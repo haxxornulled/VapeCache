@@ -110,6 +110,44 @@ internal sealed class RedisConnectionFactory(
             stream = null;
             return new Result<IRedisConnection>(conn);
         }
+        catch (OperationCanceledException oce) when (!ct.IsCancellationRequested)
+        {
+            // Likely ConnectTimeout/handshake timeout via the linked CTS. Don't spam stack traces for expected timeouts.
+            sw.Stop();
+            RedisTelemetry.ConnectFailures.Add(1);
+            RedisTelemetry.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
+
+            var timeout = new TimeoutException(
+                $"Redis connect timed out to {effective.Host}:{effective.Port} (Tls={effective.UseTls}).",
+                oce);
+
+            try
+            {
+                logger.LogWarning(
+                    "Redis connect timed out to {Host}:{Port} Tls={Tls} after {Ms}ms",
+                    effective.Host,
+                    effective.Port,
+                    effective.UseTls,
+                    sw.Elapsed.TotalMilliseconds);
+            }
+            catch { }
+
+            NotifyConnectFailed(effective, timeout);
+
+            try { stream?.Dispose(); } catch { }
+            try { socket?.Dispose(); } catch { }
+            return new Result<IRedisConnection>(timeout);
+        }
+        catch (OperationCanceledException oce) when (ct.IsCancellationRequested)
+        {
+            // Host/app shutdown: treat as a canceled attempt without noisy logging.
+            sw.Stop();
+            RedisTelemetry.ConnectFailures.Add(1);
+            RedisTelemetry.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
+            try { stream?.Dispose(); } catch { }
+            try { socket?.Dispose(); } catch { }
+            return new Result<IRedisConnection>(oce);
+        }
         catch (Exception ex)
         {
             sw.Stop();
