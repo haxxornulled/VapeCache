@@ -48,28 +48,82 @@ Tracing:
 
 ## Architecture (high level)
 ```mermaid
-flowchart LR
-  App[Your App] --> Cache[ICacheService]
-  Cache --> Stampede[StampedeProtectedCacheService]
-  Stampede --> Hybrid[HybridCacheService]
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "Segoe UI, Inter, Arial",
+    "primaryColor": "#0b1220",
+    "primaryTextColor": "#e6edf3",
+    "primaryBorderColor": "#2f81f7",
+    "lineColor": "#8b949e",
+    "secondaryColor": "#0f172a",
+    "tertiaryColor": "#111827"
+  }
+}}%%
+flowchart TB
+  %% Keep the top-right area relatively empty (GitHub's diagram controls live there).
 
-  Hybrid -->|try| Redis[RedisCacheService]
-  Hybrid -->|fallback| Mem[InMemoryCacheService]
+  classDef api fill:#0b1220,stroke:#2f81f7,color:#e6edf3,stroke-width:2px;
+  classDef svc fill:#0f172a,stroke:#22c55e,color:#e6edf3,stroke-width:2px;
+  classDef redis fill:#111827,stroke:#f97316,color:#e6edf3,stroke-width:2px;
+  classDef mem fill:#111827,stroke:#a855f7,color:#e6edf3,stroke-width:2px;
+  classDef telem fill:#0b1220,stroke:#eab308,color:#e6edf3,stroke-width:2px;
+  classDef host fill:#0b1220,stroke:#38bdf8,color:#e6edf3,stroke-width:2px;
 
-  Redis --> Exec[IRedisCommandExecutor]
-  Exec --> Mux[RedisCommandExecutor and RedisMultiplexedConnections]
-  Mux --> Factory[IRedisConnectionFactory]
-  Factory --> Conn[RedisConnection]
-  Conn --> Socket[Socket/Stream]
+  subgraph Host["Console Host (Composition Root)"]
+    direction TB
+    App["Your App / Host"]:::host
+    DI["DI + config (Autofac + appsettings)"]:::host
+    Web["HTTP endpoints (Postman)"]:::host
+    OTel["OpenTelemetry exporters"]:::host
+    App --> DI
+    App --> Web
+    App --> OTel
+  end
 
-  Mem --> IMC[IMemoryCache]
+  subgraph API["VapeCache.Abstractions (NuGet boundary)"]
+    direction TB
+    ICache["ICacheService"]:::api
+    IStats["ICacheStats"]:::api
+    ICurrent["ICurrentCacheService"]:::api
+    IExec["IRedisCommandExecutor"]:::api
+  end
 
-  Hybrid --> Current[ICurrentCacheService]
-  Hybrid --> Stats[ICacheStats]
+  subgraph Infra["VapeCache.Infrastructure (Implementation)"]
+    direction TB
+    Stampede["StampedeProtectedCacheService"]:::svc
+    Hybrid["HybridCacheService (breaker + fallback)"]:::svc
+    RedisCache["RedisCacheService"]:::redis
+    MemCache["InMemoryCacheService"]:::mem
+    Stats["CacheStats + CacheTelemetry"]:::telem
+  end
+
+  subgraph RedisWire["Redis Transport (RESP)"]
+    direction TB
+    Exec["RedisCommandExecutor"]:::redis
+    Mux["RedisMultiplexedConnection(s)"]:::redis
+    Factory["IRedisConnectionFactory"]:::redis
+    Conn["RedisConnection"]:::redis
+    Sock["Socket/Stream"]:::redis
+  end
+
+  DI --> ICache
+  ICache --> Stampede --> Hybrid
+  Hybrid -->|try| RedisCache
+  Hybrid -->|fallback| MemCache
+
+  Hybrid --> IStats
+  Hybrid --> ICurrent
+  RedisCache --> IExec
+  IExec --> Exec --> Mux --> Factory --> Conn --> Sock
+
+  MemCache --> IMC["IMemoryCache"]:::mem
+  Stats -.-> OTel
 ```
 
 Circuit breaker + fallback:
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Segoe UI, Inter, Arial","primaryColor":"#0b1220","primaryTextColor":"#e6edf3","lineColor":"#8b949e"}}}%%
 sequenceDiagram
   participant App as App
   participant S as StampedeProtectedCacheService
@@ -80,19 +134,17 @@ sequenceDiagram
   App->>S: GetAsync(key)
   S->>H: GetAsync(key)
 
-  alt breaker open (or half-open busy)
+  alt Breaker open / half-open busy
+    note right of H: Fast path to memory (no Redis call)
     H->>M: GetAsync(key)
     M-->>H: value/null
-  else breaker closed
+  else Breaker closed (Redis allowed)
     H->>R: GetAsync(key)
-    alt redis hit
+    alt Redis returns value
       R-->>H: value
-    else redis miss
-      R-->>H: null
-      H->>M: GetAsync(key)
-      M-->>H: value/null
-    else redis error
-      R-->>H: throws
+    else Redis returns null or throws
+      R-->>H: null/throws
+      note right of H: Fallback to memory on miss/error
       H->>M: GetAsync(key)
       M-->>H: value/null
     end
