@@ -1,0 +1,30 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# User / IDE
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider
+.idea/
+
+# VS Code
+.vscode/
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Secrets / local overrides
+appsettings.Development.json
+appsettings.*.Development.json
+*.secrets.json
+.env
+
+# BenchmarkDotNet
+BenchmarkDotNet.Artifacts/
+

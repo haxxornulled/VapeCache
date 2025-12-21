@@ -1,0 +1,189 @@
+using Autofac;
+using Autofac.Configuration;
+using Autofac.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using Serilog;
+using VapeCache.Application.Connections;
+using VapeCache.Application.Caching;
+using VapeCache.Console.Hosting;
+using VapeCache.Infrastructure.Connections;
+using VapeCache.Infrastructure.Caching;
+using VapeCache.Console.Stress;
+using VapeCache.Console.Secrets;
+
+var host = Host.CreateDefaultBuilder(args)
+    .UseServiceProviderFactory(new AutofacServiceProviderFactory())
+    .ConfigureAppConfiguration(static (context, config) =>
+    {
+        config.SetBasePath(AppContext.BaseDirectory);
+        config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
+        config.AddJsonFile($"appsettings.{context.HostingEnvironment.EnvironmentName}.json", optional: true, reloadOnChange: true);
+        config.AddJsonFile("autofac.json", optional: true, reloadOnChange: true);
+        config.AddEnvironmentVariables();
+
+        // Simulated "KeyVault" injection for Redis connection string.
+        // Set `RedisSecret__EnvVar` to choose which env var to read; secret itself lives only in that env var.
+        var envVarName = Environment.GetEnvironmentVariable("RedisSecret__EnvVar");
+        if (string.IsNullOrWhiteSpace(envVarName))
+            envVarName = "VAPECACHE_REDIS_CONNECTIONSTRING";
+
+        var secret = Environment.GetEnvironmentVariable(envVarName);
+        if (!string.IsNullOrWhiteSpace(secret))
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["RedisConnection:ConnectionString"] = secret
+            });
+        }
+    })
+    .UseSerilog(static (context, services, loggerConfig) =>
+    {
+        loggerConfig
+            .ReadFrom.Configuration(context.Configuration)
+            .ReadFrom.Services(services)
+            .Enrich.FromLogContext();
+    })
+    .ConfigureWebHostDefaults(web =>
+    {
+        web.ConfigureServices((ctx, services) =>
+        {
+            web.UseSetting(WebHostDefaults.ServerUrlsKey, ctx.Configuration["Web:Urls"] ?? "http://localhost:5080");
+
+        services.AddRouting();
+        services.AddOptions<WebHostOptions>()
+            .Bind(ctx.Configuration.GetSection("Web"))
+            .Validate(static o => !string.IsNullOrWhiteSpace(o.Urls), "Web:Urls is required.")
+            .ValidateOnStart();
+
+        services.AddOptions<LiveDemoOptions>()
+            .Bind(ctx.Configuration.GetSection("LiveDemo"))
+            .Validate(static o => o.Interval > TimeSpan.Zero, "LiveDemo:Interval must be > 0.")
+            .Validate(static o => !string.IsNullOrWhiteSpace(o.Key), "LiveDemo:Key is required.")
+            .Validate(static o => o.Ttl > TimeSpan.Zero, "LiveDemo:Ttl must be > 0.")
+            .ValidateOnStart();
+    });
+
+        web.Configure(app =>
+        {
+            var opts = app.ApplicationServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebHostOptions>>().Value;
+            if (!opts.Enabled) return;
+            CacheEndpoints.Configure(app);
+        });
+    })
+    .ConfigureServices(static (context, services) =>
+    {
+        services.AddOpenTelemetry()
+            .ConfigureResource(r => r.AddService(serviceName: "VapeCache.Console"))
+            .WithMetrics(m =>
+            {
+                m.AddMeter("VapeCache.Redis");
+                m.AddMeter("VapeCache.Cache");
+                m.AddRuntimeInstrumentation();
+                m.AddHttpClientInstrumentation();
+                m.AddAspNetCoreInstrumentation();
+
+                m.AddOtlpExporter(otlp =>
+                {
+                    var endpoint = context.Configuration["OpenTelemetry:Otlp:Endpoint"];
+                    if (!string.IsNullOrWhiteSpace(endpoint))
+                        otlp.Endpoint = new Uri(endpoint);
+                });
+            })
+            .WithTracing(t =>
+            {
+                t.AddSource("VapeCache.Redis");
+                t.AddHttpClientInstrumentation();
+                t.AddAspNetCoreInstrumentation();
+
+                t.AddOtlpExporter(otlp =>
+                {
+                    var endpoint = context.Configuration["OpenTelemetry:Otlp:Endpoint"];
+                    if (!string.IsNullOrWhiteSpace(endpoint))
+                        otlp.Endpoint = new Uri(endpoint);
+                });
+            });
+
+        services
+            .AddOptions<RedisSecretOptions>()
+            .Bind(context.Configuration.GetSection("RedisSecret"))
+            .Validate(static o => !string.IsNullOrWhiteSpace(o.EnvVar), "RedisSecret:EnvVar is required.")
+            .ValidateOnStart();
+
+        services
+            .AddOptions<RedisConnectionOptions>()
+            .Bind(context.Configuration.GetSection("RedisConnection"))
+            .Validate(static o => !string.IsNullOrWhiteSpace(o.Host) || !string.IsNullOrWhiteSpace(o.ConnectionString), "RedisConnection:Host or RedisConnection:ConnectionString is required.")
+            .Validate(static o => o.MaxConnections > 0, "RedisConnection:MaxConnections must be > 0.")
+            .Validate(static o => o.MaxIdle >= 0, "RedisConnection:MaxIdle must be >= 0.")
+            .Validate(static o => o.MaxIdle <= o.MaxConnections, "RedisConnection:MaxIdle must be <= MaxConnections.")
+            .Validate(static o => o.Warm >= 0, "RedisConnection:Warm must be >= 0.")
+            .Validate(static o => o.Warm <= o.MaxIdle, "RedisConnection:Warm must be <= MaxIdle.")
+            .Validate(static o => o.ValidateAfterIdle >= TimeSpan.Zero, "RedisConnection:ValidateAfterIdle must be >= 0.")
+            .Validate(static o => o.ValidateTimeout >= TimeSpan.Zero, "RedisConnection:ValidateTimeout must be >= 0.")
+            .Validate(static o => o.IdleTimeout >= TimeSpan.Zero, "RedisConnection:IdleTimeout must be >= 0.")
+            .Validate(static o => o.MaxConnectionLifetime >= TimeSpan.Zero, "RedisConnection:MaxConnectionLifetime must be >= 0.")
+            .Validate(static o => o.ReaperPeriod >= TimeSpan.Zero, "RedisConnection:ReaperPeriod must be >= 0.")
+            .ValidateOnStart();
+
+        services
+            .AddOptions<RedisStressOptions>()
+            .Bind(context.Configuration.GetSection("RedisStress"))
+            .Validate(static o => !o.Enabled || o.Workers > 0, "RedisStress:Workers must be > 0.")
+            .Validate(static o => !o.Enabled || (o.Mode ?? "pool").Trim().ToLowerInvariant() != "burn" || o.BurnConnectionsTarget > 0, "RedisStress:BurnConnectionsTarget must be > 0 when Mode=burn.")
+            .Validate(static o => !o.Enabled || o.PayloadBytes >= 0, "RedisStress:PayloadBytes must be >= 0.")
+            .Validate(static o => !o.Enabled || o.KeySpace > 0, "RedisStress:KeySpace must be > 0.")
+            .Validate(static o => !o.Enabled || o.VirtualUsers > 0, "RedisStress:VirtualUsers must be > 0.")
+            .Validate(static o => !o.Enabled || o.SetPercent is >= 0 and <= 100, "RedisStress:SetPercent must be 0..100.")
+            .Validate(static o => !o.Enabled || o.PayloadTtl >= TimeSpan.Zero, "RedisStress:PayloadTtl must be >= 0.")
+            .Validate(static o => !o.Enabled || o.TargetRps >= 0, "RedisStress:TargetRps must be >= 0.")
+            .Validate(static o => !o.Enabled || o.BurstRequests > 0, "RedisStress:BurstRequests must be > 0.")
+            .ValidateOnStart();
+
+        services
+            .AddOptions<RedisMultiplexerOptions>()
+            .Bind(context.Configuration.GetSection("RedisMultiplexer"))
+            .Validate(static o => o.Connections > 0, "RedisMultiplexer:Connections must be > 0.")
+            .Validate(static o => o.MaxInFlightPerConnection > 0, "RedisMultiplexer:MaxInFlightPerConnection must be > 0.")
+            .ValidateOnStart();
+
+        services
+            .AddOptions<CacheStampedeOptions>()
+            .Bind(context.Configuration.GetSection("CacheStampede"))
+            .Validate(static o => o.MaxKeys > 0, "CacheStampede:MaxKeys must be > 0.")
+            .ValidateOnStart();
+
+        services
+            .AddOptions<RedisCircuitBreakerOptions>()
+            .Bind(context.Configuration.GetSection("RedisCircuitBreaker"))
+            .Validate(static o => o.ConsecutiveFailuresToOpen > 0, "RedisCircuitBreaker:ConsecutiveFailuresToOpen must be > 0.")
+            .Validate(static o => o.BreakDuration >= TimeSpan.Zero, "RedisCircuitBreaker:BreakDuration must be >= 0.")
+            .Validate(static o => o.HalfOpenProbeTimeout >= TimeSpan.Zero, "RedisCircuitBreaker:HalfOpenProbeTimeout must be >= 0.")
+            .ValidateOnStart();
+
+        services.AddVapecacheRedisConnections();
+        services.AddVapecacheCaching();
+        services.AddHostedService<RedisConnectionPoolReaperHostedService>();
+        services.AddHostedService<RedisStressHostedService>();
+        services.AddHostedService<LiveDemoHostedService>();
+    })
+    .ConfigureContainer<ContainerBuilder>(static (context, builder) =>
+    {
+        builder.RegisterModule(new ConfigurationModule(context.Configuration));
+    })
+    .Build();
+
+try
+{
+    await host.RunAsync().ConfigureAwait(false);
+}
+finally
+{
+    await host.StopAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+    Log.CloseAndFlush();
+}
