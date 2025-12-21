@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using VapeCache.Application.Caching;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Infrastructure.Caching;

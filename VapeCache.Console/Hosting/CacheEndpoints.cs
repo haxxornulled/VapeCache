@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using VapeCache.Application.Caching;
+using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Console.Hosting;
 

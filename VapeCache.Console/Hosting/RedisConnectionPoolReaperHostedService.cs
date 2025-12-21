@@ -2,7 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Console.Stress;
 
 namespace VapeCache.Console.Hosting;

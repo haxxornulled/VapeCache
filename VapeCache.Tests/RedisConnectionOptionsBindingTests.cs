@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using System.Text;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Tests;
 

@@ -3,7 +3,7 @@ using System.Text;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using VapeCache.Application.Caching;
+using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Console.Hosting;
 

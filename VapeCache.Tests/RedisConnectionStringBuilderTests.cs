@@ -1,4 +1,4 @@
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Tests;
 

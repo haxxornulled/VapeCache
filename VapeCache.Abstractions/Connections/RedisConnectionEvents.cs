@@ -1,4 +1,4 @@
-namespace VapeCache.Application.Connections;
+namespace VapeCache.Abstractions.Connections;
 
 public readonly record struct RedisConnectAttempt(string Host, int Port, bool UseTls);
 
@@ -23,4 +23,3 @@ public interface IRedisConnectionObserver
     void OnAuthenticated(in RedisAuthenticated e) { }
     void OnDatabaseSelected(in RedisDatabaseSelected e) { }
 }
-

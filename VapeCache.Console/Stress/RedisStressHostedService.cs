@@ -3,9 +3,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 using System.Security.Cryptography;
-using VapeCache.Application.Caching;
+using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Console.Stress;
 

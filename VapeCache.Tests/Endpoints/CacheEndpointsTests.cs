@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using VapeCache.Application.Caching;
+using VapeCache.Abstractions.Caching;
 using VapeCache.Console.Hosting;
 using VapeCache.Infrastructure.Caching;
 using Xunit;

@@ -1,4 +1,4 @@
-namespace VapeCache.Application.Caching;
+namespace VapeCache.Abstractions.Caching;
 
 public interface IRedisCircuitBreakerState
 {
@@ -8,4 +8,3 @@ public interface IRedisCircuitBreakerState
     TimeSpan? OpenRemaining { get; }
     bool HalfOpenProbeInFlight { get; }
 }
-

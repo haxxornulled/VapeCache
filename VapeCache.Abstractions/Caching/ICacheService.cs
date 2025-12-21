@@ -1,6 +1,6 @@
 using System.Buffers;
 
-namespace VapeCache.Application.Caching;
+namespace VapeCache.Abstractions.Caching;
 
 public interface ICacheService
 {

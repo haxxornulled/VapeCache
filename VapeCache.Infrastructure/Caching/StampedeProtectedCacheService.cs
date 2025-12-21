@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
-using VapeCache.Application.Caching;
+using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Infrastructure.Caching;
 
@@ -87,4 +87,3 @@ internal sealed class StampedeProtectedCacheService : ICacheService
         }
     }
 }
-

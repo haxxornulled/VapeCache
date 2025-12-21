@@ -1,6 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 using Microsoft.Extensions.Options;
 
 namespace VapeCache.Infrastructure.Connections;

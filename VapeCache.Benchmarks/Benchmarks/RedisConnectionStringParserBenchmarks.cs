@@ -1,5 +1,5 @@
 using BenchmarkDotNet.Attributes;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Benchmarks.Benchmarks;
 
@@ -18,4 +18,3 @@ public class RedisConnectionStringParserBenchmarks
     public bool TryParse()
         => RedisConnectionStringParser.TryParse(_connStr, out _, out _);
 }
-

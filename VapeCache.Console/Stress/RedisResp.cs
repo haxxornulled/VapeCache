@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.Text;
 using LanguageExt.Common;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Console.Stress;
 
@@ -47,4 +47,3 @@ internal static class RedisResp
         }
     }
 }
-

@@ -1,4 +1,3 @@
-namespace VapeCache.Application.Caching;
+namespace VapeCache.Abstractions.Caching;
 
 public readonly record struct CacheEntryOptions(TimeSpan? Ttl = null);
-

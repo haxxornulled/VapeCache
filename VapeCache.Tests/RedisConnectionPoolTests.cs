@@ -3,7 +3,7 @@ using LanguageExt.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Net.Sockets;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Tests;

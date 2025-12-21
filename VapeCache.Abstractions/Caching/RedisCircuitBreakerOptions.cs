@@ -1,4 +1,4 @@
-namespace VapeCache.Application.Caching;
+namespace VapeCache.Abstractions.Caching;
 
 public sealed record RedisCircuitBreakerOptions
 {
@@ -7,4 +7,3 @@ public sealed record RedisCircuitBreakerOptions
     public TimeSpan BreakDuration { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan HalfOpenProbeTimeout { get; init; } = TimeSpan.FromMilliseconds(250);
 }
-

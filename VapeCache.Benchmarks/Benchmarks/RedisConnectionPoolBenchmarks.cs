@@ -2,7 +2,7 @@ using BenchmarkDotNet.Attributes;
 using LanguageExt.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Benchmarks.Benchmarks;

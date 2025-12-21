@@ -10,7 +10,8 @@ Enterprise-focused caching library (in progress) with:
 - Console host for live demo, stress, and HTTP verification endpoints
 
 ## Solution Layout
-- `VapeCache.Application`: public contracts (cache + connection abstractions)
+- `VapeCache.Abstractions`: public contracts (cache + connection abstractions)
+- `VapeCache.Application`: application-layer code (future use-cases)
 - `VapeCache.Infrastructure`: Redis transport/pool/multiplexer + cache implementations
 - `VapeCache.Console`: current host (demo + stress + HTTP endpoints)
 - `VapeCache.Tests`: unit/integration tests
@@ -88,4 +89,3 @@ If you still want a Redis-backed “metrics snapshot”, do it as a coarse perio
 
 ## License
 TBD
-

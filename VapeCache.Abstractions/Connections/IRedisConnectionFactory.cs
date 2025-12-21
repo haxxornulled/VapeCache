@@ -1,6 +1,6 @@
 using LanguageExt.Common;
 
-namespace VapeCache.Application.Connections;
+namespace VapeCache.Abstractions.Connections;
 
 public interface IRedisConnectionFactory : IAsyncDisposable
 {

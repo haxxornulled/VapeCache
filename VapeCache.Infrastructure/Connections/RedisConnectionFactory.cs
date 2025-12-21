@@ -8,7 +8,7 @@ using System.Buffers.Binary;
 using LanguageExt.Common;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
 

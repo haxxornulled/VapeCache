@@ -1,6 +1,6 @@
 ﻿// ========================= File: Vapecache.Infrastructure/Connections/RedisConnectionRegistration.cs =========================
 using Microsoft.Extensions.DependencyInjection;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
 

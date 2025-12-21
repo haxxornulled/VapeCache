@@ -1,7 +1,7 @@
 using LanguageExt.Common;
 using Xunit;
 using Xunit.Sdk;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Connections;
 using Microsoft.Extensions.Logging.Abstractions;
 

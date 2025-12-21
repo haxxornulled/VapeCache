@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
 using Xunit.Sdk;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Tests.Integration;

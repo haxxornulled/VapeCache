@@ -2,7 +2,7 @@
 using System.Net.Sockets;
 using LanguageExt;
 using LanguageExt.Common;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
 

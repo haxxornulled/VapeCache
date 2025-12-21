@@ -1,4 +1,4 @@
-namespace VapeCache.Application.Connections;
+namespace VapeCache.Abstractions.Connections;
 
 public interface IRedisCommandExecutor : IAsyncDisposable
 {

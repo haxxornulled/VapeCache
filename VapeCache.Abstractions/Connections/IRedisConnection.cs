@@ -2,7 +2,7 @@ using System.Net.Sockets;
 using LanguageExt;
 using LanguageExt.Common;
 
-namespace VapeCache.Application.Connections;
+namespace VapeCache.Abstractions.Connections;
 
 public interface IRedisConnection : IAsyncDisposable
 {
@@ -17,4 +17,3 @@ public interface IRedisConnectionLease : IAsyncDisposable
 {
     IRedisConnection Connection { get; }
 }
-

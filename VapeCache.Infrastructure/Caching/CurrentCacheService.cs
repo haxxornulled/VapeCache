@@ -1,4 +1,4 @@
-using VapeCache.Application.Caching;
+using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Infrastructure.Caching;
 
@@ -14,4 +14,3 @@ internal sealed class CurrentCacheService : ICurrentCacheService
         Volatile.Write(ref _current, name);
     }
 }
-

@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace VapeCache.Application.Connections;
+namespace VapeCache.Abstractions.Connections;
 
 public static class RedisConnectionStringParser
 {
@@ -133,4 +133,3 @@ public static class RedisConnectionStringParser
         return null;
     }
 }
-

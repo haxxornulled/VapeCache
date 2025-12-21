@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.Diagnostics;
-using VapeCache.Application.Caching;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Caching;
 

@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Options;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Tests.Integration;
 

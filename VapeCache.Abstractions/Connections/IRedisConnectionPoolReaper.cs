@@ -1,7 +1,6 @@
-namespace VapeCache.Application.Connections;
+namespace VapeCache.Abstractions.Connections;
 
 public interface IRedisConnectionPoolReaper
 {
     Task RunReaperAsync(CancellationToken ct);
 }
-

@@ -1,4 +1,4 @@
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Tests;
@@ -76,4 +76,3 @@ public sealed class RedisConnectionFactoryResolveOptionsTests
         Assert.Equal(TimeSpan.FromSeconds(2), effective.ConnectTimeout);
     }
 }
-

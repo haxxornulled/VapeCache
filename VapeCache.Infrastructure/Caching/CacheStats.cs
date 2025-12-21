@@ -1,4 +1,4 @@
-using VapeCache.Application.Caching;
+using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Infrastructure.Caching;
 

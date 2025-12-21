@@ -1,5 +1,5 @@
 using System.Threading.Channels;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
 

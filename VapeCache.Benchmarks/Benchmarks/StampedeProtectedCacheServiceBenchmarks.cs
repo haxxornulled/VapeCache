@@ -1,7 +1,7 @@
 using System.Buffers;
 using BenchmarkDotNet.Attributes;
 using Microsoft.Extensions.Options;
-using VapeCache.Application.Caching;
+using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
 
 namespace VapeCache.Benchmarks.Benchmarks;

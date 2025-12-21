@@ -1,13 +1,12 @@
-namespace VapeCache.Application.Connections;
-
-using VapeCache.Application.Guards;
+namespace VapeCache.Abstractions.Connections;
 
 public sealed class RedisConnectionStringBuilder : IRedisConnectionStringBuilder
 {
     public string Build(RedisConnectionOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        Guard.Against.NotNullOrWhiteSpace(options.Host);
+        if (string.IsNullOrWhiteSpace(options.Host))
+            throw new ArgumentException("Host is required.", nameof(options.Host));
         ArgumentOutOfRangeException.ThrowIfNegative(options.Database);
         if (options.Port is < 1 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(options.Port), "Port must be between 1 and 65535.");

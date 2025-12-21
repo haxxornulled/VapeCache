@@ -1,6 +1,6 @@
 using System.Buffers;
 using Microsoft.Extensions.Options;
-using VapeCache.Application.Caching;
+using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
 using Xunit;
 
@@ -112,4 +112,3 @@ public sealed class StampedeProtectedCacheServiceTests
             => throw new NotSupportedException();
     }
 }
-

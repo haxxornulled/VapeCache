@@ -1,4 +1,4 @@
-namespace VapeCache.Application.Caching;
+namespace VapeCache.Abstractions.Caching;
 
 public interface ICacheStats
 {
@@ -13,4 +13,3 @@ public readonly record struct CacheStatsSnapshot(
     long RemoveCalls,
     long FallbackToMemory,
     long RedisBreakerOpened);
-

@@ -1,7 +1,7 @@
 using System.Threading.Channels;
 using BenchmarkDotNet.Attributes;
 using LanguageExt.Common;
-using VapeCache.Application.Connections;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Benchmarks.Benchmarks;
@@ -108,4 +108,3 @@ public class RedisMultiplexedConnectionBenchmarks
         }
     }
 }
-
