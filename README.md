@@ -44,6 +44,97 @@ When `Web:Enabled=true` (default) and `Web:Urls=http://localhost:5080`:
 - `DELETE /cache/{key}`
 - `POST /cache/{key}/get-or-set?ttlSeconds=10` (body = text payload)
 
+## Configuration (appsettings.json)
+The console host is the current composition root and uses these sections (all can be overridden via env vars).
+
+### RedisConnection
+Controls socket creation, pooling and handshake behavior.
+- `RedisConnection:ConnectionString`: full `redis://` or `rediss://` URI (recommended for KeyVault/secrets); when set it overrides host/port/user/pass/db/TLS fields.
+- `RedisConnection:Host`, `RedisConnection:Port`: target endpoint.
+- `RedisConnection:Username`, `RedisConnection:Password`, `RedisConnection:Database`: auth + db selection.
+- `RedisConnection:UseTls`, `RedisConnection:TlsHost`, `RedisConnection:AllowInvalidCert`: TLS settings.
+- `RedisConnection:MaxConnections`: max sockets (pool mode).
+- `RedisConnection:MaxIdle`: max idle sockets retained.
+- `RedisConnection:Warm`: connections to pre-create on startup (pool).
+- `RedisConnection:ConnectTimeout`: connect + TLS + handshake timeout.
+- `RedisConnection:AcquireTimeout`: pool lease timeout.
+- `RedisConnection:ValidateAfterIdle`: validate-on-borrow if idle > this duration.
+- `RedisConnection:ValidateTimeout`: timeout for validation PING.
+- `RedisConnection:IdleTimeout`: drop idle connections older than this.
+- `RedisConnection:MaxConnectionLifetime`: drop connections older than this.
+- `RedisConnection:ReaperPeriod`: pool reaper loop interval.
+- `RedisConnection:EnableTcpKeepAlive`, `RedisConnection:TcpKeepAliveTime`, `RedisConnection:TcpKeepAliveInterval`: OS keepalive tuning.
+- `RedisConnection:LogWhoAmIOnConnect`: runs `ACL WHOAMI` on connect (debug; adds chatter).
+
+### RedisSecret
+Controls how the host pulls the connection string from environment (so secrets never land in git).
+- `RedisSecret:EnvVar`: name of env var holding the full Redis connection string (default `VAPECACHE_REDIS_CONNECTIONSTRING`).
+- `RedisSecret:Required`: if `true`, the app throws on startup when the env var is not set.
+
+### StartupPreflight
+Startup validation + failover policy.
+- `StartupPreflight:Enabled`: enables preflight.
+- `StartupPreflight:FailFast`: if `true`, app fails startup when Redis is unavailable.
+- `StartupPreflight:Timeout`: overall preflight timeout.
+- `StartupPreflight:Connections`: number of concurrent connect attempts.
+- `StartupPreflight:ValidatePing`: send `PING` after connect/auth/select.
+- `StartupPreflight:FailoverToMemoryOnFailure`: if `FailFast=false`, forces Redis off and uses memory until sanity check succeeds.
+- `StartupPreflight:SanityCheckEnabled`: periodic background check to re-enable Redis when it comes back.
+- `StartupPreflight:SanityCheckInterval`: how often to probe.
+- `StartupPreflight:SanityCheckTimeout`: per-probe timeout.
+
+### RedisCircuitBreaker
+Runtime breaker in `HybridCacheService` (stops hammering Redis during outages).
+- `RedisCircuitBreaker:Enabled`
+- `RedisCircuitBreaker:ConsecutiveFailuresToOpen`
+- `RedisCircuitBreaker:BreakDuration`
+- `RedisCircuitBreaker:HalfOpenProbeTimeout`
+
+### CacheStampede
+Stampede protection wrapper over the cache.
+- `CacheStampede:Enabled`
+- `CacheStampede:MaxKeys`: max lock-map entries before fail-open.
+
+### RedisMultiplexer
+Controls ordered pipelining/multiplexing (used by `RedisCommandExecutor`).
+- `RedisMultiplexer:Connections`: number of multiplexed connections.
+- `RedisMultiplexer:MaxInFlightPerConnection`: max concurrent in-flight commands per connection.
+
+### RedisStress
+Console stress runner options.
+- `RedisStress:Enabled`
+- `RedisStress:Mode`: `pool` or `mux` (and `burn` when enabled).
+- `RedisStress:Workers`: worker count for pool mode.
+- `RedisStress:Duration`
+- `RedisStress:Workload`: `ping` or `payload` (depends on mode).
+- `RedisStress:PayloadBytes`, `RedisStress:PayloadTtl`, `RedisStress:SetPercent`
+- `RedisStress:VirtualUsers`, `RedisStress:KeySpace`, `RedisStress:KeyPrefix`, `RedisStress:PreloadKeys`
+- `RedisStress:TargetRps`, `RedisStress:BurstRequests`, `RedisStress:OperationsPerLease`
+- `RedisStress:LogEvery`
+- `RedisStress:BurnConnectionsTarget`, `RedisStress:BurnLogEvery`
+
+### Web
+Minimal HTTP host for Postman verification.
+- `Web:Enabled`
+- `Web:Urls`
+
+### LiveDemo
+Background demo loop that exercises `GetOrSetAsync` and logs backend/breaker state.
+- `LiveDemo:Enabled`
+- `LiveDemo:Interval`
+- `LiveDemo:Key`
+- `LiveDemo:Ttl`
+
+### Serilog
+Logging + sinks.
+- `Serilog:MinimumLevel:*` controls verbosity.
+- `Serilog:WriteTo`: console/Seq sinks.
+- `Serilog:Enrich`: includes span correlation (`WithSpan`) when enabled.
+
+### OpenTelemetry
+OTLP exporter endpoint.
+- `OpenTelemetry:Otlp:Endpoint`
+
 ## OpenTelemetry + Serilog
 Metrics:
 - Redis: meter `VapeCache.Redis`
