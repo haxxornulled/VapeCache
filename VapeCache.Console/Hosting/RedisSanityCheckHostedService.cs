@@ -2,6 +2,7 @@ using System.Buffers;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 
@@ -42,7 +43,15 @@ internal sealed class RedisSanityCheckHostedService(
             if (o.SanityCheckTimeout > TimeSpan.Zero)
                 cts.CancelAfter(o.SanityCheckTimeout);
 
-            var ok = await TryConnectAndPingAsync(cts.Token).ConfigureAwait(false);
+            var retries = Math.Max(0, o.SanityCheckRetries);
+            var delay = o.SanityCheckRetryDelay <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(250) : o.SanityCheckRetryDelay;
+
+            var ok = await Policy
+                .Handle<Exception>()
+                .WaitAndRetryAsync(retries, _ => delay)
+                .ExecuteAsync(async token => await TryConnectAndPingAsync(token).ConfigureAwait(false), cts.Token)
+                .ConfigureAwait(false);
+
             if (!ok)
                 continue;
 
@@ -57,9 +66,10 @@ internal sealed class RedisSanityCheckHostedService(
         if (!created.IsSuccess)
             return false;
 
-        var conn = created.Match(static succ => succ, static ex => throw ex);
-        await using var _ = conn.ConfigureAwait(false);
+        var conn = created.Match(static succ => succ, static _ => null!);
+        if (conn is null) return false;
 
+        await using var _ = conn.ConfigureAwait(false);
         try
         {
             await conn.Stream.WriteAsync(Ping, ct).ConfigureAwait(false);
@@ -99,4 +109,3 @@ internal sealed class RedisSanityCheckHostedService(
         }
     }
 }
-

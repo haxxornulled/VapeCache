@@ -47,10 +47,7 @@ var host = Host.CreateDefaultBuilder(args)
                 ["RedisConnection:ConnectionString"] = secret
             });
         }
-        else if (required)
-        {
-            throw new InvalidOperationException($"Redis secret env var '{envVarName}' is required but not set.");
-        }
+        // Never throw here; Redis can be unavailable or not configured. Startup preflight/failover controls behavior.
     })
     .UseSerilog(static (context, services, loggerConfig) =>
     {

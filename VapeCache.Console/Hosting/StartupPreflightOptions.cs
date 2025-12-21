@@ -19,4 +19,8 @@ public sealed record StartupPreflightOptions
     public bool SanityCheckEnabled { get; init; } = true;
     public TimeSpan SanityCheckInterval { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan SanityCheckTimeout { get; init; } = TimeSpan.FromSeconds(2);
+
+    // Polly retry config for sanity check probes (per interval).
+    public int SanityCheckRetries { get; init; } = 3;
+    public TimeSpan SanityCheckRetryDelay { get; init; } = TimeSpan.FromMilliseconds(250);
 }

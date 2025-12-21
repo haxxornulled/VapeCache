@@ -69,7 +69,7 @@ Controls socket creation, pooling and handshake behavior.
 ### RedisSecret
 Controls how the host pulls the connection string from environment (so secrets never land in git).
 - `RedisSecret:EnvVar`: name of env var holding the full Redis connection string (default `VAPECACHE_REDIS_CONNECTIONSTRING`).
-- `RedisSecret:Required`: if `true`, the app throws on startup when the env var is not set.
+- `RedisSecret:Required`: if `true`, the host expects the env var in production, but it will still fail over cleanly when Redis isn't configured/available (no throw in config load).
 
 ### StartupPreflight
 Startup validation + failover policy.
@@ -82,6 +82,8 @@ Startup validation + failover policy.
 - `StartupPreflight:SanityCheckEnabled`: periodic background check to re-enable Redis when it comes back.
 - `StartupPreflight:SanityCheckInterval`: how often to probe.
 - `StartupPreflight:SanityCheckTimeout`: per-probe timeout.
+- `StartupPreflight:SanityCheckRetries`: Polly retries per probe cycle.
+- `StartupPreflight:SanityCheckRetryDelay`: delay between Polly retries.
 
 ### RedisCircuitBreaker
 Runtime breaker in `HybridCacheService` (stops hammering Redis during outages).
