@@ -26,10 +26,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         using var activity = StartCommandActivity("GET");
         var sw = Stopwatch.StartNew();
         RedisTelemetry.CommandCalls.Add(1);
-        var cmd = Build(static (span, k) => RedisRespProtocol.WriteGetCommand(span, k), RedisRespProtocol.GetGetCommandLength(key), key);
+        var len = RedisRespProtocol.GetGetCommandLength(key);
+        byte[]? rented = null;
         try
         {
-            var resp = await Next().ExecuteAsync(cmd, ct).ConfigureAwait(false);
+            rented = ArrayPool<byte>.Shared.Rent(len);
+            var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
+            var resp = await Next().ExecuteAsync(rented.AsMemory(0, written), ct).ConfigureAwait(false);
             return resp.Kind switch
             {
                 RedisRespReader.RespKind.NullBulkString => null,
@@ -46,6 +49,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         {
             sw.Stop();
             RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
         }
     }
 
@@ -182,13 +186,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
 
         if (items.Length == 0) return true;
 
-        var lens = new (string Key, int ValueLen)[items.Length];
-        for (var i = 0; i < items.Length; i++)
-        {
-            lens[i] = (items[i].Key, items[i].Value.Length);
-        }
-
-        var len = RedisRespProtocol.GetMSetCommandLength(lens);
+        var len = RedisRespProtocol.GetMSetCommandLength(items);
         byte[]? rented = null;
         try
         {
@@ -215,10 +213,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         using var activity = StartCommandActivity("DEL");
         var sw = Stopwatch.StartNew();
         RedisTelemetry.CommandCalls.Add(1);
-        var cmd = Build(static (span, k) => RedisRespProtocol.WriteDelCommand(span, k), RedisRespProtocol.GetDelCommandLength(key), key);
+        var len = RedisRespProtocol.GetDelCommandLength(key);
+        byte[]? rented = null;
         try
         {
-            var resp = await Next().ExecuteAsync(cmd, ct).ConfigureAwait(false);
+            rented = ArrayPool<byte>.Shared.Rent(len);
+            var written = RedisRespProtocol.WriteDelCommand(rented.AsSpan(0, len), key);
+            var resp = await Next().ExecuteAsync(rented.AsMemory(0, written), ct).ConfigureAwait(false);
             return resp.Kind == RedisRespReader.RespKind.Integer && resp.IntegerValue > 0;
         }
         catch
@@ -230,6 +231,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         {
             sw.Stop();
             RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
         }
     }
 
@@ -238,10 +240,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         using var activity = StartCommandActivity("UNLINK");
         var sw = Stopwatch.StartNew();
         RedisTelemetry.CommandCalls.Add(1);
-        var cmd = Build(static (span, k) => RedisRespProtocol.WriteUnlinkCommand(span, k), RedisRespProtocol.GetUnlinkCommandLength(key), key);
+        var len = RedisRespProtocol.GetUnlinkCommandLength(key);
+        byte[]? rented = null;
         try
         {
-            var resp = await Next().ExecuteAsync(cmd, ct).ConfigureAwait(false);
+            rented = ArrayPool<byte>.Shared.Rent(len);
+            var written = RedisRespProtocol.WriteUnlinkCommand(rented.AsSpan(0, len), key);
+            var resp = await Next().ExecuteAsync(rented.AsMemory(0, written), ct).ConfigureAwait(false);
             return resp.Kind == RedisRespReader.RespKind.Integer ? resp.IntegerValue : 0;
         }
         catch
@@ -253,6 +258,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         {
             sw.Stop();
             RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
         }
     }
 
@@ -261,10 +267,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         using var activity = StartCommandActivity("TTL");
         var sw = Stopwatch.StartNew();
         RedisTelemetry.CommandCalls.Add(1);
-        var cmd = Build(static (span, k) => RedisRespProtocol.WriteTtlCommand(span, k), RedisRespProtocol.GetTtlCommandLength(key), key);
+        var len = RedisRespProtocol.GetTtlCommandLength(key);
+        byte[]? rented = null;
         try
         {
-            var resp = await Next().ExecuteAsync(cmd, ct).ConfigureAwait(false);
+            rented = ArrayPool<byte>.Shared.Rent(len);
+            var written = RedisRespProtocol.WriteTtlCommand(rented.AsSpan(0, len), key);
+            var resp = await Next().ExecuteAsync(rented.AsMemory(0, written), ct).ConfigureAwait(false);
             return resp.Kind == RedisRespReader.RespKind.Integer ? resp.IntegerValue : -3;
         }
         catch
@@ -276,6 +285,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         {
             sw.Stop();
             RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
         }
     }
 
@@ -284,10 +294,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         using var activity = StartCommandActivity("PTTL");
         var sw = Stopwatch.StartNew();
         RedisTelemetry.CommandCalls.Add(1);
-        var cmd = Build(static (span, k) => RedisRespProtocol.WritePTtlCommand(span, k), RedisRespProtocol.GetPTtlCommandLength(key), key);
+        var len = RedisRespProtocol.GetPTtlCommandLength(key);
+        byte[]? rented = null;
         try
         {
-            var resp = await Next().ExecuteAsync(cmd, ct).ConfigureAwait(false);
+            rented = ArrayPool<byte>.Shared.Rent(len);
+            var written = RedisRespProtocol.WritePTtlCommand(rented.AsSpan(0, len), key);
+            var resp = await Next().ExecuteAsync(rented.AsMemory(0, written), ct).ConfigureAwait(false);
             return resp.Kind == RedisRespReader.RespKind.Integer ? resp.IntegerValue : -3;
         }
         catch
@@ -299,6 +312,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         {
             sw.Stop();
             RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
         }
     }
 
@@ -312,13 +326,6 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
     {
         var idx = Interlocked.Increment(ref _rr);
         return _conns[idx % _conns.Length];
-    }
-
-    private static ReadOnlyMemory<byte> Build(Func<Span<byte>, string, int> write, int len, string key)
-    {
-        var buf = new byte[len];
-        var written = write(buf.AsSpan(), key);
-        return buf.AsMemory(0, written);
     }
 
     private static Activity? StartCommandActivity(string op)

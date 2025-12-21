@@ -110,6 +110,19 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    public static int GetMSetCommandLength((string Key, ReadOnlyMemory<byte> Value)[] items)
+    {
+        if (items.Length == 0) return 0;
+        var count = 1 + (items.Length * 2);
+        var len = GetHeaderLen(count) + GetBulkLen(4) + 4 + 2; // MSET
+        foreach (var (key, value) in items)
+        {
+            len += GetBulkStringLen(key) + 2;
+            len += GetBulkLen(value.Length) + value.Length + 2;
+        }
+        return len;
+    }
+
     public static int WriteMSetCommand(Span<byte> destination, (string Key, ReadOnlyMemory<byte> Value)[] items)
     {
         var count = 1 + (items.Length * 2);

@@ -169,6 +169,7 @@ internal sealed class RedisConnectionFactory(
 
     private static void TryConfigureKeepAlive(Socket socket, RedisConnectionOptions o)
     {
+        byte[]? rented = null;
         try
         {
             if (!o.EnableTcpKeepAlive) return;
@@ -179,14 +180,19 @@ internal sealed class RedisConnectionFactory(
             var intervalMs = (uint)Math.Clamp((long)o.TcpKeepAliveInterval.TotalMilliseconds, 1, int.MaxValue);
 
             // Windows SIO_KEEPALIVE_VALS: [onoff, time, interval] as 3 x u32.
-            var values = new byte[12];
-            BinaryPrimitives.WriteUInt32LittleEndian(values.AsSpan(0, 4), 1u);
-            BinaryPrimitives.WriteUInt32LittleEndian(values.AsSpan(4, 4), timeMs);
-            BinaryPrimitives.WriteUInt32LittleEndian(values.AsSpan(8, 4), intervalMs);
-            socket.IOControl(IOControlCode.KeepAliveValues, values, null);
+            rented = ArrayPool<byte>.Shared.Rent(12);
+            var values = rented.AsSpan(0, 12);
+            BinaryPrimitives.WriteUInt32LittleEndian(values.Slice(0, 4), 1u);
+            BinaryPrimitives.WriteUInt32LittleEndian(values.Slice(4, 4), timeMs);
+            BinaryPrimitives.WriteUInt32LittleEndian(values.Slice(8, 4), intervalMs);
+            socket.IOControl(IOControlCode.KeepAliveValues, rented, null);
         }
         catch
         {
+        }
+        finally
+        {
+            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
         }
     }
 
