@@ -49,30 +49,57 @@ Tracing:
 ## Architecture (high level)
 ```mermaid
 flowchart LR
-  App[Your App] --> ICache[ICacheService]
-  ICache --> Stampede[StampedeProtectedCacheService]
+  App[Your App] --> Cache[ICacheService]
+  Cache --> Stampede[StampedeProtectedCacheService]
   Stampede --> Hybrid[HybridCacheService]
-  Hybrid -->|primary| Redis[RedisCacheService]
+
+  Hybrid -->|try| Redis[RedisCacheService]
   Hybrid -->|fallback| Mem[InMemoryCacheService]
+
   Redis --> Exec[IRedisCommandExecutor]
-  Exec --> Mux[RedisMultiplexedConnection]
-  Mux --> Conn[RedisConnection]
+  Exec --> Mux[RedisCommandExecutor -> RedisMultiplexedConnection(s)]
+  Mux --> Factory[IRedisConnectionFactory]
+  Factory --> Conn[RedisConnection]
+  Conn --> Socket[Socket/Stream]
+
   Mem --> IMC[IMemoryCache]
+
+  Hybrid --> Current[ICurrentCacheService]
+  Hybrid --> Stats[ICacheStats]
 ```
 
 Circuit breaker + fallback:
 ```mermaid
 sequenceDiagram
-  participant A as HybridCacheService
+  participant App as App
+  participant S as StampedeProtectedCacheService
+  participant H as HybridCacheService
   participant R as RedisCacheService
   participant M as InMemoryCacheService
-  A->>R: GET key
-  alt redis ok
-    R-->>A: value/null
-  else redis throws or breaker open
-    A->>M: GET key
-    M-->>A: value/null
+
+  App->>S: GetAsync(key)
+  S->>H: GetAsync(key)
+
+  alt breaker open (or half-open busy)
+    H->>M: GetAsync(key)
+    M-->>H: value/null
+  else breaker closed
+    H->>R: GetAsync(key)
+    alt redis hit
+      R-->>H: value
+    else redis miss
+      R-->>H: null
+      H->>M: GetAsync(key)
+      M-->>H: value/null
+    else redis error
+      R-->>H: throws
+      H->>M: GetAsync(key)
+      M-->>H: value/null
+    end
   end
+
+  H-->>S: value/null
+  S-->>App: value/null
 ```
 
 ## Testing
