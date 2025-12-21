@@ -57,7 +57,7 @@ flowchart LR
   Hybrid -->|fallback| Mem[InMemoryCacheService]
 
   Redis --> Exec[IRedisCommandExecutor]
-  Exec --> Mux[RedisCommandExecutor -> RedisMultiplexedConnection(s)]
+  Exec --> Mux[RedisCommandExecutor and RedisMultiplexedConnections]
   Mux --> Factory[IRedisConnectionFactory]
   Factory --> Conn[RedisConnection]
   Conn --> Socket[Socket/Stream]
