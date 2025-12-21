@@ -15,6 +15,7 @@ internal sealed class HybridCacheService(
     CacheStats stats,
     ILogger<HybridCacheService> logger) : ICacheService
     , IRedisCircuitBreakerState
+    , IRedisFailoverController
 {
     public string Name => "hybrid";
 
@@ -22,16 +23,22 @@ internal sealed class HybridCacheService(
     private int _failures;
     private long _openUntilTicks;
     private int _halfOpenProbeInFlight;
+    private int _forcedOpen;
+    private string? _forcedReason;
 
     public bool Enabled => _breaker.Enabled;
-    public bool IsOpen => _breaker.Enabled && Volatile.Read(ref _openUntilTicks) != 0 && !IsRedisAllowedNow();
+    public bool IsOpen => _breaker.Enabled && (IsForcedOpen || (Volatile.Read(ref _openUntilTicks) != 0 && !IsRedisAllowedNow()));
     public int ConsecutiveFailures => Volatile.Read(ref _failures);
     public TimeSpan? OpenRemaining => _breaker.Enabled ? GetOpenRemaining() : null;
     public bool HalfOpenProbeInFlight => Volatile.Read(ref _halfOpenProbeInFlight) != 0;
 
+    public bool IsForcedOpen => Volatile.Read(ref _forcedOpen) != 0;
+    public string? Reason => Volatile.Read(ref _forcedReason);
+
     private bool IsRedisAllowedNow()
     {
         if (!_breaker.Enabled) return true;
+        if (IsForcedOpen) return false;
         var openUntil = Volatile.Read(ref _openUntilTicks);
         if (openUntil == 0) return true; // closed
         return timeProvider.GetTimestamp() >= openUntil;
@@ -69,6 +76,7 @@ internal sealed class HybridCacheService(
 
     private TimeSpan? GetOpenRemaining()
     {
+        if (IsForcedOpen) return null;
         var until = Volatile.Read(ref _openUntilTicks);
         if (until == 0) return null;
         var now = timeProvider.GetTimestamp();
@@ -302,5 +310,23 @@ internal sealed class HybridCacheService(
         var created = await factory(ct).ConfigureAwait(false);
         await SetAsync(key, created, serialize, options, ct).ConfigureAwait(false);
         return created;
+    }
+
+    public void ForceOpen(string reason)
+    {
+        if (!_breaker.Enabled) return;
+        Volatile.Write(ref _forcedReason, reason);
+        Volatile.Write(ref _forcedOpen, 1);
+        // Ensure state looks "open" even if it was closed previously.
+        Volatile.Write(ref _openUntilTicks, 1);
+    }
+
+    public void ClearForcedOpen()
+    {
+        if (!_breaker.Enabled) return;
+        Volatile.Write(ref _forcedOpen, 0);
+        Volatile.Write(ref _forcedReason, null);
+        Volatile.Write(ref _failures, 0);
+        Volatile.Write(ref _openUntilTicks, 0);
     }
 }

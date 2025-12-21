@@ -5,6 +5,7 @@ using LanguageExt.Common;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Console.Hosting;
@@ -12,6 +13,8 @@ namespace VapeCache.Console.Hosting;
 internal sealed class StartupPreflightHostedService(
     IOptions<StartupPreflightOptions> options,
     IRedisConnectionFactory factory,
+    IRedisFailoverController failover,
+    ICurrentCacheService current,
     ILogger<StartupPreflightHostedService> logger) : IHostedService
 {
     // RESP: *1\r\n$4\r\nPING\r\n
@@ -66,6 +69,13 @@ internal sealed class StartupPreflightHostedService(
 
             if (o.FailFast)
                 throw new InvalidOperationException($"Startup preflight failed ({failures}/{o.Connections}).");
+
+            if (o.FailoverToMemoryOnFailure)
+            {
+                failover.ForceOpen("startup-preflight-failed");
+                current.SetCurrent("memory");
+                logger.LogWarning("Forcing Redis off (memory-only) until sanity check succeeds.");
+            }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -73,6 +83,13 @@ internal sealed class StartupPreflightHostedService(
             logger.LogWarning("Startup preflight timed out after {Ms}ms.", sw.Elapsed.TotalMilliseconds);
             if (o.FailFast)
                 throw new TimeoutException($"Startup preflight timed out after {sw.Elapsed.TotalMilliseconds:0.0}ms.");
+
+            if (o.FailoverToMemoryOnFailure)
+            {
+                failover.ForceOpen("startup-preflight-timeout");
+                current.SetCurrent("memory");
+                logger.LogWarning("Forcing Redis off (memory-only) until sanity check succeeds.");
+            }
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -80,6 +97,13 @@ internal sealed class StartupPreflightHostedService(
             logger.LogError(ex, "Startup preflight failed after {Ms}ms.", sw.Elapsed.TotalMilliseconds);
             if (o.FailFast)
                 throw;
+
+            if (o.FailoverToMemoryOnFailure)
+            {
+                failover.ForceOpen("startup-preflight-exception");
+                current.SetCurrent("memory");
+                logger.LogWarning("Forcing Redis off (memory-only) until sanity check succeeds.");
+            }
         }
     }
 

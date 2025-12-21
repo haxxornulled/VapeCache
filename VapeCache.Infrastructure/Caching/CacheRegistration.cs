@@ -22,6 +22,7 @@ public static class CacheRegistration
         services.AddSingleton<InMemoryCacheService>();
         services.AddSingleton<HybridCacheService>();
         services.AddSingleton<IRedisCircuitBreakerState>(sp => sp.GetRequiredService<HybridCacheService>());
+        services.AddSingleton<IRedisFailoverController>(sp => sp.GetRequiredService<HybridCacheService>());
 
         services.TryAddSingleton<CacheStampedeOptions>();
         services.TryAddSingleton<RedisCircuitBreakerOptions>();

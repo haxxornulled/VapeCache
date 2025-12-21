@@ -11,5 +11,12 @@ public sealed record StartupPreflightOptions
 
     // Sends a RESP PING after connect/auth/select to validate round-trip.
     public bool ValidatePing { get; init; } = true;
-}
 
+    // If preflight fails and FailFast=false, force Redis off and use memory until a later sanity check succeeds.
+    public bool FailoverToMemoryOnFailure { get; init; } = true;
+
+    // Background sanity check after startup.
+    public bool SanityCheckEnabled { get; init; } = true;
+    public TimeSpan SanityCheckInterval { get; init; } = TimeSpan.FromSeconds(10);
+    public TimeSpan SanityCheckTimeout { get; init; } = TimeSpan.FromSeconds(2);
+}

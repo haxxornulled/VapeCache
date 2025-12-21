@@ -50,6 +50,41 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         Assert.Equal(3, redisExec.GetCalls);
     }
 
+    [Fact]
+    public async Task Forced_open_disables_redis_until_cleared()
+    {
+        var time = new ManualTimeProvider();
+        var redisExec = new ThrowingExecutor();
+        await using var _ = redisExec.ConfigureAwait(false);
+
+        var current = new CurrentCacheService();
+        var stats = new CacheStats();
+        var redis = new RedisCacheService(redisExec, current, stats);
+        var memory = new InMemoryCacheService(new MemoryCache(new MemoryCacheOptions()), current, stats);
+        await memory.SetAsync("k", "v"u8.ToArray(), new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None);
+
+        var breaker = Options.Create(new RedisCircuitBreakerOptions
+        {
+            Enabled = true,
+            ConsecutiveFailuresToOpen = 2,
+            BreakDuration = TimeSpan.FromSeconds(10),
+            HalfOpenProbeTimeout = TimeSpan.FromMilliseconds(1)
+        });
+
+        var hybrid = new HybridCacheService(redis, memory, current, time, breaker, stats, NullLogger<HybridCacheService>.Instance);
+
+        // Force open: no redis calls at all.
+        ((IRedisFailoverController)hybrid).ForceOpen("test");
+        Assert.Equal("v"u8.ToArray(), await hybrid.GetAsync("k", CancellationToken.None));
+        Assert.Equal(0, redisExec.GetCalls);
+        Assert.Equal("memory", current.CurrentName);
+
+        // Clear: first call attempts redis (will fail and fall back).
+        ((IRedisFailoverController)hybrid).ClearForcedOpen();
+        Assert.Equal("v"u8.ToArray(), await hybrid.GetAsync("k", CancellationToken.None));
+        Assert.Equal(1, redisExec.GetCalls);
+    }
+
     private sealed class ThrowingExecutor : IRedisCommandExecutor
     {
         public int GetCalls;

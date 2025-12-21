@@ -186,6 +186,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddVapecacheRedisConnections();
         services.AddVapecacheCaching();
         services.AddHostedService<StartupPreflightHostedService>();
+        services.AddHostedService<RedisSanityCheckHostedService>();
         services.AddHostedService<RedisConnectionPoolReaperHostedService>();
         services.AddHostedService<RedisStressHostedService>();
         services.AddHostedService<LiveDemoHostedService>();

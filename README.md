@@ -23,6 +23,13 @@ Enterprise-focused caching library (in progress) with:
 2) Run:
    - `dotnet run --project VapeCache.Console -c Release`
 
+### Local dev without committing secrets
+- Keep `VapeCache.Console/appsettings.json` sanitized.
+- Create `VapeCache.Console/appsettings.Development.json` (gitignored) with:
+  - `"RedisSecret": { "EnvVar": "VAPECACHE_REDIS_CONNECTIONSTRING", "Required": true }`
+- Set only the secret env var:
+  - `$env:VAPECACHE_REDIS_CONNECTIONSTRING = 'redis://user:pass@192.168.100.125:6379/0'`
+
 The console host also supports a helper script that prompts for the password:
 - `pwsh .\\VapeCache.Console\\run-stress-with-connectionstring.ps1`
 
