@@ -116,6 +116,13 @@ var host = Host.CreateDefaultBuilder(args)
             .ValidateOnStart();
 
         services
+            .AddOptions<StartupPreflightOptions>()
+            .Bind(context.Configuration.GetSection("StartupPreflight"))
+            .Validate(static o => !o.Enabled || o.Timeout >= TimeSpan.Zero, "StartupPreflight:Timeout must be >= 0.")
+            .Validate(static o => !o.Enabled || o.Connections > 0, "StartupPreflight:Connections must be > 0 when enabled.")
+            .ValidateOnStart();
+
+        services
             .AddOptions<RedisConnectionOptions>()
             .Bind(context.Configuration.GetSection("RedisConnection"))
             .Validate(static o => !string.IsNullOrWhiteSpace(o.Host) || !string.IsNullOrWhiteSpace(o.ConnectionString), "RedisConnection:Host or RedisConnection:ConnectionString is required.")
@@ -168,6 +175,7 @@ var host = Host.CreateDefaultBuilder(args)
 
         services.AddVapecacheRedisConnections();
         services.AddVapecacheCaching();
+        services.AddHostedService<StartupPreflightHostedService>();
         services.AddHostedService<RedisConnectionPoolReaperHostedService>();
         services.AddHostedService<RedisStressHostedService>();
         services.AddHostedService<LiveDemoHostedService>();
