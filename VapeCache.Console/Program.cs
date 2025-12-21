@@ -28,10 +28,16 @@ var host = Host.CreateDefaultBuilder(args)
         config.AddEnvironmentVariables();
 
         // Simulated "KeyVault" injection for Redis connection string.
-        // Set `RedisSecret__EnvVar` to choose which env var to read; secret itself lives only in that env var.
-        var envVarName = Environment.GetEnvironmentVariable("RedisSecret__EnvVar");
+        // Choose which env var to read from config (`RedisSecret:EnvVar`), then load the secret from that env var.
+        // This keeps the actual secret out of appsettings and works consistently for VS/CLI.
+        var temp = config.Build();
+        var envVarName = temp["RedisSecret:EnvVar"];
         if (string.IsNullOrWhiteSpace(envVarName))
             envVarName = "VAPECACHE_REDIS_CONNECTIONSTRING";
+
+        var required = false;
+        if (bool.TryParse(temp["RedisSecret:Required"], out var parsedRequired))
+            required = parsedRequired;
 
         var secret = Environment.GetEnvironmentVariable(envVarName);
         if (!string.IsNullOrWhiteSpace(secret))
@@ -40,6 +46,10 @@ var host = Host.CreateDefaultBuilder(args)
             {
                 ["RedisConnection:ConnectionString"] = secret
             });
+        }
+        else if (required)
+        {
+            throw new InvalidOperationException($"Redis secret env var '{envVarName}' is required but not set.");
         }
     })
     .UseSerilog(static (context, services, loggerConfig) =>
