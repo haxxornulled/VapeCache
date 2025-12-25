@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Infrastructure.Caching.Codecs;
 using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Infrastructure.Caching;
@@ -34,6 +36,12 @@ public static class CacheRegistration
             var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CacheStampedeOptions>>();
             return new StampedeProtectedCacheService(hybrid, options);
         });
+
+        // Ergonomic typed caching API with codec-based serialization
+        services.TryAddSingleton<ICacheCodecProvider>(sp =>
+            new SystemTextJsonCodecProvider(new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        services.AddSingleton<IVapeCache, VapeCacheClient>();
+
         return services;
     }
 }
