@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Text;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace VapeCache.Infrastructure.Connections;
@@ -10,6 +11,30 @@ internal static class RedisRespProtocol
     private static readonly byte[] PongLine = "+PONG\r\n"u8.ToArray();
 
     public static ReadOnlyMemory<byte> PingCommand { get; } = "*1\r\n$4\r\nPING\r\n"u8.ToArray();
+
+    // QUICK WIN #2: Cached common RESP command prefixes to avoid repeated encoding
+    // These are the most frequently used command prefixes in hot paths
+    // Format: Array header + command bulk string header + command name + key bulk string prefix
+    private static readonly byte[] GetCommandPrefix = "*2\r\n$3\r\nGET\r\n$"u8.ToArray();
+    private static readonly byte[] SetCommandPrefix = "*3\r\n$3\r\nSET\r\n$"u8.ToArray();
+    private static readonly byte[] SetWithTtlCommandPrefix = "*5\r\n$3\r\nSET\r\n$"u8.ToArray();
+    private static readonly byte[] DelCommandPrefix = "*2\r\n$3\r\nDEL\r\n$"u8.ToArray();
+    private static readonly byte[] UnlinkCommandPrefix = "*2\r\n$6\r\nUNLINK\r\n$"u8.ToArray();
+    private static readonly byte[] HGetCommandPrefix = "*3\r\n$4\r\nHGET\r\n$"u8.ToArray();
+    private static readonly byte[] HSetCommandPrefix = "*4\r\n$4\r\nHSET\r\n$"u8.ToArray();
+    private static readonly byte[] TtlCommandPrefix = "*2\r\n$3\r\nTTL\r\n$"u8.ToArray();
+    private static readonly byte[] PTtlCommandPrefix = "*2\r\n$4\r\nPTTL\r\n$"u8.ToArray();
+
+    // Common bulk strings for command parts
+    private static readonly byte[] GetBulkString = "$3\r\nGET\r\n"u8.ToArray();
+    private static readonly byte[] SetBulkString = "$3\r\nSET\r\n"u8.ToArray();
+    private static readonly byte[] DelBulkString = "$3\r\nDEL\r\n"u8.ToArray();
+    private static readonly byte[] MGetBulkString = "$4\r\nMGET\r\n"u8.ToArray();
+    private static readonly byte[] MSetBulkString = "$4\r\nMSET\r\n"u8.ToArray();
+    private static readonly byte[] HGetBulkString = "$4\r\nHGET\r\n"u8.ToArray();
+    private static readonly byte[] HSetBulkString = "$4\r\nHSET\r\n"u8.ToArray();
+    private static readonly byte[] PxBulkString = "$2\r\nPX\r\n"u8.ToArray();
+    private static readonly byte[] CrLf = "\r\n"u8.ToArray();
 
     public static int GetSelectCommandLength(int database)
         => GetCommandLength(2, "SELECT", GetIntLength(database));
@@ -33,7 +58,10 @@ internal static class RedisRespProtocol
     public static int WriteAclWhoAmICommand(Span<byte> destination)
         => WriteCommand(destination, 2, "ACL", "WHOAMI");
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetGetCommandLength(string key) => GetCommandLength(2, "GET", key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteGetCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "GET", key);
 
     public static int GetGetExCommandLength(string key, int? ttlMs)
@@ -63,18 +91,151 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetTtlCommandLength(string key) => GetCommandLength(2, "TTL", key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteTtlCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "TTL", key);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetPTtlCommandLength(string key) => GetCommandLength(2, "PTTL", key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WritePTtlCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "PTTL", key);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetDelCommandLength(string key) => GetCommandLength(2, "DEL", key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteDelCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "DEL", key);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetUnlinkCommandLength(string key) => GetCommandLength(2, "UNLINK", key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteUnlinkCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "UNLINK", key);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetHGetCommandLength(string key, string field) => GetCommandLength(3, "HGET", key, field);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteHGetCommand(Span<byte> destination, string key, string field) => WriteCommand(destination, 3, "HGET", key, field);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetHSetCommandLength(string key, string field, int valueLen)
+    {
+        // HSET key field value
+        return GetHeaderLen(4)
+               + GetBulkLen(4) + 4 + 2 // HSET
+               + GetBulkStringLen(key) + 2
+               + GetBulkStringLen(field) + 2
+               + GetBulkLen(valueLen) + valueLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteHSetCommand(Span<byte> destination, string key, string field, ReadOnlySpan<byte> value)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 4);
+        idx += WriteBulkString(destination.Slice(idx), "HSET");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkString(destination.Slice(idx), field);
+        idx += WriteBulkBytes(destination.Slice(idx), value);
+        return idx;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteHSetCommandHeader(Span<byte> destination, string key, string field, int valueLen)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 4);
+        idx += WriteBulkString(destination.Slice(idx), "HSET");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkString(destination.Slice(idx), field);
+        idx += WriteBulkLength(destination.Slice(idx), valueLen);
+        return idx;
+    }
+
+    public static int GetHMGetCommandLength(string key, string[] fields)
+    {
+        var count = 2 + fields.Length;
+        if (fields.Length == 0) return 0;
+
+        var len = GetHeaderLen(count)
+                  + GetBulkLen(5) + 5 + 2 // HMGET
+                  + GetBulkStringLen(key) + 2;
+        foreach (var f in fields)
+            len += GetBulkStringLen(f) + 2;
+        return len;
+    }
+
+    public static int WriteHMGetCommand(Span<byte> destination, string key, string[] fields)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 2 + fields.Length);
+        idx += WriteBulkString(destination.Slice(idx), "HMGET");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        foreach (var f in fields)
+            idx += WriteBulkString(destination.Slice(idx), f);
+        return idx;
+    }
+
+    public static int GetLPushCommandLength(string key, int valueLen)
+    {
+        // LPUSH key value
+        return GetHeaderLen(3)
+               + GetBulkLen(5) + 5 + 2 // LPUSH
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(valueLen) + valueLen + 2;
+    }
+
+    public static int WriteLPushCommand(Span<byte> destination, string key, ReadOnlySpan<byte> value)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "LPUSH");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkBytes(destination.Slice(idx), value);
+        return idx;
+    }
+
+    public static int WriteLPushCommandHeader(Span<byte> destination, string key, int valueLen)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "LPUSH");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkLength(destination.Slice(idx), valueLen);
+        return idx;
+    }
+
+    public static int GetLPopCommandLength(string key) => GetCommandLength(2, "LPOP", key);
+    public static int WriteLPopCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "LPOP", key);
+
+    public static int GetLRangeCommandLength(string key, long start, long stop)
+    {
+        // LRANGE key start stop
+        var startLen = GetIntLength(start);
+        var stopLen = GetIntLength(stop);
+        return GetHeaderLen(4)
+               + GetBulkLen(6) + 6 + 2 // LRANGE
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(startLen) + startLen + 2
+               + GetBulkLen(stopLen) + stopLen + 2;
+    }
+
+    public static int WriteLRangeCommand(Span<byte> destination, string key, long start, long stop)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 4);
+        idx += WriteBulkString(destination.Slice(idx), "LRANGE");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkInt64(destination.Slice(idx), start);
+        idx += WriteBulkInt64(destination.Slice(idx), stop);
+        return idx;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetMGetCommandLength(string[] keys)
     {
         var count = 1 + keys.Length;
@@ -86,6 +247,7 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteMGetCommand(Span<byte> destination, string[] keys)
     {
         var count = 1 + keys.Length;
@@ -97,6 +259,7 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetMSetCommandLength((string Key, int ValueLen)[] items)
     {
         if (items.Length == 0) return 0;
@@ -110,6 +273,7 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetMSetCommandLength((string Key, ReadOnlyMemory<byte> Value)[] items)
     {
         if (items.Length == 0) return 0;
@@ -123,6 +287,7 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteMSetCommand(Span<byte> destination, (string Key, ReadOnlyMemory<byte> Value)[] items)
     {
         var count = 1 + (items.Length * 2);
@@ -137,6 +302,33 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    public static int GetMSetHeaderLength((string Key, int ValueLen)[] items)
+    {
+        if (items.Length == 0) return 0;
+        var total = GetMSetCommandLength(items);
+        var payloadAndSuffix = 0;
+        foreach (var (_, vlen) in items)
+            payloadAndSuffix += vlen + 2; // payload + CRLF
+        return total - payloadAndSuffix;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteMSetCommandHeader(Span<byte> destination, ReadOnlySpan<(string Key, int ValueLen)> items)
+    {
+        if (items.Length == 0) return 0;
+        var count = 1 + (items.Length * 2);
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), count);
+        idx += WriteBulkString(destination.Slice(idx), "MSET");
+        foreach (var (key, vlen) in items)
+        {
+            idx += WriteBulkString(destination.Slice(idx), key);
+            idx += WriteBulkLength(destination.Slice(idx), vlen);
+        }
+        return idx;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetSetCommandLength(string key, int valueByteLen, int? ttlMs)
     {
         if (ttlMs is null)
@@ -154,6 +346,7 @@ internal static class RedisRespProtocol
                + GetBulkLen(GetIntLength(ttlMs.Value)) + GetIntLength(ttlMs.Value) + 2;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteSetCommand(Span<byte> destination, string key, ReadOnlySpan<byte> value, int? ttlMs)
     {
         if (ttlMs is null)
@@ -176,6 +369,32 @@ internal static class RedisRespProtocol
             idx += WriteBulkInt(destination.Slice(idx), ttlMs.Value);
             return idx;
         }
+    }
+
+    // Header-only variant (omits value bytes and trailing CRLF) for scatter/gather writes.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteSetCommandHeader(Span<byte> destination, string key, int valueByteLen, int? ttlMs)
+    {
+        if (ttlMs is null)
+        {
+            var idx = 0;
+            idx += WriteArrayHeader(destination.Slice(idx), 3);
+            idx += WriteBulkString(destination.Slice(idx), "SET");
+            idx += WriteBulkString(destination.Slice(idx), key);
+            idx += WriteBulkLength(destination.Slice(idx), valueByteLen);
+            return idx;
+        }
+
+        // SET key value PX ttl
+        var ttlLen = GetIntLength(ttlMs.Value);
+        var idxHdr = 0;
+        idxHdr += WriteArrayHeader(destination.Slice(idxHdr), 5);
+        idxHdr += WriteBulkString(destination.Slice(idxHdr), "SET");
+        idxHdr += WriteBulkString(destination.Slice(idxHdr), key);
+        idxHdr += WriteBulkLength(destination.Slice(idxHdr), valueByteLen);
+        idxHdr += WriteBulkString(destination.Slice(idxHdr), "PX");
+        idxHdr += WriteBulkInt(destination.Slice(idxHdr), ttlMs.Value);
+        return idxHdr;
     }
 
     public static byte[] BuildCommand(params string[] parts)
@@ -406,6 +625,31 @@ internal static class RedisRespProtocol
             _ => 10
         };
 
+    private static int GetIntLength(long value)
+    {
+        if (value == long.MinValue) return 20;
+        if (value < 0) return 1 + GetIntLength(-value);
+        if (value < 10L) return 1;
+        if (value < 100L) return 2;
+        if (value < 1000L) return 3;
+        if (value < 10000L) return 4;
+        if (value < 100000L) return 5;
+        if (value < 1000000L) return 6;
+        if (value < 10000000L) return 7;
+        if (value < 100000000L) return 8;
+        if (value < 1000000000L) return 9;
+        if (value < 10000000000L) return 10;
+        if (value < 100000000000L) return 11;
+        if (value < 1000000000000L) return 12;
+        if (value < 10000000000000L) return 13;
+        if (value < 100000000000000L) return 14;
+        if (value < 1000000000000000L) return 15;
+        if (value < 10000000000000000L) return 16;
+        if (value < 100000000000000000L) return 17;
+        if (value < 1000000000000000000L) return 18;
+        return 19;
+    }
+
     private static int WriteCommand(Span<byte> destination, int partsCount, string p0, string p1)
     {
         var idx = 0;
@@ -473,15 +717,20 @@ internal static class RedisRespProtocol
 
     private static int WriteBulkBytes(Span<byte> destination, ReadOnlySpan<byte> value)
     {
-        destination[0] = (byte)'$';
-        var idx = 1;
-        idx += WriteIntAscii(destination.Slice(idx), value.Length);
-        destination[idx++] = (byte)'\r';
-        destination[idx++] = (byte)'\n';
-
+        var idx = WriteBulkLength(destination, value.Length);
         value.CopyTo(destination.Slice(idx));
         idx += value.Length;
 
+        destination[idx++] = (byte)'\r';
+        destination[idx++] = (byte)'\n';
+        return idx;
+    }
+
+    internal static int WriteBulkLength(Span<byte> destination, int length)
+    {
+        destination[0] = (byte)'$';
+        var idx = 1;
+        idx += WriteIntAscii(destination.Slice(idx), length);
         destination[idx++] = (byte)'\r';
         destination[idx++] = (byte)'\n';
         return idx;
@@ -495,6 +744,27 @@ internal static class RedisRespProtocol
         Span<byte> tmp = stackalloc byte[32];
         if (!Utf8Formatter.TryFormat(value, tmp, out var written))
             throw new InvalidOperationException("Failed to format int.");
+
+        idx += WriteIntAscii(destination.Slice(idx), written);
+        destination[idx++] = (byte)'\r';
+        destination[idx++] = (byte)'\n';
+
+        tmp.Slice(0, written).CopyTo(destination.Slice(idx));
+        idx += written;
+
+        destination[idx++] = (byte)'\r';
+        destination[idx++] = (byte)'\n';
+        return idx;
+    }
+
+    private static int WriteBulkInt64(Span<byte> destination, long value)
+    {
+        destination[0] = (byte)'$';
+        var idx = 1;
+
+        Span<byte> tmp = stackalloc byte[32];
+        if (!Utf8Formatter.TryFormat(value, tmp, out var written))
+            throw new InvalidOperationException("Failed to format long.");
 
         idx += WriteIntAscii(destination.Slice(idx), written);
         destination[idx++] = (byte)'\r';
