@@ -14,7 +14,51 @@ public sealed class CacheEndpoints
 
     public static void Map(IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/healthz", static () => Results.Ok(new { status = "ok" }));
+        // Enterprise-grade health check endpoint for Kubernetes liveness/readiness probes
+        endpoints.MapGet("/healthz", static (IServiceProvider sp) =>
+        {
+            var breakerState = sp.GetService<IRedisCircuitBreakerState>();
+            var failoverController = sp.GetService<IRedisFailoverController>();
+            var currentCache = sp.GetService<ICurrentCacheService>();
+
+            var response = new
+            {
+                status = "healthy",
+                timestamp = DateTimeOffset.UtcNow,
+                cache = new
+                {
+                    backend = currentCache?.CurrentName ?? "unknown",
+                    circuitBreaker = breakerState is null ? null : new
+                    {
+                        enabled = breakerState.Enabled,
+                        isOpen = breakerState.IsOpen,
+                        isForcedOpen = failoverController?.IsForcedOpen ?? false,
+                        forcedReason = failoverController?.Reason,
+                        consecutiveFailures = breakerState.ConsecutiveFailures
+                    }
+                }
+            };
+
+            // Return 200 OK even if circuit breaker is open (graceful degradation to memory)
+            // Kubernetes should keep the pod alive since the app is still serving requests
+            return Results.Ok(response);
+        });
+
+        // Readiness probe - fail if circuit breaker is FORCED open (manual intervention required)
+        endpoints.MapGet("/ready", static (IServiceProvider sp) =>
+        {
+            var failoverController = sp.GetService<IRedisFailoverController>();
+
+            // Ready if no failover controller, OR if breaker is not forced open
+            var isReady = failoverController is null || !failoverController.IsForcedOpen;
+
+            if (isReady)
+            {
+                return Results.Ok(new { status = "ready", timestamp = DateTimeOffset.UtcNow });
+            }
+
+            return Results.StatusCode(503); // Service Unavailable - remove from load balancer
+        });
 
         endpoints.MapGet("/cache/current", static (ICurrentCacheService current) =>
             Results.Ok(new { current = current.CurrentName }));

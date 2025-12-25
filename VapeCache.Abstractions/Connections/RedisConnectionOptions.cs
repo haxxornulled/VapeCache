@@ -15,6 +15,12 @@ public sealed record RedisConnectionOptions
 
     public bool UseTls { get; init; }
     public string? TlsHost { get; init; }
+
+    /// <summary>
+    /// WARNING: Development/testing ONLY. Allows bypassing TLS certificate validation.
+    /// This creates a critical security vulnerability (MITM attacks) and MUST NOT be enabled in production.
+    /// Consider using self-signed certs in dev or proper CA-signed certs instead.
+    /// </summary>
     public bool AllowInvalidCert { get; init; }
 
     public int MaxConnections { get; init; } = 64;

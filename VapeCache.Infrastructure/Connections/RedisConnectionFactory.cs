@@ -5,6 +5,7 @@ using System.Security.Authentication;
 using System.Diagnostics;
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using LanguageExt.Common;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
@@ -38,14 +39,13 @@ internal sealed class RedisConnectionFactory(
             try
             {
                 logger.LogInformation(
-                    "Redis options resolved from ConnectionString: Host={Host} Port={Port} Db={Db} Tls={Tls} Username={Username} PasswordSet={PasswordSet} PasswordLen={PasswordLen}",
+                    "Redis options resolved from ConnectionString: Host={Host} Port={Port} Db={Db} Tls={Tls} Username={Username} PasswordSet={PasswordSet}",
                     effective.Host,
                     effective.Port,
                     effective.Database,
                     effective.UseTls,
                     string.IsNullOrWhiteSpace(effective.Username) ? "<none>" : effective.Username,
-                    !string.IsNullOrWhiteSpace(effective.Password),
-                    effective.Password?.Length ?? 0);
+                    !string.IsNullOrWhiteSpace(effective.Password));
             }
             catch { }
         }
@@ -69,6 +69,15 @@ internal sealed class RedisConnectionFactory(
 
             if (effective.UseTls)
             {
+                // SECURITY: Block AllowInvalidCert in production to prevent MITM attacks
+                if (effective.AllowInvalidCert && IsProductionEnvironment())
+                {
+                    throw new InvalidOperationException(
+                        "AllowInvalidCert=true is not permitted in production environments. " +
+                        "This setting bypasses TLS certificate validation and creates a critical security vulnerability. " +
+                        "Use proper CA-signed certificates or set ASPNETCORE_ENVIRONMENT/DOTNET_ENVIRONMENT to Development.");
+                }
+
                 var ssl = new SslStream(
                     stream,
                     leaveInnerStreamOpen: false,
@@ -173,6 +182,7 @@ internal sealed class RedisConnectionFactory(
         try
         {
             if (!o.EnableTcpKeepAlive) return;
+            if (!OperatingSystem.IsWindows()) return;
 
             socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
 
@@ -444,23 +454,85 @@ internal sealed class RedisConnectionFactory(
 
     internal static RedisConnectionOptions ResolveOptions(RedisConnectionOptions o)
     {
-        if (string.IsNullOrWhiteSpace(o.ConnectionString))
-            return o;
+        // Resolve ConnectionString (when provided) first; then apply lightweight defaults to reduce unnecessary
+        // TCP/application chatter without overriding explicit user configuration.
 
-        if (!RedisConnectionStringParser.TryParse(o.ConnectionString, out var parsed, out _))
-            return o;
+        var effective = o;
 
-        return o with
+        if (!string.IsNullOrWhiteSpace(o.ConnectionString) &&
+            RedisConnectionStringParser.TryParse(o.ConnectionString, out var parsed, out _))
         {
-            Host = parsed.Host,
-            Port = parsed.Port,
-            Username = parsed.Username,
-            Password = parsed.Password,
-            Database = parsed.Database,
-            UseTls = parsed.UseTls,
-            TlsHost = parsed.TlsHost,
-            AllowInvalidCert = parsed.AllowInvalidCert
-        };
+            effective = o with
+            {
+                Host = parsed.Host,
+                Port = parsed.Port,
+                Username = parsed.Username,
+                Password = parsed.Password,
+                Database = parsed.Database,
+                UseTls = parsed.UseTls,
+                TlsHost = parsed.TlsHost,
+                AllowInvalidCert = parsed.AllowInvalidCert
+            };
+        }
+
+        return ApplyTcpChatterOptimization(effective);
+    }
+
+    private static RedisConnectionOptions ApplyTcpChatterOptimization(RedisConnectionOptions o)
+    {
+        // Goal:
+        // - Localhost: disable both TCP keepalive probes and borrow-time PING validation (no NAT/LB idleness).
+        // - Non-localhost: prefer TCP keepalive and disable borrow-time PING validation (option A).
+        // 
+        // IMPORTANT: do not override explicit configuration; only adjust when defaults are still in place.
+
+        var isLoopback = IsLoopbackHost(o.Host);
+
+        // Option A: disable borrow-time PING when using default ValidateAfterIdle.
+        if (o.ValidateAfterIdle == TimeSpan.FromSeconds(30))
+            o = o with { ValidateAfterIdle = TimeSpan.Zero };
+
+        if (!isLoopback)
+            return o;
+
+        // For loopback only, also disable keepalive when using default keepalive settings.
+        if (o.EnableTcpKeepAlive &&
+            o.TcpKeepAliveTime == TimeSpan.FromSeconds(30) &&
+            o.TcpKeepAliveInterval == TimeSpan.FromSeconds(10))
+        {
+            o = o with { EnableTcpKeepAlive = false };
+        }
+
+        return o;
+    }
+
+    private static bool IsLoopbackHost(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+            return false;
+
+        // Common literals.
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // IP literals.
+        if (System.Net.IPAddress.TryParse(host, out var ip))
+            return System.Net.IPAddress.IsLoopback(ip);
+
+        // Treat .local as non-loopback; don't do DNS here.
+        return false;
+    }
+
+    private static bool IsProductionEnvironment()
+    {
+        // Check standard .NET environment variables
+        var aspNetEnv = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        var dotnetEnv = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+
+        // Production if explicitly set to Production, or if not set to Development/Staging
+        var env = aspNetEnv ?? dotnetEnv ?? "Production";
+        return !string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(env, "Staging", StringComparison.OrdinalIgnoreCase);
     }
 
     public ValueTask DisposeAsync()

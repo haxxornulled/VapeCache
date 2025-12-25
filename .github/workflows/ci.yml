@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Unit tests
+        run: dotnet test -c Release VapeCache.sln
+
+      - name: Perf gates
+        run: |
+          dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj
+          pwsh -File tools/perf-gate.ps1

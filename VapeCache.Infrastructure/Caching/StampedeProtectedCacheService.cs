@@ -11,6 +11,7 @@ internal sealed class StampedeProtectedCacheService : ICacheService
     {
         public readonly SemaphoreSlim Semaphore = new(1, 1);
         public int RefCount;
+        public int Disposed; // 0 = active, 1 = disposed (prevents race on disposal)
     }
 
     private readonly ICacheService _inner;
@@ -32,7 +33,7 @@ internal sealed class StampedeProtectedCacheService : ICacheService
 
     public ValueTask<bool> RemoveAsync(string key, CancellationToken ct) => _inner.RemoveAsync(key, ct);
 
-    public ValueTask<T?> GetAsync<T>(string key, Func<ReadOnlySpan<byte>, T> deserialize, CancellationToken ct)
+    public ValueTask<T?> GetAsync<T>(string key, SpanDeserializer<T> deserialize, CancellationToken ct)
         => _inner.GetAsync(key, deserialize, ct);
 
     public ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
@@ -42,7 +43,7 @@ internal sealed class StampedeProtectedCacheService : ICacheService
         string key,
         Func<CancellationToken, ValueTask<T>> factory,
         Action<IBufferWriter<byte>, T> serialize,
-        Func<ReadOnlySpan<byte>, T> deserialize,
+        SpanDeserializer<T> deserialize,
         CacheEntryOptions options,
         CancellationToken ct)
     {
@@ -59,8 +60,31 @@ internal sealed class StampedeProtectedCacheService : ICacheService
             return await _inner.GetOrSetAsync(key, factory, serialize, deserialize, options, ct).ConfigureAwait(false);
         }
 
-        var entry = _locks.GetOrAdd(key, static _ => new LockEntry());
-        Interlocked.Increment(ref entry.RefCount);
+        LockEntry entry;
+        while (true)
+        {
+            entry = _locks.GetOrAdd(key, static _ => new LockEntry());
+
+            // CRITICAL: Check if this entry is already marked for disposal before incrementing refcount
+            // This prevents the race where we get a stale entry that's being disposed
+            if (Volatile.Read(ref entry.Disposed) == 1)
+            {
+                // Entry is being disposed, retry to get the new entry
+                continue;
+            }
+
+            Interlocked.Increment(ref entry.RefCount);
+
+            // Double-check after increment - if it was disposed between read and increment, decrement and retry
+            if (Volatile.Read(ref entry.Disposed) == 1)
+            {
+                Interlocked.Decrement(ref entry.RefCount);
+                continue;
+            }
+
+            // Safe to use this entry
+            break;
+        }
 
         try
         {
@@ -82,8 +106,21 @@ internal sealed class StampedeProtectedCacheService : ICacheService
         }
         finally
         {
-            if (Interlocked.Decrement(ref entry.RefCount) == 0 && _locks.TryRemove(new KeyValuePair<string, LockEntry>(key, entry)))
-                entry.Semaphore.Dispose();
+            // Decrement refcount and attempt cleanup
+            var newCount = Interlocked.Decrement(ref entry.RefCount);
+            if (newCount == 0)
+            {
+                // Mark as disposed to prevent new callers from using this entry
+                if (Interlocked.CompareExchange(ref entry.Disposed, 1, 0) == 0)
+                {
+                    // Successfully marked as disposed, now safe to remove and dispose
+                    // Even if TryRemove fails (rare race), the disposed flag prevents reuse
+                    if (_locks.TryRemove(new KeyValuePair<string, LockEntry>(key, entry)))
+                    {
+                        entry.Semaphore.Dispose();
+                    }
+                }
+            }
         }
     }
 }
