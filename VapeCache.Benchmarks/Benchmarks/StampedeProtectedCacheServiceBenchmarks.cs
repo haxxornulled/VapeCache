@@ -21,7 +21,7 @@ public class StampedeProtectedCacheServiceBenchmarks
         w.Write(tmp);
     };
 
-    private readonly Func<ReadOnlySpan<byte>, int> _deserialize = static s => BitConverter.ToInt32(s);
+    private readonly SpanDeserializer<int> _deserialize = static s => BitConverter.ToInt32(s);
 
     [Params(false, true)]
     public bool Enabled { get; set; }
@@ -75,7 +75,7 @@ public class StampedeProtectedCacheServiceBenchmarks
         public ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
             => new(_store.Remove(key));
 
-        public ValueTask<T?> GetAsync<T>(string key, Func<ReadOnlySpan<byte>, T> deserialize, CancellationToken ct)
+        public ValueTask<T?> GetAsync<T>(string key, SpanDeserializer<T> deserialize, CancellationToken ct)
         {
             if (!_store.TryGetValue(key, out var value))
                 return new ValueTask<T?>(default(T));
@@ -94,7 +94,7 @@ public class StampedeProtectedCacheServiceBenchmarks
             string key,
             Func<CancellationToken, ValueTask<T>> factory,
             Action<IBufferWriter<byte>, T> serialize,
-            Func<ReadOnlySpan<byte>, T> deserialize,
+            SpanDeserializer<T> deserialize,
             CacheEntryOptions options,
             CancellationToken ct)
         {

@@ -93,7 +93,7 @@ public sealed class StampedeProtectedCacheServiceTests
             return ValueTask.FromResult(ok);
         }
 
-        public ValueTask<T?> GetAsync<T>(string key, Func<ReadOnlySpan<byte>, T> deserialize, CancellationToken ct)
+        public ValueTask<T?> GetAsync<T>(string key, SpanDeserializer<T> deserialize, CancellationToken ct)
         {
             if (!_store.TryGetValue(key, out var v)) return ValueTask.FromResult<T?>(default);
             return ValueTask.FromResult<T?>(deserialize(v));
@@ -108,7 +108,7 @@ public sealed class StampedeProtectedCacheServiceTests
         }
 
         public ValueTask<T> GetOrSetAsync<T>(string key, Func<CancellationToken, ValueTask<T>> factory, Action<IBufferWriter<byte>, T> serialize,
-            Func<ReadOnlySpan<byte>, T> deserialize, CacheEntryOptions options, CancellationToken ct)
+            SpanDeserializer<T> deserialize, CacheEntryOptions options, CancellationToken ct)
             => throw new NotSupportedException();
     }
 }

@@ -84,6 +84,25 @@ public sealed class RedisCommandExecutorIntegrationTests
 
         var missing = await exec.GetAsync(key1, CancellationToken.None);
         Assert.Null(missing);
+
+        // Hashes
+        var hkey = key2 + ":hash";
+        var field = "f1";
+        var added = await exec.HSetAsync(hkey, field, "hv"u8.ToArray(), CancellationToken.None);
+        Assert.True(added >= 0);
+        var hval = await exec.HGetAsync(hkey, field, CancellationToken.None);
+        Assert.NotNull(hval);
+
+        var hm = await exec.HMGetAsync(hkey, new[] { field, "missing" }, CancellationToken.None);
+        Assert.Equal(2, hm.Length);
+        Assert.NotNull(hm[0]);
+
+        // Lists
+        var lkey = key2 + ":list";
+        var llen = await exec.LPushAsync(lkey, "lv"u8.ToArray(), CancellationToken.None);
+        Assert.True(llen >= 1);
+        var popped = await exec.LPopAsync(lkey, CancellationToken.None);
+        Assert.NotNull(popped);
     }
 
     [SkippableFact]

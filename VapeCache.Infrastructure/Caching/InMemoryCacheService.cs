@@ -71,7 +71,7 @@ internal sealed class InMemoryCacheService(IMemoryCache cache, ICurrentCacheServ
         return ValueTask.FromResult(true);
     }
 
-    public async ValueTask<T?> GetAsync<T>(string key, Func<ReadOnlySpan<byte>, T> deserialize, CancellationToken ct)
+    public async ValueTask<T?> GetAsync<T>(string key, SpanDeserializer<T> deserialize, CancellationToken ct)
     {
         var bytes = await GetAsync(key, ct).ConfigureAwait(false);
         if (bytes is null) return default;
@@ -91,7 +91,7 @@ internal sealed class InMemoryCacheService(IMemoryCache cache, ICurrentCacheServ
         string key,
         Func<CancellationToken, ValueTask<T>> factory,
         Action<IBufferWriter<byte>, T> serialize,
-        Func<ReadOnlySpan<byte>, T> deserialize,
+        SpanDeserializer<T> deserialize,
         CacheEntryOptions options,
         CancellationToken ct)
     {

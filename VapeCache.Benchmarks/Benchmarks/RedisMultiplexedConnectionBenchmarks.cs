@@ -19,7 +19,7 @@ public class RedisMultiplexedConnectionBenchmarks
     public void Setup()
     {
         _cmd = RedisRespProtocol.PingCommand;
-        _mux = new RedisMultiplexedConnection(new FakeFactory(), MaxInFlight);
+        _mux = new RedisMultiplexedConnection(new FakeFactory(), MaxInFlight, coalesceWrites: false);
     }
 
     [GlobalCleanup]

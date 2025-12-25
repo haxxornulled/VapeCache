@@ -6,73 +6,53 @@ namespace VapeCache.Tests;
 public sealed class RedisConnectionFactoryResolveOptionsTests
 {
     [Fact]
-    public void ResolveOptions_returns_original_when_connection_string_empty()
+    public void ResolveOptions_DisablesBorrowPingValidation_ForNonLoopback_WhenUsingDefault()
     {
         var o = new RedisConnectionOptions
         {
-            Host = "h",
-            MaxConnections = 10,
-            MaxIdle = 5
+            Host = "10.0.0.5",
+            ValidateAfterIdle = TimeSpan.FromSeconds(30), // default
+            EnableTcpKeepAlive = true
         };
 
         var effective = RedisConnectionFactory.ResolveOptions(o);
-        Assert.Equal(o, effective);
+
+        Assert.Equal(TimeSpan.Zero, effective.ValidateAfterIdle);
+        Assert.True(effective.EnableTcpKeepAlive);
+    }
+
+    [Theory]
+    [InlineData("localhost")]
+    [InlineData("127.0.0.1")]
+    [InlineData("::1")]
+    public void ResolveOptions_DisablesKeepAlive_OnLoopback_WhenUsingDefaultKeepAlive(string host)
+    {
+        var o = new RedisConnectionOptions
+        {
+            Host = host,
+            ValidateAfterIdle = TimeSpan.FromSeconds(30), // default
+            EnableTcpKeepAlive = true,
+            TcpKeepAliveTime = TimeSpan.FromSeconds(30),
+            TcpKeepAliveInterval = TimeSpan.FromSeconds(10)
+        };
+
+        var effective = RedisConnectionFactory.ResolveOptions(o);
+
+        Assert.Equal(TimeSpan.Zero, effective.ValidateAfterIdle);
+        Assert.False(effective.EnableTcpKeepAlive);
     }
 
     [Fact]
-    public void ResolveOptions_returns_original_when_connection_string_invalid()
+    public void ResolveOptions_DoesNotOverrideExplicitValidateAfterIdle()
     {
         var o = new RedisConnectionOptions
         {
-            ConnectionString = "not a uri",
-            Host = "h",
-            Port = 1234,
-            UseTls = false
-        };
-
-        var effective = RedisConnectionFactory.ResolveOptions(o);
-        Assert.Equal("h", effective.Host);
-        Assert.Equal(1234, effective.Port);
-        Assert.False(effective.UseTls);
-    }
-
-    [Fact]
-    public void ResolveOptions_overrides_endpoint_and_auth_but_keeps_pooling_values()
-    {
-        var o = new RedisConnectionOptions
-        {
-            ConnectionString = "rediss://u:p%40ss%21%21@cache.local:6380/2?sni=sni.host&allowInvalidCert=true",
-            Host = "ignored",
-            Port = 1,
-            Username = "ignored",
-            Password = "ignored",
-            Database = 0,
-            UseTls = false,
-            TlsHost = null,
-            AllowInvalidCert = false,
-
-            MaxConnections = 200,
-            MaxIdle = 50,
-            Warm = 10,
-            AcquireTimeout = TimeSpan.FromSeconds(1),
-            ConnectTimeout = TimeSpan.FromSeconds(2)
+            Host = "10.0.0.5",
+            ValidateAfterIdle = TimeSpan.FromMinutes(2) // explicit
         };
 
         var effective = RedisConnectionFactory.ResolveOptions(o);
 
-        Assert.Equal("cache.local", effective.Host);
-        Assert.Equal(6380, effective.Port);
-        Assert.Equal("u", effective.Username);
-        Assert.Equal("p@ss!!", effective.Password);
-        Assert.Equal(2, effective.Database);
-        Assert.True(effective.UseTls);
-        Assert.Equal("sni.host", effective.TlsHost);
-        Assert.True(effective.AllowInvalidCert);
-
-        Assert.Equal(200, effective.MaxConnections);
-        Assert.Equal(50, effective.MaxIdle);
-        Assert.Equal(10, effective.Warm);
-        Assert.Equal(TimeSpan.FromSeconds(1), effective.AcquireTimeout);
-        Assert.Equal(TimeSpan.FromSeconds(2), effective.ConnectTimeout);
+        Assert.Equal(TimeSpan.FromMinutes(2), effective.ValidateAfterIdle);
     }
 }

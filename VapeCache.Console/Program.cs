@@ -17,7 +17,7 @@ using VapeCache.Infrastructure.Caching;
 using VapeCache.Console.Stress;
 using VapeCache.Console.Secrets;
 
-var host = Host.CreateDefaultBuilder(args)
+var hostBuilder = Host.CreateDefaultBuilder(args)
     .UseServiceProviderFactory(new AutofacServiceProviderFactory())
     .ConfigureAppConfiguration(static (context, config) =>
     {
@@ -191,15 +191,31 @@ var host = Host.CreateDefaultBuilder(args)
     .ConfigureContainer<ContainerBuilder>(static (context, builder) =>
     {
         builder.RegisterModule(new ConfigurationModule(context.Configuration));
-    })
-    .Build();
+    });
+
+using var host = hostBuilder.Build();
+
+var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStarted.Register(() =>
+{
+    Log.Information("VapeCache.Console started. Press Ctrl+C to exit. Endpoints ready for Postman.");
+});
+lifetime.ApplicationStopping.Register(() =>
+{
+    Log.Information("VapeCache.Console stopping...");
+});
+lifetime.ApplicationStopped.Register(() =>
+{
+    Log.Information("VapeCache.Console stopped.");
+});
 
 try
 {
-    await host.RunAsync().ConfigureAwait(false);
+    await host.StartAsync().ConfigureAwait(false);
+    await host.WaitForShutdownAsync().ConfigureAwait(false);
 }
 finally
 {
-    await host.StopAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+    try { await host.StopAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); } catch { }
     Log.CloseAndFlush();
 }

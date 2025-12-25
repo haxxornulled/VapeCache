@@ -4,11 +4,13 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="VapeCache.Tests" />
     <InternalsVisibleTo Include="VapeCache.Benchmarks" />
+    <InternalsVisibleTo Include="VapeCache.PerfGates.Tests" />
   </ItemGroup>
 
   <ItemGroup>

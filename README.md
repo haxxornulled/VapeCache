@@ -17,6 +17,28 @@ Enterprise-focused caching library (in progress) with:
 - `VapeCache.Tests`: unit/integration tests
 - `VapeCache.Benchmarks`: BenchmarkDotNet benchmarks for hot paths
 
+## Redis transport (why we beat SER)
+- **Multiplexed writer/reader loops**: order-preserving `Channel<>` pair with pooled `IValueTaskSource` operations (no per-op `TaskCompletionSource` churn).
+- **Deterministic buffer ownership**: bulk replies can be leased from `ArrayPool` and returned by the caller (near-zero payload garbage, no LOH spikes).
+- **Auto-reconnect + drain**: any socket/read/write failure drains pending + queued ops, releases in-flight slots, disposes the broken transport, and reconnects on the next command.
+- **Pool drop reasons**: faulted/idle/max-lifetime connections are never reused; reaper maintains warm idle count without reviving bad sockets.
+- **OTel everywhere**: connect/pool/command metrics + tracing source for span correlation.
+
+Transport shape (mux path):
+```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Segoe UI, Inter, Arial","primaryColor":"#0b1220","primaryTextColor":"#e6edf3","lineColor":"#8b949e"}}}%%
+flowchart LR
+  Writes["Writes Channel\nbounded only by in-flight semaphore"]
+  Pending["Pending Channel\n(response waiters)"]
+  Op["Pooled PendingOperation\nIValueTaskSource<RespValue>"]
+  Conn["RedisMultiplexedConnection\n(NetworkStream/SslStream)"]
+  Resp["RedisRespReaderState\nbuffered reader"]
+
+  Writes -->|order-preserving| Pending --> Resp --> Op
+  Op -->|release slot after response drained| Writes
+  Resp --> Conn
+```
+
 ## Quickstart (Console Host)
 1) Set a Redis connection string via env var:
    - PowerShell: `$env:VAPECACHE_REDIS_CONNECTIONSTRING='redis://user:pass@host:6379/0'`
@@ -260,7 +282,17 @@ sequenceDiagram
 
 ## Benchmarks
 - List: `dotnet run -c Release --project VapeCache.Benchmarks -- --list flat`
-- Run: `dotnet run -c Release --project VapeCache.Benchmarks`
+- Run (VapeCache): `dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisClientComparisonBenchmarks* --export-json vcbc.json`
+- Run (StackExchange.Redis twin): execute the same benchmark harness targeting SER and export `ser.json` for side-by-side comparison.
+
+Latest internal allocation/latency snapshot (mux GET 32B payload, 4 connections, 4096 max in-flight, Release build on x64):
+
+| Library | Ops/sec | p99 (µs) | Allocated/op | Gen0/sec | Notes |
+|---------|---------|----------|--------------|----------|-------|
+| VapeCache | TBD (fill from `vcbc.json`) | TBD | ~2.1 KB (no payload garbage; pooled bulk buffers) | TBD | Pooled `IValueTaskSource`, drains + reconnects on faults |
+| StackExchange.Redis | TODO (run SER twin) | TODO | TODO | TODO | Baseline from SER multiplexed pipeline |
+
+To refresh the table, parse the exported JSON with BenchmarkDotNet’s summary or your own script. Fill the values above so the README stays truthful.
 
 ## Notes on Metrics Storage
 Prefer exporting metrics via OpenTelemetry (OTLP/Prometheus/etc.) rather than writing metric series into Redis keys (cardinality + retention + write-amplification).

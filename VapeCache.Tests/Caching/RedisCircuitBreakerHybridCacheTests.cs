@@ -103,6 +103,16 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         public ValueTask<long> TtlSecondsAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<long> PTtlMillisecondsAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<long> UnlinkAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<RedisValueLease> GetLeaseAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<RedisValueLease> GetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> HSetAsync(string key, string field, ReadOnlyMemory<byte> value, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<byte[]?> HGetAsync(string key, string field, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<byte[]?[]> HMGetAsync(string key, string[] fields, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<RedisValueLease> HGetLeaseAsync(string key, string field, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> LPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<byte[]?[]> LRangeAsync(string key, long start, long stop, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<RedisValueLease> LPopLeaseAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

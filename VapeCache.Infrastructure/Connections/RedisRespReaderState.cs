@@ -1,0 +1,236 @@
+using System.Buffers;
+using System.Globalization;
+using System.IO;
+using System.Text;
+using System.Threading;
+
+namespace VapeCache.Infrastructure.Connections;
+
+internal sealed class RedisRespReaderState : IAsyncDisposable
+{
+    private readonly Stream _stream;
+    private byte[] _buffer;
+    private int _pos;
+    private int _len;
+    private int _disposed;
+    private readonly bool _useUnsafeFastPath;
+
+    public RedisRespReaderState(Stream stream, int bufferSize = 8192, bool useUnsafeFastPath = false)
+    {
+        _stream = stream;
+        _buffer = ArrayPool<byte>.Shared.Rent(Math.Max(256, bufferSize));
+        _useUnsafeFastPath = useUnsafeFastPath;
+    }
+
+    public ValueTask<RedisRespReader.RespValue> ReadAsync(CancellationToken ct) => ReadAsync(poolBulk: false, ct);
+
+    public async ValueTask<RedisRespReader.RespValue> ReadAsync(bool poolBulk, CancellationToken ct)
+    {
+        var prefix = await ReadByteAsync(ct).ConfigureAwait(false);
+        return prefix switch
+        {
+            (byte)'+' => RedisRespReader.RespValue.SimpleString(await ReadLineAsync(ct).ConfigureAwait(false)),
+            (byte)'-' => RedisRespReader.RespValue.Error(await ReadLineAsync(ct).ConfigureAwait(false)),
+            (byte)':' => RedisRespReader.RespValue.Integer(ReadInt64(await ReadLineAsync(ct).ConfigureAwait(false))),
+            (byte)'$' => await ReadBulkStringAsync(poolBulk, ct).ConfigureAwait(false),
+            (byte)'*' => await ReadArrayAsync(poolBulk, ct).ConfigureAwait(false),
+            _ => throw new InvalidOperationException($"Unsupported RESP type: {(char)prefix}")
+        };
+    }
+
+    private async ValueTask<byte> ReadByteAsync(CancellationToken ct)
+    {
+        if (_pos >= _len)
+            await FillAsync(ct).ConfigureAwait(false);
+        return _buffer[_pos++];
+    }
+
+    private async ValueTask FillAsync(CancellationToken ct)
+    {
+        if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisRespReaderState));
+
+        _pos = 0;
+        _len = 0;
+        var read = await _stream.ReadAsync(_buffer.AsMemory(), ct).ConfigureAwait(false);
+        if (read == 0) throw new EndOfStreamException();
+        _len = read;
+    }
+
+    private async ValueTask<string> ReadLineAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            if (_pos >= _len)
+                await FillAsync(ct).ConfigureAwait(false);
+
+            var span = _buffer.AsSpan(_pos, _len - _pos);
+            var lf = span.IndexOf((byte)'\n');
+            if (lf >= 0)
+            {
+                var lineLen = lf > 0 && span[lf - 1] == (byte)'\r' ? lf - 1 : lf;
+                var s = Encoding.UTF8.GetString(_buffer, _pos, lineLen);
+                _pos += lf + 1;
+                return s;
+            }
+
+            // Line spans multiple fills: accumulate remaining bytes then continue.
+            byte[]? rented = null;
+            try
+            {
+                rented = ArrayPool<byte>.Shared.Rent(512);
+                var total = 0;
+
+                while (true)
+                {
+                    var remaining = _len - _pos;
+                    if (remaining > 0)
+                    {
+                        if (total + remaining > rented.Length)
+                        {
+                            var bigger = ArrayPool<byte>.Shared.Rent(Math.Max(rented.Length * 2, total + remaining));
+                            Buffer.BlockCopy(rented, 0, bigger, 0, total);
+                            ArrayPool<byte>.Shared.Return(rented);
+                            rented = bigger;
+                        }
+
+                        Buffer.BlockCopy(_buffer, _pos, rented, total, remaining);
+                        total += remaining;
+                        _pos = _len;
+                    }
+
+                    await FillAsync(ct).ConfigureAwait(false);
+                    span = _buffer.AsSpan(_pos, _len - _pos);
+                    lf = span.IndexOf((byte)'\n');
+                    if (lf < 0)
+                        continue;
+
+                    var take = lf + 1;
+                    if (total + take > rented.Length)
+                    {
+                        var bigger = ArrayPool<byte>.Shared.Rent(Math.Max(rented.Length * 2, total + take));
+                        Buffer.BlockCopy(rented, 0, bigger, 0, total);
+                        ArrayPool<byte>.Shared.Return(rented);
+                        rented = bigger;
+                    }
+
+                    Buffer.BlockCopy(_buffer, _pos, rented, total, take);
+                    total += take;
+                    _pos += take;
+
+                    // strip trailing CRLF or LF
+                    var end = total;
+                    if (end >= 2 && rented[end - 2] == (byte)'\r' && rented[end - 1] == (byte)'\n')
+                        end -= 2;
+                    else if (end >= 1 && rented[end - 1] == (byte)'\n')
+                        end -= 1;
+
+                    return Encoding.UTF8.GetString(rented, 0, end);
+                }
+            }
+            finally
+            {
+                if (rented is not null)
+                    ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+    }
+
+    private static long ReadInt64(string line)
+    {
+        if (!long.TryParse(line, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+            throw new InvalidOperationException($"Invalid integer response: {line}");
+        return value;
+    }
+
+    private async ValueTask<RedisRespReader.RespValue> ReadBulkStringAsync(bool poolBulk, CancellationToken ct)
+    {
+        var header = await ReadLineAsync(ct).ConfigureAwait(false);
+        if (!int.TryParse(header, out var len))
+            throw new InvalidOperationException($"Invalid bulk length: {header}");
+
+        if (len == -1)
+            return RedisRespReader.RespValue.NullBulkString();
+
+        if (len < 0)
+            throw new InvalidOperationException($"Invalid bulk length: {header}");
+
+        var buf = poolBulk
+            ? ArrayPool<byte>.Shared.Rent(len)
+            : GC.AllocateUninitializedArray<byte>(len);
+        await ReadExactAsync(buf.AsMemory(0, len), ct).ConfigureAwait(false);
+
+        // consume CRLF
+        var cr = await ReadByteAsync(ct).ConfigureAwait(false);
+        var lf = await ReadByteAsync(ct).ConfigureAwait(false);
+        if (cr != (byte)'\r' || lf != (byte)'\n')
+            throw new InvalidOperationException("Invalid bulk string terminator.");
+
+        return RedisRespReader.RespValue.BulkString(buf, len, poolBulk);
+    }
+
+    private async ValueTask ReadExactAsync(Memory<byte> destination, CancellationToken ct)
+    {
+        var written = 0;
+        while (written < destination.Length)
+        {
+            if (_pos >= _len)
+                await FillAsync(ct).ConfigureAwait(false);
+
+            var destSpan = destination.Span;
+            var available = _len - _pos;
+            var toCopy = Math.Min(available, destSpan.Length - written);
+            CopyBufferToDestination(destSpan, written, toCopy, _pos);
+            _pos += toCopy;
+            written += toCopy;
+        }
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private void CopyBufferToDestination(Span<byte> destination, int destOffset, int count, int srcOffset)
+    {
+        if (count <= 0) return;
+
+        if (_useUnsafeFastPath)
+        {
+            unsafe
+            {
+                fixed (byte* src = &_buffer[srcOffset])
+                fixed (byte* dst = destination)
+                {
+                    Buffer.MemoryCopy(src, dst + destOffset, destination.Length - destOffset, count);
+                }
+            }
+        }
+        else
+        {
+            _buffer.AsSpan(srcOffset, count).CopyTo(destination.Slice(destOffset, count));
+        }
+    }
+
+    private async ValueTask<RedisRespReader.RespValue> ReadArrayAsync(bool poolBulk, CancellationToken ct)
+    {
+        var header = await ReadLineAsync(ct).ConfigureAwait(false);
+        if (!int.TryParse(header, out var len))
+            throw new InvalidOperationException($"Invalid array length: {header}");
+
+        if (len == -1)
+            return RedisRespReader.RespValue.NullArray();
+
+        if (len < 0)
+            throw new InvalidOperationException($"Invalid array length: {header}");
+
+        var items = RedisRespReader.RentArray(len);
+        for (var i = 0; i < len; i++)
+            items[i] = await ReadAsync(poolBulk, ct).ConfigureAwait(false);
+
+        return RedisRespReader.RespValue.Array(items, len, pooled: true);
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1) return ValueTask.CompletedTask;
+        ArrayPool<byte>.Shared.Return(_buffer);
+        _buffer = Array.Empty<byte>();
+        return ValueTask.CompletedTask;
+    }
+}
