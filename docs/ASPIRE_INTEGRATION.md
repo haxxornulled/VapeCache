@@ -1,0 +1,471 @@
+# .NET Aspire Integration for VapeCache
+
+## Overview
+
+VapeCache.Extensions.Aspire provides first-class integration with [.NET Aspire](https://learn.microsoft.com/en-us/dotnet/aspire/), Microsoft's opinionated stack for building observable, production-ready, cloud-native applications.
+
+## What is .NET Aspire?
+
+.NET Aspire is a cloud-ready stack for building distributed applications that includes:
+- **Service Discovery**: Automatic connection string resolution from resources
+- **Health Checks**: Built-in liveness/readiness probes
+- **Telemetry**: OpenTelemetry integration with Aspire Dashboard
+- **Local Development**: Docker-based local dev experience
+- **Deployment**: One-click deploy to Azure Container Apps, Kubernetes, etc.
+
+## VapeCache + Aspire Integration Goals
+
+### Developer Experience
+✅ **Single-line setup**: `builder.AddVapeCache().WithRedisFromAspire("redis")`
+✅ **Zero configuration**: Aspire resources auto-configure connection strings
+✅ **Local dev parity**: Same code runs in dev (Docker) and prod (Azure)
+✅ **Observable by default**: Metrics/traces flow to Aspire Dashboard
+
+### Production Features
+✅ **Health checks**: `/health/redis` and `/health/cache` endpoints
+✅ **Service discovery**: Dynamic Redis endpoint resolution
+✅ **Resilience**: Circuit breaker + retry policies pre-configured
+✅ **Telemetry**: Aspire Dashboard shows VapeCache metrics/traces
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Aspire AppHost (Orchestrator)                               │
+├─────────────────────────────────────────────────────────────┤
+│ var builder = DistributedApplication.CreateBuilder(args);  │
+│                                                              │
+│ var redis = builder.AddRedis("redis")                      │
+│     .WithDataVolume()                                       │
+│     .WithRedisCommander();  // Optional UI                  │
+│                                                              │
+│ var cache = builder.AddProject<Projects.MyApi>("api")      │
+│     .WithReference(redis);  // Injects connection string    │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              │ Service Discovery
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│ MyApi Project (Your Application)                            │
+├─────────────────────────────────────────────────────────────┤
+│ var builder = WebApplication.CreateBuilder(args);          │
+│                                                              │
+│ builder.AddVapeCache()  // From VapeCache.Extensions.Aspire│
+│     .WithRedisFromAspire("redis")  // Binds to resource     │
+│     .WithHealthChecks()             // Adds /health         │
+│     .WithAspireTelemetry();         // OTel → Dashboard     │
+│                                                              │
+│ var app = builder.Build();                                  │
+│ app.MapHealthChecks("/health");                             │
+│ app.Run();                                                   │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              │ Connection String Injected
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│ VapeCache.Infrastructure                                    │
+├─────────────────────────────────────────────────────────────┤
+│ RedisConnectionOptions:                                     │
+│   ConnectionString: "redis://localhost:6379"  ← From Aspire │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Implementation Plan
+
+### Phase 1: VapeCache.Extensions.Aspire Project
+
+**File Structure:**
+```
+VapeCache.Extensions.Aspire/
+├── VapeCache.Extensions.Aspire.csproj
+├── AspireVapeCacheExtensions.cs      // builder.AddVapeCache()
+├── AspireRedisResourceExtensions.cs  // .WithRedisFromAspire()
+├── AspireHealthCheckExtensions.cs    // .WithHealthChecks()
+├── AspireTelemetryExtensions.cs      // .WithAspireTelemetry()
+├── VapeCacheHealthCheck.cs           // IHealthCheck implementation
+└── RedisHealthCheck.cs               // IHealthCheck implementation
+```
+
+**Dependencies:**
+```xml
+<PackageReference Include="Aspire.Hosting.Redis" Version="9.0.0" />
+<PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="9.0.0" />
+<PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.0" />
+<PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.10.0" />
+```
+
+### Phase 2: API Design
+
+#### Extension Method: `AddVapeCache()`
+
+```csharp
+namespace Microsoft.Extensions.Hosting;
+
+public static class AspireVapeCacheExtensions
+{
+    /// <summary>
+    /// Adds VapeCache services configured for .NET Aspire.
+    /// </summary>
+    public static AspireVapeCacheBuilder AddVapeCache(
+        this IHostApplicationBuilder builder)
+    {
+        // Register core VapeCache services
+        builder.Services.AddVapecacheRedisConnections();
+        builder.Services.AddVapecacheCaching();
+
+        // Return builder for fluent configuration
+        return new AspireVapeCacheBuilder(builder);
+    }
+}
+
+public sealed class AspireVapeCacheBuilder
+{
+    public IHostApplicationBuilder Builder { get; }
+
+    internal AspireVapeCacheBuilder(IHostApplicationBuilder builder)
+    {
+        Builder = builder;
+    }
+}
+```
+
+#### Extension Method: `WithRedisFromAspire()`
+
+```csharp
+public static class AspireRedisResourceExtensions
+{
+    /// <summary>
+    /// Configures VapeCache to use Redis connection string from Aspire resource.
+    /// </summary>
+    /// <param name="builder">VapeCache builder.</param>
+    /// <param name="connectionName">Name of the Redis resource in AppHost.</param>
+    public static AspireVapeCacheBuilder WithRedisFromAspire(
+        this AspireVapeCacheBuilder builder,
+        string connectionName)
+    {
+        // Use Aspire's service discovery to resolve connection string
+        builder.Builder.Services.Configure<RedisConnectionOptions>(options =>
+        {
+            // Aspire injects connection strings via IConfiguration
+            var connectionString = builder.Builder.Configuration
+                .GetConnectionString(connectionName);
+
+            if (!string.IsNullOrEmpty(connectionString))
+            {
+                options.ConnectionString = connectionString;
+            }
+        });
+
+        return builder;
+    }
+}
+```
+
+#### Extension Method: `WithHealthChecks()`
+
+```csharp
+public static class AspireHealthCheckExtensions
+{
+    /// <summary>
+    /// Adds VapeCache and Redis health checks to the application.
+    /// </summary>
+    public static AspireVapeCacheBuilder WithHealthChecks(
+        this AspireVapeCacheBuilder builder)
+    {
+        builder.Builder.Services
+            .AddHealthChecks()
+            .AddCheck<RedisHealthCheck>(
+                "redis",
+                tags: new[] { "ready", "live" })
+            .AddCheck<VapeCacheHealthCheck>(
+                "vapecache",
+                tags: new[] { "ready" });
+
+        return builder;
+    }
+}
+
+// Health check implementation
+internal sealed class RedisHealthCheck : IHealthCheck
+{
+    private readonly IRedisCommandExecutor _redis;
+
+    public RedisHealthCheck(IRedisCommandExecutor redis)
+    {
+        _redis = redis;
+    }
+
+    public async Task<HealthCheckResult> CheckHealthAsync(
+        HealthCheckContext context,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _redis.PingAsync(cancellationToken);
+            return HealthCheckResult.Healthy("Redis is responsive");
+        }
+        catch (Exception ex)
+        {
+            return HealthCheckResult.Unhealthy(
+                "Redis is not responsive",
+                ex);
+        }
+    }
+}
+
+internal sealed class VapeCacheHealthCheck : IHealthCheck
+{
+    private readonly IRedisCircuitBreakerState _breaker;
+    private readonly ICacheStats _stats;
+
+    public VapeCacheHealthCheck(
+        IRedisCircuitBreakerState breaker,
+        ICacheStats stats)
+    {
+        _breaker = breaker;
+        _stats = stats;
+    }
+
+    public Task<HealthCheckResult> CheckHealthAsync(
+        HealthCheckContext context,
+        CancellationToken cancellationToken = default)
+    {
+        var data = new Dictionary<string, object>
+        {
+            ["breaker_open"] = _breaker.IsOpen,
+            ["consecutive_failures"] = _breaker.ConsecutiveFailures,
+            ["hit_count"] = _stats.HitCount,
+            ["miss_count"] = _stats.MissCount,
+            ["hit_rate"] = _stats.HitRate
+        };
+
+        if (_breaker.IsForcedOpen)
+        {
+            return Task.FromResult(HealthCheckResult.Degraded(
+                "Redis circuit breaker is forced open (manual failover)",
+                data: data));
+        }
+
+        if (_breaker.IsOpen)
+        {
+            return Task.FromResult(HealthCheckResult.Degraded(
+                "Redis circuit breaker is open (automatic failover)",
+                data: data));
+        }
+
+        return Task.FromResult(HealthCheckResult.Healthy(
+            "VapeCache is operating normally",
+            data: data));
+    }
+}
+```
+
+#### Extension Method: `WithAspireTelemetry()`
+
+```csharp
+public static class AspireTelemetryExtensions
+{
+    /// <summary>
+    /// Configures OpenTelemetry to send VapeCache metrics/traces to Aspire Dashboard.
+    /// </summary>
+    public static AspireVapeCacheBuilder WithAspireTelemetry(
+        this AspireVapeCacheBuilder builder)
+    {
+        // Aspire automatically configures OTLP endpoint via environment variables
+        // We just need to register VapeCache meters/activity sources
+
+        builder.Builder.Services
+            .AddOpenTelemetry()
+            .WithMetrics(metrics =>
+            {
+                metrics.AddMeter("VapeCache.Redis");
+                metrics.AddMeter("VapeCache.Cache");
+            })
+            .WithTracing(tracing =>
+            {
+                tracing.AddSource("VapeCache.Redis");
+            });
+
+        return builder;
+    }
+}
+```
+
+### Phase 3: Example Aspire AppHost
+
+**MyApp.AppHost/Program.cs:**
+```csharp
+var builder = DistributedApplication.CreateBuilder(args);
+
+// Add Redis resource with persistent volume
+var redis = builder.AddRedis("redis")
+    .WithDataVolume()
+    .WithRedisCommander();  // Optional: Redis UI at http://localhost:8081
+
+// Add your API with VapeCache
+var api = builder.AddProject<Projects.MyApi>("api")
+    .WithReference(redis)  // Injects ConnectionStrings:redis
+    .WithExternalHttpEndpoints();
+
+// Add Aspire Dashboard (automatic)
+// http://localhost:15888
+
+builder.Build().Run();
+```
+
+**MyApi/Program.cs:**
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+// Single-line VapeCache + Aspire setup
+builder.AddVapeCache()
+    .WithRedisFromAspire("redis")  // Binds to AppHost Redis resource
+    .WithHealthChecks()             // Adds /health/redis, /health/vapecache
+    .WithAspireTelemetry();         // Sends to Aspire Dashboard
+
+var app = builder.Build();
+
+// Health check endpoints (for Kubernetes, Azure Container Apps, etc.)
+app.MapHealthChecks("/health");
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready")
+});
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("live")
+});
+
+app.Run();
+```
+
+### Phase 4: Testing Strategy
+
+**Unit Tests:**
+```csharp
+[Fact]
+public void AddVapeCache_RegistersRequiredServices()
+{
+    var builder = WebApplication.CreateBuilder();
+    builder.AddVapeCache();
+
+    var app = builder.Build();
+
+    Assert.NotNull(app.Services.GetService<ICacheService>());
+    Assert.NotNull(app.Services.GetService<IRedisCommandExecutor>());
+}
+
+[Fact]
+public async Task RedisHealthCheck_ReturnsHealthy_WhenRedisIsAvailable()
+{
+    // Arrange
+    var redis = Substitute.For<IRedisCommandExecutor>();
+    redis.PingAsync(default).Returns(ValueTask.CompletedTask);
+
+    var healthCheck = new RedisHealthCheck(redis);
+
+    // Act
+    var result = await healthCheck.CheckHealthAsync(null!);
+
+    // Assert
+    Assert.Equal(HealthStatus.Healthy, result.Status);
+}
+```
+
+**Integration Tests (with Aspire TestHost):**
+```csharp
+public class AspireIntegrationTests
+{
+    [Fact]
+    public async Task VapeCache_WorksWithAspireRedisResource()
+    {
+        // Arrange
+        await using var app = await DistributedApplicationTestingBuilder
+            .CreateAsync<Projects.MyApp_AppHost>();
+
+        await app.StartAsync();
+
+        // Act
+        var httpClient = app.CreateHttpClient("api");
+        var response = await httpClient.GetAsync("/health");
+
+        // Assert
+        response.EnsureSuccessStatusCode();
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Healthy", content);
+    }
+}
+```
+
+## Aspire Dashboard Integration
+
+When you run your Aspire app, the dashboard (`http://localhost:15888`) will show:
+
+### Resources Tab
+- **redis**: Redis container status, port mappings, logs
+- **api**: Your API status, endpoints, logs
+
+### Metrics Tab (VapeCache Metrics)
+- `redis.cmd.calls`: Total Redis commands
+- `redis.cmd.failures`: Failed commands
+- `redis.cmd.ms`: Command latency histogram
+- `redis.pool.acquires`: Pool lease requests
+- `redis.pool.timeouts`: Pool timeouts
+- `cache.hits`: Cache hit count
+- `cache.misses`: Cache miss count
+- `cache.fallback_to_memory`: Redis fallback events
+
+### Traces Tab (Distributed Tracing)
+- HTTP request → Cache lookup → Redis command
+- Trace IDs link logs, metrics, and traces
+- Flamegraph visualization of request latency
+
+### Logs Tab (Structured Logs)
+- All VapeCache logs (via ILogger<T>)
+- Filtered by service (api, redis)
+- Correlated with traces via TraceId
+
+## Deployment
+
+### Azure Container Apps
+```bash
+# Aspire CLI (coming soon)
+azd init
+azd up  # Deploys to Azure with VapeCache configured
+```
+
+### Kubernetes
+```bash
+# Generate manifests
+dotnet publish /t:GenerateAspireKubernetesManifests
+
+# Apply to cluster
+kubectl apply -f ./manifests
+```
+
+## Benefits Summary
+
+| Feature | Without Aspire | With Aspire |
+|---------|---------------|-------------|
+| **Connection Strings** | Manual appsettings.json | Auto-injected from resources |
+| **Local Redis** | Manual Docker run | One-line `.AddRedis()` |
+| **Health Checks** | Manual implementation | `.WithHealthChecks()` |
+| **Telemetry** | Manual OTel config | Auto-configured dashboard |
+| **Service Discovery** | Hardcoded hosts | Dynamic resolution |
+| **Deployment** | Manual YAML/Bicep | `azd up` |
+| **Dev/Prod Parity** | Different configs | Same code everywhere |
+
+## Roadmap
+
+- ✅ **Phase 1**: Remove Serilog from VapeCache.Infrastructure (DONE)
+- 🚧 **Phase 2**: Create VapeCache.Extensions.Aspire project
+- 📋 **Phase 3**: Add Aspire AppHost example
+- 📋 **Phase 4**: Integration tests with Aspire TestHost
+- 📋 **Phase 5**: Publish to NuGet
+
+## References
+
+- [.NET Aspire Documentation](https://learn.microsoft.com/en-us/dotnet/aspire/)
+- [Aspire Redis Component](https://learn.microsoft.com/en-us/dotnet/aspire/caching/stackexchange-redis-component)
+- [Aspire Health Checks](https://learn.microsoft.com/en-us/dotnet/aspire/fundamentals/health-checks)
+- [Aspire Service Discovery](https://learn.microsoft.com/en-us/dotnet/aspire/service-discovery/overview)
