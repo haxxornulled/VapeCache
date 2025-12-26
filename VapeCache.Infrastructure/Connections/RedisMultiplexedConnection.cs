@@ -198,9 +198,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 await EnsureConnectedAsync(_cts.Token).ConfigureAwait(false);
                 var conn = _conn!;
 
-                var shouldCoalesce = _coalesceWrites
-                                     && req.Payload.Length <= 1024
-                                     && req.PayloadCount == 0;
+                // Coalescing now works for ALL Redis command types, including payload operations.
+                // Fixed scratch buffer reuse bug that was causing protocol corruption for multi-segment commands.
+                var shouldCoalesce = _coalesceWrites;
 
                 if (shouldCoalesce)
                 {
@@ -352,7 +352,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         _coalesceDrained.Clear();
         _coalesceCaptured.Clear();
         _coalesceDrained.Add(first);
-        await _pending.EnqueueAsync(first.Op, ct).ConfigureAwait(false);
+
         var firstCoalesced = ToCoalesced(first);
         _coalesceQueue.Enqueue(firstCoalesced);
         _coalesceCaptured.Add(firstCoalesced);
@@ -361,7 +361,6 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         while (_writes.TryDequeue(out var nextReq))
         {
             _coalesceDrained.Add(nextReq);
-            await _pending.EnqueueAsync(nextReq.Op, ct).ConfigureAwait(false);
             var c = ToCoalesced(nextReq);
             _coalesceQueue.Enqueue(c);
             _coalesceCaptured.Add(c);
@@ -419,6 +418,12 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             Array.Clear(_coalesceBuffers, 0, _coalesceBufferCount);
             _coalesceBufferCount = 0;
             batch.RecycleAfterSend();
+        }
+
+        // NOW enqueue all operations to _pending AFTER socket send completed successfully
+        for (var i = 0; i < _coalesceDrained.Count; i++)
+        {
+            await _pending.EnqueueAsync(_coalesceDrained[i].Op, ct).ConfigureAwait(false);
         }
 
         // Return buffers for drained requests.

@@ -48,7 +48,12 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
 
         BufferList = null;
         SetBuffer(null, 0, 0);
-        BufferList = buffers;
+
+        // CRITICAL FIX: Only assign the segments we're actually using, not the entire array!
+        // BufferList will validate ALL elements when assigned, so we must create a subset.
+        var subset = new ArraySegment<byte>[count];
+        Array.Copy(buffers, subset, count);
+        BufferList = subset;
     }
 
     /// <summary>
