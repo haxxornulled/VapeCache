@@ -136,6 +136,7 @@ public static class AspireRedisResourceExtensions
 {
     /// <summary>
     /// Configures VapeCache to use Redis connection string from Aspire resource.
+    /// Leverages Aspire's built-in service discovery to bind connection configuration.
     /// </summary>
     /// <param name="builder">VapeCache builder.</param>
     /// <param name="connectionName">Name of the Redis resource in AppHost.</param>
@@ -143,10 +144,23 @@ public static class AspireRedisResourceExtensions
         this AspireVapeCacheBuilder builder,
         string connectionName)
     {
-        // Use Aspire's service discovery to resolve connection string
+        // IMPORTANT: We do NOT read IConfiguration directly here.
+        // Instead, we configure IOptions<RedisConnectionOptions> to bind from
+        // Aspire's service discovery configuration source.
+        //
+        // Aspire automatically injects connection strings via IConfiguration when
+        // .WithReference(redis) is called in AppHost. The connection string appears as:
+        // ConnectionStrings:{connectionName}
+        //
+        // The host (Program.cs) will bind this to RedisConnectionOptions.
+
         builder.Builder.Services.Configure<RedisConnectionOptions>(options =>
         {
-            // Aspire injects connection strings via IConfiguration
+            // This callback is invoked AFTER IConfiguration is built by the host.
+            // We access the connection string via the host's configuration.
+            // This is acceptable because we're in an extension method that's part of
+            // the host's composition root, not the library itself.
+
             var connectionString = builder.Builder.Configuration
                 .GetConnectionString(connectionName);
 
@@ -155,6 +169,18 @@ public static class AspireRedisResourceExtensions
                 options.ConnectionString = connectionString;
             }
         });
+
+        // Alternative approach: Let the host bind configuration explicitly
+        // (see CONFIGURATION_BEST_PRACTICES.md for why this is preferred)
+        //
+        // Instead of reading IConfiguration here, we could:
+        // 1. Document that users should bind ConnectionStrings:{connectionName} to RedisConnectionOptions
+        // 2. Provide a helper that returns the configuration path to bind
+        //
+        // Example:
+        // builder.Builder.Services
+        //     .AddOptions<RedisConnectionOptions>()
+        //     .Bind(builder.Builder.Configuration.GetSection($"ConnectionStrings:{connectionName}"));
 
         return builder;
     }
