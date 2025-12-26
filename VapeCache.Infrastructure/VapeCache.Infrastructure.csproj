@@ -17,9 +17,12 @@
     <PackageReference Include="Autofac" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
-    <PackageReference Include="Serilog" Version="4.3.0" />
-    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
-    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <!--
+      REMOVED: Serilog sink dependencies (Console, File)
+      VapeCache.Infrastructure is a library and should only use ILogger<T> abstraction.
+      Consumers choose their logging implementation (Serilog, NLog, etc.) in their host project.
+      SEQ/console/file sinks belong in VapeCache.Console or user's host project.
+    -->
   </ItemGroup>
 
   <ItemGroup>
