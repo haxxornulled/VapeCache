@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Text;
 using VapeCache.Abstractions.Connections;
 using Microsoft.Extensions.Options;
 
@@ -50,7 +51,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
             return resp.Kind switch
             {
                 RedisRespReader.RespKind.NullBulkString => null,
-                RedisRespReader.RespKind.BulkString => resp.Bulk,
+                RedisRespReader.RespKind.BulkString => resp.BulkIsPooled
+                    ? resp.Bulk.AsSpan(0, resp.BulkLength).ToArray()
+                    : resp.Bulk,
                 _ => throw new InvalidOperationException($"Unexpected GET response: {resp.Kind}")
             };
         }
@@ -142,7 +145,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
             return resp.Kind switch
             {
                 RedisRespReader.RespKind.NullBulkString => null,
-                RedisRespReader.RespKind.BulkString => resp.Bulk,
+                RedisRespReader.RespKind.BulkString => resp.BulkIsPooled
+                    ? resp.Bulk.AsSpan(0, resp.BulkLength).ToArray()
+                    : resp.Bulk,
                 _ => throw new InvalidOperationException($"Unexpected GETEX response: {resp.Kind}")
             };
         }
@@ -280,24 +285,55 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
             ttlMs = (int)Math.Clamp(ms, 1, int.MaxValue);
         }
 
-        var len = RedisRespProtocol.GetSetCommandLength(key, value.Length, ttlMs);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            var headerLen = len - value.Length - 2; // exclude value bytes + CRLF
             conn = Next();
-            rented = conn.RentHeaderBuffer(headerLen);
-            var written = RedisRespProtocol.WriteSetCommandHeader(rented.AsSpan(0, headerLen), key, value.Length, ttlMs);
-            var resp = await conn.ExecuteAsync(
-                rented.AsMemory(0, written),
-                payload: value,
-                appendCrlf: true,
-                poolBulk: false,
-                ct,
-                headerBuffer: rented).ConfigureAwait(false);
-            rented = null; // returned by writer
-            return resp.Kind == RedisRespReader.RespKind.SimpleString && ReferenceEquals(resp.Text, RedisRespReader.OkSimpleString);
+
+            // For SET without TTL, use scatter/gather I/O for zero-copy performance
+            if (ttlMs is null)
+            {
+                var len = RedisRespProtocol.GetSetCommandLength(key, value.Length, null);
+                var headerLen = len - value.Length - 2; // exclude value bytes + CRLF
+                rented = conn.RentHeaderBuffer(headerLen);
+                var written = RedisRespProtocol.WriteSetCommandHeader(rented.AsSpan(0, headerLen), key, value.Length, null);
+                var resp = await conn.ExecuteAsync(
+                    rented.AsMemory(0, written),
+                    payload: value,
+                    appendCrlf: true,
+                    poolBulk: false,
+                    ct,
+                    headerBuffer: rented).ConfigureAwait(false);
+                rented = null; // returned by writer
+
+                if (resp.Kind == RedisRespReader.RespKind.Error)
+                    throw new InvalidOperationException($"Redis error: {resp.Text}");
+
+                // Use string equality instead of reference equality for more reliable checking
+                return resp.Kind == RedisRespReader.RespKind.SimpleString &&
+                       (ReferenceEquals(resp.Text, RedisRespReader.OkSimpleString) || resp.Text == "OK");
+            }
+            else
+            {
+                // For SET with TTL (SET key value PX ttl), we must build the entire command
+                // because the command structure is: [header][value][suffix] where suffix = PX ttl
+                // Scatter/gather I/O doesn't support a suffix after payload+CRLF
+                var len = RedisRespProtocol.GetSetCommandLength(key, value.Length, ttlMs);
+                rented = ArrayPool<byte>.Shared.Rent(len);
+                var written = RedisRespProtocol.WriteSetCommand(rented.AsSpan(0, len), key, value.Span, ttlMs);
+                var resp = await conn.ExecuteAsync(
+                    rented.AsMemory(0, written),
+                    poolBulk: false,
+                    ct).ConfigureAwait(false);
+
+                if (resp.Kind == RedisRespReader.RespKind.Error)
+                    throw new InvalidOperationException($"Redis error: {resp.Text}");
+
+                // Use string equality instead of reference equality for more reliable checking
+                return resp.Kind == RedisRespReader.RespKind.SimpleString &&
+                       (ReferenceEquals(resp.Text, RedisRespReader.OkSimpleString) || resp.Text == "OK");
+            }
         }
         catch
         {
@@ -308,7 +344,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         {
             sw.Stop();
             if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
-            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+            if (rented is not null)
+            {
+                if (ttlMs is null && conn is not null)
+                    conn.ReturnHeaderBuffer(rented);
+                else
+                    ArrayPool<byte>.Shared.Return(rented);
+            }
         }
     }
 
@@ -879,6 +921,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
 
     public async ValueTask DisposeAsync()
     {
+        // MEMORY LEAK FIX P3-2: Clear cached array to avoid memory leak
+        _msetLengthsCache = null;
+
         foreach (var c in _conns)
             await c.DisposeAsync().ConfigureAwait(false);
     }
@@ -921,5 +966,454 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
         if (lengths.Length > MaxCachedLength) return;
 
         Interlocked.CompareExchange(ref _msetLengthsCache, lengths, null);
+    }
+
+    // ========== List Commands ==========
+
+    public async ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("RPUSH");
+        activity?.SetTag("db.redis.key", key);
+        var sw = Stopwatch.StartNew();
+        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+
+        var len = RedisRespProtocol.GetRPushCommandLength(key, value.Length);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteRPushCommand(rented.AsSpan(0, len), key, value.Span);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null; // returned by writer
+
+            return resp.Kind == RedisRespReader.RespKind.Integer
+                ? resp.IntegerValue
+                : throw new InvalidOperationException($"Unexpected RPUSH response: {resp.Kind}");
+        }
+        catch
+        {
+            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public async ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("RPOP");
+        activity?.SetTag("db.redis.key", key);
+        var sw = Stopwatch.StartNew();
+        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+
+        var len = RedisRespProtocol.GetRPopCommandLength(key);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: true,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null; // returned by writer
+
+            return resp.Kind switch
+            {
+                RedisRespReader.RespKind.BulkString => resp.BulkIsPooled
+                    ? resp.Bulk.AsSpan(0, resp.BulkLength).ToArray()  // Copy only valid bytes from pooled buffer
+                    : resp.Bulk,
+                RedisRespReader.RespKind.NullBulkString => null,
+                _ => throw new InvalidOperationException($"Unexpected RPOP response: {resp.Kind}")
+            };
+        }
+        catch
+        {
+            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public async ValueTask<long> LLenAsync(string key, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("LLEN");
+        activity?.SetTag("db.redis.key", key);
+        var sw = Stopwatch.StartNew();
+        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+
+        var len = RedisRespProtocol.GetLLenCommandLength(key);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteLLenCommand(rented.AsSpan(0, len), key);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null; // returned by writer
+
+            return resp.Kind == RedisRespReader.RespKind.Integer
+                ? resp.IntegerValue
+                : throw new InvalidOperationException($"Unexpected LLEN response: {resp.Kind}");
+        }
+        catch
+        {
+            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    // ========== Set Commands ==========
+
+    public async ValueTask<long> SAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("SADD");
+        activity?.SetTag("db.redis.key", key);
+        var sw = Stopwatch.StartNew();
+        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+
+        var len = RedisRespProtocol.GetSAddCommandLength(key, member.Length);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteSAddCommand(rented.AsSpan(0, len), key, member.Span);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null; // returned by writer
+
+            return resp.Kind == RedisRespReader.RespKind.Integer
+                ? resp.IntegerValue
+                : throw new InvalidOperationException($"Unexpected SADD response: {resp.Kind}");
+        }
+        catch
+        {
+            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public async ValueTask<long> SRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("SREM");
+        activity?.SetTag("db.redis.key", key);
+        var sw = Stopwatch.StartNew();
+        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+
+        var len = RedisRespProtocol.GetSRemCommandLength(key, member.Length);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteSRemCommand(rented.AsSpan(0, len), key, member.Span);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null; // returned by writer
+
+            return resp.Kind == RedisRespReader.RespKind.Integer
+                ? resp.IntegerValue
+                : throw new InvalidOperationException($"Unexpected SREM response: {resp.Kind}");
+        }
+        catch
+        {
+            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public async ValueTask<bool> SIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("SISMEMBER");
+        activity?.SetTag("db.redis.key", key);
+        var sw = Stopwatch.StartNew();
+        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+
+        var len = RedisRespProtocol.GetSIsMemberCommandLength(key, member.Length);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteSIsMemberCommand(rented.AsSpan(0, len), key, member.Span);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null; // returned by writer
+
+            return resp.Kind == RedisRespReader.RespKind.Integer && resp.IntegerValue == 1;
+        }
+        catch
+        {
+            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public async ValueTask<byte[]?[]> SMembersAsync(string key, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("SMEMBERS");
+        activity?.SetTag("db.redis.key", key);
+        var sw = Stopwatch.StartNew();
+        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+
+        var len = RedisRespProtocol.GetSMembersCommandLength(key);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteSMembersCommand(rented.AsSpan(0, len), key);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null; // returned by writer
+
+            if (resp.Kind is RedisRespReader.RespKind.NullArray)
+                return Array.Empty<byte[]?>();
+
+            if (resp.Kind is not RedisRespReader.RespKind.Array || resp.ArrayItems is null)
+                throw new InvalidOperationException($"Unexpected SMEMBERS response: {resp.Kind}");
+
+            var items = resp.ArrayItems;
+            var result = new byte[]?[items.Length];
+            for (var i = 0; i < items.Length; i++)
+            {
+                result[i] = items[i].Kind switch
+                {
+                    RedisRespReader.RespKind.BulkString => items[i].Bulk,
+                    RedisRespReader.RespKind.NullBulkString => null,
+                    _ => throw new InvalidOperationException($"Unexpected SMEMBERS item kind: {items[i].Kind}")
+                };
+            }
+            return result;
+        }
+        catch
+        {
+            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public async ValueTask<long> SCardAsync(string key, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("SCARD");
+        activity?.SetTag("db.redis.key", key);
+        var sw = Stopwatch.StartNew();
+        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+
+        var len = RedisRespProtocol.GetSCardCommandLength(key);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteSCardCommand(rented.AsSpan(0, len), key);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null; // returned by writer
+
+            return resp.Kind == RedisRespReader.RespKind.Integer
+                ? resp.IntegerValue
+                : throw new InvalidOperationException($"Unexpected SCARD response: {resp.Kind}");
+        }
+        catch
+        {
+            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    // ========== Server Commands ==========
+
+    public async ValueTask<string> PingAsync(CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("PING");
+        var sw = Stopwatch.StartNew();
+        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            var cmd = RedisRespProtocol.PingCommand;
+            var resp = await conn.ExecuteAsync(
+                cmd,
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: null).ConfigureAwait(false);
+
+            return resp.Kind == RedisRespReader.RespKind.SimpleString
+                ? resp.Text
+                : throw new InvalidOperationException($"Unexpected PING response: {resp.Kind}");
+        }
+        catch
+        {
+            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public async ValueTask<string[]> ModuleListAsync(CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("MODULE");
+        var sw = Stopwatch.StartNew();
+        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            var cmd = RedisRespProtocol.ModuleListCommand;
+            var resp = await conn.ExecuteAsync(
+                cmd,
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: null).ConfigureAwait(false);
+
+            if (resp.Kind is RedisRespReader.RespKind.NullArray)
+                return Array.Empty<string>();
+
+            if (resp.Kind is not RedisRespReader.RespKind.Array || resp.ArrayItems is null)
+                throw new InvalidOperationException($"Unexpected MODULE LIST response: {resp.Kind}");
+
+            var items = resp.ArrayItems;
+            var result = new string[items.Length];
+            for (var i = 0; i < items.Length; i++)
+            {
+                // Each module is returned as an array with metadata
+                // We just extract the module name from the first element
+                if (items[i].Kind is not RedisRespReader.RespKind.Array || items[i].ArrayItems is null)
+                    throw new InvalidOperationException($"Unexpected MODULE LIST item kind: {items[i].Kind}");
+
+                var moduleInfo = items[i].ArrayItems;
+                if (moduleInfo.Length > 1 && moduleInfo[1].Kind == RedisRespReader.RespKind.BulkString)
+                {
+                    result[i] = Encoding.UTF8.GetString(moduleInfo[1].Bulk ?? Array.Empty<byte>());
+                }
+                else
+                {
+                    result[i] = string.Empty;
+                }
+            }
+            return result;
+        }
+        catch
+        {
+            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
     }
 }

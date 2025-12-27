@@ -7,9 +7,10 @@ internal static class RedisRespReader
 {
     internal static readonly string OkSimpleString = "OK";
     private const int MaxCachedArrayLength = 16;
-    private static readonly object ArrayCacheLock = new();
-    private static readonly RespValue[][] ArrayCache = new RespValue[32][];
-    private static int _arrayCacheCount;
+
+    // PERFORMANCE FIX P2-2: Replace global lock with ThreadStatic cache to eliminate contention
+    // Each thread maintains its own cache of small RespValue arrays
+    [ThreadStatic] private static RespValue[]? _tlsCachedArray;
 
     internal static void ReturnBuffers(in RespValue value)
     {
@@ -32,20 +33,12 @@ internal static class RedisRespReader
 
     internal static RespValue[] RentArray(int length)
     {
-        if (length <= MaxCachedArrayLength)
+        // PERFORMANCE FIX P2-2: Use ThreadStatic cache for lock-free fast path
+        // Only small arrays (≤16 elements) are cached, larger ones go directly to ArrayPool
+        if (length <= MaxCachedArrayLength && _tlsCachedArray is { } cached && cached.Length >= length)
         {
-            lock (ArrayCacheLock)
-            {
-                if (_arrayCacheCount > 0)
-                {
-                    var arr = ArrayCache[--_arrayCacheCount];
-                    ArrayCache[_arrayCacheCount] = null!;
-                    if (arr.Length >= length)
-                        return arr;
-
-                    ArrayPool<RespValue>.Shared.Return(arr, clearArray: true);
-                }
-            }
+            _tlsCachedArray = null;
+            return cached;
         }
 
         return ArrayPool<RespValue>.Shared.Rent(length);
@@ -56,16 +49,12 @@ internal static class RedisRespReader
         // Clear references to avoid holding onto nested pooled buffers.
         Array.Clear(array, 0, Math.Min(length, array.Length));
 
-        if (length <= MaxCachedArrayLength)
+        // PERFORMANCE FIX P2-2: Use ThreadStatic cache for lock-free fast path
+        // Only cache one array per thread to keep TLS overhead minimal
+        if (length <= MaxCachedArrayLength && _tlsCachedArray is null)
         {
-            lock (ArrayCacheLock)
-            {
-                if (_arrayCacheCount < ArrayCache.Length)
-                {
-                    ArrayCache[_arrayCacheCount++] = array;
-                    return;
-                }
-            }
+            _tlsCachedArray = array;
+            return;
         }
 
         ArrayPool<RespValue>.Shared.Return(array, clearArray: true);
@@ -125,7 +114,9 @@ internal static class RedisRespReader
         if (len < 0)
             throw new InvalidOperationException($"Invalid bulk length: {header}");
 
-        var buf = GC.AllocateUninitializedArray<byte>(len);
+        // Use GC.AllocateArray instead of AllocateUninitializedArray to ensure zero-initialization
+        // This prevents potential garbage data in the array that can cause JSON deserialization errors
+        var buf = new byte[len];
         var read = 0;
         while (read < len)
         {
