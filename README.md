@@ -2,9 +2,10 @@
 
 **Enterprise-grade Redis caching library for .NET 10** with hybrid fallback, circuit breaker, and production observability.
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
-[![NuGet](https://img.shields.io/badge/nuget-coming_soon-blue)]()
-[![License](https://img.shields.io/badge/license-TBD-lightgrey)]()
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/haxxornulled/VapeCache)
+[![NuGet VapeCache](https://img.shields.io/badge/nuget-v1.0.0-blue)](https://github.com/haxxornulled/VapeCache/releases)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-10.0-purple)](https://dot.net)
 
 ---
 
@@ -30,30 +31,67 @@
 
 ## 📦 Quick Start
 
-### Installation (Coming Soon)
+### Installation
+
 ```bash
-# Core library
-dotnet add package VapeCache.Infrastructure
+# Install the main package
+dotnet add package VapeCache
+
+# Or just the abstractions (for library authors)
+dotnet add package VapeCache.Abstractions
 
 # .NET Aspire integration (optional)
 dotnet add package VapeCache.Extensions.Aspire
 ```
 
-### Basic Usage
-```csharp
-// Add to your host (Program.cs)
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+### Configuration (appsettings.json)
 
-// Configure via appsettings.json
+**Minimal Configuration:**
+```json
 {
   "RedisConnection": {
     "Host": "localhost",
-    "Port": 6379
+    "Port": 6379,
+    "Database": 0
   }
 }
+```
 
-// Use in your application
+**Production Configuration:**
+```json
+{
+  "RedisConnection": {
+    "Host": "redis.example.com",
+    "Port": 6380,
+    "Database": 0,
+    "Password": "your-secure-password",
+    "UseTls": true,
+    "ConnectTimeout": "00:00:05",
+    "MaxConnections": 64,
+    "MaxIdle": 64
+  },
+  "RedisMultiplexer": {
+    "Connections": 4,
+    "MaxInFlightPerConnection": 4096,
+    "EnableCoalescedSocketWrites": true,
+    "EnableCommandInstrumentation": true
+  },
+  "CacheService": {
+    "EnableCircuitBreaker": true,
+    "InMemoryCacheSizeLimitMb": 100
+  }
+}
+```
+
+📖 **[Complete Configuration Reference](docs/CONFIGURATION.md)** - All appsettings.json options documented
+
+### Basic Usage
+```csharp
+// 1. Add to your host (Program.cs)
+builder.Services.AddVapecacheRedisConnections();
+builder.Services.AddVapecacheCaching();
+
+// 2. Inject and use in your services
 public class MyService
 {
     private readonly ICacheService _cache;
@@ -146,6 +184,11 @@ graph LR
 - [.NET Aspire Dashboard](docs/ASPIRE_INTEGRATION.md) - Cloud-native observability
 
 ### API Reference
+- **[Complete API Reference](docs/API_REFERENCE.md)** - Full API documentation
+  - [ICacheService](docs/API_REFERENCE.md#icacheservice) - Core caching operations
+  - [Typed Collections API](docs/API_REFERENCE.md#typed-collections-api) - Lists, Sets, Hashes
+  - [Serialization Patterns](docs/API_REFERENCE.md#serialization) - Zero-allocation serialization
+  - [Performance Patterns](docs/API_REFERENCE.md#performance-patterns) - Best practices
 - [Redis Protocol Support](docs/REDIS_PROTOCOL_SUPPORT.md) - What commands are supported
 - [API Expansion Plan](docs/API_EXPANSION_PLAN.md) - Roadmap to 200+ commands
 - [Non-Goals](docs/NON_GOALS.md) - What VapeCache is **not**
@@ -312,7 +355,7 @@ See [docs/NON_GOALS.md](docs/NON_GOALS.md) for strategic positioning.
 
 ## 📜 License
 
-TBD (will be open-source)
+MIT License - See [LICENSE](LICENSE) for details
 
 ---
 
