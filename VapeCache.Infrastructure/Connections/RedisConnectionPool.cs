@@ -242,23 +242,51 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
             _logger.LogInformation("Redis pool warm complete: Created={Created} Idle={Idle} Disposed={Disposed}", _created, _idleCount, _disposedConnections);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            // Log warm-up failure but don't crash - pool can still work with on-demand connection creation
+            _logger.LogWarning(ex, "Redis pool warm-up failed, pool will create connections on-demand: Created={Created} Idle={Idle}", _created, _idleCount);
+        }
     }
 
     private async Task MaintainWarmAsync(RedisConnectionOptions o, int warmTarget, CancellationToken ct)
     {
         warmTarget = Math.Min(warmTarget, Math.Max(0, o.MaxIdle));
+        const int MaxWarmupRetries = 10;
+        const int MaxTotalAttempts = 20;
+        var retryCount = 0;
+        var totalAttempts = 0;
 
         while (Volatile.Read(ref _disposed) == 0 &&
                Volatile.Read(ref _idleCount) < warmTarget &&
                _connectionSlots.Wait(0))
         {
+            totalAttempts++;
+            if (totalAttempts >= MaxTotalAttempts)
+            {
+                _logger.LogWarning("Failed to warm connection pool after {Attempts} total attempts. Stopping warmup to prevent infinite loop.", MaxTotalAttempts);
+                _connectionSlots.Release();
+                return;
+            }
+
             var created = await _factory.CreateAsync(ct).ConfigureAwait(false);
             if (!created.IsSuccess)
             {
                 _connectionSlots.Release();
-                return;
+                retryCount++;
+
+                if (retryCount >= MaxWarmupRetries)
+                {
+                    _logger.LogWarning("Failed to warm connection pool after {Retries} attempts. Redis may be unavailable. Pool will attempt to create connections on-demand.", MaxWarmupRetries);
+                    return;
+                }
+
+                var backoffMs = Math.Min(1000, 50 * (1 << (retryCount - 1)));
+                await Task.Delay(backoffMs, ct).ConfigureAwait(false);
+                continue;
             }
+
+            retryCount = 0;
 
             await created.Match(
                 async succ =>

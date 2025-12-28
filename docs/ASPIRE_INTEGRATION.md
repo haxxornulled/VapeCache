@@ -484,7 +484,11 @@ kubectl apply -f ./manifests
 ## Roadmap
 
 - ✅ **Phase 1**: Remove Serilog from VapeCache.Infrastructure (DONE)
-- 🚧 **Phase 2**: Create VapeCache.Extensions.Aspire project
+- ✅ **Phase 2**: Create VapeCache.Extensions.Aspire project (DONE)
+  - ✅ Fluent API extensions (AddVapeCache, WithRedisFromAspire, WithHealthChecks, WithAspireTelemetry)
+  - ✅ Health check implementations (RedisHealthCheck, VapeCacheHealthCheck)
+  - ✅ OpenTelemetry integration (cache hit/miss metrics, Redis traces)
+  - ✅ Package documentation (README.md)
 - 📋 **Phase 3**: Add Aspire AppHost example
 - 📋 **Phase 4**: Integration tests with Aspire TestHost
 - 📋 **Phase 5**: Publish to NuGet

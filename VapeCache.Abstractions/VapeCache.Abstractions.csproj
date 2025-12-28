@@ -6,8 +6,23 @@
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Abstractions</PackageId>
-    <Description>Public contracts and options for VapeCache.</Description>
+    <Version>1.0.0</Version>
+    <Authors>VapeCache Contributors</Authors>
+    <Company>VapeCache</Company>
+    <Product>VapeCache</Product>
+    <Description>Public contracts and options for VapeCache - a high-performance Redis client optimized for caching workloads. 5-30% faster than StackExchange.Redis with coalesced writes and zero-allocation pooling.</Description>
+    <PackageTags>redis;cache;performance;distributed-cache;async;netcore</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/yourusername/VapeCache</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/yourusername/VapeCache</PackageProjectUrl>
+    <Copyright>Copyright (c) 2025 VapeCache Contributors</Copyright>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="LanguageExt.Core" Version="4.4.9" />

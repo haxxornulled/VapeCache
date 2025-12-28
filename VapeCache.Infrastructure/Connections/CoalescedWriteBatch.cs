@@ -23,9 +23,9 @@ internal sealed class CoalescedWriteBatch : IDisposable
     private const int DefaultScratchSize = 8 * 1024;
 
     public List<ReadOnlyMemory<byte>> SegmentsToWrite { get; } = new(32);
-    public byte[]? Scratch { get; private set; }
+    public byte[]? Scratch { get; internal set; }
     public int ScratchUsed { get; set; }
-    public int ScratchBaseOffset { get; set; } // Tracks where in scratch the current write region starts
+    public int ScratchBaseOffset { get; set; }
     public List<IDisposable> Owners { get; } = new(8);
 
     public void Reset()
@@ -85,8 +85,7 @@ internal sealed class Coalescer
             var req = _queue.Peek();
             var segments = req.Segments;
 
-            // CRITICAL FIX: Calculate total size of this request BEFORE processing
-            // to ensure we never split a single Redis command across batches
+            // Calculate request size to avoid splitting Redis commands across batches
             var reqTotalBytes = 0;
             var reqSegmentCount = 0;
             for (var i = 0; i < req.Count; i++)
@@ -94,23 +93,20 @@ internal sealed class Coalescer
                 if (segments[i].Length > 0)
                 {
                     reqTotalBytes += segments[i].Length;
-                    reqSegmentCount++; // worst case: each segment becomes separate write
+                    reqSegmentCount++;
                 }
             }
 
-            // If adding this entire request would exceed limits AND we already have data,
-            // commit current batch and process this request in next batch
+            // If adding this request would exceed limits and we have data, commit current batch
             if (batch.SegmentsToWrite.Count > 0 || batch.ScratchUsed > 0)
             {
                 if ((totalBytes + reqTotalBytes > MaxWriteBytes) ||
                     (batch.SegmentsToWrite.Count + reqSegmentCount > MaxSegments))
                 {
                     CommitScratch(batch);
-                    return true; // leave req in queue for next batch
+                    return true;
                 }
             }
-            // If batch is empty, process this request anyway (even if it exceeds limits)
-            // to ensure progress - we can't skip requests
 
             for (var i = 0; i < req.Count; i++)
             {
@@ -122,7 +118,8 @@ internal sealed class Coalescer
                 if (segLen <= SmallCopyThreshold)
                 {
                     batch.EnsureScratch();
-                    if (batch.ScratchBaseOffset + batch.ScratchUsed + segLen > batch.Scratch!.Length)
+                    var requiredSpace = batch.ScratchBaseOffset + batch.ScratchUsed + segLen;
+                    if (requiredSpace > batch.Scratch!.Length)
                     {
                         CommitScratch(batch);
                         batch.EnsureScratch();
@@ -153,11 +150,21 @@ internal sealed class Coalescer
     {
         if (batch.Scratch is not null && batch.ScratchUsed > 0)
         {
-            // CRITICAL FIX: Use ScratchBaseOffset to avoid overwriting previously committed segments.
-            // When we commit, we add a segment from [BaseOffset..BaseOffset+Used], then advance
-            // BaseOffset so the next write doesn't overwrite this committed region.
             batch.SegmentsToWrite.Add(batch.Scratch.AsMemory(batch.ScratchBaseOffset, batch.ScratchUsed));
-            batch.ScratchBaseOffset += batch.ScratchUsed;
+
+            var nextOffset = batch.ScratchBaseOffset + batch.ScratchUsed;
+            var remainingSpace = batch.Scratch.Length - nextOffset;
+
+            if (remainingSpace < SmallCopyThreshold + 1024)
+            {
+                ArrayPool<byte>.Shared.Return(batch.Scratch);
+                batch.Scratch = ArrayPool<byte>.Shared.Rent(8192);
+                batch.ScratchBaseOffset = 0;
+            }
+            else
+            {
+                batch.ScratchBaseOffset = nextOffset;
+            }
             batch.ScratchUsed = 0;
         }
     }

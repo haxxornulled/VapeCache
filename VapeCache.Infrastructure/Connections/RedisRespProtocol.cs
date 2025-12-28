@@ -58,6 +58,13 @@ internal static class RedisRespProtocol
     public static int WriteAclWhoAmICommand(Span<byte> destination)
         => WriteCommand(destination, 2, "ACL", "WHOAMI");
 
+    // HELLO command to negotiate RESP protocol version (for Redis 6+)
+    public static int GetHelloCommandLength(int protocolVersion)
+        => GetCommandLength(2, "HELLO", GetIntLength(protocolVersion));
+
+    public static int WriteHelloCommand(Span<byte> destination, int protocolVersion)
+        => WriteCommand(destination, 2, "HELLO", protocolVersion);
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetGetCommandLength(string key) => GetCommandLength(2, "GET", key);
 
@@ -372,29 +379,21 @@ internal static class RedisRespProtocol
     }
 
     // Header-only variant (omits value bytes and trailing CRLF) for scatter/gather writes.
+    // This is only used for SET without TTL, since SET with TTL requires building the full command.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteSetCommandHeader(Span<byte> destination, string key, int valueByteLen, int? ttlMs)
     {
-        if (ttlMs is null)
-        {
-            var idx = 0;
-            idx += WriteArrayHeader(destination.Slice(idx), 3);
-            idx += WriteBulkString(destination.Slice(idx), "SET");
-            idx += WriteBulkString(destination.Slice(idx), key);
-            idx += WriteBulkLength(destination.Slice(idx), valueByteLen);
-            return idx;
-        }
+        // Only support SET without TTL for scatter/gather writes
+        // SET with TTL must use WriteSetCommand to build the full command
+        if (ttlMs is not null)
+            throw new InvalidOperationException("WriteSetCommandHeader does not support TTL. Use WriteSetCommand instead.");
 
-        // SET key value PX ttl
-        var ttlLen = GetIntLength(ttlMs.Value);
-        var idxHdr = 0;
-        idxHdr += WriteArrayHeader(destination.Slice(idxHdr), 5);
-        idxHdr += WriteBulkString(destination.Slice(idxHdr), "SET");
-        idxHdr += WriteBulkString(destination.Slice(idxHdr), key);
-        idxHdr += WriteBulkLength(destination.Slice(idxHdr), valueByteLen);
-        idxHdr += WriteBulkString(destination.Slice(idxHdr), "PX");
-        idxHdr += WriteBulkInt(destination.Slice(idxHdr), ttlMs.Value);
-        return idxHdr;
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "SET");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkLength(destination.Slice(idx), valueByteLen);
+        return idx;
     }
 
     public static byte[] BuildCommand(params string[] parts)
@@ -478,6 +477,46 @@ internal static class RedisRespProtocol
     public static async Task ExpectPongAsync(Stream stream, CancellationToken ct)
     {
         await ExpectExactAsync(stream, PongLine, ct).ConfigureAwait(false);
+    }
+
+    // HELLO response is a map/array in RESP2 - just skip it recursively
+    public static async Task SkipHelloResponseAsync(Stream stream, CancellationToken ct)
+    {
+        await SkipRespValueAsync(stream, ct).ConfigureAwait(false);
+    }
+
+    // Recursively skip any RESP value (array, bulk string, simple string, integer, error)
+    private static async Task SkipRespValueAsync(Stream stream, CancellationToken ct)
+    {
+        var line = await ReadLineAsync(stream, ct).ConfigureAwait(false);
+
+        if (line.StartsWith("-", StringComparison.Ordinal))
+            throw new InvalidOperationException($"Redis error: {line}");
+
+        if (line.StartsWith("*", StringComparison.Ordinal)) // Array
+        {
+            if (!int.TryParse(line.AsSpan(1), out var count))
+                throw new InvalidOperationException($"Invalid array response: {line}");
+
+            // Recursively skip all array elements
+            for (int i = 0; i < count; i++)
+            {
+                await SkipRespValueAsync(stream, ct).ConfigureAwait(false);
+            }
+        }
+        else if (line.StartsWith("$", StringComparison.Ordinal)) // Bulk string
+        {
+            if (!int.TryParse(line.AsSpan(1), out var len))
+                throw new InvalidOperationException($"Invalid bulk string length: {line}");
+
+            if (len >= 0)
+            {
+                // Read the bulk string data + CRLF
+                var skip = new byte[len + 2];
+                await ReadExactAsync(stream, skip, ct).ConfigureAwait(false);
+            }
+        }
+        // Simple string (+), integer (:), and null ($-1) are already consumed by ReadLineAsync
     }
 
     public static async Task<bool> TryExpectOkAsync(Stream stream, CancellationToken ct)
@@ -784,4 +823,127 @@ internal static class RedisRespProtocol
             throw new InvalidOperationException("Failed to format int.");
         return written;
     }
+
+    // ======================
+    // NEW COMMANDS - Phase 1
+    // ======================
+
+    // RPUSH (push to tail of list)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetRPushCommandLength(string key, int valueLen)
+    {
+        // RPUSH key value
+        return GetHeaderLen(3)
+               + GetBulkLen(5) + 5 + 2 // RPUSH
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(valueLen) + valueLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteRPushCommand(Span<byte> destination, string key, ReadOnlySpan<byte> value)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "RPUSH");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkBytes(destination.Slice(idx), value);
+        return idx;
+    }
+
+    // RPOP (pop from tail of list)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetRPopCommandLength(string key) => GetCommandLength(2, "RPOP", key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteRPopCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "RPOP", key);
+
+    // LLEN (get list length)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetLLenCommandLength(string key) => GetCommandLength(2, "LLEN", key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteLLenCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "LLEN", key);
+
+    // SADD (add to set)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetSAddCommandLength(string key, int memberLen)
+    {
+        // SADD key member
+        return GetHeaderLen(3)
+               + GetBulkLen(4) + 4 + 2 // SADD
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(memberLen) + memberLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteSAddCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "SADD");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkBytes(destination.Slice(idx), member);
+        return idx;
+    }
+
+    // SREM (remove from set)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetSRemCommandLength(string key, int memberLen)
+    {
+        // SREM key member
+        return GetHeaderLen(3)
+               + GetBulkLen(4) + 4 + 2 // SREM
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(memberLen) + memberLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteSRemCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "SREM");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkBytes(destination.Slice(idx), member);
+        return idx;
+    }
+
+    // SISMEMBER (check set membership)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetSIsMemberCommandLength(string key, int memberLen)
+    {
+        // SISMEMBER key member
+        return GetHeaderLen(3)
+               + GetBulkLen(9) + 9 + 2 // SISMEMBER
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(memberLen) + memberLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteSIsMemberCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "SISMEMBER");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkBytes(destination.Slice(idx), member);
+        return idx;
+    }
+
+    // SMEMBERS (get all set members)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetSMembersCommandLength(string key) => GetCommandLength(2, "SMEMBERS", key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteSMembersCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "SMEMBERS", key);
+
+    // SCARD (get set cardinality/count)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetSCardCommandLength(string key) => GetCommandLength(2, "SCARD", key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteSCardCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "SCARD", key);
+
+    // MODULE LIST (detect installed modules like RedisJSON)
+    public static ReadOnlyMemory<byte> ModuleListCommand { get; } = "*2\r\n$6\r\nMODULE\r\n$4\r\nLIST\r\n"u8.ToArray();
 }

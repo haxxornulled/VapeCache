@@ -13,7 +13,8 @@ internal sealed class HybridCacheService(
     TimeProvider timeProvider,
     IOptions<RedisCircuitBreakerOptions> breakerOptions,
     CacheStats stats,
-    ILogger<HybridCacheService> logger) : ICacheService
+    ILogger<HybridCacheService> logger,
+    IRedisReconciliationService? reconciliation = null) : ICacheService
     , IRedisCircuitBreakerState
     , IRedisFailoverController
 {
@@ -44,14 +45,14 @@ internal sealed class HybridCacheService(
         return timeProvider.GetTimestamp() >= openUntil;
     }
 
-    private void MarkRedisSuccess()
+    public void MarkRedisSuccess()
     {
         if (!_breaker.Enabled) return;
         Volatile.Write(ref _failures, 0);
         Volatile.Write(ref _openUntilTicks, 0);
     }
 
-    private void MarkRedisFailure()
+    public void MarkRedisFailure()
     {
         if (!_breaker.Enabled) return;
         var failures = Interlocked.Increment(ref _failures);
@@ -63,6 +64,8 @@ internal sealed class HybridCacheService(
             {
                 stats.IncBreakerOpened();
                 CacheTelemetry.RedisBreakerOpened.Add(1, new TagList { { "backend", Name } });
+                logger.LogWarning("⚡ CIRCUIT BREAKER OPENED after {Failures} consecutive failures. Switching to in-memory mode for {Duration} seconds.", failures, _breaker.BreakDuration.TotalSeconds);
+                System.Console.WriteLine($"\n🔥🔥🔥 ⚡ CIRCUIT BREAKER OPENED! Failures={failures}, switching to IN-MEMORY mode for {_breaker.BreakDuration.TotalSeconds} seconds 🔥🔥🔥\n");
             }
         }
     }
@@ -71,7 +74,12 @@ internal sealed class HybridCacheService(
     {
         var freq = timeProvider.TimestampFrequency;
         var delta = (long)Math.Max(1, duration.TotalSeconds * freq);
-        return checked(timestamp + delta);
+
+        // Protect against overflow - if adding duration would overflow, cap at max value
+        if (delta > 0 && timestamp > long.MaxValue - delta)
+            return long.MaxValue;
+
+        return timestamp + delta;
     }
 
     private TimeSpan? GetOpenRemaining()
@@ -109,17 +117,22 @@ internal sealed class HybridCacheService(
 
             try
             {
-                // Half-open probe: allow only one concurrent redis attempt after break duration.
+                // Half-open state: allow limited concurrent Redis probes during recovery
                 if (_breaker.Enabled && Volatile.Read(ref _openUntilTicks) != 0)
                 {
-                    if (Interlocked.CompareExchange(ref _halfOpenProbeInFlight, 1, 0) != 0)
+                    var probeNum = Interlocked.Increment(ref _halfOpenProbeInFlight);
+                    probeTaken = true;
+
+                    if (probeNum > _breaker.MaxHalfOpenProbes)
                     {
+                        Interlocked.Decrement(ref _halfOpenProbeInFlight);
+                        probeTaken = false;
+
                         current.SetCurrent(memory.Name);
                         stats.IncFallbackToMemory();
                         CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
                         return await memory.GetAsync(key, ct).ConfigureAwait(false);
                     }
-                    probeTaken = true;
                 }
 
                 using var probeCts = probeTaken
@@ -155,7 +168,7 @@ internal sealed class HybridCacheService(
         finally
         {
             if (probeTaken)
-                Interlocked.Exchange(ref _halfOpenProbeInFlight, 0);
+                Interlocked.Decrement(ref _halfOpenProbeInFlight);
             CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "get" } });
         }
     }
@@ -175,22 +188,34 @@ internal sealed class HybridCacheService(
                 stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
                 await memory.SetAsync(key, value, options, ct).ConfigureAwait(false);
+
+                // Track write for reconciliation when Redis recovers
+                reconciliation?.TrackWrite(key, value, options.Ttl);
                 return;
             }
 
             try
             {
+                // Half-open state: allow limited concurrent Redis probes during recovery
                 if (_breaker.Enabled && Volatile.Read(ref _openUntilTicks) != 0)
                 {
-                    if (Interlocked.CompareExchange(ref _halfOpenProbeInFlight, 1, 0) != 0)
+                    var probeNum = Interlocked.Increment(ref _halfOpenProbeInFlight);
+                    probeTaken = true;
+
+                    if (probeNum > _breaker.MaxHalfOpenProbes)
                     {
+                        Interlocked.Decrement(ref _halfOpenProbeInFlight);
+                        probeTaken = false;
+
                         current.SetCurrent(memory.Name);
                         stats.IncFallbackToMemory();
                         CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
                         await memory.SetAsync(key, value, options, ct).ConfigureAwait(false);
+
+                        // Track write for reconciliation when Redis recovers
+                        reconciliation?.TrackWrite(key, value, options.Ttl);
                         return;
                     }
-                    probeTaken = true;
                 }
 
                 using var probeCts = probeTaken
@@ -216,7 +241,7 @@ internal sealed class HybridCacheService(
         finally
         {
             if (probeTaken)
-                Interlocked.Exchange(ref _halfOpenProbeInFlight, 0);
+                Interlocked.Decrement(ref _halfOpenProbeInFlight);
             CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "set" } });
         }
     }
@@ -240,16 +265,22 @@ internal sealed class HybridCacheService(
 
             try
             {
+                // Half-open state: allow limited concurrent Redis probes during recovery
                 if (_breaker.Enabled && Volatile.Read(ref _openUntilTicks) != 0)
                 {
-                    if (Interlocked.CompareExchange(ref _halfOpenProbeInFlight, 1, 0) != 0)
+                    var probeNum = Interlocked.Increment(ref _halfOpenProbeInFlight);
+                    probeTaken = true;
+
+                    if (probeNum > _breaker.MaxHalfOpenProbes)
                     {
+                        Interlocked.Decrement(ref _halfOpenProbeInFlight);
+                        probeTaken = false;
+
                         current.SetCurrent(memory.Name);
                         stats.IncFallbackToMemory();
                         CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
                         return ok;
                     }
-                    probeTaken = true;
                 }
 
                 using var probeCts = probeTaken
@@ -276,7 +307,7 @@ internal sealed class HybridCacheService(
         finally
         {
             if (probeTaken)
-                Interlocked.Exchange(ref _halfOpenProbeInFlight, 0);
+                Interlocked.Decrement(ref _halfOpenProbeInFlight);
             CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "remove" } });
         }
     }

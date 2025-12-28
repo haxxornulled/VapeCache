@@ -165,7 +165,7 @@ internal static class RedisRespReader
         return RespValue.Array(items, len, pooled: true);
     }
 
-    internal readonly record struct RespValue
+    internal sealed class RespValue
     {
         private RespValue(RespKind kind, string? text, byte[]? bulk, int bulkLength, bool bulkIsPooled, long integer, RespValue[]? array, int arrayLength, bool arrayIsPooled)
         {

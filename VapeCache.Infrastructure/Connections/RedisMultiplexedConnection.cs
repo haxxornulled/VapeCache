@@ -6,6 +6,7 @@ using System.Threading.Tasks.Sources;
 using System.Runtime.InteropServices;
 using System.Collections.Generic;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
@@ -18,6 +19,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private readonly int _maxInFlight;
     private readonly bool _coalesceWrites;
     private readonly bool _useSocketReader;
+    private readonly int _maxBulkStringBytes;
+    private readonly int _maxArrayDepth;
 
     private readonly MpscRingQueue<PendingRequest> _writes;
     private readonly SpscRingQueue<PendingOperation> _pending;
@@ -30,12 +33,19 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private readonly Task _reader;
     private static readonly ReadOnlyMemory<byte> CrlfMemory = "\r\n"u8.ToArray();
 
-    // QUICK WIN #3: ThreadLocal caching to eliminate Interlocked contention
-    // Each thread gets its own cache, avoiding contention on high-concurrency workloads
+    // Per-thread caches (fast path - no locks)
     [ThreadStatic] private static byte[]? _tlsHeaderCache;
     [ThreadStatic] private static byte[]? _tlsSmallHeaderCache;
     [ThreadStatic] private static ReadOnlyMemory<byte>[]? _tlsPayloadArrayCache;
     [ThreadStatic] private static ReadOnlyMemory<byte>[]? _tlsSmallPayloadArrayCache;
+
+    // Shared pools for cross-thread returns
+    private static readonly ConcurrentBag<byte[]> _sharedHeaderCache = new();
+    private static readonly ConcurrentBag<byte[]> _sharedSmallHeaderCache = new();
+    private static readonly ConcurrentBag<ReadOnlyMemory<byte>[]> _sharedPayloadArrayCache = new();
+    private static readonly ConcurrentBag<ReadOnlyMemory<byte>[]> _sharedSmallPayloadArrayCache = new();
+
+    private const int MaxSharedCacheSize = 64;
     private readonly Queue<CoalescedPendingRequest> _coalesceQueue = new(16);
     private readonly List<PendingRequest> _coalesceDrained = new(8);
     private readonly List<CoalescedPendingRequest> _coalesceCaptured = new(8);
@@ -56,6 +66,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
 
     private static int RoundUpToPowerOfTwo(int value)
     {
+        if (value <= 0)
+            throw new ArgumentOutOfRangeException(nameof(value), "Value must be positive");
+        if (value > (1 << 30))
+            throw new ArgumentOutOfRangeException(nameof(value), "Value too large to round to power of two");
+
         value = Math.Max(2, value);
         value--;
         value |= value >> 1;
@@ -66,12 +81,14 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         return value + 1;
     }
 
-    public RedisMultiplexedConnection(IRedisConnectionFactory factory, int maxInFlight, bool coalesceWrites)
+    public RedisMultiplexedConnection(IRedisConnectionFactory factory, int maxInFlight, bool coalesceWrites, int maxBulkStringBytes = 16 * 1024 * 1024, int maxArrayDepth = 64)
     {
         _factory = factory;
         _maxInFlight = Math.Max(1, maxInFlight);
         _coalesceWrites = coalesceWrites;
         _useSocketReader = EnableSocketRespReader && coalesceWrites;
+        _maxBulkStringBytes = maxBulkStringBytes;
+        _maxArrayDepth = maxArrayDepth;
         _inFlight = new SemaphoreSlim(_maxInFlight, _maxInFlight);
 
         var capacity = RoundUpToPowerOfTwo(Math.Max(128, _maxInFlight * 4));
@@ -180,11 +197,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         _conn = created.Match(static c => c, static ex => throw ex);
         if (_useSocketReader)
         {
-            _respSocketReader = new RedisRespSocketReaderState(_conn.Socket, useUnsafeFastPath: false);
+            _respSocketReader = new RedisRespSocketReaderState(_conn.Socket, useUnsafeFastPath: false, maxBulkStringBytes: _maxBulkStringBytes, maxArrayDepth: _maxArrayDepth);
         }
         else
         {
-            _respReader = new RedisRespReaderState(_conn.Stream, useUnsafeFastPath: false);
+            _respReader = new RedisRespReaderState(_conn.Stream, useUnsafeFastPath: false, maxBulkStringBytes: _maxBulkStringBytes, maxArrayDepth: _maxArrayDepth);
         }
     }
 
@@ -192,9 +209,12 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         while (!_cts.IsCancellationRequested)
         {
+            PendingRequest req = default;
+            bool hasReq = false;
             try
             {
-                var req = await _writes.DequeueAsync(_cts.Token).ConfigureAwait(false);
+                req = await _writes.DequeueAsync(_cts.Token).ConfigureAwait(false);
+                hasReq = true;
                 await EnsureConnectedAsync(_cts.Token).ConfigureAwait(false);
                 var conn = _conn!;
 
@@ -218,8 +238,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                     ReturnPayloadArray(req.PayloadArrayBuffer);
                 }
             }
-            catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+            catch (OperationCanceledException oce) when (_cts.IsCancellationRequested)
             {
+                // Complete any pending request that was dequeued before cancellation
+                if (hasReq && req.Op is not null && !req.Op.IsCompleted)
+                    req.Op.AbortUnqueued(oce);
                 break;
             }
             catch (Exception ex)
@@ -233,9 +256,10 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         while (!_cts.IsCancellationRequested)
         {
+            PendingOperation? next = null;
             try
             {
-                var next = await _pending.DequeueAsync(_cts.Token).ConfigureAwait(false);
+                next = await _pending.DequeueAsync(_cts.Token).ConfigureAwait(false);
                 await EnsureConnectedAsync(_cts.Token).ConfigureAwait(false);
                 RedisRespReader.RespValue resp = default;
                 Exception? ex = null;
@@ -302,8 +326,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
 
                 next.MarkResponseProcessed();
             }
-            catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+            catch (OperationCanceledException oce) when (_cts.IsCancellationRequested)
             {
+                // Complete any pending operation that was dequeued before cancellation
+                if (next is not null && !next.IsCompleted)
+                    next.TrySetException(oce);
                 break;
             }
             catch (Exception ex)
@@ -521,11 +548,14 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
     if (socket.SendAsync(args))
     {
         args.RegisterCancellation(ct);
-        return await args.WaitAsync().ConfigureAwait(false);
+        var result = await args.WaitAsync().ConfigureAwait(false);
+        args.ReturnBufferList();
+        return result;
     }
 
-    // Synchronous completion: honor SocketError.
-    return args.CompleteInlineOrThrow();
+    var syncResult = args.CompleteInlineOrThrow();
+    args.ReturnBufferList();
+    return syncResult;
 }
 
 
@@ -586,14 +616,44 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
 
         try { _cts.Cancel(); } catch { }
 
-        try { await _writer.ConfigureAwait(false); } catch { }
-        try { await _reader.ConfigureAwait(false); } catch { }
+        var tasks = new[] { _writer, _reader }.Where(t => t != null).ToArray();
+        if (tasks.Length > 0)
+        {
+            try
+            {
+                await Task.WhenAny(
+                    Task.WhenAll(tasks),
+                    Task.Delay(TimeSpan.FromSeconds(5))
+                ).ConfigureAwait(false);
+            }
+            catch { }
+        }
 
         await FailTransportAsync(new ObjectDisposedException(nameof(RedisMultiplexedConnection))).ConfigureAwait(false);
 
-        _cts.Dispose();
-        _inFlight.Dispose();
-        _coalesceBatch.Dispose();
+        if (_conn is not null)
+        {
+            try { await _conn.DisposeAsync().ConfigureAwait(false); } catch { }
+        }
+
+        while (_opPool.TryTake(out var pooledOp))
+        {
+            try
+            {
+                if (!pooledOp.IsCompleted)
+                    pooledOp.TrySetException(new ObjectDisposedException(nameof(RedisMultiplexedConnection)));
+                pooledOp.DisposeResources();
+            }
+            catch { }
+        }
+
+        try { _writes.Dispose(); } catch { }
+        try { _pending.Dispose(); } catch { }
+
+        try { _inFlight.Dispose(); } catch { }
+        try { _coalesceBatch.Dispose(); } catch { }
+
+        try { _cts.Dispose(); } catch { }
 
         while (_coalesceSegmentsPool8Count > 0)
         {
@@ -603,31 +663,13 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
         }
 
         if (_respReader is not null)
-            await _respReader.DisposeAsync().ConfigureAwait(false);
-        if (_respSocketReader is not null)
-            await _respSocketReader.DisposeAsync().ConfigureAwait(false);
-
-        if (_conn is not null)
-            await _conn.DisposeAsync().ConfigureAwait(false);
-
-        // CRITICAL: Drain and dispose all pooled operations to prevent SemaphoreSlim/CancellationTokenRegistration leaks
-        while (_opPool.TryTake(out var pooledOp))
         {
-            try
-            {
-                // Ensure operation is fully completed before disposal
-                if (!pooledOp.IsCompleted)
-                {
-                    pooledOp.TrySetException(new ObjectDisposedException(nameof(RedisMultiplexedConnection)));
-                }
-                pooledOp.DisposeResources();
-            }
-            catch { }
+            try { await _respReader.DisposeAsync().ConfigureAwait(false); } catch { }
         }
-
-        // CRITICAL: Dispose ring queues to prevent SemaphoreSlim leaks
-        try { _writes.Dispose(); } catch { }
-        try { _pending.Dispose(); } catch { }
+        if (_respSocketReader is not null)
+        {
+            try { await _respSocketReader.DisposeAsync().ConfigureAwait(false); } catch { }
+        }
     }
 
     private PendingOperation RentOperation()
@@ -658,82 +700,142 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
 
     internal byte[] RentHeaderBuffer(int minLength)
     {
-        // QUICK WIN #3: ThreadLocal cache - zero contention, faster than Interlocked.Exchange
-        byte[]? buf;
         if (minLength <= 512)
         {
-            buf = _tlsSmallHeaderCache;
-            if (buf is not null && buf.Length >= minLength)
+            // FAST PATH: Try thread-local cache first (lock-free)
+            if (_tlsSmallHeaderCache is { Length: >= 512 } buf)
             {
                 _tlsSmallHeaderCache = null;
                 return buf;
             }
+
+            if (_sharedSmallHeaderCache.TryTake(out var poolBuf) && poolBuf.Length >= minLength)
+            {
+                return poolBuf;
+            }
+
+            return new byte[512];
         }
 
-        buf = _tlsHeaderCache;
-        if (buf is not null && buf.Length >= minLength)
+        // Large buffer path (same pattern)
+        if (_tlsHeaderCache is { Length: >= 2048 } largeBuf)
         {
             _tlsHeaderCache = null;
-            return buf;
+            return largeBuf;
         }
 
-        return new byte[minLength];
+        if (_sharedHeaderCache.TryTake(out var largePoolBuf) && largePoolBuf.Length >= minLength)
+        {
+            return largePoolBuf;
+        }
+
+        return new byte[Math.Max(2048, minLength)];
     }
 
     internal void ReturnHeaderBuffer(byte[] buffer)
     {
         if (buffer is null) return;
 
-        // QUICK WIN #3: ThreadLocal return - zero contention
         if (buffer.Length <= 512)
         {
+            // FAST PATH: Try to cache in thread-local slot (lock-free)
             if (_tlsSmallHeaderCache is null)
+            {
                 _tlsSmallHeaderCache = buffer;
+                return;
+            }
+
+            if (_sharedSmallHeaderCache.Count < MaxSharedCacheSize)
+            {
+                _sharedSmallHeaderCache.Add(buffer);
+            }
             return;
         }
 
+        // Large buffer path (same pattern)
         if (_tlsHeaderCache is null)
+        {
             _tlsHeaderCache = buffer;
+            return;
+        }
+
+        if (_sharedHeaderCache.Count < MaxSharedCacheSize)
+        {
+            _sharedHeaderCache.Add(buffer);
+        }
     }
 
     internal ReadOnlyMemory<byte>[] RentPayloadArray(int minLength)
     {
-        // QUICK WIN #3: ThreadLocal cache for payload arrays
-        ReadOnlyMemory<byte>[]? arr;
         if (minLength <= 16)
         {
-            arr = _tlsSmallPayloadArrayCache;
-            if (arr is not null && arr.Length >= minLength)
+            // FAST PATH: Try thread-local cache first (lock-free)
+            if (_tlsSmallPayloadArrayCache is { Length: >= 16 } arr)
             {
                 _tlsSmallPayloadArrayCache = null;
                 return arr;
             }
+
+            // FALLBACK: Try shared pool
+            if (_sharedSmallPayloadArrayCache.TryTake(out var poolArr) && poolArr.Length >= minLength)
+            {
+                return poolArr;
+            }
+
+            // SLOW PATH: Allocate new array
+            return new ReadOnlyMemory<byte>[16];
         }
 
-        arr = _tlsPayloadArrayCache;
-        if (arr is not null && arr.Length >= minLength)
+        // Large array path (same pattern)
+        if (_tlsPayloadArrayCache is { Length: >= 64 } largeArr)
         {
             _tlsPayloadArrayCache = null;
-            return arr;
+            return largeArr;
         }
 
-        return new ReadOnlyMemory<byte>[minLength];
+        if (_sharedPayloadArrayCache.TryTake(out var largePoolArr) && largePoolArr.Length >= minLength)
+        {
+            return largePoolArr;
+        }
+
+        return new ReadOnlyMemory<byte>[Math.Max(64, minLength)];
     }
 
     internal void ReturnPayloadArray(ReadOnlyMemory<byte>[]? payloads)
     {
         if (payloads is null) return;
 
-        // QUICK WIN #3: ThreadLocal return for payload arrays
         if (payloads.Length <= 16)
         {
+            // FAST PATH: Try to cache in thread-local slot (lock-free)
             if (_tlsSmallPayloadArrayCache is null)
+            {
+                Array.Clear(payloads, 0, payloads.Length);
                 _tlsSmallPayloadArrayCache = payloads;
+                return;
+            }
+
+            if (_sharedSmallPayloadArrayCache.Count < MaxSharedCacheSize)
+            {
+                Array.Clear(payloads, 0, payloads.Length);
+                _sharedSmallPayloadArrayCache.Add(payloads);
+            }
             return;
         }
 
+        // Large array path (same pattern)
         if (_tlsPayloadArrayCache is null)
+        {
+            Array.Clear(payloads, 0, payloads.Length);
             _tlsPayloadArrayCache = payloads;
+            return;
+        }
+
+        if (_sharedPayloadArrayCache.Count < MaxSharedCacheSize)
+        {
+            Array.Clear(payloads, 0, payloads.Length);
+            _sharedPayloadArrayCache.Add(payloads);
+        }
     }
 
     private sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespValue>
@@ -746,6 +848,7 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
         private int _completed;
         private int _responseProcessed;
         private int _awaiterObserved;
+        private CancellationTokenSource? _linkedCts;
 
         public PendingOperation(RedisMultiplexedConnection owner)
         {
@@ -767,6 +870,9 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
             ValueTask = default;
             _ct = default;
             _holdsSlot = false;
+            _linkedCts?.Dispose();
+            _linkedCts = null;
+            _core.RunContinuationsAsynchronously = true;
             _core.Reset();
             Volatile.Write(ref _completed, 0);
             Volatile.Write(ref _responseProcessed, 0);
@@ -780,31 +886,47 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
             _holdsSlot = holdsSlot;
             ValueTask = new ValueTask<RedisRespReader.RespValue>(this, _core.Version);
 
+            // Create a linked token that cancels when either the user's token or the internal _cts is cancelled
+            // This ensures disposal cancels all pending operations even if user passed CancellationToken.None
             if (ct.CanBeCanceled)
             {
-                _ctr = ct.Register(static s =>
+                _linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, _owner._cts.Token);
+                _ctr = _linkedCts.Token.Register(static s =>
                 {
                     var op = (PendingOperation)s!;
                     op.TrySetException(new OperationCanceledException(op._ct));
+                }, this);
+            }
+            else
+            {
+                // User passed CancellationToken.None, so only listen to internal _cts
+                _ctr = _owner._cts.Token.Register(static s =>
+                {
+                    var op = (PendingOperation)s!;
+                    op.TrySetException(new OperationCanceledException());
                 }, this);
             }
         }
 
         public void TrySetResult(RedisRespReader.RespValue value)
         {
-            if (Interlocked.Exchange(ref _completed, 1) != 0)
+            if (Interlocked.CompareExchange(ref _completed, 1, 0) != 0)
                 return;
 
             _ctr.Dispose();
+            _linkedCts?.Dispose();
+            _linkedCts = null;
             _core.SetResult(value);
         }
 
         public void TrySetException(Exception ex)
         {
-            if (Interlocked.Exchange(ref _completed, 1) != 0)
+            if (Interlocked.CompareExchange(ref _completed, 1, 0) != 0)
                 return;
 
             _ctr.Dispose();
+            _linkedCts?.Dispose();
+            _linkedCts = null;
             _core.SetException(ex);
         }
 
@@ -816,7 +938,8 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
                 _holdsSlot = false;
                 _owner._inFlight.Release();
             }
-            TryReturnToPool();
+            // Don't call TryReturnToPool() here - only return to pool after GetResult() is called
+            // This prevents race condition where operation is reset before GetResult() executes
         }
 
         public void AbortUnqueued(Exception ex)
@@ -841,14 +964,9 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
 
         RedisRespReader.RespValue IValueTaskSource<RedisRespReader.RespValue>.GetResult(short token)
         {
-            try
-            {
-                return _core.GetResult(token);
-            }
-            finally
-            {
-                MarkAwaiterObserved();
-            }
+            var result = _core.GetResult(token);
+            MarkAwaiterObserved();
+            return result;
         }
 
         ValueTaskSourceStatus IValueTaskSource<RedisRespReader.RespValue>.GetStatus(short token)
@@ -861,6 +979,8 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
         {
             // Dispose CancellationTokenRegistration to prevent leaks
             try { _ctr.Dispose(); } catch { }
+            try { _linkedCts?.Dispose(); } catch { }
+            _linkedCts = null;
 
             // Release slot if still held (defensive)
             if (_holdsSlot)
@@ -940,25 +1060,48 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
             }
 
             var wait = _slots.WaitAsync(ct);
-            return wait.IsCompletedSuccessfully
-                ? ValueTask.CompletedTask // already acquired
-                : EnqueueAsyncSlow(item, wait);
+            if (wait.IsCompletedSuccessfully)
+            {
+                EnqueueAfterSlot(item);
+                return ValueTask.CompletedTask;
+            }
+            return EnqueueAsyncSlow(item, wait);
         }
 
         private async ValueTask EnqueueAsyncSlow(T item, Task slotWait)
         {
-            await slotWait.ConfigureAwait(false);
-            EnqueueAfterSlot(item);
+            try
+            {
+                await slotWait.ConfigureAwait(false);
+                EnqueueAfterSlot(item);
+            }
+            catch
+            {
+                _slots.Release();
+                throw;
+            }
         }
 
         private void EnqueueAfterSlot(T item)
         {
             if (!TryEnqueueCore(item))
-            {
-                _slots.Release();
                 throw new InvalidOperationException("Ring enqueue failed unexpectedly.");
-            }
             _items.Release();
+        }
+
+        /// <summary>
+        /// Test helper: EnqueueAsync without the spin-wait loop, directly using the async path.
+        /// Used to test synchronous completion handling in unit tests.
+        /// </summary>
+        private ValueTask EnqueueAsyncNoSpinForTests(T item, CancellationToken ct)
+        {
+            var wait = _slots.WaitAsync(ct);
+            if (wait.IsCompletedSuccessfully)
+            {
+                EnqueueAfterSlot(item);
+                return ValueTask.CompletedTask;
+            }
+            return EnqueueAsyncSlow(item, wait);
         }
 
         private bool TryEnqueueCore(T item)
@@ -1029,16 +1172,29 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
 
         private T DequeueAfterWait()
         {
-            if (!TryDequeueCore(out var item))
-                throw new InvalidOperationException("Ring dequeue failed unexpectedly.");
+            var spinner = new SpinWait();
+            while (true)
+            {
+                if (TryDequeueCore(out var item))
+                {
+                    _slots.Release();
+                    return item!;
+                }
 
-            _slots.Release();
-            return item!;
+                spinner.SpinOnce();
+
+                if (spinner.Count > 1000)
+                {
+                    _items.Release();
+                    throw new InvalidOperationException("Ring dequeue failed unexpectedly after 1000 spins.");
+                }
+            }
         }
 
         private bool TryDequeueCore(out T? item)
         {
             var pos = Volatile.Read(ref _tail);
+            var spins = 0;
             while (true)
             {
                 var idx = (int)(pos & _mask);
@@ -1046,15 +1202,30 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
                 var dif = seq - (pos + 1);
                 if (dif == 0)
                 {
-                    item = _buffer[idx];
-                    _buffer[idx] = default!;
-                    Volatile.Write(ref _sequence[idx], pos + _buffer.Length);
-                    Volatile.Write(ref _tail, pos + 1);
-                    return true;
+                    // Try to claim this slot using CAS for thread-safety
+                    if (Interlocked.CompareExchange(ref _tail, pos + 1, pos) == pos)
+                    {
+                        item = _buffer[idx];
+                        _buffer[idx] = default!;
+                        Volatile.Write(ref _sequence[idx], pos + _buffer.Length);
+                        return true;
+                    }
+                    // Another thread claimed it, reload position and retry
+                    pos = Volatile.Read(ref _tail);
+                    continue;
                 }
 
                 if (dif < 0)
                 {
+                    item = default;
+                    return false;
+                }
+
+                // Spin wait with limit to prevent infinite loops
+                spins++;
+                if (spins > 100)
+                {
+                    // Too many spins, likely a race condition - bail out
                     item = default;
                     return false;
                 }
@@ -1152,15 +1323,26 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
             }
 
             var wait = _slots.WaitAsync(ct);
-            return wait.IsCompletedSuccessfully
-                ? ValueTask.CompletedTask
-                : EnqueueAsyncSlow(item, wait);
+            if (wait.IsCompletedSuccessfully)
+            {
+                EnqueueAfterSlot(item);
+                return ValueTask.CompletedTask;
+            }
+            return EnqueueAsyncSlow(item, wait);
         }
 
         private async ValueTask EnqueueAsyncSlow(T item, Task wait)
         {
-            await wait.ConfigureAwait(false);
-            EnqueueAfterSlot(item);
+            try
+            {
+                await wait.ConfigureAwait(false);
+                EnqueueAfterSlot(item);
+            }
+            catch
+            {
+                _slots.Release();
+                throw;
+            }
         }
 
         private void EnqueueAfterSlot(T item)
@@ -1169,6 +1351,21 @@ private async ValueTask<int> SendWithArgsAsync(Socket socket, ArraySegment<byte>
             _buffer[idx] = item;
             _head++;
             _items.Release();
+        }
+
+        /// <summary>
+        /// Test helper: EnqueueAsync without the spin-wait loop, directly using the async path.
+        /// Used to test synchronous completion handling in unit tests.
+        /// </summary>
+        private ValueTask EnqueueAsyncNoSpinForTests(T item, CancellationToken ct)
+        {
+            var wait = _slots.WaitAsync(ct);
+            if (wait.IsCompletedSuccessfully)
+            {
+                EnqueueAfterSlot(item);
+                return ValueTask.CompletedTask;
+            }
+            return EnqueueAsyncSlow(item, wait);
         }
 
         public bool TryDequeue(out T? item)

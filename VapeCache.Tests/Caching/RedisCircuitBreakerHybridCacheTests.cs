@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;
+using VapeCache.Infrastructure.Connections;
 using Xunit;
 
 namespace VapeCache.Tests.Caching;
@@ -113,6 +114,16 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         public ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?[]> LRangeAsync(string key, long start, long stop, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<RedisValueLease> LPopLeaseAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> LLenAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> SAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> SRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<bool> SIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<byte[]?[]> SMembersAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> SCardAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<string> PingAsync(CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<string[]> ModuleListAsync(CancellationToken ct) => throw new InvalidOperationException("redis down");
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

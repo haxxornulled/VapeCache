@@ -14,17 +14,42 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
     private readonly bool _coalesce;
     private (string Key, int ValueLen)[]? _msetLengthsCache;
 
+    // Backwards compatibility constructor - delegates to IOptions<T> monitor
     public RedisCommandExecutor(
         IRedisConnectionFactory factory,
         IOptions<RedisMultiplexerOptions> options)
+        : this(factory, new OptionsMonitorWrapper<RedisMultiplexerOptions>(options.Value), null)
     {
-        var o = options.Value;
+    }
+
+    public RedisCommandExecutor(
+        IRedisConnectionFactory factory,
+        IOptionsMonitor<RedisMultiplexerOptions> options,
+        IOptionsMonitor<RedisConnectionOptions>? connectionOptions = null)
+    {
+        var o = options.CurrentValue;
+        var connOpts = connectionOptions?.CurrentValue ?? new RedisConnectionOptions();
         var count = Math.Max(1, o.Connections);
         _conns = new RedisMultiplexedConnection[count];
         for (var i = 0; i < count; i++)
-            _conns[i] = new RedisMultiplexedConnection(factory, o.MaxInFlightPerConnection, o.EnableCoalescedSocketWrites);
+            _conns[i] = new RedisMultiplexedConnection(
+                factory,
+                o.MaxInFlightPerConnection,
+                o.EnableCoalescedSocketWrites,
+                connOpts.MaxBulkStringBytes,
+                connOpts.MaxArrayDepth);
         _instrument = o.EnableCommandInstrumentation;
         _coalesce = o.EnableCoalescedSocketWrites;
+    }
+
+    // Simple wrapper to convert IOptions to IOptionsMonitor
+    private class OptionsMonitorWrapper<T> : IOptionsMonitor<T>
+    {
+        private readonly T _value;
+        public OptionsMonitorWrapper(T value) => _value = value;
+        public T CurrentValue => _value;
+        public T Get(string? name) => _value;
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
@@ -346,10 +371,10 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
             if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null)
             {
-                if (ttlMs is null && conn is not null)
-                    conn.ReturnHeaderBuffer(rented);
-                else
+                if (ttlMs is not null)
                     ArrayPool<byte>.Shared.Return(rented);
+                else if (conn is not null)
+                    conn.ReturnHeaderBuffer(rented);
             }
         }
     }
@@ -403,7 +428,6 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
             finally
             {
                 ReturnMSetLengths(lengths, items.Length);
-                conn.ReturnPayloadArray(payloads);
             }
         }
         catch
@@ -715,7 +739,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
                 return new byte[]?[fields.Length];
 
             if (resp.Kind is not RedisRespReader.RespKind.Array || resp.ArrayItems is null)
-                return new byte[]?[fields.Length];
+                throw new InvalidOperationException($"RESP protocol violation: Expected Array for HMGET, got {resp.Kind}. Possible corrupted response stream.");
 
             var items = resp.ArrayItems;
             var result = new byte[]?[items.Length];
@@ -887,11 +911,11 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
                 ct,
                 headerBuffer: rented).ConfigureAwait(false);
             rented = null; // returned by writer
-            if (resp.Kind is RedisRespReader.RespKind.NullArray || resp.ArrayItems is null)
+            if (resp.Kind is RedisRespReader.RespKind.NullArray)
                 return Array.Empty<byte[]?>();
 
-            if (resp.Kind is not RedisRespReader.RespKind.Array)
-                return Array.Empty<byte[]?>();
+            if (resp.Kind is not RedisRespReader.RespKind.Array || resp.ArrayItems is null)
+                throw new InvalidOperationException($"RESP protocol violation: Expected Array for LRANGE, got {resp.Kind}. Possible corrupted response stream.");
 
             var items = resp.ArrayItems;
             var result = new byte[]?[items.Length];
@@ -921,7 +945,6 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
 
     public async ValueTask DisposeAsync()
     {
-        // MEMORY LEAK FIX P3-2: Clear cached array to avoid memory leak
         _msetLengthsCache = null;
 
         foreach (var c in _conns)
@@ -956,12 +979,10 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
     {
         if (lengths is null) return;
 
-        // Prevent long-lived retention of key strings.
         used = Math.Clamp(used, 0, lengths.Length);
         for (var i = 0; i < used; i++)
             lengths[i] = default;
 
-        // Avoid caching very large arrays (reduces retention + cache pollution).
         const int MaxCachedLength = 1024;
         if (lengths.Length > MaxCachedLength) return;
 
@@ -1038,7 +1059,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
             return resp.Kind switch
             {
                 RedisRespReader.RespKind.BulkString => resp.BulkIsPooled
-                    ? resp.Bulk.AsSpan(0, resp.BulkLength).ToArray()  // Copy only valid bytes from pooled buffer
+                    ? resp.Bulk.AsSpan(0, resp.BulkLength).ToArray()
                     : resp.Bulk,
                 RedisRespReader.RespKind.NullBulkString => null,
                 _ => throw new InvalidOperationException($"Unexpected RPOP response: {resp.Kind}")
@@ -1341,7 +1362,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor
                 headerBuffer: null).ConfigureAwait(false);
 
             return resp.Kind == RedisRespReader.RespKind.SimpleString
-                ? resp.Text
+                ? resp.Text ?? string.Empty
                 : throw new InvalidOperationException($"Unexpected PING response: {resp.Kind}");
         }
         catch

@@ -14,12 +14,18 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
     private int _len;
     private int _disposed;
     private readonly bool _useUnsafeFastPath;
+    private readonly int _maxBulkStringBytes;
+    private readonly int _maxArrayDepth;
+    private int _currentArrayDepth;
 
-    public RedisRespReaderState(Stream stream, int bufferSize = 8192, bool useUnsafeFastPath = false)
+    public RedisRespReaderState(Stream stream, int bufferSize = 8192, bool useUnsafeFastPath = false, int maxBulkStringBytes = 16 * 1024 * 1024, int maxArrayDepth = 64)
     {
         _stream = stream;
         _buffer = ArrayPool<byte>.Shared.Rent(Math.Max(256, bufferSize));
         _useUnsafeFastPath = useUnsafeFastPath;
+        _maxBulkStringBytes = maxBulkStringBytes;
+        _maxArrayDepth = maxArrayDepth;
+        _currentArrayDepth = 0;
     }
 
     public ValueTask<RedisRespReader.RespValue> ReadAsync(CancellationToken ct) => ReadAsync(poolBulk: false, ct);
@@ -154,9 +160,14 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
         if (len < 0)
             throw new InvalidOperationException($"Invalid bulk length: {header}");
 
+        // CRITICAL: Prevent DoS attacks from malicious Redis server sending huge bulk strings
+        if (_maxBulkStringBytes >= 0 && len > _maxBulkStringBytes)
+            throw new InvalidOperationException($"Bulk string size {len} bytes exceeds maximum allowed size of {_maxBulkStringBytes} bytes. Possible DoS attack or misconfigured server.");
+
+        // Use zero-initialized arrays to prevent garbage data that can cause JSON deserialization errors
         var buf = poolBulk
             ? ArrayPool<byte>.Shared.Rent(len)
-            : GC.AllocateUninitializedArray<byte>(len);
+            : new byte[len];
         await ReadExactAsync(buf.AsMemory(0, len), ct).ConfigureAwait(false);
 
         // consume CRLF
@@ -219,11 +230,26 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
         if (len < 0)
             throw new InvalidOperationException($"Invalid array length: {header}");
 
-        var items = RedisRespReader.RentArray(len);
-        for (var i = 0; i < len; i++)
-            items[i] = await ReadAsync(poolBulk, ct).ConfigureAwait(false);
+        // CRITICAL: Prevent stack overflow from deeply nested arrays
+        _currentArrayDepth++;
+        if (_maxArrayDepth >= 0 && _currentArrayDepth > _maxArrayDepth)
+        {
+            _currentArrayDepth--;
+            throw new InvalidOperationException($"Array nesting depth {_currentArrayDepth} exceeds maximum allowed depth of {_maxArrayDepth}. Possible stack overflow attack.");
+        }
 
-        return RedisRespReader.RespValue.Array(items, len, pooled: true);
+        try
+        {
+            var items = RedisRespReader.RentArray(len);
+            for (var i = 0; i < len; i++)
+                items[i] = await ReadAsync(poolBulk, ct).ConfigureAwait(false);
+
+            return RedisRespReader.RespValue.Array(items, len, pooled: true);
+        }
+        finally
+        {
+            _currentArrayDepth--;
+        }
     }
 
     public ValueTask DisposeAsync()

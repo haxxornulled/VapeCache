@@ -33,19 +33,21 @@ internal sealed class RedisConnectionFactory(
 
         NotifyConnectAttempt(effective);
 
+        // SECURITY FIX: Only log connection details in Development environment to prevent credential enumeration
         if (!string.IsNullOrWhiteSpace(o.ConnectionString) &&
             Interlocked.Exchange(ref _loggedConnectionStringResolution, 1) == 0)
         {
             try
             {
-                logger.LogInformation(
-                    "Redis options resolved from ConnectionString: Host={Host} Port={Port} Db={Db} Tls={Tls} Username={Username} PasswordSet={PasswordSet}",
-                    effective.Host,
-                    effective.Port,
-                    effective.Database,
-                    effective.UseTls,
-                    string.IsNullOrWhiteSpace(effective.Username) ? "<none>" : effective.Username,
-                    !string.IsNullOrWhiteSpace(effective.Password));
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(
+                        "Redis options resolved from ConnectionString: Host={Host} Port={Port} Db={Db} Tls={Tls}",
+                        effective.Host,
+                        effective.Port,
+                        effective.Database,
+                        effective.UseTls);
+                }
             }
             catch { }
         }
@@ -208,6 +210,13 @@ internal sealed class RedisConnectionFactory(
 
     private async Task AuthenticateAndSelectAsync(long id, Stream stream, RedisConnectionOptions o, CancellationToken ct)
     {
+        // TODO: HELLO command causes issues with Redis 8.4 - investigate wire protocol
+        // For now, skip HELLO - Redis should default to RESP2 anyway
+        // await WriteHandshakeAsync(stream, ct,
+        //     write => RedisRespProtocol.WriteHelloCommand(write, 2),
+        //     () => RedisRespProtocol.GetHelloCommandLength(2)).ConfigureAwait(false);
+        // await RedisRespProtocol.SkipHelloResponseAsync(stream, ct).ConfigureAwait(false);
+
         var usedFallback = false;
         if (!string.IsNullOrEmpty(o.Password))
         {
@@ -395,6 +404,7 @@ internal sealed class RedisConnectionFactory(
             rented = ArrayPool<byte>.Shared.Rent(len);
             var written = write(rented.AsSpan(0, len));
             await stream.WriteAsync(rented.AsMemory(0, written), ct).ConfigureAwait(false);
+            await stream.FlushAsync(ct).ConfigureAwait(false); // CRITICAL: Flush to ensure data is sent
         }
         finally
         {
@@ -459,9 +469,16 @@ internal sealed class RedisConnectionFactory(
 
         var effective = o;
 
-        if (!string.IsNullOrWhiteSpace(o.ConnectionString) &&
-            RedisConnectionStringParser.TryParse(o.ConnectionString, out var parsed, out _))
+        if (!string.IsNullOrWhiteSpace(o.ConnectionString))
         {
+            if (!RedisConnectionStringParser.TryParse(o.ConnectionString, out var parsed, out var error))
+            {
+                throw new InvalidOperationException(
+                    $"Invalid Redis connection string: {error ?? "Unknown parsing error"}. " +
+                    $"Expected format: redis://[[user]:password@]host[:port][/database] or rediss:// for TLS. " +
+                    $"Provided: {o.ConnectionString}");
+            }
+
             effective = o with
             {
                 Host = parsed.Host,

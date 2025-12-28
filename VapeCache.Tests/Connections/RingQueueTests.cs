@@ -101,7 +101,12 @@ public class RingQueueTests
 
         await mux.DisposeAsync();
 
-        var ex = await Assert.ThrowsAnyAsync<Exception>(async () => await pending.AsTask().WaitAsync(TimeSpan.FromSeconds(2)));
+        var pendingTask = pending.AsTask();
+        var completed = await Task.WhenAny(pendingTask, Task.Delay(TimeSpan.FromSeconds(2)));
+
+        Assert.True(completed == pendingTask, "Pending operation did not complete within 2 seconds");
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(async () => await pendingTask);
         Assert.True(ex is ObjectDisposedException || ex is OperationCanceledException, $"Unexpected exception type: {ex.GetType()}");
     }
 
@@ -183,6 +188,8 @@ public class RingQueueTests
 
     private sealed class BlockingStream : Stream
     {
+        private readonly TaskCompletionSource<int> _blockTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public override bool CanRead => true;
         public override bool CanSeek => false;
         public override bool CanWrite => true;
@@ -194,15 +201,27 @@ public class RingQueueTests
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         public override void Write(byte[] buffer, int offset, int count) { }
 
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            if (cancellationToken.IsCancellationRequested)
-                return ValueTask.FromCanceled<int>(cancellationToken);
-
-            return new ValueTask<int>(Task.Delay(Timeout.Infinite, cancellationToken).ContinueWith<int>(_ => 0, cancellationToken));
+            var ctr = cancellationToken.Register(() => _blockTcs.TrySetCanceled(cancellationToken));
+            try
+            {
+                return await _blockTcs.Task.ConfigureAwait(false);
+            }
+            finally
+            {
+                ctr.Dispose();
+            }
         }
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
             ValueTask.CompletedTask;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+                _blockTcs.TrySetException(new ObjectDisposedException(nameof(BlockingStream)));
+            base.Dispose(disposing);
+        }
     }
 }

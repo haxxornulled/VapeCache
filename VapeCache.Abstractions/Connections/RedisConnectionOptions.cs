@@ -42,4 +42,18 @@ public sealed record RedisConnectionOptions
 
     public bool AllowAuthFallbackToPasswordOnly { get; init; } = true;
     public bool LogWhoAmIOnConnect { get; init; } = false;
+
+    /// <summary>
+    /// Maximum allowed size for Redis bulk strings (RESP protocol).
+    /// Prevents DoS attacks where malicious Redis server sends extremely large bulk strings.
+    /// Default: 16MB. Set to -1 for unlimited (not recommended for production).
+    /// </summary>
+    public int MaxBulkStringBytes { get; init; } = 16 * 1024 * 1024; // 16MB
+
+    /// <summary>
+    /// Maximum nesting depth for Redis arrays (RESP protocol).
+    /// Prevents stack overflow from pathological deeply-nested array responses.
+    /// Default: 64 levels. Set to -1 for unlimited (not recommended).
+    /// </summary>
+    public int MaxArrayDepth { get; init; } = 64;
 }

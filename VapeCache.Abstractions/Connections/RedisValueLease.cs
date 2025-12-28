@@ -2,17 +2,22 @@ using System.Buffers;
 
 namespace VapeCache.Abstractions.Connections;
 
-public readonly struct RedisValueLease : IDisposable
+// CRITICAL FIX P1-3: Add disposal tracking to prevent double-dispose bug
+// Cannot use 'ref struct' because it's incompatible with ValueTask<T>
+// Instead use disposal flag - small overhead (4 bytes) but prevents buffer pool corruption
+public struct RedisValueLease : IDisposable
 {
     private readonly byte[]? _buffer;
     private readonly int _length;
     private readonly bool _pooled;
+    private int _disposed; // 0 = not disposed, 1 = disposed
 
     internal RedisValueLease(byte[] buffer, int length, bool pooled)
     {
         _buffer = buffer;
         _length = length;
         _pooled = pooled;
+        _disposed = 0;
     }
 
     public static RedisValueLease Null => default;
@@ -25,8 +30,13 @@ public readonly struct RedisValueLease : IDisposable
 
     public void Dispose()
     {
+        // CRITICAL FIX P1-3: Atomic check-and-set to prevent double-dispose
+        // Only first thread to dispose will return buffer to pool
         if (_pooled && _buffer is not null)
-            ArrayPool<byte>.Shared.Return(_buffer);
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                ArrayPool<byte>.Shared.Return(_buffer);
+        }
     }
 }
 

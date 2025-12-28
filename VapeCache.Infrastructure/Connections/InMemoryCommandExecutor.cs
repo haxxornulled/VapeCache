@@ -13,6 +13,7 @@ internal sealed class InMemoryCommandExecutor : IRedisCommandExecutor
 {
     private readonly ConcurrentDictionary<string, CacheEntry> _store = new();
     private readonly Timer _expirationTimer;
+    private int _cleanupOffset = 0;
 
     public InMemoryCommandExecutor()
     {
@@ -22,21 +23,29 @@ internal sealed class InMemoryCommandExecutor : IRedisCommandExecutor
 
     private void CleanupExpiredEntries(object? state)
     {
-        // PERFORMANCE FIX P2-3: Optimize expiration cleanup to avoid full dictionary enumeration
-        // Use foreach with early exit instead of LINQ which allocates iterator objects
         var now = DateTimeOffset.UtcNow;
-        var expiredCount = 0;
-        const int MaxExpiredPerRun = 1000; // Limit work per cleanup cycle
+        var processedCount = 0;
+        const int MaxProcessedPerRun = 1000;
 
-        foreach (var kvp in _store)
+        var entries = _store.ToArray();
+        if (entries.Length == 0) return;
+
+        var startOffset = Volatile.Read(ref _cleanupOffset);
+
+        for (int i = 0; i < entries.Length && processedCount < MaxProcessedPerRun; i++)
         {
+            var idx = (startOffset + i) % entries.Length;
+            var kvp = entries[idx];
+
             if (kvp.Value.ExpiresAt.HasValue && kvp.Value.ExpiresAt <= now)
             {
                 _store.TryRemove(kvp.Key, out _);
-                if (++expiredCount >= MaxExpiredPerRun)
-                    break; // Prevent long pauses if many entries expired
             }
+            processedCount++;
         }
+
+        var nextOffset = (startOffset + processedCount) % Math.Max(1, entries.Length);
+        Volatile.Write(ref _cleanupOffset, nextOffset);
     }
 
     private bool IsExpired(CacheEntry entry)
@@ -155,11 +164,9 @@ internal sealed class InMemoryCommandExecutor : IRedisCommandExecutor
     {
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.String && entry.StringValue != null)
         {
-            // Update TTL if provided
             if (ttl.HasValue)
                 entry.ExpiresAt = DateTimeOffset.UtcNow.Add(ttl.Value);
 
-            // Return non-pooled lease (data is already in memory, no need for ArrayPool)
             return ValueTask.FromResult(new RedisValueLease(entry.StringValue, entry.StringValue.Length, pooled: false));
         }
         return ValueTask.FromResult(default(RedisValueLease));
@@ -209,7 +216,6 @@ internal sealed class InMemoryCommandExecutor : IRedisCommandExecutor
         {
             if (entry.HashValue!.TryGetValue(field, out var value))
             {
-                // Return non-pooled lease (data is already in memory, no need for ArrayPool)
                 return ValueTask.FromResult(new RedisValueLease(value, value.Length, pooled: false));
             }
         }
@@ -315,7 +321,6 @@ internal sealed class InMemoryCommandExecutor : IRedisCommandExecutor
             {
                 var value = entry.ListValue.First!.Value;
                 entry.ListValue.RemoveFirst();
-                // Return non-pooled lease (data is already in memory, no need for ArrayPool)
                 return ValueTask.FromResult(new RedisValueLease(value, value.Length, pooled: false));
             }
         }
@@ -332,7 +337,6 @@ internal sealed class InMemoryCommandExecutor : IRedisCommandExecutor
         if (entry.Type != EntryType.Set)
             throw new InvalidOperationException($"Key '{key}' is not a set");
 
-        // Use TryAdd for thread-safe insertion
         var added = entry.SetValue!.TryAdd(member.ToArray(), 0);
         return ValueTask.FromResult(added ? 1L : 0L);
     }
@@ -398,8 +402,6 @@ internal sealed class InMemoryCommandExecutor : IRedisCommandExecutor
         public byte[]? StringValue { get; set; }
         public ConcurrentDictionary<string, byte[]>? HashValue { get; set; }
         public LinkedList<byte[]>? ListValue { get; set; }
-        // Use ConcurrentDictionary instead of HashSet for thread-safety
-        // The value (byte) is unused - we only care about the keys
         public ConcurrentDictionary<byte[], byte>? SetValue { get; set; }
         public DateTimeOffset? ExpiresAt { get; set; }
     }

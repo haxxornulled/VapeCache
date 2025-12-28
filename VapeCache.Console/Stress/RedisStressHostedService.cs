@@ -14,10 +14,12 @@ internal sealed class RedisStressHostedService(
     IOptionsMonitor<RedisConnectionOptions> redisOptions,
     IServiceProvider services,
     IHostApplicationLifetime lifetime,
-    ILogger<RedisStressHostedService> logger) : IHostedService
+    ILogger<RedisStressHostedService> logger) : IHostedLifecycleService
 {
     private CancellationTokenSource? _cts;
     private Task? _runTask;
+
+    public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -27,6 +29,10 @@ internal sealed class RedisStressHostedService(
         _runTask = RunAsync(_cts.Token);
         return Task.CompletedTask;
     }
+
+    public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
@@ -41,6 +47,8 @@ internal sealed class RedisStressHostedService(
             try { await _runTask.WaitAsync(cancellationToken).ConfigureAwait(false); } catch { }
         }
     }
+
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     private async Task RunAsync(CancellationToken ct)
     {

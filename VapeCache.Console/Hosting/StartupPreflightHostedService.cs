@@ -15,10 +15,12 @@ internal sealed class StartupPreflightHostedService(
     IRedisConnectionFactory factory,
     IRedisFailoverController failover,
     ICurrentCacheService current,
-    ILogger<StartupPreflightHostedService> logger) : IHostedService
+    ILogger<StartupPreflightHostedService> logger) : IHostedLifecycleService
 {
     // RESP: *1\r\n$4\r\nPING\r\n
     private static readonly byte[] Ping = "*1\r\n$4\r\nPING\r\n"u8.ToArray();
+
+    public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -107,7 +109,13 @@ internal sealed class StartupPreflightHostedService(
         }
     }
 
+    public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     private async ValueTask<Result<Unit>> CreateAndValidateAsync(StartupPreflightOptions o, CancellationToken ct)
     {

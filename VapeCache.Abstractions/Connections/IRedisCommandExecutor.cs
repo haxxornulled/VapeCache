@@ -26,7 +26,21 @@ public interface IRedisCommandExecutor : IAsyncDisposable
 
     // Lists
     ValueTask<long> LPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct);
+    ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct);
     ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct);
+    ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct);
     ValueTask<byte[]?[]> LRangeAsync(string key, long start, long stop, CancellationToken ct);
+    ValueTask<long> LLenAsync(string key, CancellationToken ct);
     ValueTask<RedisValueLease> LPopLeaseAsync(string key, CancellationToken ct);
+
+    // Sets
+    ValueTask<long> SAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct);
+    ValueTask<long> SRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct);
+    ValueTask<bool> SIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct);
+    ValueTask<byte[]?[]> SMembersAsync(string key, CancellationToken ct);
+    ValueTask<long> SCardAsync(string key, CancellationToken ct);
+
+    // Server commands
+    ValueTask<string> PingAsync(CancellationToken ct);
+    ValueTask<string[]> ModuleListAsync(CancellationToken ct);
 }

@@ -13,8 +13,9 @@ namespace VapeCache.Infrastructure.Connections;
 internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueTaskSource<int>
 {
     private ManualResetValueTaskSourceCore<int> _core;
-    private int _completed; // 0 = not completed, 1 = completed
+    private int _completed;
     private CancellationTokenRegistration _ctr;
+    private ArraySegment<byte>[]? _currentBufferList;
 
     public SocketIoAwaitableEventArgs()
     {
@@ -29,17 +30,21 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
 
     public void ResetForOperation()
     {
-        // Ensure prior token registration is cleared.
         _ctr.Dispose();
         _ctr = default;
 
         Volatile.Write(ref _completed, 0);
         _core.Reset();
 
-        // Clear any previous buffer state so we don't retain arrays.
+        ReturnBufferList();
+
         BufferList = null;
-        SetBuffer(null, 0, 0);
+        SetBuffer(Array.Empty<byte>(), 0, 0);
     }
+
+    [ThreadStatic] private static ArraySegment<byte>[]? _cachedSubset8;
+    [ThreadStatic] private static ArraySegment<byte>[]? _cachedSubset16;
+    [ThreadStatic] private static ArraySegment<byte>[]? _cachedSubset32;
 
     public void SetBufferList(ArraySegment<byte>[] buffers, int count)
     {
@@ -49,11 +54,61 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
         BufferList = null;
         SetBuffer(null, 0, 0);
 
-        // CRITICAL FIX: Only assign the segments we're actually using, not the entire array!
-        // BufferList will validate ALL elements when assigned, so we must create a subset.
-        var subset = new ArraySegment<byte>[count];
-        Array.Copy(buffers, subset, count);
+        ArraySegment<byte>[] subset;
+        if (count <= 8)
+        {
+            subset = _cachedSubset8 ?? new ArraySegment<byte>[8];
+            _cachedSubset8 = null;
+        }
+        else if (count <= 16)
+        {
+            subset = _cachedSubset16 ?? new ArraySegment<byte>[16];
+            _cachedSubset16 = null;
+        }
+        else if (count <= 32)
+        {
+            subset = _cachedSubset32 ?? new ArraySegment<byte>[32];
+            _cachedSubset32 = null;
+        }
+        else
+        {
+            subset = new ArraySegment<byte>[count];
+        }
+
+        Array.Copy(buffers, 0, subset, 0, count);
+
+        Volatile.Write(ref _currentBufferList, subset);
         BufferList = subset;
+    }
+
+    /// <summary>
+    /// Return pooled buffer list when operation completes (call after socket operation finishes)
+    /// </summary>
+    public void ReturnBufferList()
+    {
+        var list = Interlocked.Exchange(ref _currentBufferList, null);
+        if (list == null) return;
+
+        // Now we own this list exclusively, safe to return to pool
+        // Return to pool based on size
+        if (list.Length == 8 && _cachedSubset8 == null)
+        {
+            Array.Clear(list, 0, list.Length); // Clear references
+            _cachedSubset8 = list;
+        }
+        else if (list.Length == 16 && _cachedSubset16 == null)
+        {
+            Array.Clear(list, 0, list.Length);
+            _cachedSubset16 = list;
+        }
+        else if (list.Length == 32 && _cachedSubset32 == null)
+        {
+            Array.Clear(list, 0, list.Length);
+            _cachedSubset32 = list;
+        }
+        // Else: let GC collect non-standard sizes
+
+        BufferList = null;
     }
 
     /// <summary>

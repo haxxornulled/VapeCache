@@ -182,16 +182,38 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
 
         services.AddVapecacheRedisConnections();
         services.AddVapecacheCaching();
+
+        // Grocery Store Demo Services
+        services.AddSingleton<VapeCache.Console.GroceryStore.GroceryStoreService>();
+        services.AddHostedService<VapeCache.Console.GroceryStore.GroceryStoreStressTest>();
+
         services.AddHostedService<StartupPreflightHostedService>();
         services.AddHostedService<RedisSanityCheckHostedService>();
         services.AddHostedService<RedisConnectionPoolReaperHostedService>();
-        services.AddHostedService<RedisStressHostedService>();
-        services.AddHostedService<LiveDemoHostedService>();
+        // services.AddHostedService<RedisStressHostedService>();  // Disabled in favor of grocery store test
+        // services.AddHostedService<LiveDemoHostedService>();     // Disabled in favor of grocery store test
     })
     .ConfigureContainer<ContainerBuilder>(static (context, builder) =>
     {
         builder.RegisterModule(new ConfigurationModule(context.Configuration));
     });
+
+// Check if running in comparison mode
+var runComparison = Environment.GetEnvironmentVariable("VAPECACHE_RUN_COMPARISON")?.ToLowerInvariant() == "true"
+    || args.Contains("--compare", StringComparer.OrdinalIgnoreCase);
+
+if (runComparison)
+{
+    // Run comparison mode instead of hosted service mode
+    var tempConfig = new ConfigurationBuilder()
+        .SetBasePath(AppContext.BaseDirectory)
+        .AddJsonFile("appsettings.json", optional: true)
+        .AddEnvironmentVariables()
+        .Build();
+
+    await VapeCache.Console.GroceryStore.MenuRunner.RunAsync(tempConfig);
+    return;
+}
 
 using var host = hostBuilder.Build();
 

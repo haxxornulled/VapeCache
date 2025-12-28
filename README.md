@@ -32,7 +32,11 @@
 
 ### Installation (Coming Soon)
 ```bash
+# Core library
 dotnet add package VapeCache.Infrastructure
+
+# .NET Aspire integration (optional)
+dotnet add package VapeCache.Extensions.Aspire
 ```
 
 ### Basic Usage
@@ -69,6 +73,25 @@ public class MyService
     }
 }
 ```
+
+### .NET Aspire Usage
+```csharp
+// AppHost (orchestration)
+var builder = DistributedApplication.CreateBuilder(args);
+var redis = builder.AddRedis("redis");
+var api = builder.AddProject<Projects.MyApi>("api")
+    .WithReference(redis);
+
+// API Project (Program.cs)
+builder.AddVapeCache()
+    .WithRedisFromAspire("redis")
+    .WithHealthChecks()
+    .WithAspireTelemetry();  // Cache hits/misses → Aspire Dashboard
+
+// View metrics at http://localhost:15888
+```
+
+See [.NET Aspire Integration](docs/ASPIRE_INTEGRATION.md) for details.
 
 ---
 
@@ -233,6 +256,7 @@ dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisClientCom
 - ✅ Comprehensive documentation
 
 ### v1.0 (2 weeks)
+- ✅ .NET Aspire integration package (VapeCache.Extensions.Aspire)
 - [ ] Backpressure metrics (queue depth, wait time)
 - [ ] Memory accounting (buffer pool telemetry)
 - [ ] TLS security documentation
@@ -240,7 +264,6 @@ dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisClientCom
 - [ ] NuGet packages published
 
 ### v1.1 (Q2 2025)
-- [ ] .NET Aspire integration package
 - [ ] Expanded command surface (20 → 50 commands)
 - [ ] Pub/Sub API
 - [ ] Lua scripting support
