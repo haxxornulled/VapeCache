@@ -339,17 +339,319 @@ if (builder.Environment.IsProduction())
 }
 ```
 
-### Example: Azure KeyVault Integration
+### Example: Azure Key Vault Integration
+
+VapeCache supports loading Redis credentials from Azure Key Vault using the `ConnectionString` property. This is the recommended approach for production deployments to avoid hardcoding secrets in appsettings.json.
+
+#### NuGet Packages Required
+
+```bash
+dotnet add package Azure.Extensions.AspNetCore.Configuration.Secrets
+dotnet add package Azure.Identity
+```
+
+#### Option 1: Load Connection String from Key Vault (Recommended)
+
+Store the entire Redis connection string in Key Vault as a single secret.
+
+**Step 1: Create Key Vault Secret**
+
+```bash
+# Using Azure CLI
+az keyvault secret set \
+  --vault-name "myvault" \
+  --name "RedisConnectionString" \
+  --value "redis://:YOUR_PASSWORD@redis.example.com:6380/0?useTls=true"
+```
+
+**Step 2: Configure Program.cs**
 
 ```csharp
-// Program.cs
+using Azure.Identity;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add Azure Key Vault to configuration
 builder.Configuration.AddAzureKeyVault(
     new Uri("https://myvault.vault.azure.net/"),
     new DefaultAzureCredential());
 
-// Now appsettings.json can reference KeyVault secrets:
-// "Password": "my-redis-password" (resolves to KeyVault secret "my-redis-password")
+// Add VapeCache services (will read ConnectionString from Key Vault)
+builder.Services.AddVapecacheRedisConnections();
+builder.Services.AddVapecacheCaching();
+
+var app = builder.Build();
+app.Run();
 ```
+
+**Step 3: Update appsettings.json**
+
+```json
+{
+  "RedisConnection": {
+    "ConnectionString": null  // Will be loaded from Key Vault secret "RedisConnectionString"
+  }
+}
+```
+
+**How It Works:**
+- `AddAzureKeyVault()` maps Key Vault secrets to `IConfiguration` keys
+- Secret `RedisConnectionString` → `IConfiguration["RedisConnection:ConnectionString"]`
+- VapeCache parses the connection string and overrides individual properties (Host, Port, Password, UseTls, etc.)
+
+#### Option 2: Load Individual Secrets from Key Vault
+
+Store individual connection parameters as separate Key Vault secrets.
+
+**Step 1: Create Key Vault Secrets**
+
+```bash
+az keyvault secret set --vault-name "myvault" --name "RedisConnection--Host" --value "redis.example.com"
+az keyvault secret set --vault-name "myvault" --name "RedisConnection--Port" --value "6380"
+az keyvault secret set --vault-name "myvault" --name "RedisConnection--Password" --value "YOUR_PASSWORD"
+az keyvault secret set --vault-name "myvault" --name "RedisConnection--UseTls" --value "true"
+```
+
+**Step 2: Configure Program.cs**
+
+```csharp
+using Azure.Identity;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add Azure Key Vault to configuration
+builder.Configuration.AddAzureKeyVault(
+    new Uri("https://myvault.vault.azure.net/"),
+    new DefaultAzureCredential());
+
+builder.Services.AddVapecacheRedisConnections();
+builder.Services.AddVapecacheCaching();
+
+var app = builder.Build();
+app.Run();
+```
+
+**Step 3: Update appsettings.json** (minimal/optional)
+
+```json
+{
+  "RedisConnection": {
+    "Database": 0  // Only non-secret defaults
+  }
+}
+```
+
+**How It Works:**
+- `AddAzureKeyVault()` replaces `--` (double dash) with `:` (colon)
+- Secret `RedisConnection--Password` → `IConfiguration["RedisConnection:Password"]`
+- Individual properties override appsettings.json defaults
+
+#### Option 3: Managed Identity (Production Recommended)
+
+Use Azure Managed Identity to access Key Vault without storing credentials.
+
+**Step 1: Enable Managed Identity**
+
+```bash
+# Enable system-assigned managed identity on Azure App Service
+az webapp identity assign --name myapp --resource-group mygroup
+
+# Grant Key Vault access to the managed identity
+az keyvault set-policy \
+  --name myvault \
+  --object-id <MANAGED_IDENTITY_OBJECT_ID> \
+  --secret-permissions get list
+```
+
+**Step 2: Configure Program.cs**
+
+```csharp
+using Azure.Identity;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// DefaultAzureCredential automatically uses Managed Identity in Azure
+builder.Configuration.AddAzureKeyVault(
+    new Uri("https://myvault.vault.azure.net/"),
+    new DefaultAzureCredential());
+
+builder.Services.AddVapecacheRedisConnections();
+builder.Services.AddVapecacheCaching();
+
+var app = builder.Build();
+app.Run();
+```
+
+**Benefits:**
+- No credentials in code or configuration
+- Automatic credential rotation
+- Works across Azure services (App Service, Container Apps, AKS, Functions)
+
+#### Option 4: Client Secret (Development/Testing)
+
+Use a service principal with client secret for local development.
+
+**Step 1: Create Service Principal**
+
+```bash
+az ad sp create-for-rbac --name "vapecache-dev-sp" --skip-assignment
+# Output: appId, password, tenant
+
+# Grant Key Vault access
+az keyvault set-policy \
+  --name myvault \
+  --spn <APP_ID> \
+  --secret-permissions get list
+```
+
+**Step 2: Configure Program.cs**
+
+```csharp
+using Azure.Identity;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Use ClientSecretCredential for local development
+if (builder.Environment.IsDevelopment())
+{
+    var tenantId = builder.Configuration["AzureAd:TenantId"];
+    var clientId = builder.Configuration["AzureAd:ClientId"];
+    var clientSecret = builder.Configuration["AzureAd:ClientSecret"];
+
+    builder.Configuration.AddAzureKeyVault(
+        new Uri("https://myvault.vault.azure.net/"),
+        new ClientSecretCredential(tenantId, clientId, clientSecret));
+}
+else
+{
+    // Production: Use Managed Identity
+    builder.Configuration.AddAzureKeyVault(
+        new Uri("https://myvault.vault.azure.net/"),
+        new DefaultAzureCredential());
+}
+
+builder.Services.AddVapecacheRedisConnections();
+builder.Services.AddVapecacheCaching();
+
+var app = builder.Build();
+app.Run();
+```
+
+**Step 3: Store client credentials in User Secrets**
+
+```bash
+dotnet user-secrets init
+dotnet user-secrets set "AzureAd:TenantId" "YOUR_TENANT_ID"
+dotnet user-secrets set "AzureAd:ClientId" "YOUR_CLIENT_ID"
+dotnet user-secrets set "AzureAd:ClientSecret" "YOUR_CLIENT_SECRET"
+```
+
+#### Connection String Format
+
+When using `ConnectionString` property, VapeCache supports standard Redis URI format:
+
+```
+redis://[username:password@]host:port[/database][?param=value&...]
+rediss://[username:password@]host:port[/database][?param=value&...] (TLS)
+```
+
+**Examples:**
+
+```bash
+# Localhost (development)
+redis://localhost:6379/0
+
+# Production with password
+redis://:YOUR_PASSWORD@redis.example.com:6380/0
+
+# Production with TLS
+rediss://:YOUR_PASSWORD@redis.example.com:6380/0
+
+# Redis 6+ ACL with username
+redis://admin:PASSWORD@redis.example.com:6379/0
+
+# Query parameters
+redis://redis.example.com:6379/0?useTls=true&connectTimeout=5000
+```
+
+**Supported Query Parameters:**
+- `useTls` (bool) - Enable TLS
+- `allowInvalidCert` (bool) - Skip cert validation (dev only)
+- `tlsHost` (string) - SNI hostname
+- `connectTimeout` (int) - Connection timeout in milliseconds
+- `database` (int) - Database number (alternative to path segment)
+
+#### Security Best Practices
+
+1. **Never hardcode secrets in appsettings.json**
+   ```json
+   ❌ BAD:
+   {
+     "RedisConnection": {
+       "Password": "super-secret-password"
+     }
+   }
+
+   ✅ GOOD:
+   {
+     "RedisConnection": {
+       "ConnectionString": null  // Loaded from Key Vault
+     }
+   }
+   ```
+
+2. **Use Managed Identity in production**
+   - Eliminates credential management
+   - Automatic rotation
+   - Audit trail in Azure AD
+
+3. **Restrict Key Vault access**
+   ```bash
+   # Grant minimal permissions (get + list only)
+   az keyvault set-policy \
+     --name myvault \
+     --object-id <IDENTITY> \
+     --secret-permissions get list
+   ```
+
+4. **Enable Key Vault audit logging**
+   ```bash
+   az monitor diagnostic-settings create \
+     --resource /subscriptions/.../vaults/myvault \
+     --name "audit-logs" \
+     --logs '[{"category":"AuditEvent","enabled":true}]' \
+     --workspace <LOG_ANALYTICS_WORKSPACE_ID>
+   ```
+
+5. **Use separate Key Vaults per environment**
+   - `myvault-dev`
+   - `myvault-staging`
+   - `myvault-prod`
+
+#### Troubleshooting Key Vault Integration
+
+**Error: `Azure.RequestFailedException: Access denied`**
+
+**Solution:** Grant Key Vault permissions to managed identity/service principal
+```bash
+az keyvault set-policy \
+  --name myvault \
+  --object-id <IDENTITY_OBJECT_ID> \
+  --secret-permissions get list
+```
+
+**Error: `CredentialUnavailableException: DefaultAzureCredential failed to retrieve a token`**
+
+**Solution:** Ensure managed identity is enabled
+```bash
+az webapp identity assign --name myapp --resource-group mygroup
+```
+
+**Error: `Configuration key 'RedisConnection:ConnectionString' is null`**
+
+**Solution:** Verify Key Vault secret name matches configuration key
+- Secret: `RedisConnectionString` → `IConfiguration["RedisConnection:ConnectionString"]`
+- Secret: `RedisConnection--ConnectionString` → `IConfiguration["RedisConnection:ConnectionString"]`
 
 ---
 

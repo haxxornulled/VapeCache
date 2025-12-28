@@ -85,6 +85,10 @@ dotnet add package VapeCache.Extensions.Aspire
 
 📖 **[Complete Configuration Reference](docs/CONFIGURATION.md)** - All appsettings.json options documented
 
+**Production Secrets Management:**
+- 🔐 **[Azure Key Vault Integration](docs/CONFIGURATION.md#example-azure-key-vault-integration)** - Load Redis passwords from Key Vault (recommended)
+- 🔑 **[Managed Identity](docs/CONFIGURATION.md#option-3-managed-identity-production-recommended)** - Production credential management
+
 ### Basic Usage
 ```csharp
 // 1. Add to your host (Program.cs)
