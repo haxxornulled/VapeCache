@@ -209,42 +209,48 @@ graph LR
 ### High-Level Components
 
 ```mermaid
-flowchart TD
-    App[Your Application]
+flowchart TB
+    App["🖥️ Your Application"]
 
-    subgraph Cache["VapeCache Layers"]
-        ICache[ICacheService<br/>Core API]
-        Stampede[StampedeProtectedCacheService<br/>Coalesce concurrent requests]
-        Hybrid[HybridCacheService<br/>Circuit breaker + fallback]
+    subgraph VapeCache["VapeCache - Caching Layer"]
+        direction TB
+        API["ICacheService<br/><i>Public API</i>"]
+        Stampede["StampedeProtectedCacheService<br/><i>Coalesce concurrent cache misses</i>"]
+        Hybrid["HybridCacheService<br/><i>Circuit breaker + automatic failover</i>"]
 
-        subgraph Backends["Cache Backends"]
-            Redis[RedisCacheService<br/>Redis backend]
-            Memory[InMemoryCacheService<br/>In-memory fallback]
+        subgraph Backends["Backend Implementations"]
+            direction LR
+            RedisBackend["RedisCacheService<br/><i>Primary: Redis backend</i>"]
+            MemoryBackend["InMemoryCacheService<br/><i>Fallback: In-memory cache</i>"]
         end
     end
 
-    subgraph Transport["Redis Transport"]
-        Executor[RedisCommandExecutor<br/>4 multiplexed connections]
-        Mux[RedisMultiplexedConnection<br/>Ordered pipelining + coalesced writes]
-        Pool[RedisConnectionPool<br/>Connection pooling + reaper]
-        Socket[Socket/NetworkStream/SslStream<br/>TCP/TLS connection]
+    subgraph RedisTransport["Redis Transport Layer - Why We're Fast"]
+        direction TB
+        Executor["RedisCommandExecutor<br/><i>4 multiplexed connections</i>"]
+        Multiplexer["RedisMultiplexedConnection<br/><i>Ordered pipelining + coalesced writes (29% faster)</i>"]
+        ConnectionPool["RedisConnectionPool<br/><i>Connection pooling + idle reaper</i>"]
+        Network["Socket / NetworkStream / SslStream<br/><i>TCP or TLS connection</i>"]
     end
 
-    App --> ICache
-    ICache --> Stampede
-    Stampede --> Hybrid
-    Hybrid -->|Primary| Redis
-    Hybrid -.->|Failover| Memory
-    Redis --> Executor
-    Executor --> Mux
-    Mux --> Pool
-    Pool --> Socket
-    Socket -->|RESP2 Protocol| RedisServer[(Redis Server)]
+    RedisInstance[("⚡ Redis Server<br/><i>RESP2 Protocol</i>")]
 
-    style Hybrid fill:#e1f5ff
-    style Memory fill:#ffe1e1
-    style Redis fill:#e1ffe1
-    style Mux fill:#fff4e1
+    App --> API
+    API --> Stampede
+    Stampede --> Hybrid
+    Hybrid -->|"✓ Healthy"| RedisBackend
+    Hybrid -.->|"⚠️ Circuit Open"| MemoryBackend
+    RedisBackend --> Executor
+    Executor --> Multiplexer
+    Multiplexer --> ConnectionPool
+    ConnectionPool --> Network
+    Network -->|"RESP2 Commands"| RedisInstance
+
+    style Hybrid fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
+    style MemoryBackend fill:#ffe1e1,stroke:#cc0000,stroke-width:2px
+    style RedisBackend fill:#e1ffe1,stroke:#00cc00,stroke-width:3px
+    style Multiplexer fill:#fff4e1,stroke:#ff9900,stroke-width:3px
+    style RedisInstance fill:#ffcccc,stroke:#cc0000,stroke-width:3px
 ```
 
 ### Transport Layer (Why We're Fast)
