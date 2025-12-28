@@ -203,26 +203,44 @@ graph LR
 ## 🏗️ Architecture
 
 ### High-Level Components
-```
-┌─────────────────────────────────────┐
-│ Your Application                    │
-├─────────────────────────────────────┤
-│ IVapeCache (typed cache API)       │
-│   ↓                                  │
-│ ICacheService (low-level API)      │
-│   ↓                                  │
-│ StampedeProtectedCacheService       │  ← Coalesce concurrent requests
-│   ↓                                  │
-│ HybridCacheService                  │  ← Circuit breaker + fallback
-│   ├─→ RedisCacheService             │  ← Try Redis first
-│   └─→ InMemoryCacheService          │  ← Fallback when Redis down
-│         ↓                            │
-│ RedisCommandExecutor                │  ← RESP2 protocol
-│   ↓                                  │
-│ RedisMultiplexedConnection          │  ← Ordered pipelining
-│   ↓                                  │
-│ Socket/NetworkStream/SslStream      │  ← TCP connection
-└─────────────────────────────────────┘
+
+```mermaid
+flowchart TD
+    App[Your Application]
+
+    subgraph Cache["VapeCache Layers"]
+        ICache[ICacheService<br/>Core API]
+        Stampede[StampedeProtectedCacheService<br/>Coalesce concurrent requests]
+        Hybrid[HybridCacheService<br/>Circuit breaker + fallback]
+
+        subgraph Backends["Cache Backends"]
+            Redis[RedisCacheService<br/>Redis backend]
+            Memory[InMemoryCacheService<br/>In-memory fallback]
+        end
+    end
+
+    subgraph Transport["Redis Transport"]
+        Executor[RedisCommandExecutor<br/>4 multiplexed connections]
+        Mux[RedisMultiplexedConnection<br/>Ordered pipelining + coalesced writes]
+        Pool[RedisConnectionPool<br/>Connection pooling + reaper]
+        Socket[Socket/NetworkStream/SslStream<br/>TCP/TLS connection]
+    end
+
+    App --> ICache
+    ICache --> Stampede
+    Stampede --> Hybrid
+    Hybrid -->|Primary| Redis
+    Hybrid -.->|Failover| Memory
+    Redis --> Executor
+    Executor --> Mux
+    Mux --> Pool
+    Pool --> Socket
+    Socket -->|RESP2 Protocol| RedisServer[(Redis Server)]
+
+    style Hybrid fill:#e1f5ff
+    style Memory fill:#ffe1e1
+    style Redis fill:#e1ffe1
+    style Mux fill:#fff4e1
 ```
 
 ### Transport Layer (Why We're Fast)
