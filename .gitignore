@@ -28,3 +28,24 @@ appsettings.*.Development.json
 # BenchmarkDotNet
 BenchmarkDotNet.Artifacts/
 
+# NuGet packages
+nupkg/
+*.nupkg
+*.snupkg
+
+# Test/debug scripts and artifacts
+test_*.csx
+test_*.cs
+test_*.ps1
+fix_*.ps1
+debug_*.ps1
+run_comparison.ps1
+*.log
+
+# Archives
+*.zip
+*.tar.gz
+*.7z
+
+# Temporary files
+nul
