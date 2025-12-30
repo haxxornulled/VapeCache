@@ -1,32 +1,44 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Caching.Memory;
 using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Infrastructure.Caching;
 
-internal sealed class InMemoryCacheService(IMemoryCache cache, ICurrentCacheService current, CacheStats stats) : ICacheService
+internal sealed class InMemoryCacheService : ICacheService
 {
+    private readonly IMemoryCache _cache;
+    private readonly ICurrentCacheService _current;
+    private readonly CacheStats _stats;
+
+    public InMemoryCacheService(IMemoryCache cache, ICurrentCacheService current, CacheStatsRegistry statsRegistry)
+    {
+        _cache = cache;
+        _current = current;
+        _stats = statsRegistry.GetOrCreate(CacheStatsNames.Memory);
+    }
+
     public string Name => "memory";
 
     public ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        current.SetCurrent(Name);
+        _current.SetCurrent(Name);
 
-        stats.IncGet();
+        _stats.IncGet();
         var start = Stopwatch.GetTimestamp();
         try
         {
-            if (cache.TryGetValue(key, out byte[]? value))
+            if (_cache.TryGetValue(key, out byte[]? value))
             {
-                stats.IncHit();
+                _stats.IncHit();
                 CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
                 CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
                 return ValueTask.FromResult<byte[]?>(value);
             }
 
-            stats.IncMiss();
+            _stats.IncMiss();
             CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
             CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
             return ValueTask.FromResult<byte[]?>(null);
@@ -40,16 +52,26 @@ internal sealed class InMemoryCacheService(IMemoryCache cache, ICurrentCacheServ
     public ValueTask SetAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions options, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        current.SetCurrent(Name);
-        stats.IncSet();
+        _current.SetCurrent(Name);
+        _stats.IncSet();
         CacheTelemetry.SetCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
-        var entry = cache.CreateEntry(key);
+        var entry = _cache.CreateEntry(key);
         try
         {
             if (options.Ttl is not null)
                 entry.AbsoluteExpirationRelativeToNow = options.Ttl;
-            entry.Value = value.ToArray();
+            if (MemoryMarshal.TryGetArray(value, out ArraySegment<byte> segment) &&
+                segment.Array is not null &&
+                segment.Offset == 0 &&
+                segment.Count == segment.Array.Length)
+            {
+                entry.Value = segment.Array;
+            }
+            else
+            {
+                entry.Value = value.ToArray();
+            }
         }
         finally
         {
@@ -62,11 +84,11 @@ internal sealed class InMemoryCacheService(IMemoryCache cache, ICurrentCacheServ
     public ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        current.SetCurrent(Name);
-        stats.IncRemove();
+        _current.SetCurrent(Name);
+        _stats.IncRemove();
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
-        cache.Remove(key);
+        _cache.Remove(key);
         CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "remove" } });
         return ValueTask.FromResult(true);
     }
@@ -81,7 +103,7 @@ internal sealed class InMemoryCacheService(IMemoryCache cache, ICurrentCacheServ
     public ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        current.SetCurrent(Name);
+        _current.SetCurrent(Name);
         var buffer = new ArrayBufferWriter<byte>(256);
         serialize(buffer, value);
         return SetAsync(key, buffer.WrittenMemory, options, ct);

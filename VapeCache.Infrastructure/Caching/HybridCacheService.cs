@@ -1,31 +1,41 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Infrastructure.Caching;
 
+/// <summary>
+/// Hybrid cache implementation that combines Redis for distributed caching with
+/// automatic failover to in-memory caching when Redis is unavailable.
+/// Uses a circuit breaker pattern to detect failures and gradually recover.
+/// </summary>
 internal sealed class HybridCacheService(
     RedisCacheService redis,
     InMemoryCacheService memory,
     ICurrentCacheService current,
     TimeProvider timeProvider,
     IOptions<RedisCircuitBreakerOptions> breakerOptions,
-    CacheStats stats,
+    CacheStatsRegistry statsRegistry,
     ILogger<HybridCacheService> logger,
     IRedisReconciliationService? reconciliation = null) : ICacheService
     , IRedisCircuitBreakerState
     , IRedisFailoverController
 {
+    /// <inheritdoc />
     public string Name => "hybrid";
 
+    private readonly CacheStats _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
     private readonly RedisCircuitBreakerOptions _breaker = breakerOptions.Value;
     private int _failures;
     private long _openUntilTicks;
     private int _halfOpenProbeInFlight;
     private int _forcedOpen;
     private string? _forcedReason;
+    private int _openAttempts;
+    private int _reconcileInFlight;
 
     public bool Enabled => _breaker.Enabled;
     public bool IsOpen => _breaker.Enabled && (IsForcedOpen || (Volatile.Read(ref _openUntilTicks) != 0 && !IsRedisAllowedNow()));
@@ -48,8 +58,12 @@ internal sealed class HybridCacheService(
     public void MarkRedisSuccess()
     {
         if (!_breaker.Enabled) return;
+        var wasOpen = Volatile.Read(ref _openUntilTicks) != 0;
         Volatile.Write(ref _failures, 0);
         Volatile.Write(ref _openUntilTicks, 0);
+        Volatile.Write(ref _openAttempts, 0);
+        if (!IsForcedOpen && wasOpen)
+            TryStartReconciliation();
     }
 
     public void MarkRedisFailure()
@@ -58,14 +72,32 @@ internal sealed class HybridCacheService(
         var failures = Interlocked.Increment(ref _failures);
         if (failures >= Math.Max(1, _breaker.ConsecutiveFailuresToOpen))
         {
-            var until = AddDurationToTimestamp(timeProvider.GetTimestamp(), _breaker.BreakDuration);
-            Volatile.Write(ref _openUntilTicks, until);
+            var attempts = Interlocked.Increment(ref _openAttempts);
+            var breakDuration = _breaker.BreakDuration;
+            if (_breaker.UseExponentialBackoff)
+            {
+                var scaled = _breaker.BreakDuration.TotalSeconds * Math.Pow(2, Math.Max(0, attempts - 1));
+                var capped = Math.Min(_breaker.MaxBreakDuration.TotalSeconds, scaled);
+                breakDuration = TimeSpan.FromSeconds(capped);
+            }
+
+            // If we've exceeded max retries, hold the breaker open indefinitely
+            if (_breaker.MaxConsecutiveRetries > 0 && attempts > _breaker.MaxConsecutiveRetries)
+            {
+                Volatile.Write(ref _openUntilTicks, long.MaxValue);
+                logger.LogWarning("Redis circuit breaker reached MaxConsecutiveRetries ({Attempts}); holding open indefinitely until manual reset.", attempts);
+            }
+            else
+            {
+                var until = AddDurationToTimestamp(timeProvider.GetTimestamp(), breakDuration);
+                Volatile.Write(ref _openUntilTicks, until);
+            }
             if (failures == _breaker.ConsecutiveFailuresToOpen)
             {
-                stats.IncBreakerOpened();
+                _stats.IncBreakerOpened();
                 CacheTelemetry.RedisBreakerOpened.Add(1, new TagList { { "backend", Name } });
-                logger.LogWarning("⚡ CIRCUIT BREAKER OPENED after {Failures} consecutive failures. Switching to in-memory mode for {Duration} seconds.", failures, _breaker.BreakDuration.TotalSeconds);
-                System.Console.WriteLine($"\n🔥🔥🔥 ⚡ CIRCUIT BREAKER OPENED! Failures={failures}, switching to IN-MEMORY mode for {_breaker.BreakDuration.TotalSeconds} seconds 🔥🔥🔥\n");
+                logger.LogWarning("⚡ CIRCUIT BREAKER OPENED after {Failures} consecutive failures. Switching to in-memory mode for {Duration} seconds.", failures, breakDuration.TotalSeconds);
+                System.Console.WriteLine($"\n🔥🔥🔥 ⚡ CIRCUIT BREAKER OPENED! Failures={failures}, switching to IN-MEMORY mode for {breakDuration.TotalSeconds} seconds 🔥🔥🔥\n");
             }
         }
     }
@@ -96,7 +128,7 @@ internal sealed class HybridCacheService(
 
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
-        stats.IncGet();
+        _stats.IncGet();
         CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
 
@@ -106,12 +138,12 @@ internal sealed class HybridCacheService(
             if (_breaker.Enabled && !IsRedisAllowedNow())
             {
                 current.SetCurrent(memory.Name);
-                stats.IncFallbackToMemory();
+                _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
 
                 var bytes = await memory.GetAsync(key, ct).ConfigureAwait(false);
-                if (bytes is null) { stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
-                else { stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
+                if (bytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
+                else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
                 return bytes;
             }
 
@@ -129,7 +161,7 @@ internal sealed class HybridCacheService(
                         probeTaken = false;
 
                         current.SetCurrent(memory.Name);
-                        stats.IncFallbackToMemory();
+                        _stats.IncFallbackToMemory();
                         CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
                         return await memory.GetAsync(key, ct).ConfigureAwait(false);
                     }
@@ -146,7 +178,7 @@ internal sealed class HybridCacheService(
                 current.SetCurrent(redis.Name);
                 if (v is not null)
                 {
-                    stats.IncHit();
+                    _stats.IncHit();
                     CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
                     return v;
                 }
@@ -155,14 +187,14 @@ internal sealed class HybridCacheService(
             {
                 MarkRedisFailure();
                 current.SetCurrent(memory.Name);
-                stats.IncFallbackToMemory();
+                _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
                 logger.LogWarning(ex, "Redis GET failed; falling back to memory.");
             }
 
             var fallbackBytes = await memory.GetAsync(key, ct).ConfigureAwait(false);
-            if (fallbackBytes is null) { stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
-            else { stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
+            if (fallbackBytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
+            else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
             return fallbackBytes;
         }
         finally
@@ -175,7 +207,7 @@ internal sealed class HybridCacheService(
 
     public async ValueTask SetAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions options, CancellationToken ct)
     {
-        stats.IncSet();
+        _stats.IncSet();
         CacheTelemetry.SetCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
 
@@ -185,7 +217,7 @@ internal sealed class HybridCacheService(
             if (_breaker.Enabled && !IsRedisAllowedNow())
             {
                 current.SetCurrent(memory.Name);
-                stats.IncFallbackToMemory();
+                _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
                 await memory.SetAsync(key, value, options, ct).ConfigureAwait(false);
 
@@ -208,7 +240,7 @@ internal sealed class HybridCacheService(
                         probeTaken = false;
 
                         current.SetCurrent(memory.Name);
-                        stats.IncFallbackToMemory();
+                        _stats.IncFallbackToMemory();
                         CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
                         await memory.SetAsync(key, value, options, ct).ConfigureAwait(false);
 
@@ -232,10 +264,11 @@ internal sealed class HybridCacheService(
             {
                 MarkRedisFailure();
                 current.SetCurrent(memory.Name);
-                stats.IncFallbackToMemory();
+                _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
                 logger.LogWarning(ex, "Redis SET failed; writing to memory.");
                 await memory.SetAsync(key, value, options, ct).ConfigureAwait(false);
+                reconciliation?.TrackWrite(key, value, options.Ttl);
             }
         }
         finally
@@ -248,7 +281,7 @@ internal sealed class HybridCacheService(
 
     public async ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
     {
-        stats.IncRemove();
+        _stats.IncRemove();
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
         var ok = await memory.RemoveAsync(key, ct).ConfigureAwait(false);
@@ -258,8 +291,9 @@ internal sealed class HybridCacheService(
             if (_breaker.Enabled && !IsRedisAllowedNow())
             {
                 current.SetCurrent(memory.Name);
-                stats.IncFallbackToMemory();
+                _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
+                reconciliation?.TrackDelete(key);
                 return ok;
             }
 
@@ -277,8 +311,9 @@ internal sealed class HybridCacheService(
                         probeTaken = false;
 
                         current.SetCurrent(memory.Name);
-                        stats.IncFallbackToMemory();
+                        _stats.IncFallbackToMemory();
                         CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
+                        reconciliation?.TrackDelete(key);
                         return ok;
                     }
                 }
@@ -298,9 +333,10 @@ internal sealed class HybridCacheService(
             {
                 MarkRedisFailure();
                 current.SetCurrent(memory.Name);
-                stats.IncFallbackToMemory();
+                _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
                 logger.LogWarning(ex, "Redis DEL failed; memory only.");
+                reconciliation?.TrackDelete(key);
                 return ok;
             }
         }
@@ -359,5 +395,35 @@ internal sealed class HybridCacheService(
         Volatile.Write(ref _forcedReason, null);
         Volatile.Write(ref _failures, 0);
         Volatile.Write(ref _openUntilTicks, 0);
+        Volatile.Write(ref _openAttempts, 0);
+        TryStartReconciliation();
+    }
+
+    private void TryStartReconciliation()
+    {
+        if (reconciliation is null)
+            return;
+
+        if (Interlocked.CompareExchange(ref _reconcileInFlight, 1, 0) != 0)
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            logger.LogInformation("Starting Redis reconciliation after breaker close.");
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                await reconciliation.ReconcileAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Redis reconciliation failed.");
+            }
+            finally
+            {
+                logger.LogInformation("Redis reconciliation finished in {Duration}ms.", sw.Elapsed.TotalMilliseconds);
+                Interlocked.Exchange(ref _reconcileInFlight, 0);
+            }
+        });
     }
 }

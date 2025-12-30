@@ -5,27 +5,38 @@ using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Caching;
 
-internal sealed class RedisCacheService(IRedisCommandExecutor redis, ICurrentCacheService current, CacheStats stats) : ICacheService
+internal sealed class RedisCacheService : ICacheService
 {
+    private readonly IRedisCommandExecutor _redis;
+    private readonly ICurrentCacheService _current;
+    private readonly CacheStats _stats;
+
+    public RedisCacheService(IRedisCommandExecutor redis, ICurrentCacheService current, CacheStatsRegistry statsRegistry)
+    {
+        _redis = redis;
+        _current = current;
+        _stats = statsRegistry.GetOrCreate(CacheStatsNames.Redis);
+    }
+
     public string Name => "redis";
 
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
-        current.SetCurrent(Name);
-        stats.IncGet();
+        _current.SetCurrent(Name);
+        _stats.IncGet();
         CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
         try
         {
-            var bytes = await redis.GetAsync(key, ct).ConfigureAwait(false);
+            var bytes = await _redis.GetAsync(key, ct).ConfigureAwait(false);
             if (bytes is null)
             {
-                stats.IncMiss();
+                _stats.IncMiss();
                 CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
             }
             else
             {
-                stats.IncHit();
+                _stats.IncHit();
                 CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
             }
             return bytes;
@@ -38,24 +49,24 @@ internal sealed class RedisCacheService(IRedisCommandExecutor redis, ICurrentCac
 
     public async ValueTask SetAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions options, CancellationToken ct)
     {
-        current.SetCurrent(Name);
-        stats.IncSet();
+        _current.SetCurrent(Name);
+        _stats.IncSet();
         CacheTelemetry.SetCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
-        var ok = await redis.SetAsync(key, value, options.Ttl, ct).ConfigureAwait(false);
+        var ok = await _redis.SetAsync(key, value, options.Ttl, ct).ConfigureAwait(false);
         CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "set" } });
         if (!ok) throw new InvalidOperationException("Redis SET failed.");
     }
 
     public async ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
     {
-        current.SetCurrent(Name);
-        stats.IncRemove();
+        _current.SetCurrent(Name);
+        _stats.IncRemove();
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
         try
         {
-            return await redis.DeleteAsync(key, ct).ConfigureAwait(false);
+            return await _redis.DeleteAsync(key, ct).ConfigureAwait(false);
         }
         finally
         {

@@ -60,8 +60,8 @@ public sealed class CacheEndpointsTests
                     services.AddRouting();
                     services.AddMemoryCache();
                     services.AddSingleton<ICurrentCacheService, CurrentCacheService>();
-                    services.AddSingleton<CacheStats>();
-                    services.AddSingleton<ICacheStats>(sp => sp.GetRequiredService<CacheStats>());
+                    services.AddSingleton<CacheStatsRegistry>();
+                    services.AddSingleton<ICacheStats, CurrentCacheStats>();
                     services.AddSingleton<ICacheService, InMemoryCacheService>();
                 });
                 web.Configure(app =>

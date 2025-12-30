@@ -20,13 +20,14 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
     private readonly ICurrentCacheService _current;
     private readonly ILogger<HybridCommandExecutor> _logger;
     private readonly RedisCircuitBreakerOptions _breaker;
+    private int _halfOpenProbes;
 
     public HybridCommandExecutor(
         RedisCommandExecutor redis,
         InMemoryCommandExecutor memory,
         IRedisCircuitBreakerState breakerState,
         IRedisFailoverController breakerController,
-        CacheStats stats,
+        CacheStatsRegistry statsRegistry,
         ICurrentCacheService current,
         IOptions<RedisCircuitBreakerOptions> breakerOptions,
         ILogger<HybridCommandExecutor> logger)
@@ -35,10 +36,65 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
         _memory = memory;
         _breakerState = breakerState;
         _breakerController = breakerController;
-        _stats = stats;
+        _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
         _current = current;
         _logger = logger;
         _breaker = breakerOptions.Value;
+    }
+
+    private readonly struct ProbeScope : IDisposable
+    {
+        private readonly HybridCommandExecutor _owner;
+        private readonly CancellationTokenSource? _cts;
+        private readonly bool _tookSlot;
+
+        public bool Allowed { get; }
+        public bool Throttled { get; }
+        public CancellationToken Token { get; }
+
+        public ProbeScope(bool allowed, bool throttled, bool tookSlot, CancellationToken token, CancellationTokenSource? cts, HybridCommandExecutor owner)
+        {
+            Allowed = allowed;
+            Throttled = throttled;
+            _tookSlot = tookSlot;
+            Token = token;
+            _cts = cts;
+            _owner = owner;
+        }
+
+        public void Dispose()
+        {
+            _cts?.Dispose();
+            if (_tookSlot)
+                Interlocked.Decrement(ref _owner._halfOpenProbes);
+        }
+    }
+
+    private ProbeScope StartProbe(CancellationToken ct)
+    {
+        if (!_breaker.Enabled)
+            return new ProbeScope(allowed: true, throttled: false, tookSlot: false, token: ct, cts: null, owner: this);
+
+        // Only throttle when we've opened previously (consecutive failures at/above threshold) or when half-open probes are in flight.
+        var useSlot = _breakerState.ConsecutiveFailures >= _breaker.ConsecutiveFailuresToOpen || _breakerState.HalfOpenProbeInFlight;
+        if (!useSlot)
+            return new ProbeScope(allowed: true, throttled: false, tookSlot: false, token: ct, cts: null, owner: this);
+
+        var probeNum = Interlocked.Increment(ref _halfOpenProbes);
+        if (probeNum > _breaker.MaxHalfOpenProbes)
+        {
+            Interlocked.Decrement(ref _halfOpenProbes);
+            return new ProbeScope(allowed: false, throttled: true, tookSlot: false, token: ct, cts: null, owner: this);
+        }
+
+        CancellationTokenSource? cts = null;
+        if (_breaker.HalfOpenProbeTimeout > TimeSpan.Zero)
+        {
+            cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(_breaker.HalfOpenProbeTimeout);
+        }
+
+        return new ProbeScope(allowed: true, throttled: false, tookSlot: true, token: cts?.Token ?? ct, cts: cts, owner: this);
     }
 
     // Retry helper with exponential backoff for transient failures
@@ -87,9 +143,17 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             return await _memory.GetAsync(key, ct).ConfigureAwait(false);
         }
 
+        using var probe = StartProbe(ct);
+        if (probe.Throttled)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            return await _memory.GetAsync(key, ct).ConfigureAwait(false);
+        }
+
         try
         {
-            var result = await _redis.GetAsync(key, ct).ConfigureAwait(false);
+            var result = await _redis.GetAsync(key, probe.Token).ConfigureAwait(false);
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
             return result;
@@ -113,9 +177,17 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             return await _memory.GetExAsync(key, ttl, ct).ConfigureAwait(false);
         }
 
+        using var probe = StartProbe(ct);
+        if (probe.Throttled)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            return await _memory.GetExAsync(key, ttl, ct).ConfigureAwait(false);
+        }
+
         try
         {
-            var result = await _redis.GetExAsync(key, ttl, ct).ConfigureAwait(false);
+            var result = await _redis.GetExAsync(key, ttl, probe.Token).ConfigureAwait(false);
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
             return result;
@@ -139,9 +211,17 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             return await _memory.MGetAsync(keys, ct).ConfigureAwait(false);
         }
 
+        using var probe = StartProbe(ct);
+        if (probe.Throttled)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            return await _memory.MGetAsync(keys, ct).ConfigureAwait(false);
+        }
+
         try
         {
-            var result = await _redis.MGetAsync(keys, ct).ConfigureAwait(false);
+            var result = await _redis.MGetAsync(keys, probe.Token).ConfigureAwait(false);
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
             return result;
@@ -165,9 +245,17 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             return await _memory.SetAsync(key, value, ttl, ct).ConfigureAwait(false);
         }
 
+        using var probe = StartProbe(ct);
+        if (probe.Throttled)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            return await _memory.SetAsync(key, value, ttl, ct).ConfigureAwait(false);
+        }
+
         try
         {
-            var result = await _redis.SetAsync(key, value, ttl, ct).ConfigureAwait(false);
+            var result = await _redis.SetAsync(key, value, ttl, probe.Token).ConfigureAwait(false);
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
             return result;
@@ -191,9 +279,17 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             return await _memory.MSetAsync(items, ct).ConfigureAwait(false);
         }
 
+        using var probe = StartProbe(ct);
+        if (probe.Throttled)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            return await _memory.MSetAsync(items, ct).ConfigureAwait(false);
+        }
+
         try
         {
-            var result = await _redis.MSetAsync(items, ct).ConfigureAwait(false);
+            var result = await _redis.MSetAsync(items, probe.Token).ConfigureAwait(false);
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
             return result;
@@ -217,9 +313,17 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             return await _memory.DeleteAsync(key, ct).ConfigureAwait(false);
         }
 
+        using var probe = StartProbe(ct);
+        if (probe.Throttled)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            return await _memory.DeleteAsync(key, ct).ConfigureAwait(false);
+        }
+
         try
         {
-            var result = await _redis.DeleteAsync(key, ct).ConfigureAwait(false);
+            var result = await _redis.DeleteAsync(key, probe.Token).ConfigureAwait(false);
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
             return result;
@@ -243,9 +347,17 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             return await _memory.TtlSecondsAsync(key, ct).ConfigureAwait(false);
         }
 
+        using var probe = StartProbe(ct);
+        if (probe.Throttled)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            return await _memory.TtlSecondsAsync(key, ct).ConfigureAwait(false);
+        }
+
         try
         {
-            var result = await _redis.TtlSecondsAsync(key, ct).ConfigureAwait(false);
+            var result = await _redis.TtlSecondsAsync(key, probe.Token).ConfigureAwait(false);
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
             return result;
@@ -840,6 +952,87 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             _current.SetCurrent("memory");
             _logger.LogWarning(ex, "Redis MODULE LIST failed; falling back to in-memory");
             return await _memory.ModuleListAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask<bool> ExpireAsync(string key, TimeSpan ttl, CancellationToken ct)
+    {
+        if (_breaker.Enabled && _breakerState.IsOpen)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            _logger.LogWarning("Redis breaker open: executing {Command} against in-memory backend", "EXPIRE");
+            return await _memory.ExpireAsync(key, ttl, ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            var result = await _redis.ExpireAsync(key, ttl, ct).ConfigureAwait(false);
+            _breakerController.MarkRedisSuccess();
+            _current.SetCurrent("redis");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _breakerController.MarkRedisFailure();
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            _logger.LogWarning(ex, "Redis EXPIRE failed for key {Key}; falling back to in-memory", key);
+            return await _memory.ExpireAsync(key, ttl, ct).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask<byte[]?> LIndexAsync(string key, long index, CancellationToken ct)
+    {
+        if (_breaker.Enabled && _breakerState.IsOpen)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            _logger.LogWarning("Redis breaker open: executing {Command} against in-memory backend", "LINDEX");
+            return await _memory.LIndexAsync(key, index, ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            var result = await _redis.LIndexAsync(key, index, ct).ConfigureAwait(false);
+            _breakerController.MarkRedisSuccess();
+            _current.SetCurrent("redis");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _breakerController.MarkRedisFailure();
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            _logger.LogWarning(ex, "Redis LINDEX failed for key {Key}; falling back to in-memory", key);
+            return await _memory.LIndexAsync(key, index, ct).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask<byte[]?> GetRangeAsync(string key, long start, long end, CancellationToken ct)
+    {
+        if (_breaker.Enabled && _breakerState.IsOpen)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            _logger.LogWarning("Redis breaker open: executing {Command} against in-memory backend", "GETRANGE");
+            return await _memory.GetRangeAsync(key, start, end, ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            var result = await _redis.GetRangeAsync(key, start, end, ct).ConfigureAwait(false);
+            _breakerController.MarkRedisSuccess();
+            _current.SetCurrent("redis");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _breakerController.MarkRedisFailure();
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent("memory");
+            _logger.LogWarning(ex, "Redis GETRANGE failed for key {Key}; falling back to in-memory", key);
+            return await _memory.GetRangeAsync(key, start, end, ct).ConfigureAwait(false);
         }
     }
 

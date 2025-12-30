@@ -59,8 +59,8 @@ public class CircuitBreakerPerformanceBenchmarks
         // Create separate pure in-memory cache for baseline comparison
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var currentService = new CurrentCacheService();
-        var stats = new CacheStats();
-        _inMemory = new InMemoryCacheService(memoryCache, currentService, stats);
+        var statsRegistry = new CacheStatsRegistry();
+        _inMemory = new InMemoryCacheService(memoryCache, currentService, statsRegistry);
 
         // Prepare test data
         _payload = Encoding.UTF8.GetBytes("Benchmark payload data");

@@ -22,11 +22,11 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
 
     public PollyRedisCircuitBreaker(
         IOptions<RedisCircuitBreakerOptions> options,
-        CacheStats stats,
+        CacheStatsRegistry statsRegistry,
         ILogger<PollyRedisCircuitBreaker> logger)
     {
         _options = options.Value;
-        _stats = stats;
+        _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
         _logger = logger;
 
         // Build Polly resilience pipeline with circuit breaker

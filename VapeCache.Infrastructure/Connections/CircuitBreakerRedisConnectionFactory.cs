@@ -21,7 +21,6 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
     private readonly ILogger<CircuitBreakerRedisConnectionFactory> _logger;
     private readonly CacheStats _stats;
     private readonly RedisCircuitBreakerOptions _options;
-    private readonly IRedisReconciliationService? _reconciliation;
     private CircuitState _currentState = CircuitState.Closed;
     private int _consecutiveRetries = 0;
     private TimeSpan _currentBreakDuration;
@@ -29,15 +28,13 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
     public CircuitBreakerRedisConnectionFactory(
         RedisConnectionFactory inner, // Concrete type to avoid circular dep with IRedisConnectionFactory
         IOptions<RedisCircuitBreakerOptions> options,
-        CacheStats stats,
-        ILogger<CircuitBreakerRedisConnectionFactory> logger,
-        IRedisReconciliationService? reconciliation = null) // Optional - may be null if not registered yet
+        CacheStatsRegistry statsRegistry,
+        ILogger<CircuitBreakerRedisConnectionFactory> logger)
     {
         _inner = inner;
         _options = options.Value;
-        _stats = stats;
+        _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
         _logger = logger;
-        _reconciliation = reconciliation;
         _currentBreakDuration = _options.BreakDuration; // Initialize with base duration
 
         // Build Polly resilience pipeline with circuit breaker that handles Result<T>
@@ -75,6 +72,7 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
                 },
                 OnOpened = args =>
                 {
+                    var previous = _currentState;
                     _currentState = CircuitState.Open;
                     _stats.IncBreakerOpened();
                     CacheTelemetry.RedisBreakerOpened.Add(1, new System.Diagnostics.TagList { { "backend", "hybrid" } });
@@ -92,17 +90,20 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
                     }
 
                     _logger.LogWarning(
-                        "⚡ CIRCUIT BREAKER OPENED - Redis connections failing (retry #{Retry}). Switching to in-memory mode for {Duration} seconds.",
+                        "⚡ CIRCUIT BREAKER OPENED - Redis connections failing (retry #{Retry}). Switching to in-memory mode for {Duration} seconds. State: {Previous}->{Current}",
                         _consecutiveRetries,
-                        _currentBreakDuration.TotalSeconds);
+                        _currentBreakDuration.TotalSeconds,
+                        previous,
+                        _currentState);
 
                     Console.WriteLine(
                         $"\n🔥🔥🔥 ⚡ CIRCUIT BREAKER OPENED! Redis connections failing (retry #{_consecutiveRetries}), switching to IN-MEMORY mode for {_currentBreakDuration.TotalSeconds} seconds 🔥🔥🔥\n");
 
                     return ValueTask.CompletedTask;
                 },
-                OnClosed = async args =>
+                OnClosed = args =>
                 {
+                    var previous = _currentState;
                     _currentState = CircuitState.Closed;
 
                     // Reset retry counter and break duration on successful recovery
@@ -111,34 +112,19 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
                     _currentBreakDuration = _options.BreakDuration;
 
                     _logger.LogInformation(
-                        "✅ Circuit breaker CLOSED. Redis operations resumed after {Retries} retries.",
-                        totalRetries);
+                        "✅ Circuit breaker CLOSED. Redis operations resumed after {Retries} retries. State: {Previous}->{Current}",
+                        totalRetries,
+                        previous,
+                        _currentState);
                     Console.WriteLine(
                         $"\n✅✅✅ Circuit breaker CLOSED! Redis operations resumed after {totalRetries} retries. ✅✅✅\n");
-
-                    // Trigger reconciliation to sync in-memory writes back to Redis
-                    if (_reconciliation != null && _reconciliation.PendingOperations > 0)
-                    {
-                        _logger.LogInformation(
-                            "🔄 Triggering reconciliation: {Count} pending operations",
-                            _reconciliation.PendingOperations);
-                        Console.WriteLine(
-                            $"\n🔄 Syncing {_reconciliation.PendingOperations} in-memory writes back to Redis...\n");
-
-                        try
-                        {
-                            await _reconciliation.ReconcileAsync().ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Failed to reconcile in-memory writes to Redis");
-                        }
-                    }
+                    return ValueTask.CompletedTask;
                 },
                 OnHalfOpened = args =>
                 {
+                    var previous = _currentState;
                     _currentState = CircuitState.HalfOpen;
-                    _logger.LogInformation("🔄 Circuit breaker HALF-OPEN. Testing Redis connection...");
+                    _logger.LogInformation("🔄 Circuit breaker HALF-OPEN. Testing Redis connection... State: {Previous}->{Current}", previous, _currentState);
                     Console.WriteLine("\n🔄 Circuit breaker HALF-OPEN. Testing Redis connection...\n");
                     return ValueTask.CompletedTask;
                 }
@@ -171,3 +157,4 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
         return _inner.DisposeAsync();
     }
 }
+
