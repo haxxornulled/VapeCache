@@ -116,6 +116,26 @@ internal static class RedisRespProtocol
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteDelCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "DEL", key);
 
+    public static int GetExpireCommandLength(string key, int seconds)
+    {
+        // EXPIRE key seconds
+        var secondsLen = GetIntLength(seconds);
+        return GetHeaderLen(3)
+               + GetBulkLen(6) + 6 + 2 // EXPIRE
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(secondsLen) + secondsLen + 2;
+    }
+
+    public static int WriteExpireCommand(Span<byte> destination, string key, int seconds)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "EXPIRE");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkInt(destination.Slice(idx), seconds);
+        return idx;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetUnlinkCommandLength(string key) => GetCommandLength(2, "UNLINK", key);
 
@@ -239,6 +259,49 @@ internal static class RedisRespProtocol
         idx += WriteBulkString(destination.Slice(idx), key);
         idx += WriteBulkInt64(destination.Slice(idx), start);
         idx += WriteBulkInt64(destination.Slice(idx), stop);
+        return idx;
+    }
+
+    public static int GetLIndexCommandLength(string key, long index)
+    {
+        // LINDEX key index
+        var indexLen = GetIntLength(index);
+        return GetHeaderLen(3)
+               + GetBulkLen(6) + 6 + 2 // LINDEX
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(indexLen) + indexLen + 2;
+    }
+
+    public static int WriteLIndexCommand(Span<byte> destination, string key, long index)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "LINDEX");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkInt64(destination.Slice(idx), index);
+        return idx;
+    }
+
+    public static int GetGetRangeCommandLength(string key, long start, long end)
+    {
+        // GETRANGE key start end
+        var startLen = GetIntLength(start);
+        var endLen = GetIntLength(end);
+        return GetHeaderLen(4)
+               + GetBulkLen(8) + 8 + 2 // GETRANGE
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(startLen) + startLen + 2
+               + GetBulkLen(endLen) + endLen + 2;
+    }
+
+    public static int WriteGetRangeCommand(Span<byte> destination, string key, long start, long end)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 4);
+        idx += WriteBulkString(destination.Slice(idx), "GETRANGE");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkInt64(destination.Slice(idx), start);
+        idx += WriteBulkInt64(destination.Slice(idx), end);
         return idx;
     }
 
@@ -796,6 +859,27 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    private static int WriteBulkLong(Span<byte> destination, long value)
+    {
+        destination[0] = (byte)'$';
+        var idx = 1;
+
+        Span<byte> tmp = stackalloc byte[32];
+        if (!Utf8Formatter.TryFormat(value, tmp, out var written))
+            throw new InvalidOperationException("Failed to format long.");
+
+        idx += WriteIntAscii(destination.Slice(idx), written);
+        destination[idx++] = (byte)'\r';
+        destination[idx++] = (byte)'\n';
+
+        tmp.Slice(0, written).CopyTo(destination.Slice(idx));
+        idx += written;
+
+        destination[idx++] = (byte)'\r';
+        destination[idx++] = (byte)'\n';
+        return idx;
+    }
+
     private static int WriteBulkInt64(Span<byte> destination, long value)
     {
         destination[0] = (byte)'$';
@@ -943,6 +1027,505 @@ internal static class RedisRespProtocol
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteSCardCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "SCARD", key);
+
+    // ZADD (add/update sorted set member)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetZAddCommandLength(string key, string score, int memberLen)
+    {
+        return GetHeaderLen(4)
+               + GetBulkStringLen("ZADD") + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkStringLen(score) + 2
+               + GetBulkLen(memberLen) + memberLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteZAddCommand(Span<byte> destination, string key, string score, ReadOnlySpan<byte> member)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 4);
+        idx += WriteBulkString(destination.Slice(idx), "ZADD");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkString(destination.Slice(idx), score);
+        idx += WriteBulkBytes(destination.Slice(idx), member);
+        return idx;
+    }
+
+    // ZREM (remove sorted set member)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetZRemCommandLength(string key, int memberLen)
+    {
+        return GetHeaderLen(3)
+               + GetBulkStringLen("ZREM") + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(memberLen) + memberLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteZRemCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "ZREM");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkBytes(destination.Slice(idx), member);
+        return idx;
+    }
+
+    // ZCARD (sorted set cardinality)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetZCardCommandLength(string key) => GetCommandLength(2, "ZCARD", key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteZCardCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "ZCARD", key);
+
+    // ZSCORE (member score)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetZScoreCommandLength(string key, int memberLen)
+    {
+        return GetHeaderLen(3)
+               + GetBulkStringLen("ZSCORE") + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(memberLen) + memberLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteZScoreCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "ZSCORE");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkBytes(destination.Slice(idx), member);
+        return idx;
+    }
+
+    // ZRANK/ZREVRANK (member rank)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetZRankCommandLength(string key, int memberLen, bool descending)
+    {
+        var command = descending ? "ZREVRANK" : "ZRANK";
+        return GetHeaderLen(3)
+               + GetBulkStringLen(command) + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(memberLen) + memberLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteZRankCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member, bool descending)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), descending ? "ZREVRANK" : "ZRANK");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkBytes(destination.Slice(idx), member);
+        return idx;
+    }
+
+    // ZINCRBY (increment score)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetZIncrByCommandLength(string key, string increment, int memberLen)
+    {
+        return GetHeaderLen(4)
+               + GetBulkStringLen("ZINCRBY") + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkStringLen(increment) + 2
+               + GetBulkLen(memberLen) + memberLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteZIncrByCommand(Span<byte> destination, string key, string increment, ReadOnlySpan<byte> member)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 4);
+        idx += WriteBulkString(destination.Slice(idx), "ZINCRBY");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkString(destination.Slice(idx), increment);
+        idx += WriteBulkBytes(destination.Slice(idx), member);
+        return idx;
+    }
+
+    // ZRANGE/ZREVRANGE (with scores)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetZRangeWithScoresCommandLength(string key, long start, long stop, bool descending)
+    {
+        var startLen = GetIntLength(start);
+        var stopLen = GetIntLength(stop);
+        var command = descending ? "ZREVRANGE" : "ZRANGE";
+
+        return GetHeaderLen(5)
+               + GetBulkStringLen(command) + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(startLen) + startLen + 2
+               + GetBulkLen(stopLen) + stopLen + 2
+               + GetBulkStringLen("WITHSCORES") + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteZRangeWithScoresCommand(Span<byte> destination, string key, long start, long stop, bool descending)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 5);
+        idx += WriteBulkString(destination.Slice(idx), descending ? "ZREVRANGE" : "ZRANGE");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkLong(destination.Slice(idx), start);
+        idx += WriteBulkLong(destination.Slice(idx), stop);
+        idx += WriteBulkString(destination.Slice(idx), "WITHSCORES");
+        return idx;
+    }
+
+    // ZRANGEBYSCORE/ZREVRANGEBYSCORE (with scores)
+    public static int GetZRangeByScoreWithScoresCommandLength(
+        string key,
+        string min,
+        string max,
+        bool descending,
+        long? offset,
+        long? count)
+    {
+        var command = descending ? "ZREVRANGEBYSCORE" : "ZRANGEBYSCORE";
+        var parts = 5;
+        if (offset.HasValue && count.HasValue)
+            parts += 2;
+
+        var len = GetHeaderLen(parts)
+                  + GetBulkStringLen(command) + 2
+                  + GetBulkStringLen(key) + 2
+                  + GetBulkStringLen(min) + 2
+                  + GetBulkStringLen(max) + 2
+                  + GetBulkStringLen("WITHSCORES") + 2;
+
+        if (offset.HasValue && count.HasValue)
+        {
+            var offsetLen = GetIntLength(offset.Value);
+            var countLen = GetIntLength(count.Value);
+            len += GetBulkStringLen("LIMIT") + 2
+                   + GetBulkLen(offsetLen) + offsetLen + 2
+                   + GetBulkLen(countLen) + countLen + 2;
+        }
+
+        return len;
+    }
+
+    public static int WriteZRangeByScoreWithScoresCommand(
+        Span<byte> destination,
+        string key,
+        string min,
+        string max,
+        bool descending,
+        long? offset,
+        long? count)
+    {
+        var parts = 5;
+        if (offset.HasValue && count.HasValue)
+            parts += 2;
+
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), parts);
+        idx += WriteBulkString(destination.Slice(idx), descending ? "ZREVRANGEBYSCORE" : "ZRANGEBYSCORE");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkString(destination.Slice(idx), min);
+        idx += WriteBulkString(destination.Slice(idx), max);
+        idx += WriteBulkString(destination.Slice(idx), "WITHSCORES");
+
+        if (offset.HasValue && count.HasValue)
+        {
+            idx += WriteBulkString(destination.Slice(idx), "LIMIT");
+            idx += WriteBulkLong(destination.Slice(idx), offset.Value);
+            idx += WriteBulkLong(destination.Slice(idx), count.Value);
+        }
+
+        return idx;
+    }
+
+    // JSON.GET
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetJsonGetCommandLength(string key, string? path)
+        => path is null
+            ? GetCommandLength(2, "JSON.GET", key)
+            : GetCommandLength(3, "JSON.GET", key, path);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteJsonGetCommand(Span<byte> destination, string key, string? path)
+        => path is null
+            ? WriteCommand(destination, 2, "JSON.GET", key)
+            : WriteCommand(destination, 3, "JSON.GET", key, path);
+
+    // JSON.SET
+    public static int GetJsonSetCommandLength(string key, string path, int jsonLength)
+    {
+        return GetHeaderLen(4)
+               + GetBulkStringLen("JSON.SET") + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkStringLen(path) + 2
+               + GetBulkLen(jsonLength) + jsonLength + 2;
+    }
+
+    // Header-only variant (omits JSON bytes and trailing CRLF) for scatter/gather writes.
+    public static int WriteJsonSetCommandHeader(Span<byte> destination, string key, string path, int jsonLength)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 4);
+        idx += WriteBulkString(destination.Slice(idx), "JSON.SET");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkString(destination.Slice(idx), path);
+        idx += WriteBulkLength(destination.Slice(idx), jsonLength);
+        return idx;
+    }
+
+    // JSON.DEL
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetJsonDelCommandLength(string key, string? path)
+        => path is null
+            ? GetCommandLength(2, "JSON.DEL", key)
+            : GetCommandLength(3, "JSON.DEL", key, path);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteJsonDelCommand(Span<byte> destination, string key, string? path)
+        => path is null
+            ? WriteCommand(destination, 2, "JSON.DEL", key)
+            : WriteCommand(destination, 3, "JSON.DEL", key, path);
+
+    // SCAN/SSCAN/HSCAN/ZSCAN
+    public static int GetScanCommandLength(string command, string? key, long cursor, string? pattern, int count)
+    {
+        var parts = key is null ? 2 : 3;
+        if (!string.IsNullOrWhiteSpace(pattern))
+            parts += 2;
+        if (count > 0)
+            parts += 2;
+
+        var cursorLen = GetIntLength(cursor);
+        var len = GetHeaderLen(parts)
+                  + GetBulkStringLen(command) + 2;
+
+        if (key is not null)
+            len += GetBulkStringLen(key) + 2;
+
+        len += GetBulkLen(cursorLen) + cursorLen + 2;
+
+        if (!string.IsNullOrWhiteSpace(pattern))
+            len += GetBulkStringLen("MATCH") + 2 + GetBulkStringLen(pattern) + 2;
+
+        if (count > 0)
+        {
+            var countLen = GetIntLength(count);
+            len += GetBulkStringLen("COUNT") + 2 + GetBulkLen(countLen) + countLen + 2;
+        }
+
+        return len;
+    }
+
+    public static int WriteScanCommand(Span<byte> destination, string command, string? key, long cursor, string? pattern, int count)
+    {
+        var parts = key is null ? 2 : 3;
+        if (!string.IsNullOrWhiteSpace(pattern))
+            parts += 2;
+        if (count > 0)
+            parts += 2;
+
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), parts);
+        idx += WriteBulkString(destination.Slice(idx), command);
+        if (key is not null)
+            idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkLong(destination.Slice(idx), cursor);
+
+        if (!string.IsNullOrWhiteSpace(pattern))
+        {
+            idx += WriteBulkString(destination.Slice(idx), "MATCH");
+            idx += WriteBulkString(destination.Slice(idx), pattern);
+        }
+
+        if (count > 0)
+        {
+            idx += WriteBulkString(destination.Slice(idx), "COUNT");
+            idx += WriteBulkInt(destination.Slice(idx), count);
+        }
+
+        return idx;
+    }
+
+    // BF.ADD / BF.EXISTS (RedisBloom)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetBfAddCommandLength(string key, int itemLen)
+    {
+        return GetHeaderLen(3)
+               + GetBulkStringLen("BF.ADD") + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(itemLen) + itemLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteBfAddCommand(Span<byte> destination, string key, ReadOnlySpan<byte> item)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "BF.ADD");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkBytes(destination.Slice(idx), item);
+        return idx;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetBfExistsCommandLength(string key, int itemLen)
+    {
+        return GetHeaderLen(3)
+               + GetBulkStringLen("BF.EXISTS") + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(itemLen) + itemLen + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteBfExistsCommand(Span<byte> destination, string key, ReadOnlySpan<byte> item)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), "BF.EXISTS");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkBytes(destination.Slice(idx), item);
+        return idx;
+    }
+
+    // FT.CREATE / FT.SEARCH (RediSearch)
+    public static int GetFtCreateCommandLength(string index, string prefix, string[] fields)
+    {
+        var parts = 8 + fields.Length * 2;
+        var len = GetHeaderLen(parts)
+                  + GetBulkStringLen("FT.CREATE") + 2
+                  + GetBulkStringLen(index) + 2
+                  + GetBulkStringLen("ON") + 2
+                  + GetBulkStringLen("HASH") + 2
+                  + GetBulkStringLen("PREFIX") + 2
+                  + GetBulkStringLen("1") + 2
+                  + GetBulkStringLen(prefix) + 2
+                  + GetBulkStringLen("SCHEMA") + 2;
+
+        for (var i = 0; i < fields.Length; i++)
+        {
+            len += GetBulkStringLen(fields[i]) + 2
+                   + GetBulkStringLen("TEXT") + 2;
+        }
+
+        return len;
+    }
+
+    public static int WriteFtCreateCommand(Span<byte> destination, string index, string prefix, string[] fields)
+    {
+        var parts = 8 + fields.Length * 2;
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), parts);
+        idx += WriteBulkString(destination.Slice(idx), "FT.CREATE");
+        idx += WriteBulkString(destination.Slice(idx), index);
+        idx += WriteBulkString(destination.Slice(idx), "ON");
+        idx += WriteBulkString(destination.Slice(idx), "HASH");
+        idx += WriteBulkString(destination.Slice(idx), "PREFIX");
+        idx += WriteBulkString(destination.Slice(idx), "1");
+        idx += WriteBulkString(destination.Slice(idx), prefix);
+        idx += WriteBulkString(destination.Slice(idx), "SCHEMA");
+        for (var i = 0; i < fields.Length; i++)
+        {
+            idx += WriteBulkString(destination.Slice(idx), fields[i]);
+            idx += WriteBulkString(destination.Slice(idx), "TEXT");
+        }
+
+        return idx;
+    }
+
+    public static int GetFtSearchCommandLength(string index, string query, int? offset, int? count)
+    {
+        var parts = 3;
+        if (offset.HasValue && count.HasValue)
+            parts += 3;
+
+        var len = GetHeaderLen(parts)
+                  + GetBulkStringLen("FT.SEARCH") + 2
+                  + GetBulkStringLen(index) + 2
+                  + GetBulkStringLen(query) + 2;
+
+        if (offset.HasValue && count.HasValue)
+        {
+            var offsetLen = GetIntLength(offset.Value);
+            var countLen = GetIntLength(count.Value);
+            len += GetBulkStringLen("LIMIT") + 2
+                   + GetBulkLen(offsetLen) + offsetLen + 2
+                   + GetBulkLen(countLen) + countLen + 2;
+        }
+
+        return len;
+    }
+
+    public static int WriteFtSearchCommand(Span<byte> destination, string index, string query, int? offset, int? count)
+    {
+        var parts = 3;
+        if (offset.HasValue && count.HasValue)
+            parts += 3;
+
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), parts);
+        idx += WriteBulkString(destination.Slice(idx), "FT.SEARCH");
+        idx += WriteBulkString(destination.Slice(idx), index);
+        idx += WriteBulkString(destination.Slice(idx), query);
+
+        if (offset.HasValue && count.HasValue)
+        {
+            idx += WriteBulkString(destination.Slice(idx), "LIMIT");
+            idx += WriteBulkLong(destination.Slice(idx), offset.Value);
+            idx += WriteBulkLong(destination.Slice(idx), count.Value);
+        }
+
+        return idx;
+    }
+
+    // TS.CREATE / TS.ADD / TS.RANGE (RedisTimeSeries)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetTsCreateCommandLength(string key) => GetCommandLength(2, "TS.CREATE", key);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteTsCreateCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "TS.CREATE", key);
+
+    public static int GetTsAddCommandLength(string key, long timestamp, string value)
+    {
+        var tsLen = GetIntLength(timestamp);
+        return GetHeaderLen(4)
+               + GetBulkStringLen("TS.ADD") + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(tsLen) + tsLen + 2
+               + GetBulkStringLen(value) + 2;
+    }
+
+    public static int WriteTsAddCommand(Span<byte> destination, string key, long timestamp, string value)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 4);
+        idx += WriteBulkString(destination.Slice(idx), "TS.ADD");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkLong(destination.Slice(idx), timestamp);
+        idx += WriteBulkString(destination.Slice(idx), value);
+        return idx;
+    }
+
+    public static int GetTsRangeCommandLength(string key, long from, long to)
+    {
+        var fromLen = GetIntLength(from);
+        var toLen = GetIntLength(to);
+        return GetHeaderLen(4)
+               + GetBulkStringLen("TS.RANGE") + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(fromLen) + fromLen + 2
+               + GetBulkLen(toLen) + toLen + 2;
+    }
+
+    public static int WriteTsRangeCommand(Span<byte> destination, string key, long from, long to)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 4);
+        idx += WriteBulkString(destination.Slice(idx), "TS.RANGE");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkLong(destination.Slice(idx), from);
+        idx += WriteBulkLong(destination.Slice(idx), to);
+        return idx;
+    }
 
     // MODULE LIST (detect installed modules like RedisJSON)
     public static ReadOnlyMemory<byte> ModuleListCommand { get; } = "*2\r\n$6\r\nMODULE\r\n$4\r\nLIST\r\n"u8.ToArray();

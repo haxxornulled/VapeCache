@@ -37,6 +37,10 @@ internal sealed class RedisModuleDetector : IRedisModuleDetector
             _modulesCached = true;
             return modules;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             // If MODULE LIST fails (old Redis or no modules), return empty

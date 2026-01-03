@@ -50,6 +50,30 @@ internal sealed class CacheList<T> : ICacheList<T>
         return _codec.Deserialize(bytes);
     }
 
+    public bool TryPopFrontAsync(CancellationToken ct, out ValueTask<T?> task)
+    {
+        if (!_executor.TryLPopAsync(Key, ct, out var bytesTask))
+        {
+            task = default;
+            return false;
+        }
+
+        task = MapPopAsync(bytesTask, _codec);
+        return true;
+    }
+
+    public bool TryPopBackAsync(CancellationToken ct, out ValueTask<T?> task)
+    {
+        if (!_executor.TryRPopAsync(Key, ct, out var bytesTask))
+        {
+            task = default;
+            return false;
+        }
+
+        task = MapPopAsync(bytesTask, _codec);
+        return true;
+    }
+
     public async ValueTask<T[]> RangeAsync(long start, long stop, CancellationToken ct = default)
     {
         var items = await _executor.LRangeAsync(Key, start, stop, ct).ConfigureAwait(false);
@@ -65,5 +89,51 @@ internal sealed class CacheList<T> : ICacheList<T>
     public ValueTask<long> LengthAsync(CancellationToken ct = default)
     {
         return _executor.LLenAsync(Key, ct);
+    }
+
+    public async IAsyncEnumerable<T> StreamAsync(
+        int pageSize = 128,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (pageSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+        long start = 0;
+        while (true)
+        {
+            var stop = start + pageSize - 1;
+            var items = await _executor.LRangeAsync(Key, start, stop, ct).ConfigureAwait(false);
+            if (items.Length == 0)
+                yield break;
+
+            foreach (var item in items)
+            {
+                if (item is not null)
+                    yield return _codec.Deserialize(item);
+            }
+
+            if (items.Length < pageSize)
+                yield break;
+
+            start += items.Length;
+        }
+    }
+
+    private static ValueTask<T?> MapPopAsync(ValueTask<byte[]?> bytesTask, ICacheCodec<T> codec)
+    {
+        if (bytesTask.IsCompletedSuccessfully)
+        {
+            var bytes = bytesTask.Result;
+            return new ValueTask<T?>(bytes is null ? default : codec.Deserialize(bytes));
+        }
+
+        return AwaitMapPopAsync(bytesTask, codec);
+
+        static async ValueTask<T?> AwaitMapPopAsync(ValueTask<byte[]?> task, ICacheCodec<T> codec)
+        {
+            var bytes = await task.ConfigureAwait(false);
+            if (bytes is null) return default;
+            return codec.Deserialize(bytes);
+        }
     }
 }

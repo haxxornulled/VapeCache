@@ -101,9 +101,11 @@ public class UserDtoCodec : ICacheCodec<UserDto>
 
 // Register at startup
 services.AddVapecacheCaching();
-services.Configure<ICacheCodecProvider>((provider, sp) =>
+services.AddSingleton<ICacheCodecProvider>(sp =>
 {
+    var provider = new SystemTextJsonCodecProvider();
     provider.Register(new UserDtoCodec());
+    return provider;
 });
 ```
 
@@ -202,12 +204,15 @@ public interface ICacheRegion
 ### Stampede Protection
 
 ```csharp
-var options = new CacheEntryOptions(
-    Ttl: TimeSpan.FromMinutes(10),
-    EnableStampedeProtection: true);
+// Enable stampede protection globally
+services.Configure<CacheStampedeOptions>(options =>
+{
+    options.Enabled = true;
+    options.MaxKeys = 100000;
+});
 
 // Multiple concurrent requests will be coalesced to a single DB query
-var user = await _cache.GetOrCreateAsync(key, LoadFromDb, options, ct);
+var user = await _cache.GetOrCreateAsync(key, LoadFromDb, new CacheEntryOptions(TimeSpan.FromMinutes(10)), ct);
 ```
 
 ### Circuit Breaker Integration

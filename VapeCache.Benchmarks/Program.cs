@@ -16,9 +16,12 @@ if (args.Length > 0 && args[0] == "standalone")
     var test = new StandalonePerformanceTest(host, port, username, password);
     await test.RunAsync();
 }
+else if (args.Length > 0 && args[0] == "alloc-profile")
+{
+    await AllocationProfileRunner.RunAsync(args);
+}
 else
 {
     // Normal BenchmarkDotNet mode
     BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, new EnterpriseBenchmarkConfig());
 }
-

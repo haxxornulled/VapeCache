@@ -1,7 +1,8 @@
 # Phase 2 & 3 Complete: Amazing Developer API ✨
 
-**Date:** December 25, 2025
-**Status:** ✅ COMPLETE
+**Date:** December 25, 2025  
+**Status:** ✅ COMPLETE  
+**Last validated:** January 1, 2026
 
 ## Executive Summary
 
@@ -23,13 +24,18 @@ VapeCache now provides an **amazing, type-safe API** for Redis data structures w
 - Automatic serialization via ICacheCodec\<T\>
 - Full integration with DI container
 
-###Phase 3: Module Detection & In-Memory Parity (COMPLETE ✅)
+### Phase 3: Module Detection & In-Memory Parity (COMPLETE ✅)
 - **IRedisModuleDetector** - Detect installed Redis modules (RedisJSON, RediSearch, etc.)
 - **MODULE LIST** command implementation
 - **InMemoryCommandExecutor** - Full in-memory implementation of IRedisCommandExecutor
 - In-memory support for LIST, SET, HASH with TTL expiration
-- Thread-safe concurrent data structures
+- Thread-safe concurrent data structures with per-entry locking for LISTs
 - Automatic cleanup of expired entries
+
+### Phase 4/5 Validation Additions (2026-01-01)
+- Lease-based JSON APIs (zero-copy) in `IRedisCommandExecutor` and `IJsonCache`
+- RESP numeric parsing optimizations to reduce allocation churn
+- Module benchmark suite stabilized and passing
 
 ## API Showcase
 
@@ -120,7 +126,7 @@ private sealed class CacheEntry
     public byte[]? StringValue { get; set; }
     public ConcurrentDictionary<string, byte[]>? HashValue { get; set; }
     public LinkedList<byte[]>? ListValue { get; set; }
-    public HashSet<byte[]>? SetValue { get; set; }
+    public ConcurrentDictionary<byte[], byte>? SetValue { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
 }
 ```
@@ -342,13 +348,18 @@ Time Elapsed 00:00:01.70
 - [ ] Fallback from Redis to InMemory for collections
 - [ ] Module detection against live Redis Stack
 
+### Revalidation Summary (2026-01-01)
+- ✅ `dotnet test .\VapeCache.Tests\VapeCache.Tests.csproj` (110/110 passed)
+- ✅ Module benchmarks rerun (`RedisModuleVapeCacheBenchmarks`)
+
 ## Deployment
 
-### No Breaking Changes
+### Compatibility Notes
 
-All new features are **additive**:
+Most new features are **additive**, but interface implementers must add the new lease methods:
 - Existing `IVapeCache` API unchanged
-- Existing `IRedisCommandExecutor` unchanged
+- `IRedisCommandExecutor` now includes JSON lease APIs
+- `IJsonCache` now includes lease-based JSON APIs
 - New interfaces added in `VapeCache.Abstractions.Collections`
 - New implementations in `VapeCache.Infrastructure.Collections`
 
@@ -374,18 +385,20 @@ await users.PushFrontAsync(user);
 - [x] Phase 2: Typed collection APIs (ICacheList, ICacheSet, ICacheHash)
 - [x] Phase 3: Module detection + In-memory executor
 
-### Phase 4: Future Enhancements
-- [ ] Sorted Sets (ICacheSortedSet\<T\> for leaderboards)
-- [ ] RedisJSON commands (JSON.GET, JSON.SET if module detected)
-- [ ] Batch operations (pipeline multiple commands)
-- [ ] Async enumerable for streaming large collections
-- [ ] Pub/Sub typed channels
+### Phase 4: ✅ COMPLETE
+- [x] Sorted Sets (ICacheSortedSet\<T\> for leaderboards)
+- [x] RedisJSON commands (JSON.GET, JSON.SET if module detected)
+- [x] Batch operations (pipeline multiple commands)
+- [x] Async enumerable for streaming large collections
 
-### Phase 5: Advanced Features
-- [ ] RediSearch integration (full-text search on cached data)
-- [ ] RedisBloom integration (probabilistic filters)
-- [ ] RedisTimeSeries integration
-- [ ] Custom binary codecs for ultra-high-performance scenarios
+### Phase 5: ✅ COMPLETE
+- [x] RediSearch integration (full-text search on cached data)
+- [x] RedisBloom integration (probabilistic filters)
+- [x] RedisTimeSeries integration
+- [x] Custom binary codecs for ultra-high-performance scenarios
+
+### Non-goals
+- [ ] Pub/Sub (explicitly out of scope for VapeCache)
 
 ## Documentation
 
@@ -424,9 +437,8 @@ VapeCache now provides **the most ergonomic Redis caching API in .NET** with:
 ---
 
 **Next Steps:**
-1. Add integration tests for typed collections
-2. Implement Sorted Sets (ZSET) for leaderboards
-3. Add RedisJSON commands when module detected
-4. Create samples/benchmarks showcasing the new APIs
+1. Add integration tests for module features (RediSearch/Bloom/TimeSeries)
+2. Expand examples for batch/pipeline and streaming APIs
+3. Add performance benchmarks for sorted sets and JSON
 
 Questions? See [TYPED_COLLECTIONS.md](TYPED_COLLECTIONS.md) or [open an issue](https://github.com/yourorg/vapecache/issues)!

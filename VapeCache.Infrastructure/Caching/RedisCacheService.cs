@@ -1,7 +1,9 @@
 using System.Buffers;
 using System.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Infrastructure.Caching;
 
@@ -10,6 +12,12 @@ internal sealed class RedisCacheService : ICacheService
     private readonly IRedisCommandExecutor _redis;
     private readonly ICurrentCacheService _current;
     private readonly CacheStats _stats;
+
+    [ActivatorUtilitiesConstructor]
+    public RedisCacheService(RedisCommandExecutor redis, ICurrentCacheService current, CacheStatsRegistry statsRegistry)
+        : this((IRedisCommandExecutor)redis, current, statsRegistry)
+    {
+    }
 
     public RedisCacheService(IRedisCommandExecutor redis, ICurrentCacheService current, CacheStatsRegistry statsRegistry)
     {
@@ -22,6 +30,7 @@ internal sealed class RedisCacheService : ICacheService
 
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
         _current.SetCurrent(Name);
         _stats.IncGet();
         CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
@@ -49,6 +58,7 @@ internal sealed class RedisCacheService : ICacheService
 
     public async ValueTask SetAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions options, CancellationToken ct)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
         _current.SetCurrent(Name);
         _stats.IncSet();
         CacheTelemetry.SetCalls.Add(1, new TagList { { "backend", Name } });
@@ -60,6 +70,7 @@ internal sealed class RedisCacheService : ICacheService
 
     public async ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
         _current.SetCurrent(Name);
         _stats.IncRemove();
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });

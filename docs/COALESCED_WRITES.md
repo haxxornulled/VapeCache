@@ -919,6 +919,7 @@ Savings: 30μs (66% reduction)
   "RedisMultiplexer": {
     "Connections": 1,
     "MaxInFlightPerConnection": 4096,
+    "ResponseTimeout": "00:00:02",
     "EnableCoalescedSocketWrites": true  // ← Default: true
   }
 }

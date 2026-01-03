@@ -15,7 +15,10 @@ namespace VapeCache.Benchmarks;
 internal sealed class NearestProjectCsProjGenerator : CsProjGenerator
 {
     public NearestProjectCsProjGenerator(string targetFrameworkMoniker, string? customDotNetCliPath = null, string? packagesPath = null, string? runtimeFrameworkVersion = null)
-        : base(targetFrameworkMoniker, customDotNetCliPath, packagesPath, runtimeFrameworkVersion)
+        : base(targetFrameworkMoniker,
+            customDotNetCliPath ?? string.Empty,
+            packagesPath ?? string.Empty,
+            runtimeFrameworkVersion ?? string.Empty)
     {
     }
 

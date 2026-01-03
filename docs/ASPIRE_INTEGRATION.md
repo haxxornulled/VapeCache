@@ -22,9 +22,9 @@ VapeCache.Extensions.Aspire provides first-class integration with [.NET Aspire](
 ✅ **Observable by default**: Metrics/traces flow to Aspire Dashboard
 
 ### Production Features
-✅ **Health checks**: `/health/redis` and `/health/cache` endpoints
+✅ **Health checks**: Registered checks you map in your host as needed
 ✅ **Service discovery**: Dynamic Redis endpoint resolution
-✅ **Resilience**: Circuit breaker + retry policies pre-configured
+✅ **Resilience**: Circuit breaker pre-configured
 ✅ **Telemetry**: Aspire Dashboard shows VapeCache metrics/traces
 
 ## Architecture
@@ -52,7 +52,7 @@ VapeCache.Extensions.Aspire provides first-class integration with [.NET Aspire](
 │                                                              │
 │ builder.AddVapeCache()  // From VapeCache.Extensions.Aspire│
 │     .WithRedisFromAspire("redis")  // Binds to resource     │
-│     .WithHealthChecks()             // Adds /health         │
+│     .WithHealthChecks()             // Adds health checks   │
 │     .WithAspireTelemetry();         // OTel → Dashboard     │
 │                                                              │
 │ var app = builder.Build();                                  │
@@ -346,12 +346,12 @@ var builder = WebApplication.CreateBuilder(args);
 // Single-line VapeCache + Aspire setup
 builder.AddVapeCache()
     .WithRedisFromAspire("redis")  // Binds to AppHost Redis resource
-    .WithHealthChecks()             // Adds /health/redis, /health/vapecache
+    .WithHealthChecks()             // Registers Redis + VapeCache health checks
     .WithAspireTelemetry();         // Sends to Aspire Dashboard
 
 var app = builder.Build();
 
-// Health check endpoints (for Kubernetes, Azure Container Apps, etc.)
+// Health check mapping (for Kubernetes, Azure Container Apps, etc.)
 app.MapHealthChecks("/health");
 app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
@@ -429,7 +429,7 @@ When you run your Aspire app, the dashboard (`http://localhost:15888`) will show
 
 ### Resources Tab
 - **redis**: Redis container status, port mappings, logs
-- **api**: Your API status, endpoints, logs
+- **api**: Your API status, logs
 
 ### Metrics Tab (VapeCache Metrics)
 - `redis.cmd.calls`: Total Redis commands

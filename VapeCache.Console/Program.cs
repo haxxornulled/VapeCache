@@ -1,7 +1,6 @@
 using Autofac;
 using Autofac.Configuration;
 using Autofac.Extensions.DependencyInjection;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -14,8 +13,10 @@ using VapeCache.Abstractions.Caching;
 using VapeCache.Console.Hosting;
 using VapeCache.Infrastructure.Connections;
 using VapeCache.Infrastructure.Caching;
+using VapeCache.Infrastructure.DependencyInjection;
 using VapeCache.Console.Stress;
 using VapeCache.Console.Secrets;
+using VapeCache.Reconciliation;
 
 var hostBuilder = Host.CreateDefaultBuilder(args)
     .UseServiceProviderFactory(new AutofacServiceProviderFactory())
@@ -56,33 +57,6 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .ReadFrom.Services(services)
             .Enrich.FromLogContext();
     })
-    .ConfigureWebHostDefaults(web =>
-    {
-        web.ConfigureServices((ctx, services) =>
-        {
-            web.UseSetting(WebHostDefaults.ServerUrlsKey, ctx.Configuration["Web:Urls"] ?? "http://localhost:5080");
-
-        services.AddRouting();
-        services.AddOptions<WebHostOptions>()
-            .Bind(ctx.Configuration.GetSection("Web"))
-            .Validate(static o => !string.IsNullOrWhiteSpace(o.Urls), "Web:Urls is required.")
-            .ValidateOnStart();
-
-        services.AddOptions<LiveDemoOptions>()
-            .Bind(ctx.Configuration.GetSection("LiveDemo"))
-            .Validate(static o => o.Interval > TimeSpan.Zero, "LiveDemo:Interval must be > 0.")
-            .Validate(static o => !string.IsNullOrWhiteSpace(o.Key), "LiveDemo:Key is required.")
-            .Validate(static o => o.Ttl > TimeSpan.Zero, "LiveDemo:Ttl must be > 0.")
-            .ValidateOnStart();
-    });
-
-        web.Configure(app =>
-        {
-            var opts = app.ApplicationServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebHostOptions>>().Value;
-            if (!opts.Enabled) return;
-            CacheEndpoints.Configure(app);
-        });
-    })
     .ConfigureServices(static (context, services) =>
     {
         services.AddOpenTelemetry()
@@ -120,6 +94,13 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .AddOptions<RedisSecretOptions>()
             .Bind(context.Configuration.GetSection("RedisSecret"))
             .Validate(static o => !string.IsNullOrWhiteSpace(o.EnvVar), "RedisSecret:EnvVar is required.")
+            .ValidateOnStart();
+
+        services.AddOptions<LiveDemoOptions>()
+            .Bind(context.Configuration.GetSection("LiveDemo"))
+            .Validate(static o => o.Interval > TimeSpan.Zero, "LiveDemo:Interval must be > 0.")
+            .Validate(static o => !string.IsNullOrWhiteSpace(o.Key), "LiveDemo:Key is required.")
+            .Validate(static o => o.Ttl > TimeSpan.Zero, "LiveDemo:Ttl must be > 0.")
             .ValidateOnStart();
 
         services
@@ -180,8 +161,11 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.HalfOpenProbeTimeout >= TimeSpan.Zero, "RedisCircuitBreaker:HalfOpenProbeTimeout must be >= 0.")
             .ValidateOnStart();
 
-        services.AddVapecacheRedisConnections();
-        services.AddVapecacheCaching();
+        if (context.HostingEnvironment.IsDevelopment())
+        {
+            services.AddVapeCacheRedisReconciliation(context.Configuration);
+        }
+
 
         // Grocery Store Demo Services
         services.AddSingleton<VapeCache.Console.GroceryStore.GroceryStoreService>();
@@ -196,6 +180,8 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
     .ConfigureContainer<ContainerBuilder>(static (context, builder) =>
     {
         builder.RegisterModule(new ConfigurationModule(context.Configuration));
+        builder.RegisterModule(new VapeCacheConnectionsModule());
+        builder.RegisterModule(new VapeCacheCachingModule());
     });
 
 // Check if running in comparison mode
@@ -220,7 +206,7 @@ using var host = hostBuilder.Build();
 var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStarted.Register(() =>
 {
-    Log.Information("VapeCache.Console started. Press Ctrl+C to exit. Endpoints ready for Postman.");
+    Log.Information("VapeCache.Console started. Press Ctrl+C to exit.");
 });
 lifetime.ApplicationStopping.Register(() =>
 {

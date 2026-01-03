@@ -14,7 +14,7 @@ namespace VapeCache.Infrastructure.Caching;
 /// </summary>
 internal sealed class HybridCacheService(
     RedisCacheService redis,
-    InMemoryCacheService memory,
+    ICacheFallbackService fallback,
     ICurrentCacheService current,
     TimeProvider timeProvider,
     IOptions<RedisCircuitBreakerOptions> breakerOptions,
@@ -96,8 +96,8 @@ internal sealed class HybridCacheService(
             {
                 _stats.IncBreakerOpened();
                 CacheTelemetry.RedisBreakerOpened.Add(1, new TagList { { "backend", Name } });
-                logger.LogWarning("⚡ CIRCUIT BREAKER OPENED after {Failures} consecutive failures. Switching to in-memory mode for {Duration} seconds.", failures, breakDuration.TotalSeconds);
-                System.Console.WriteLine($"\n🔥🔥🔥 ⚡ CIRCUIT BREAKER OPENED! Failures={failures}, switching to IN-MEMORY mode for {breakDuration.TotalSeconds} seconds 🔥🔥🔥\n");
+                logger.LogWarning("⚡ CIRCUIT BREAKER OPENED after {Failures} consecutive failures. Switching to {Fallback} mode for {Duration} seconds.", failures, fallback.Name, breakDuration.TotalSeconds);
+                System.Console.WriteLine($"\n🔥🔥🔥 ⚡ CIRCUIT BREAKER OPENED! Failures={failures}, switching to {fallback.Name.ToUpperInvariant()} mode for {breakDuration.TotalSeconds} seconds 🔥🔥🔥\n");
             }
         }
     }
@@ -137,11 +137,11 @@ internal sealed class HybridCacheService(
         {
             if (_breaker.Enabled && !IsRedisAllowedNow())
             {
-                current.SetCurrent(memory.Name);
+                current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
 
-                var bytes = await memory.GetAsync(key, ct).ConfigureAwait(false);
+                var bytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
                 if (bytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
                 else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
                 return bytes;
@@ -160,10 +160,10 @@ internal sealed class HybridCacheService(
                         Interlocked.Decrement(ref _halfOpenProbeInFlight);
                         probeTaken = false;
 
-                        current.SetCurrent(memory.Name);
+                        current.SetCurrent(fallback.Name);
                         _stats.IncFallbackToMemory();
                         CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
-                        return await memory.GetAsync(key, ct).ConfigureAwait(false);
+                        return await fallback.GetAsync(key, ct).ConfigureAwait(false);
                     }
                 }
 
@@ -186,13 +186,13 @@ internal sealed class HybridCacheService(
             catch (Exception ex)
             {
                 MarkRedisFailure();
-                current.SetCurrent(memory.Name);
+                current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
-                logger.LogWarning(ex, "Redis GET failed; falling back to memory.");
+                logger.LogWarning(ex, "Redis GET failed; falling back to {Fallback}.", fallback.Name);
             }
 
-            var fallbackBytes = await memory.GetAsync(key, ct).ConfigureAwait(false);
+            var fallbackBytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
             if (fallbackBytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
             else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
             return fallbackBytes;
@@ -216,10 +216,10 @@ internal sealed class HybridCacheService(
         {
             if (_breaker.Enabled && !IsRedisAllowedNow())
             {
-                current.SetCurrent(memory.Name);
+                current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
-                await memory.SetAsync(key, value, options, ct).ConfigureAwait(false);
+                await fallback.SetAsync(key, value, options, ct).ConfigureAwait(false);
 
                 // Track write for reconciliation when Redis recovers
                 reconciliation?.TrackWrite(key, value, options.Ttl);
@@ -239,10 +239,10 @@ internal sealed class HybridCacheService(
                         Interlocked.Decrement(ref _halfOpenProbeInFlight);
                         probeTaken = false;
 
-                        current.SetCurrent(memory.Name);
+                        current.SetCurrent(fallback.Name);
                         _stats.IncFallbackToMemory();
                         CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
-                        await memory.SetAsync(key, value, options, ct).ConfigureAwait(false);
+                        await fallback.SetAsync(key, value, options, ct).ConfigureAwait(false);
 
                         // Track write for reconciliation when Redis recovers
                         reconciliation?.TrackWrite(key, value, options.Ttl);
@@ -263,11 +263,11 @@ internal sealed class HybridCacheService(
             catch (Exception ex)
             {
                 MarkRedisFailure();
-                current.SetCurrent(memory.Name);
+                current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
-                logger.LogWarning(ex, "Redis SET failed; writing to memory.");
-                await memory.SetAsync(key, value, options, ct).ConfigureAwait(false);
+                logger.LogWarning(ex, "Redis SET failed; writing to {Fallback}.", fallback.Name);
+                await fallback.SetAsync(key, value, options, ct).ConfigureAwait(false);
                 reconciliation?.TrackWrite(key, value, options.Ttl);
             }
         }
@@ -284,13 +284,13 @@ internal sealed class HybridCacheService(
         _stats.IncRemove();
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
-        var ok = await memory.RemoveAsync(key, ct).ConfigureAwait(false);
+        var ok = await fallback.RemoveAsync(key, ct).ConfigureAwait(false);
         var probeTaken = false;
         try
         {
             if (_breaker.Enabled && !IsRedisAllowedNow())
             {
-                current.SetCurrent(memory.Name);
+                current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
                 reconciliation?.TrackDelete(key);
@@ -310,7 +310,7 @@ internal sealed class HybridCacheService(
                         Interlocked.Decrement(ref _halfOpenProbeInFlight);
                         probeTaken = false;
 
-                        current.SetCurrent(memory.Name);
+                        current.SetCurrent(fallback.Name);
                         _stats.IncFallbackToMemory();
                         CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
                         reconciliation?.TrackDelete(key);
@@ -332,10 +332,10 @@ internal sealed class HybridCacheService(
             catch (Exception ex)
             {
                 MarkRedisFailure();
-                current.SetCurrent(memory.Name);
+                current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
-                logger.LogWarning(ex, "Redis DEL failed; memory only.");
+                logger.LogWarning(ex, "Redis DEL failed; using {Fallback} only.", fallback.Name);
                 reconciliation?.TrackDelete(key);
                 return ok;
             }

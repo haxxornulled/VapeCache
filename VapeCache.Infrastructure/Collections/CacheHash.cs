@@ -47,4 +47,13 @@ internal sealed class CacheHash<T> : ICacheHash<T>
         }
         return result;
     }
+
+    public async IAsyncEnumerable<(string Field, T Value)> StreamAsync(
+        string? pattern = null,
+        int pageSize = 128,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await foreach (var (field, value) in _executor.HScanAsync(Key, pattern, pageSize, ct).ConfigureAwait(false))
+            yield return (field, _codec.Deserialize(value));
+    }
 }

@@ -59,4 +59,13 @@ internal sealed class CacheSet<T> : ICacheSet<T>
     {
         return _executor.SCardAsync(Key, ct);
     }
+
+    public async IAsyncEnumerable<T> StreamAsync(
+        string? pattern = null,
+        int pageSize = 128,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await foreach (var member in _executor.SScanAsync(Key, pattern, pageSize, ct).ConfigureAwait(false))
+            yield return _codec.Deserialize(member);
+    }
 }

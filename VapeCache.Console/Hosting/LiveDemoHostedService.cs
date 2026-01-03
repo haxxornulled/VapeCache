@@ -8,21 +8,18 @@ using VapeCache.Abstractions.Caching;
 namespace VapeCache.Console.Hosting;
 
 internal sealed class LiveDemoHostedService(
-    IOptions<WebHostOptions> webOptions,
     IOptions<LiveDemoOptions> demoOptions,
     ICacheService cache,
     ICurrentCacheService current,
-    IServiceProvider services,
+    IRedisCircuitBreakerState? circuitBreaker,
     ILogger<LiveDemoHostedService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var web = webOptions.Value;
         var demo = demoOptions.Value;
         if (!demo.Enabled) return;
 
-        logger.LogInformation("Live demo enabled. Web={WebEnabled} Urls={Urls}", web.Enabled, web.Urls);
-        logger.LogInformation("Endpoints: GET /healthz | GET /cache/current | GET /cache/breaker | GET /cache/stats | PUT/GET/DELETE /cache/{{key}} | POST /cache/{{key}}/get-or-set");
+        logger.LogInformation("Live demo enabled.");
         logger.LogInformation("Demo: Key={Key} Ttl={Ttl} Interval={Interval}", demo.Key, demo.Ttl, demo.Interval);
 
         static void Serialize(IBufferWriter<byte> w, string v)
@@ -48,15 +45,13 @@ internal sealed class LiveDemoHostedService(
                         stoppingToken)
                     .ConfigureAwait(false);
 
-                var breaker = services.GetService(typeof(IRedisCircuitBreakerState)) as IRedisCircuitBreakerState;
-
                 logger.LogInformation(
                     "Live demo tick: Value={Value} Backend={Backend} BreakerOpen={BreakerOpen} Failures={Failures} RemainingMs={RemainingMs}",
                     value,
                     current.CurrentName,
-                    breaker?.IsOpen,
-                    breaker?.ConsecutiveFailures,
-                    breaker?.OpenRemaining?.TotalMilliseconds);
+                    circuitBreaker?.IsOpen,
+                    circuitBreaker?.ConsecutiveFailures,
+                    circuitBreaker?.OpenRemaining?.TotalMilliseconds);
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {

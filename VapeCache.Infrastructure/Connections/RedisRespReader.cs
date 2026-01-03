@@ -60,7 +60,21 @@ internal static class RedisRespReader
         ArrayPool<RespValue>.Shared.Return(array, clearArray: true);
     }
 
-    public static async ValueTask<RespValue> ReadAsync(Stream stream, CancellationToken ct)
+    public static ValueTask<RespValue> ReadAsync(
+        Stream stream,
+        CancellationToken ct,
+        int maxBulkStringBytes = 16 * 1024 * 1024,
+        int maxArrayDepth = 64)
+    {
+        return ReadAsyncInternal(stream, ct, maxBulkStringBytes, maxArrayDepth, currentArrayDepth: 0);
+    }
+
+    private static async ValueTask<RespValue> ReadAsyncInternal(
+        Stream stream,
+        CancellationToken ct,
+        int maxBulkStringBytes,
+        int maxArrayDepth,
+        int currentArrayDepth)
     {
         var prefix = await ReadByteAsync(stream, ct).ConfigureAwait(false);
         return prefix switch
@@ -73,8 +87,8 @@ internal static class RedisRespReader
                     : throw new InvalidOperationException("Invalid simple string"),
             (byte)'-' => RespValue.Error(await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false)),
             (byte)':' => RespValue.Integer(ReadInt64(await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false))),
-            (byte)'$' => await ReadBulkStringAsync(stream, ct).ConfigureAwait(false),
-            (byte)'*' => await ReadArrayAsync(stream, ct).ConfigureAwait(false),
+            (byte)'$' => await ReadBulkStringAsync(stream, ct, maxBulkStringBytes).ConfigureAwait(false),
+            (byte)'*' => await ReadArrayAsync(stream, ct, maxBulkStringBytes, maxArrayDepth, currentArrayDepth).ConfigureAwait(false),
             _ => throw new InvalidOperationException($"Unsupported RESP type: {(char)prefix}")
         };
     }
@@ -102,7 +116,7 @@ internal static class RedisRespReader
         return value;
     }
 
-    private static async ValueTask<RespValue> ReadBulkStringAsync(Stream stream, CancellationToken ct)
+    private static async ValueTask<RespValue> ReadBulkStringAsync(Stream stream, CancellationToken ct, int maxBulkStringBytes)
     {
         var header = await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false);
         if (!int.TryParse(header, out var len))
@@ -113,6 +127,9 @@ internal static class RedisRespReader
 
         if (len < 0)
             throw new InvalidOperationException($"Invalid bulk length: {header}");
+
+        if (maxBulkStringBytes >= 0 && len > maxBulkStringBytes)
+            throw new InvalidOperationException($"Bulk string size {len} bytes exceeds maximum allowed size of {maxBulkStringBytes} bytes. Possible DoS attack or misconfigured server.");
 
         // Use GC.AllocateArray instead of AllocateUninitializedArray to ensure zero-initialization
         // This prevents potential garbage data in the array that can cause JSON deserialization errors
@@ -146,7 +163,12 @@ internal static class RedisRespReader
         return RespValue.BulkString(buf, len, pooled: false);
     }
 
-    private static async ValueTask<RespValue> ReadArrayAsync(Stream stream, CancellationToken ct)
+    private static async ValueTask<RespValue> ReadArrayAsync(
+        Stream stream,
+        CancellationToken ct,
+        int maxBulkStringBytes,
+        int maxArrayDepth,
+        int currentArrayDepth)
     {
         var header = await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false);
         if (!int.TryParse(header, out var len))
@@ -158,11 +180,29 @@ internal static class RedisRespReader
         if (len < 0)
             throw new InvalidOperationException($"Invalid array length: {header}");
 
-        var items = RentArray(len);
-        for (var i = 0; i < len; i++)
-            items[i] = await ReadAsync(stream, ct).ConfigureAwait(false);
+        var nextDepth = currentArrayDepth + 1;
+        if (maxArrayDepth >= 0 && nextDepth > maxArrayDepth)
+            throw new InvalidOperationException($"Array nesting depth {nextDepth} exceeds maximum allowed depth of {maxArrayDepth}. Possible stack overflow attack.");
 
-        return RespValue.Array(items, len, pooled: true);
+        var items = RentArray(len);
+        var filled = 0;
+        try
+        {
+            for (var i = 0; i < len; i++)
+            {
+                items[i] = await ReadAsyncInternal(stream, ct, maxBulkStringBytes, maxArrayDepth, nextDepth).ConfigureAwait(false);
+                filled++;
+            }
+
+            return RespValue.Array(items, len, pooled: true);
+        }
+        catch
+        {
+            for (var i = 0; i < filled; i++)
+                ReturnBuffers(items[i]);
+            ReturnArray(items, len);
+            throw;
+        }
     }
 
     internal sealed class RespValue

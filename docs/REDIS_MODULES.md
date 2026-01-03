@@ -1,11 +1,11 @@
 # Redis Module Detection
 
-**Status:** ✅ COMPLETE (Phase 3 - Detection Only)
+**Status:** ✅ COMPLETE (Phase 3-5 - Detection + Modules)
 **Date:** December 25, 2025
 
 ## Overview
 
-VapeCache can detect which Redis modules are installed on your server, enabling conditional feature activation. Currently supports **module detection** via the `MODULE LIST` command - actual module-specific operations (like RedisJSON) will be added incrementally.
+VapeCache can detect which Redis modules are installed on your server and enables module-specific operations (RedisJSON, RediSearch, RedisBloom, RedisTimeSeries) when available.
 
 ## Why Module Detection?
 
@@ -66,7 +66,7 @@ public class CacheService
         if (await _moduleDetector.HasRedisJsonAsync())
         {
             _logger.LogInformation("RedisJSON detected - native JSON operations enabled");
-            // Future: Enable JSON.GET, JSON.SET commands
+            // JSON.GET / JSON.SET enabled automatically via IJsonCache
         }
         else
         {
@@ -152,6 +152,18 @@ If `MODULE LIST` fails (old Redis version, permissions issue):
 - Logs error but doesn't throw
 - Caches the empty result to avoid retry storms
 
+### Failover Semantics (In-Memory)
+
+When Redis is unavailable, the hybrid executor falls back to the in-memory command executor for module commands.
+The fallback is designed for continuity, not perfect parity with Redis modules.
+
+- **JSON (RedisJSON)**: Full-document reads/writes are supported. JSONPath is ignored unless the path is `.`.
+- **RediSearch**: Index creation is a no-op and searches return empty results.
+- **RedisBloom**: Backed by an in-memory set (exact membership, not probabilistic).
+- **RedisTimeSeries**: Backed by an in-memory sorted dictionary.
+- **MODULE LIST**: Returns an empty array.
+- **PING**: Returns `PONG`.
+
 ## Common Module Names
 
 | Module Name     | Detection String | Description |
@@ -163,24 +175,34 @@ If `MODULE LIST` fails (old Redis version, permissions issue):
 | RedisTimeSeries| `timeseries`    | Time-series data management |
 | RedisGears     | `rg`            | Serverless functions |
 
-## RedisJSON Integration (Future)
+## RedisJSON Integration
 
 When RedisJSON is detected, VapeCache will enable:
 
 ### Native JSON Commands
 ```csharp
-// Future API (not yet implemented)
-var jsonCache = serviceProvider.GetRequiredService<IJsonCacheService>();
+var jsonCache = serviceProvider.GetRequiredService<IJsonCache>();
 
 // Store JSON document natively (no serialization!)
 await jsonCache.SetAsync("user:123", new User { Name = "Alice", Age = 30 });
 
 // Query with JSONPath
-var name = await jsonCache.GetPathAsync<string>("user:123", "$.name");
-// Returns "Alice" without deserializing entire object!
+var name = await jsonCache.GetAsync<string>("user:123", "$.name");
 
-// Update specific field (atomic!)
-await jsonCache.SetPathAsync("user:123", "$.age", 31);
+// Update specific field (atomic with RedisJSON)
+await jsonCache.SetAsync("user:123", 31, "$.age");
+```
+
+### Lease-based JSON (zero-copy)
+```csharp
+var jsonCache = serviceProvider.GetRequiredService<IJsonCache>();
+
+using var lease = await jsonCache.GetLeaseAsync("user:123");
+if (!lease.IsNull)
+{
+    // Copy JSON payload to another key without extra allocations.
+    await jsonCache.SetLeaseAsync("user:123:copy", lease);
+}
 ```
 
 ### Benefits of RedisJSON
@@ -262,7 +284,10 @@ public async Task DetectRealRedisModules()
     var services = new ServiceCollection();
     services.AddVapecacheCaching();
     services.Configure<RedisConnectionOptions>(o =>
-        o.Endpoints = "localhost:6379"); // Redis Stack container
+    {
+        o.Host = "localhost";
+        o.Port = 6379; // Redis Stack container
+    });
 
     var provider = services.BuildServiceProvider();
     var detector = provider.GetRequiredService<IRedisModuleDetector>();
@@ -322,18 +347,16 @@ return result; // ["ReJSON", "ft"]
 - [x] In-memory caching of results
 - [x] Error handling for old Redis versions
 
-### Phase 4 (RedisJSON): Future
-- [ ] JSON.SET, JSON.GET, JSON.DEL commands
-- [ ] JSONPath query support (JSON.GET with path)
-- [ ] Partial updates (JSON.SET with path)
-- [ ] Atomic operations (JSON.NUMINCRBY, JSON.ARRAPPEND)
-- [ ] Automatic fallback to serialized JSON when module unavailable
-- [ ] Typed API: `IJsonDocument<T>` with JSONPath methods
+### Phase 4 (RedisJSON): ✅ COMPLETE
+- [x] JSON.SET, JSON.GET, JSON.DEL commands
+- [x] JSONPath query support (JSON.GET with path)
+- [x] Partial updates (JSON.SET with path)
+- [x] Automatic fallback to serialized JSON when module unavailable
 
-### Phase 5 (Other Modules): Future
-- [ ] RediSearch integration (full-text search)
-- [ ] RedisBloom integration (probabilistic filters)
-- [ ] RedisTimeSeries integration
+### Phase 5 (Other Modules): ✅ COMPLETE
+- [x] RediSearch integration (full-text search)
+- [x] RedisBloom integration (probabilistic filters)
+- [x] RedisTimeSeries integration
 
 ## See Also
 
@@ -344,4 +367,4 @@ return result; // ["ReJSON", "ft"]
 
 ---
 
-**Next Steps:** Once RedisJSON commands are implemented, VapeCache will automatically use them when the module is detected!
+**Next Steps:** Expand module helpers (JSON.NUMINCRBY, JSON.ARRAPPEND) and add more RediSearch query options.

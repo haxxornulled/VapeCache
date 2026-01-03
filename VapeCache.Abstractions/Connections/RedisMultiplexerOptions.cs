@@ -21,4 +21,10 @@ public sealed record RedisMultiplexerOptions
     /// Falls back to the legacy stream writer when false.
     /// </summary>
     public bool EnableCoalescedSocketWrites { get; init; } = true;
+
+    /// <summary>
+    /// Maximum time to wait for a Redis response before treating the connection as unhealthy.
+    /// Set to TimeSpan.Zero to disable.
+    /// </summary>
+    public TimeSpan ResponseTimeout { get; init; } = TimeSpan.FromSeconds(2);
 }

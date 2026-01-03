@@ -25,16 +25,19 @@ public sealed class RedisCommandExecutorIntegrationTests
             factory,
             Options.Create(new RedisMultiplexerOptions { Connections = 2, MaxInFlightPerConnection = 1024 }));
 
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var ct = cts.Token;
+
         var key = "vapecache:test:" + Guid.NewGuid().ToString("N");
         var bytes = "hello"u8.ToArray();
 
-        Assert.True(await exec.SetAsync(key, bytes, TimeSpan.FromSeconds(30), CancellationToken.None));
-        var got = await exec.GetAsync(key, CancellationToken.None);
+        Assert.True(await exec.SetAsync(key, bytes, TimeSpan.FromSeconds(30), ct));
+        var got = await exec.GetAsync(key, ct);
         Assert.NotNull(got);
         Assert.Equal(bytes, got);
 
-        Assert.True(await exec.DeleteAsync(key, CancellationToken.None));
-        var missing = await exec.GetAsync(key, CancellationToken.None);
+        Assert.True(await exec.DeleteAsync(key, ct));
+        var missing = await exec.GetAsync(key, ct);
         Assert.Null(missing);
     }
 
@@ -53,6 +56,9 @@ public sealed class RedisCommandExecutorIntegrationTests
             factory,
             Options.Create(new RedisMultiplexerOptions { Connections = 1, MaxInFlightPerConnection = 1024 }));
 
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var ct = cts.Token;
+
         var key1 = "vapecache:ex:" + Guid.NewGuid().ToString("N");
         var key2 = "vapecache:ex:" + Guid.NewGuid().ToString("N");
 
@@ -62,46 +68,46 @@ public sealed class RedisCommandExecutorIntegrationTests
                 (key1, "one"u8.ToArray()),
                 (key2, "two"u8.ToArray())
             },
-            CancellationToken.None));
+            ct));
 
-        var got = await exec.MGetAsync(new[] { key1, key2 }, CancellationToken.None);
+        var got = await exec.MGetAsync(new[] { key1, key2 }, ct);
         Assert.Equal(2, got.Length);
         Assert.Equal("one", System.Text.Encoding.UTF8.GetString(got[0]!));
         Assert.Equal("two", System.Text.Encoding.UTF8.GetString(got[1]!));
 
         // GETEX sets/updates TTL and returns value
-        var gotEx = await exec.GetExAsync(key1, TimeSpan.FromSeconds(5), CancellationToken.None);
+        var gotEx = await exec.GetExAsync(key1, TimeSpan.FromSeconds(5), ct);
         Assert.NotNull(gotEx);
         Assert.Equal("one", System.Text.Encoding.UTF8.GetString(gotEx!));
 
-        var ttl = await exec.TtlSecondsAsync(key1, CancellationToken.None);
-        var pttl = await exec.PTtlMillisecondsAsync(key1, CancellationToken.None);
+        var ttl = await exec.TtlSecondsAsync(key1, ct);
+        var pttl = await exec.PTtlMillisecondsAsync(key1, ct);
         Assert.True(ttl >= 0);
         Assert.True(pttl >= 0);
 
-        var unlinked = await exec.UnlinkAsync(key1, CancellationToken.None);
+        var unlinked = await exec.UnlinkAsync(key1, ct);
         Assert.True(unlinked >= 0);
 
-        var missing = await exec.GetAsync(key1, CancellationToken.None);
+        var missing = await exec.GetAsync(key1, ct);
         Assert.Null(missing);
 
         // Hashes
         var hkey = key2 + ":hash";
         var field = "f1";
-        var added = await exec.HSetAsync(hkey, field, "hv"u8.ToArray(), CancellationToken.None);
+        var added = await exec.HSetAsync(hkey, field, "hv"u8.ToArray(), ct);
         Assert.True(added >= 0);
-        var hval = await exec.HGetAsync(hkey, field, CancellationToken.None);
+        var hval = await exec.HGetAsync(hkey, field, ct);
         Assert.NotNull(hval);
 
-        var hm = await exec.HMGetAsync(hkey, new[] { field, "missing" }, CancellationToken.None);
+        var hm = await exec.HMGetAsync(hkey, new[] { field, "missing" }, ct);
         Assert.Equal(2, hm.Length);
         Assert.NotNull(hm[0]);
 
         // Lists
         var lkey = key2 + ":list";
-        var llen = await exec.LPushAsync(lkey, "lv"u8.ToArray(), CancellationToken.None);
+        var llen = await exec.LPushAsync(lkey, "lv"u8.ToArray(), ct);
         Assert.True(llen >= 1);
-        var popped = await exec.LPopAsync(lkey, CancellationToken.None);
+        var popped = await exec.LPopAsync(lkey, ct);
         Assert.NotNull(popped);
     }
 
@@ -120,14 +126,17 @@ public sealed class RedisCommandExecutorIntegrationTests
             factory,
             Options.Create(new RedisMultiplexerOptions { Connections = 1, MaxInFlightPerConnection = 4096 }));
 
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var ct = cts.Token;
+
         var keyPrefix = "vapecache:pipe:" + Guid.NewGuid().ToString("N") + ":";
 
         var tasks = Enumerable.Range(0, 200).Select(async i =>
         {
             var key = keyPrefix + i;
             var payload = BitConverter.GetBytes(i);
-            Assert.True(await exec.SetAsync(key, payload, TimeSpan.FromSeconds(60), CancellationToken.None));
-            var got = await exec.GetAsync(key, CancellationToken.None);
+            Assert.True(await exec.SetAsync(key, payload, TimeSpan.FromSeconds(60), ct));
+            var got = await exec.GetAsync(key, ct);
             Assert.NotNull(got);
             Assert.Equal(i, BitConverter.ToInt32(got));
         });

@@ -112,7 +112,7 @@ See [CONFIGURATION_BEST_PRACTICES.md](CONFIGURATION_BEST_PRACTICES.md) for detai
 
 | Layer | Responsibility | Key Components |
 |-------|----------------|----------------|
-| **Application** | Business logic, HTTP endpoints | Controllers, Services |
+| **Application** | Business logic, host entry points | Controllers, Services |
 | **Typed Cache API** | Generic cache operations | `IVapeCache<T>` |
 | **Cache Service** | Byte-level cache operations | `ICacheService` |
 | **Stampede Protection** | Coalesce concurrent requests | `StampedeProtectedCacheService` |
@@ -274,10 +274,10 @@ public async Task<TValue?> GetOrSetAsync<TValue>(
 **Configuration:**
 ```json
 {
-  "CacheService": {
-    "CircuitBreakerFailureThreshold": 5,        // Failures before opening
-    "CircuitBreakerSamplingDurationSeconds": 30, // Time window for counting
-    "CircuitBreakerBreakDurationSeconds": 60     // How long to wait before half-open
+  "RedisCircuitBreaker": {
+    "ConsecutiveFailuresToOpen": 5,
+    "BreakDuration": "00:00:60",
+    "HalfOpenProbeTimeout": "00:00:00.250"
   }
 }
 ```
@@ -299,8 +299,8 @@ public async Task<TValue?> GetOrSetAsync<TValue>(
 **Acquisition Flow:**
 ```
 1. TryRent() → Check available connections
-2. If none available → Try create new connection (up to MaxPoolSize)
-3. If at limit → Wait up to AcquireTimeoutMs
+2. If none available → Try create new connection (up to MaxConnections)
+3. If at limit → Wait up to AcquireTimeout
 4. If timeout → Throw TimeoutException
 5. Validate connection (PING) → Return to caller
 ```

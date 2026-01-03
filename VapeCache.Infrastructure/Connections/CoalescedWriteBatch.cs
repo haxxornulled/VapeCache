@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace VapeCache.Infrastructure.Connections;
 
@@ -157,7 +158,8 @@ internal sealed class Coalescer
 
             if (remainingSpace < SmallCopyThreshold + 1024)
             {
-                ArrayPool<byte>.Shared.Return(batch.Scratch);
+                // Keep the current scratch alive until the batch is sent.
+                batch.Owners.Add(new ArrayPoolLease(batch.Scratch));
                 batch.Scratch = ArrayPool<byte>.Shared.Rent(8192);
                 batch.ScratchBaseOffset = 0;
             }
@@ -167,5 +169,19 @@ internal sealed class Coalescer
             }
             batch.ScratchUsed = 0;
         }
+    }
+}
+
+internal sealed class ArrayPoolLease : IDisposable
+{
+    private byte[]? _buffer;
+
+    public ArrayPoolLease(byte[] buffer) => _buffer = buffer;
+
+    public void Dispose()
+    {
+        var buffer = Interlocked.Exchange(ref _buffer, null);
+        if (buffer is not null)
+            ArrayPool<byte>.Shared.Return(buffer);
     }
 }

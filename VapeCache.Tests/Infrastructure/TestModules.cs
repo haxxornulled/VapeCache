@@ -51,11 +51,14 @@ internal static class TestModules
 
         // Executors
         builder.RegisterInstance(redisExecutor).As<IRedisCommandExecutor>().SingleInstance();
-        builder.RegisterType<InMemoryCommandExecutor>().AsSelf().SingleInstance();
+        builder.RegisterType<InMemoryCommandExecutor>()
+            .AsSelf()
+            .As<IRedisFallbackCommandExecutor>()
+            .SingleInstance();
 
         // Cache services
         builder.RegisterType<RedisCacheService>().AsSelf().SingleInstance();
-        builder.RegisterType<InMemoryCacheService>().AsSelf().SingleInstance();
+        builder.RegisterType<InMemoryCacheService>().AsSelf().As<ICacheFallbackService>().SingleInstance();
         builder.RegisterType<HybridCacheService>()
             .AsSelf()
             .As<IRedisCircuitBreakerState>()
@@ -76,4 +79,5 @@ internal sealed class NoopReconciliationService : IRedisReconciliationService
     public void TrackDelete(string key) { }
     public ValueTask ReconcileAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
     public void Clear() { }
+    public ValueTask FlushAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
 }

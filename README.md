@@ -40,6 +40,9 @@ dotnet add package VapeCache
 # Or just the abstractions (for library authors)
 dotnet add package VapeCache.Abstractions
 
+# Redis reconciliation (optional)
+dotnet add package VapeCache.Reconciliation
+
 # .NET Aspire integration (optional)
 dotnet add package VapeCache.Extensions.Aspire
 ```
@@ -73,17 +76,45 @@ dotnet add package VapeCache.Extensions.Aspire
   "RedisMultiplexer": {
     "Connections": 4,
     "MaxInFlightPerConnection": 4096,
+    "ResponseTimeout": "00:00:02",
     "EnableCoalescedSocketWrites": true,
     "EnableCommandInstrumentation": true
   },
-  "CacheService": {
-    "EnableCircuitBreaker": true,
-    "InMemoryCacheSizeLimitMb": 100
+  "RedisCircuitBreaker": {
+    "Enabled": true,
+    "ConsecutiveFailuresToOpen": 2,
+    "BreakDuration": "00:00:10",
+    "HalfOpenProbeTimeout": "00:00:00.250"
+  },
+  "CacheStampede": {
+    "Enabled": true,
+    "MaxKeys": 100000
   }
 }
 ```
 
 📖 **[Complete Configuration Reference](docs/CONFIGURATION.md)** - All appsettings.json options documented
+
+### Redis Reconciliation (opt-in)
+```csharp
+builder.Services.AddVapeCacheRedisReconciliation(options =>
+{
+    options.MaxOperationAge = TimeSpan.FromMinutes(5);
+});
+```
+
+```json
+{
+  "RedisReconciliation": {
+    "Enabled": true,
+    "MaxOperationAge": "00:05:00"
+  },
+  "RedisReconciliationStore": {
+    "UseSqlite": true,
+    "StorePath": "%LOCALAPPDATA%/VapeCache/persistence/reconciliation.db"
+  }
+}
+```
 
 **Production Secrets Management:**
 - 🔐 **[Azure Key Vault Integration](docs/CONFIGURATION.md#example-azure-key-vault-integration)** - Load Redis passwords from Key Vault (recommended)
@@ -110,9 +141,32 @@ public class MyService
             async ct => await _db.Users.FindAsync(id, ct), // Factory
             (writer, user) => JsonSerializer.Serialize(writer, user), // Serialize
             bytes => JsonSerializer.Deserialize<User>(bytes), // Deserialize
-            new CacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5) },
+            new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(5)),
             ct);
     }
+}
+```
+
+### Autofac Registration
+```csharp
+builder.RegisterModule(new VapeCache.Infrastructure.DependencyInjection.VapeCacheConnectionsModule());
+builder.RegisterModule(new VapeCache.Infrastructure.DependencyInjection.VapeCacheCachingModule());
+```
+
+### Fast-Fail List Pops (Try*)
+```csharp
+var workQueue = collections.List<WorkItem>("jobs:pending");
+
+if (!workQueue.TryPopFrontAsync(ct, out var task))
+{
+    // Multiplexer saturated: skip or backoff instead of waiting
+    return;
+}
+
+var workItem = await task;
+if (workItem is not null)
+{
+    await ProcessAsync(workItem);
 }
 ```
 
@@ -170,10 +224,12 @@ graph LR
 
 ## 📚 Documentation
 
+Start here: [Docs Index](docs/INDEX.md)
+
 ### Getting Started
-- [Quickstart Guide](docs/QUICKSTART.md) - Get running in 5 minutes
-- [Configuration Guide](docs/CONFIGURATION.md) - appsettings.json reference
-- [.NET Aspire Integration](docs/ASPIRE_INTEGRATION.md) - Cloud-native deployment
+- [Quickstart Guide](docs/QUICKSTART.md)
+- [Configuration Guide](docs/CONFIGURATION.md)
+- [.NET Aspire Integration](docs/ASPIRE_INTEGRATION.md)
 
 ### Architecture & Design
 - [Architecture Overview](docs/ARCHITECTURE.md) - High-level design
@@ -188,14 +244,11 @@ graph LR
 - [.NET Aspire Dashboard](docs/ASPIRE_INTEGRATION.md) - Cloud-native observability
 
 ### API Reference
-- **[Complete API Reference](docs/API_REFERENCE.md)** - Full API documentation
-  - [ICacheService](docs/API_REFERENCE.md#icacheservice) - Core caching operations
-  - [Typed Collections API](docs/API_REFERENCE.md#typed-collections-api) - Lists, Sets, Hashes
-  - [Serialization Patterns](docs/API_REFERENCE.md#serialization) - Zero-allocation serialization
-  - [Performance Patterns](docs/API_REFERENCE.md#performance-patterns) - Best practices
-- [Redis Protocol Support](docs/REDIS_PROTOCOL_SUPPORT.md) - What commands are supported
-- [API Expansion Plan](docs/API_EXPANSION_PLAN.md) - Roadmap to 200+ commands
-- [Non-Goals](docs/NON_GOALS.md) - What VapeCache is **not**
+- [API Reference](docs/API_REFERENCE.md)
+- [Redis Protocol Support](docs/REDIS_PROTOCOL_SUPPORT.md)
+- [API Expansion Backlog](docs/API_EXPANSION_PLAN.md)
+- [Non-Goals](docs/NON_GOALS.md)
+- [FAQ](docs/FAQ.md)
 
 ### Operations
 - [Failure Scenarios](docs/FAILURE_SCENARIOS.md) - What happens when Redis fails
@@ -299,50 +352,34 @@ dotnet test -c Release
 # Set Redis connection string
 $env:VAPECACHE_REDIS_CONNECTIONSTRING = 'redis://localhost:6379/0'
 
-# Run console host with HTTP endpoints
 dotnet run --project VapeCache.Console -c Release
-
-# HTTP endpoints available at http://localhost:5080
-# - GET /healthz
-# - GET /cache/stats
-# - PUT /cache/{key}?ttlSeconds=60
-# - GET /cache/{key}
 ```
+Console host runs the demo workloads and logs cache activity; it does not expose HTTP endpoints.
 
 ### Run Benchmarks
 ```bash
-dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisClientComparisonBenchmarks*
+$env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
+dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisClientStackExchangeBenchmarks*
+dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisClientVapeCacheBenchmarks*
 ```
 
 ---
 
 ## 📋 Roadmap
 
-### Current Status (v0.9 - Pre-Release)
-- ✅ Core caching commands (GET, SET, MGET, MSET, etc.)
-- ✅ Hybrid cache with circuit breaker
+### Current (v1.0)
+- ✅ Core caching commands and typed collections (List/Set/Hash/SortedSet)
+- ✅ Hybrid cache with circuit breaker + reconciliation (optional)
 - ✅ Ordered multiplexing + coalesced writes
 - ✅ OpenTelemetry metrics + tracing
-- ✅ Connection pooling + reaper
-- ✅ Comprehensive documentation
+- ✅ Redis module commands (RedisJSON, RediSearch, RedisBloom, RedisTimeSeries)
+- ✅ .NET Aspire integration package
 
-### v1.0 (2 weeks)
-- ✅ .NET Aspire integration package (VapeCache.Extensions.Aspire)
+### Backlog (Scoped)
+- [ ] Expand core command surface (INCR/DECR, EXISTS, etc.)
 - [ ] Backpressure metrics (queue depth, wait time)
-- [ ] Memory accounting (buffer pool telemetry)
-- [ ] TLS security documentation
-- [ ] Failure scenario matrix
-- [ ] NuGet packages published
-
-### v1.1 (Q2 2025)
-- [ ] Expanded command surface (20 → 50 commands)
-- [ ] Pub/Sub API
-- [ ] Lua scripting support
-
-### v2.0 (Q3 2025)
-- [ ] Fluent API builders (LINQ-style)
-- [ ] Source generators (compile-time validation)
-- [ ] Cluster mode support (maybe)
+- [ ] Buffer pool accounting telemetry
+- [ ] Additional codec implementations
 
 See [docs/API_EXPANSION_PLAN.md](docs/API_EXPANSION_PLAN.md) for detailed roadmap.
 
@@ -398,5 +435,5 @@ MIT License - See [LICENSE](LICENSE) for details
 ## 📞 Support
 
 - **GitHub Issues**: [https://github.com/haxxornulled/VapeCache/issues](https://github.com/haxxornulled/VapeCache/issues)
-- **Documentation**: [docs/](docs/)
+- **Documentation**: [docs/INDEX.md](docs/INDEX.md)
 - **Discussions**: [GitHub Discussions](https://github.com/haxxornulled/VapeCache/discussions) (coming soon)

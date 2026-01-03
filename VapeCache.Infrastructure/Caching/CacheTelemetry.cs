@@ -18,6 +18,14 @@ public static class CacheTelemetry
 
     public static readonly Histogram<double> OpMs = Meter.CreateHistogram<double>("cache.op.ms", unit: "ms", description: "Cache operation latency");
 
+    public static readonly Counter<long> SpillWriteCount = Meter.CreateCounter<long>("cache.spill.write.count", description: "Spill write operations");
+    public static readonly Counter<long> SpillWriteBytes = Meter.CreateCounter<long>("cache.spill.write.bytes", unit: "bytes", description: "Spill write bytes");
+    public static readonly Counter<long> SpillReadCount = Meter.CreateCounter<long>("cache.spill.read.count", description: "Spill read operations");
+    public static readonly Counter<long> SpillReadBytes = Meter.CreateCounter<long>("cache.spill.read.bytes", unit: "bytes", description: "Spill read bytes");
+    public static readonly Counter<long> SpillOrphanScanned = Meter.CreateCounter<long>("cache.spill.orphan.scanned", description: "Spill files scanned for orphan cleanup");
+    public static readonly Counter<long> SpillOrphanCleanupCount = Meter.CreateCounter<long>("cache.spill.orphan.cleanup.count", description: "Spill files deleted during orphan cleanup");
+    public static readonly Counter<long> SpillOrphanCleanupBytes = Meter.CreateCounter<long>("cache.spill.orphan.cleanup.bytes", unit: "bytes", description: "Spill bytes deleted during orphan cleanup");
+
     private static ICurrentCacheService? _currentCacheService;
 
     /// <summary>

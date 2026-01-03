@@ -19,6 +19,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCahe.Core", "VapeCahe.C
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Extensions.Aspire", "VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj", "{6234C7AF-32C6-476C-9F94-32C198E78671}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Sample", "samples\VapeCache.Sample\VapeCache.Sample.csproj", "{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -125,6 +127,18 @@ Global
 		{6234C7AF-32C6-476C-9F94-32C198E78671}.Release|x64.Build.0 = Release|Any CPU
 		{6234C7AF-32C6-476C-9F94-32C198E78671}.Release|x86.ActiveCfg = Release|Any CPU
 		{6234C7AF-32C6-476C-9F94-32C198E78671}.Release|x86.Build.0 = Release|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Debug|x64.Build.0 = Debug|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Debug|x86.Build.0 = Debug|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Release|x64.ActiveCfg = Release|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Release|x64.Build.0 = Release|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Release|x86.ActiveCfg = Release|Any CPU
+		{5C8DA374-3733-4BDD-AA8D-65A001BDEF4B}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

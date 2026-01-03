@@ -486,9 +486,32 @@ This provides **zero-data-loss failover** for cache operations.
 {
   "RedisReconciliation": {
     "Enabled": true,
-    "MaxOperationAge": "00:05:00"
+    "MaxOperationAge": "00:05:00",
+    "MaxPendingOperations": 100000,
+    "MaxOperationsPerRun": 10000,
+    "BatchSize": 256,
+    "MaxRunDuration": "00:00:30",
+    "InitialBackoff": "00:00:00.025",
+    "MaxBackoff": "00:00:02",
+    "BackoffMultiplier": 2.0
+  },
+  "RedisReconciliationStore": {
+    "UseSqlite": true,
+    "StorePath": "%LOCALAPPDATA%/VapeCache/persistence/reconciliation.db",
+    "BusyTimeoutMs": 1000,
+    "EnablePragmaOptimizations": true,
+    "VacuumOnClear": false
   }
 }
+```
+
+### DI Registration
+
+```csharp
+builder.Services.AddVapeCacheRedisReconciliation(options =>
+{
+    options.MaxOperationAge = TimeSpan.FromMinutes(5);
+});
 ```
 
 ### Options
@@ -533,11 +556,13 @@ When circuit closes (Redis recovers):
    ✅ Redis reconciliation complete: 45 synced, 2 skipped, 0 failed (took 234ms)
    ```
 
+### Utilities
+
+- `IRedisReconciliationService.FlushAsync()` clears the backing store on demand (useful for admin tooling and test cleanup).
+
 ### Important Notes
 
-⚠️ **Current Status**: Reconciliation service is **fully implemented** but temporarily disabled due to a circular dependency issue in the DI container. The circuit breaker works perfectly without it.
-
-**Roadmap**: Reconciliation will be re-enabled in a future release with architectural improvements.
+Reconciliation is **opt-in**. Enable it in DI with `AddVapeCacheRedisReconciliation(...)` so recovery sync is explicit and configurable.
 
 ---
 
@@ -921,11 +946,9 @@ Circuit breaker: Max retries (10) exceeded. Staying in OPEN state indefinitely.
 
 **Symptoms**: In-memory writes are not synced back to Redis after recovery.
 
-**Current Status**: ⚠️ Reconciliation is **fully implemented** but temporarily disabled due to circular dependency in DI container.
+**Cause**: Reconciliation is opt-in. Ensure `AddVapeCacheRedisReconciliation(...)` is registered and your options are valid.
 
-**Workaround**: Circuit breaker works perfectly without reconciliation. Writes during outage are only in-memory until Redis recovery.
-
-**Future**: Reconciliation will be re-enabled in a future release.
+**Workaround**: Circuit breaker still works without reconciliation; writes during outage remain in-memory until Redis recovery.
 
 ---
 

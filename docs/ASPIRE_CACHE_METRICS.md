@@ -300,7 +300,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Add VapeCache with Aspire integration
 builder.AddVapeCache()
     .WithRedisFromAspire("redis")     // Binds to AppHost Redis resource
-    .WithHealthChecks()                // Adds /health/redis, /health/vapecache
+    .WithHealthChecks()                // Registers Redis + VapeCache health checks
     .WithAspireTelemetry();            // ← Sends hit/miss to Aspire Dashboard
 
 // Add Blazor services
@@ -358,6 +358,13 @@ You'll see VapeCache metrics grouped by meter:
 - `cache.remove.calls` (Counter) - Total REMOVE calls
 - `cache.fallback.to_memory` (Counter) - Circuit breaker activations
 - `cache.redis.breaker.opened` (Counter) - Circuit breaker opens
+- `cache.spill.write.count` (Counter) - Spill writes
+- `cache.spill.write.bytes` (Counter) - Spill write bytes
+- `cache.spill.read.count` (Counter) - Spill reads
+- `cache.spill.read.bytes` (Counter) - Spill read bytes
+- `cache.spill.orphan.scanned` (Counter) - Spill files scanned for cleanup
+- `cache.spill.orphan.cleanup.count` (Counter) - Spill files deleted during cleanup
+- `cache.spill.orphan.cleanup.bytes` (Counter) - Spill bytes deleted during cleanup
 - `cache.op.ms` (Histogram) - Operation latency
 
 **VapeCache.Redis (Redis Metrics):**
@@ -367,6 +374,8 @@ You'll see VapeCache metrics grouped by meter:
 - `redis.pool.acquires` (Counter) - Pool lease requests
 - `redis.pool.timeouts` (Counter) - Pool timeouts
 - `redis.pool.wait.ms` (Histogram) - Pool wait time
+- `redis.queue.depth` (Gauge) - Write/pending queue depth (tagged by queue and connection)
+- `redis.queue.wait.ms` (Histogram) - Write queue backpressure wait time
 - `redis.connect.attempts` (Counter) - Connection attempts
 - `redis.connect.failures` (Counter) - Connection failures
 
@@ -424,7 +433,7 @@ builder.Services.AddOpenTelemetry()
 Identify performance issues immediately:
 - Low hit rate → Increase TTL or cache more data
 - High fallback rate → Redis is down, check circuit breaker
-- High pool timeouts → Increase MaxPoolSize
+- High pool timeouts → Increase MaxConnections
 
 ## Roadmap
 

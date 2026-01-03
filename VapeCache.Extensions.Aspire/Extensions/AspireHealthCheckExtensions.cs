@@ -10,7 +10,7 @@ public static class AspireHealthCheckExtensions
 {
     /// <summary>
     /// Adds VapeCache and Redis health checks to the application.
-    /// Exposes /health endpoints for Kubernetes, Azure Container Apps, and Aspire Dashboard.
+    /// Endpoint mapping is handled by the host (Kubernetes, Azure Container Apps, etc.).
     /// </summary>
     /// <param name="builder">The VapeCache builder.</param>
     /// <returns>The builder for method chaining.</returns>
@@ -27,7 +27,7 @@ public static class AspireHealthCheckExtensions
     /// - Unhealthy: Redis connection failed
     /// </para>
     /// <para>
-    /// <strong>Usage with endpoints:</strong>
+    /// <strong>Usage in your host:</strong>
     /// </para>
     /// <code>
     /// app.MapHealthChecks("/health");                     // All health checks

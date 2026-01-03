@@ -31,12 +31,12 @@ public sealed class EnterpriseBenchmarkConfig : ManualConfig
         AddJob(
             Job.Default
                 .WithId("net10-wks")
-                .WithToolchain(InProcessNoEmitToolchain.Instance));
+                .WithToolchain(NearestProjectToolchain.Net10));
 
         AddJob(
             Job.Default
                 .WithId("net10-svr")
-                .WithToolchain(InProcessNoEmitToolchain.Instance)
+                .WithToolchain(NearestProjectToolchain.Net10)
                 .WithGcServer(true));
 
         AddDiagnoser(MemoryDiagnoser.Default);

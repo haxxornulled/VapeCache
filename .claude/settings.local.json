@@ -101,7 +101,9 @@
       "Bash(ildasm:*)",
       "Bash(dotnet pack:*)",
       "Bash(7z l:*)",
-      "Bash(unzip:*)"
+      "Bash(unzip:*)",
+      "Bash(git mv:*)",
+      "Bash(dir:*)"
     ]
   }
 }

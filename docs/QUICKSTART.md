@@ -10,7 +10,7 @@ Get VapeCache running in 5 minutes.
 ## Step 1: Install (Coming Soon)
 
 ```bash
-dotnet add package VapeCache.Infrastructure
+dotnet add package VapeCache
 ```
 
 For now, clone the repository:
@@ -75,10 +75,7 @@ public class UserService
         await _cache.SetAsync(
             key,
             json,
-            new CacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5)
-            },
+            new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(5)),
             CancellationToken.None);
 
         return user;
@@ -98,7 +95,7 @@ public async Task<User?> GetUserAsync(int id, CancellationToken ct)
         async ct => await _db.Users.FindAsync(id, ct), // Factory
         (writer, user) => JsonSerializer.Serialize(writer, user), // Serialize
         bytes => JsonSerializer.Deserialize<User>(bytes), // Deserialize
-        new CacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5) },
+        new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(5)),
         ct);
 }
 ```
@@ -116,11 +113,7 @@ Run the console host to test the connection:
 dotnet run --project VapeCache.Console -c Release
 ```
 
-HTTP endpoints available at `http://localhost:5080`:
-- `GET /healthz` - Check if Redis is connected
-- `GET /cache/stats` - View hit/miss rates
-- `PUT /cache/test?ttlSeconds=60` - Store a value (body = text)
-- `GET /cache/test` - Retrieve the value
+The console host runs demo workloads and logs cache activity; it does not expose HTTP endpoints.
 
 ## Next Steps
 

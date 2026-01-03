@@ -36,11 +36,15 @@ VapeCache has **production-grade observability built-in**, but with **zero lock-
   - `redis.connect.attempts`, `redis.connect.failures`, `redis.connect.ms`
   - `redis.pool.acquires`, `redis.pool.timeouts`, `redis.pool.wait.ms`
   - `redis.cmd.calls`, `redis.cmd.failures`, `redis.cmd.ms`
+  - `redis.queue.depth`, `redis.queue.wait.ms`
   - `redis.bytes.sent`, `redis.bytes.received`
 - `VapeCache.Cache` meter:
   - `cache.get.calls`, `cache.set.calls`, `cache.remove.calls`
   - `cache.hits`, `cache.misses`
   - `cache.fallback_to_memory`
+  - `cache.spill.write.count`, `cache.spill.write.bytes`
+  - `cache.spill.read.count`, `cache.spill.read.bytes`
+  - `cache.spill.orphan.scanned`, `cache.spill.orphan.cleanup.count`, `cache.spill.orphan.cleanup.bytes`
   - `cache.op.ms`
 
 ✅ **OpenTelemetry Tracing (ActivitySource)**
@@ -120,7 +124,7 @@ builder.AddVapeCache()
 
 **What You Get:**
 - Automatic Redis connection string injection
-- Built-in health checks (`/health`, `/health/ready`, `/health/live`)
+- Health checks registered (map to `/health`, `/health/ready`, `/health/live` in your host)
 - Aspire Dashboard (`http://localhost:15888`) with metrics/traces/logs
 - One-command deployment: `azd up`
 
@@ -142,11 +146,11 @@ builder.Services.AddOpenTelemetry()
         .AddVapeCacheMetrics()
         .AddPrometheusExporter());
 
-app.MapPrometheusScrapingEndpoint();  // /metrics
+app.MapPrometheusScrapingEndpoint();  // host-mapped /metrics
 ```
 
 **What You Get:**
-- Prometheus scrapes `/metrics` endpoint
+- Prometheus scrapes your host's `/metrics` endpoint (if exposed)
 - Grafana dashboards for VapeCache metrics
 - AlertManager integration for circuit breaker open, pool timeouts, etc.
 
@@ -260,6 +264,8 @@ builder.Services.AddVapecacheCaching();
 | `redis.cmd.calls` | Counter | count | Redis commands sent |
 | `redis.cmd.failures` | Counter | count | Failed commands |
 | `redis.cmd.ms` | Histogram | milliseconds | Command latency |
+| `redis.queue.depth` | ObservableGauge | items | Write/pending queue depth (tagged by `queue`, `connection.id`, `capacity`) |
+| `redis.queue.wait.ms` | Histogram | milliseconds | Time waiting to enqueue when write queue is full |
 | `redis.bytes.sent` | Counter | bytes | Bytes sent to Redis |
 | `redis.bytes.received` | Counter | bytes | Bytes received from Redis |
 
@@ -273,6 +279,13 @@ builder.Services.AddVapecacheCaching();
 | `cache.hits` | Counter | count | Cache hits |
 | `cache.misses` | Counter | count | Cache misses |
 | `cache.fallback_to_memory` | Counter | count | Redis → memory fallbacks (tagged by reason) |
+| `cache.spill.write.count` | Counter | count | Spill write operations |
+| `cache.spill.write.bytes` | Counter | bytes | Spill write bytes |
+| `cache.spill.read.count` | Counter | count | Spill read operations |
+| `cache.spill.read.bytes` | Counter | bytes | Spill read bytes |
+| `cache.spill.orphan.scanned` | Counter | count | Spill files scanned for cleanup |
+| `cache.spill.orphan.cleanup.count` | Counter | count | Spill files deleted during cleanup |
+| `cache.spill.orphan.cleanup.bytes` | Counter | bytes | Spill bytes deleted during cleanup |
 | `cache.op.ms` | Histogram | milliseconds | Cache operation latency (tagged by op) |
 | `redis.breaker.opened` | Counter | count | Circuit breaker opened |
 

@@ -12,6 +12,8 @@ namespace VapeCache.Infrastructure.Connections;
 /// </summary>
 internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueTaskSource<int>
 {
+    private static readonly ArraySegment<byte> EmptySegment = new(Array.Empty<byte>());
+
     private ManualResetValueTaskSourceCore<int> _core;
     private int _completed;
     private CancellationTokenRegistration _ctr;
@@ -76,6 +78,8 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
         }
 
         Array.Copy(buffers, 0, subset, 0, count);
+        for (var i = count; i < subset.Length; i++)
+            subset[i] = EmptySegment;
 
         Volatile.Write(ref _currentBufferList, subset);
         BufferList = subset;

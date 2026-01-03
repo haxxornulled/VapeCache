@@ -8,6 +8,7 @@ using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
+using VapeCache.Reconciliation;
 using Xunit;
 
 namespace VapeCache.Tests.Caching;
@@ -24,7 +25,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         var current = new CurrentCacheService();
         var statsRegistry = new CacheStatsRegistry();
         var redis = new RedisCacheService(redisExec, current, statsRegistry);
-        var memory = new InMemoryCacheService(new MemoryCache(new MemoryCacheOptions()), current, statsRegistry);
+        var memory = CreateMemoryCacheService(current, statsRegistry);
 
         await memory.SetAsync("k", "v"u8.ToArray(), new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None);
 
@@ -64,7 +65,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         var current = new CurrentCacheService();
         var statsRegistry = new CacheStatsRegistry();
         var redis = new RedisCacheService(redisExec, current, statsRegistry);
-        var memory = new InMemoryCacheService(new MemoryCache(new MemoryCacheOptions()), current, statsRegistry);
+        var memory = CreateMemoryCacheService(current, statsRegistry);
         await memory.SetAsync("k", "v"u8.ToArray(), new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None);
 
         var breaker = Options.Create(new RedisCircuitBreakerOptions
@@ -99,7 +100,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         var current = new CurrentCacheService();
         var statsRegistry = new CacheStatsRegistry();
         var redis = new RedisCacheService(flakyRedis, current, statsRegistry);
-        var memory = new InMemoryCacheService(new MemoryCache(new MemoryCacheOptions()), current, statsRegistry);
+        var memory = CreateMemoryCacheService(current, statsRegistry);
 
         var breaker = Options.Create(new RedisCircuitBreakerOptions
         {
@@ -112,10 +113,11 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         var reconciliationOptions = Options.Create(new RedisReconciliationOptions
         {
             Enabled = true,
-            MaxBatchSize = 100,
+            BatchSize = 100,
             MaxRunDuration = TimeSpan.FromSeconds(2)
         });
-        var reconciliation = new RedisReconciliationService(flakyRedis, reconciliationOptions, NullLogger<RedisReconciliationService>.Instance);
+        var store = new InMemoryReconciliationStore();
+        var reconciliation = new RedisReconciliationService(new TestReconciliationExecutor(flakyRedis), reconciliationOptions, NullLogger<RedisReconciliationService>.Instance, time, store);
 
         var hybrid = new HybridCacheService(redis, memory, current, time, breaker, statsRegistry, NullLogger<HybridCacheService>.Instance, reconciliation);
 
@@ -155,9 +157,12 @@ public sealed class RedisCircuitBreakerHybridCacheTests
             throw new InvalidOperationException("redis down");
         }
 
+        public bool TryGetAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?> GetExAsync(string key, TimeSpan? ttl, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public bool TryGetExAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<byte[]?> task) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?[]> MGetAsync(string[] keys, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<bool> SetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public bool TrySetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct, out ValueTask<bool> task) => throw new InvalidOperationException("redis down");
         public ValueTask<bool> MSetAsync((string Key, ReadOnlyMemory<byte> Value)[] items, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<bool> DeleteAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<long> TtlSecondsAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
@@ -165,20 +170,29 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         public ValueTask<long> UnlinkAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<RedisValueLease> GetLeaseAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<RedisValueLease> GetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public bool TryGetLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new InvalidOperationException("redis down");
+        public bool TryGetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new InvalidOperationException("redis down");
         public ValueTask<long> HSetAsync(string key, string field, ReadOnlyMemory<byte> value, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?> HGetAsync(string key, string field, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public bool TryHGetAsync(string key, string field, CancellationToken ct, out ValueTask<byte[]?> task) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?[]> HMGetAsync(string key, string[] fields, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<RedisValueLease> HGetLeaseAsync(string key, string field, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<long> LPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public bool TryLPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?[]> LRangeAsync(string key, long start, long stop, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<RedisValueLease> LPopLeaseAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<RedisValueLease> RPopLeaseAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public bool TryLPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new InvalidOperationException("redis down");
+        public bool TryRPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new InvalidOperationException("redis down");
         public ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public bool TryRPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task) => throw new InvalidOperationException("redis down");
         public ValueTask<long> LLenAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<long> SAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<long> SRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<bool> SIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public bool TrySIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct, out ValueTask<bool> task) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?[]> SMembersAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<long> SCardAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<string> PingAsync(CancellationToken ct) => throw new InvalidOperationException("redis down");
@@ -186,6 +200,32 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         public ValueTask<bool> ExpireAsync(string key, TimeSpan ttl, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?> LIndexAsync(string key, long index, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?> GetRangeAsync(string key, long start, long end, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public IRedisBatch CreateBatch() => new NoopBatch();
+        public ValueTask<byte[]?> JsonGetAsync(string key, string? path, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<RedisValueLease> JsonGetLeaseAsync(string key, string? path, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public bool TryJsonGetLeaseAsync(string key, string? path, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new InvalidOperationException("redis down");
+        public ValueTask<bool> JsonSetAsync(string key, string? path, ReadOnlyMemory<byte> json, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<bool> JsonSetLeaseAsync(string key, string? path, RedisValueLease json, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> JsonDelAsync(string key, string? path, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<bool> FtCreateAsync(string index, string prefix, string[] fields, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<string[]> FtSearchAsync(string index, string query, int? offset, int? count, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<bool> BfAddAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<bool> BfExistsAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<bool> TsCreateAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> TsAddAsync(string key, long timestamp, double value, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<(long Timestamp, double Value)[]> TsRangeAsync(string key, long from, long to, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> ZAddAsync(string key, double score, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> ZRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> ZCardAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<double?> ZScoreAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long?> ZRankAsync(string key, ReadOnlyMemory<byte> member, bool descending, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<double> ZIncrByAsync(string key, double increment, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<(byte[] Member, double Score)[]> ZRangeWithScoresAsync(string key, long start, long stop, bool descending, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<(byte[] Member, double Score)[]> ZRangeByScoreWithScoresAsync(string key, double min, double max, bool descending, long? offset, long? count, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public IAsyncEnumerable<string> ScanAsync(string? pattern = null, int pageSize = 128, CancellationToken ct = default) => throw new InvalidOperationException("redis down");
+        public IAsyncEnumerable<byte[]> SScanAsync(string key, string? pattern = null, int pageSize = 128, CancellationToken ct = default) => throw new InvalidOperationException("redis down");
+        public IAsyncEnumerable<(string Field, byte[] Value)> HScanAsync(string key, string? pattern = null, int pageSize = 128, CancellationToken ct = default) => throw new InvalidOperationException("redis down");
+        public IAsyncEnumerable<(byte[] Member, double Score)> ZScanAsync(string key, string? pattern = null, int pageSize = 128, CancellationToken ct = default) => throw new InvalidOperationException("redis down");
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
@@ -222,7 +262,9 @@ public sealed class RedisCircuitBreakerHybridCacheTests
             return ValueTask.FromResult<byte[]?>(value);
         }
 
+        public bool TryGetAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task) => throw new NotSupportedException();
         public ValueTask<byte[]?> GetExAsync(string key, TimeSpan? ttl, CancellationToken ct) => GetAsync(key, ct);
+        public bool TryGetExAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<byte[]?> task) => throw new NotSupportedException();
         public ValueTask<byte[]?[]> MGetAsync(string[] keys, CancellationToken ct) => throw new NotSupportedException();
 
         public ValueTask<bool> SetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct)
@@ -232,6 +274,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
             return ValueTask.FromResult(true);
         }
 
+        public bool TrySetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct, out ValueTask<bool> task) => throw new NotSupportedException();
         public ValueTask<bool> MSetAsync((string Key, ReadOnlyMemory<byte> Value)[] items, CancellationToken ct) => throw new NotSupportedException();
 
         public ValueTask<bool> DeleteAsync(string key, CancellationToken ct)
@@ -245,28 +288,92 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         public ValueTask<long> UnlinkAsync(string key, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<RedisValueLease> GetLeaseAsync(string key, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<RedisValueLease> GetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct) => throw new NotSupportedException();
+        public bool TryGetLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new NotSupportedException();
+        public bool TryGetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new NotSupportedException();
         public ValueTask<long> HSetAsync(string key, string field, ReadOnlyMemory<byte> value, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<byte[]?> HGetAsync(string key, string field, CancellationToken ct) => throw new NotSupportedException();
+        public bool TryHGetAsync(string key, string field, CancellationToken ct, out ValueTask<byte[]?> task) => throw new NotSupportedException();
         public ValueTask<byte[]?[]> HMGetAsync(string key, string[] fields, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<RedisValueLease> HGetLeaseAsync(string key, string field, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<long> LPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct) => throw new NotSupportedException();
+        public bool TryLPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task) => throw new NotSupportedException();
         public ValueTask<byte[]?[]> LRangeAsync(string key, long start, long stop, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<RedisValueLease> LPopLeaseAsync(string key, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<RedisValueLease> RPopLeaseAsync(string key, CancellationToken ct) => throw new NotSupportedException();
+        public bool TryLPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new NotSupportedException();
+        public bool TryRPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new NotSupportedException();
         public ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct) => throw new NotSupportedException();
+        public bool TryRPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task) => throw new NotSupportedException();
         public ValueTask<long> LLenAsync(string key, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<long> SAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<long> SRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<bool> SIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new NotSupportedException();
+        public bool TrySIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct, out ValueTask<bool> task) => throw new NotSupportedException();
         public ValueTask<byte[]?[]> SMembersAsync(string key, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<long> SCardAsync(string key, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<string> PingAsync(CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<string[]> ModuleListAsync(CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<bool> ExpireAsync(string key, TimeSpan ttl, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<byte[]?> LIndexAsync(string key, long index, CancellationToken ct) => throw new NotSupportedException();
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         public ValueTask<byte[]?> GetRangeAsync(string key, long start, long end, CancellationToken ct) => throw new NotSupportedException();
+        public IRedisBatch CreateBatch() => new NoopBatch();
+        public ValueTask<byte[]?> JsonGetAsync(string key, string? path, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<RedisValueLease> JsonGetLeaseAsync(string key, string? path, CancellationToken ct) => throw new NotSupportedException();
+        public bool TryJsonGetLeaseAsync(string key, string? path, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new NotSupportedException();
+        public ValueTask<bool> JsonSetAsync(string key, string? path, ReadOnlyMemory<byte> json, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<bool> JsonSetLeaseAsync(string key, string? path, RedisValueLease json, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<long> JsonDelAsync(string key, string? path, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<bool> FtCreateAsync(string index, string prefix, string[] fields, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<string[]> FtSearchAsync(string index, string query, int? offset, int? count, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<bool> BfAddAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<bool> BfExistsAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<bool> TsCreateAsync(string key, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<long> TsAddAsync(string key, long timestamp, double value, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<(long Timestamp, double Value)[]> TsRangeAsync(string key, long from, long to, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<long> ZAddAsync(string key, double score, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<long> ZRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<long> ZCardAsync(string key, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<double?> ZScoreAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<long?> ZRankAsync(string key, ReadOnlyMemory<byte> member, bool descending, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<double> ZIncrByAsync(string key, double increment, ReadOnlyMemory<byte> member, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<(byte[] Member, double Score)[]> ZRangeWithScoresAsync(string key, long start, long stop, bool descending, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<(byte[] Member, double Score)[]> ZRangeByScoreWithScoresAsync(string key, double min, double max, bool descending, long? offset, long? count, CancellationToken ct) => throw new NotSupportedException();
+        public IAsyncEnumerable<string> ScanAsync(string? pattern = null, int pageSize = 128, CancellationToken ct = default) => throw new NotSupportedException();
+        public IAsyncEnumerable<byte[]> SScanAsync(string key, string? pattern = null, int pageSize = 128, CancellationToken ct = default) => throw new NotSupportedException();
+        public IAsyncEnumerable<(string Field, byte[] Value)> HScanAsync(string key, string? pattern = null, int pageSize = 128, CancellationToken ct = default) => throw new NotSupportedException();
+        public IAsyncEnumerable<(byte[] Member, double Score)> ZScanAsync(string key, string? pattern = null, int pageSize = 128, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class NoopBatch : IRedisBatch
+    {
+        public ValueTask QueueAsync(Func<IRedisCommandExecutor, CancellationToken, ValueTask> operation, CancellationToken ct = default)
+            => ValueTask.CompletedTask;
+
+        public ValueTask<T> QueueAsync<T>(Func<IRedisCommandExecutor, CancellationToken, ValueTask<T>> operation, CancellationToken ct = default)
+            => ValueTask.FromResult(default(T)!);
+
+        public ValueTask ExecuteAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class TestReconciliationExecutor : IRedisReconciliationExecutor
+    {
+        private readonly IRedisCommandExecutor _executor;
+
+        public TestReconciliationExecutor(IRedisCommandExecutor executor)
+        {
+            _executor = executor;
+        }
+
+        public ValueTask<bool> SetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct)
+            => _executor.SetAsync(key, value, ttl, ct);
+
+        public ValueTask<bool> DeleteAsync(string key, CancellationToken ct)
+            => _executor.DeleteAsync(key, ct);
     }
 
     private sealed class ManualTimeProvider : TimeProvider
@@ -282,5 +389,13 @@ public sealed class RedisCircuitBreakerHybridCacheTests
             var delta = (long)(by.TotalSeconds * TimestampFrequency);
             Interlocked.Add(ref _timestamp, delta);
         }
+    }
+
+    private static InMemoryCacheService CreateMemoryCacheService(ICurrentCacheService current, CacheStatsRegistry statsRegistry)
+    {
+        var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        var spillOptions = Options.Create(new InMemorySpillOptions { EnableSpillToDisk = false });
+        var spillStore = new FileSpillStore(spillOptions, new NoopSpillEncryptionProvider());
+        return new InMemoryCacheService(memoryCache, current, statsRegistry, spillOptions, spillStore);
     }
 }

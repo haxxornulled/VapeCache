@@ -131,7 +131,7 @@ public static class ResultExtensions
         this Result<T> result,
         Action<Exception> errorHandler)
     {
-        return result.Match(
+        return result.Match<Exception?>(
             success => null, // No error, return null
             error =>
             {
@@ -152,7 +152,7 @@ public static class ResultExtensions
         this Result<T> result,
         Func<Exception, TE> errorHandler)
     {
-        return result.Match(
+        return result.Match<TE?>(
             success => default, // No error, return default TE
             errorHandler);
     }
@@ -213,7 +213,7 @@ public static class ResultExtensions
         Action<ILogger, Exception> logAction,
         ILogger logger)
     {
-        return result.Match(
+        return result.Match<Exception?>(
             success => null, // No error, return null
             error =>
             {

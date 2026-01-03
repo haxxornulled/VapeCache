@@ -78,6 +78,44 @@ public class RingQueueTests
     }
 
     [Fact]
+    public async Task MpscRingQueue_CanceledEnqueue_DoesNotOverReleaseSlots()
+    {
+        var queue = CreateQueue("MpscRingQueue`1", capacity: 1);
+        await InvokeEnqueueAsync(queue, 1, CancellationToken.None);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await InvokeEnqueueAsync(queue, 2, cts.Token));
+
+        var enqueueOk = InvokeTryEnqueue(queue, 3);
+        Assert.False(enqueueOk);
+
+        _ = await InvokeDequeueAsync(queue, CancellationToken.None);
+        enqueueOk = InvokeTryEnqueue(queue, 4);
+        Assert.True(enqueueOk);
+    }
+
+    [Fact]
+    public async Task SpscRingQueue_CanceledEnqueue_DoesNotOverReleaseSlots()
+    {
+        var queue = CreateQueue("SpscRingQueue`1", capacity: 1);
+        await InvokeEnqueueAsync(queue, 1, CancellationToken.None);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await InvokeEnqueueAsync(queue, 2, cts.Token));
+
+        var enqueueOk = InvokeTryEnqueue(queue, 3);
+        Assert.False(enqueueOk);
+
+        _ = await InvokeDequeueAsync(queue, CancellationToken.None);
+        enqueueOk = InvokeTryEnqueue(queue, 4);
+        Assert.True(enqueueOk);
+    }
+
+    [Fact]
     public async Task CapacityRoundedUpToPowerOfTwo()
     {
         await using var mux = new RedisMultiplexedConnection(new NoopFactory(), maxInFlight: 75, coalesceWrites: false);
@@ -121,8 +159,15 @@ public class RingQueueTests
     private static async ValueTask InvokeEnqueueAsync(object queue, int value, CancellationToken ct)
     {
         var method = queue.GetType().GetMethod("EnqueueAsync");
-        var vt = (ValueTask)method!.Invoke(queue, new object[] { value, ct })!;
-        await vt.ConfigureAwait(false);
+        try
+        {
+            var vt = (ValueTask)method!.Invoke(queue, new object[] { value, ct })!;
+            await vt.ConfigureAwait(false);
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        {
+            throw ex.InnerException;
+        }
     }
 
     private static async ValueTask InvokeEnqueueNoSpinAsync(object queue, int value, CancellationToken ct)
@@ -130,6 +175,12 @@ public class RingQueueTests
         var method = queue.GetType().GetMethod("EnqueueAsyncNoSpinForTests", BindingFlags.Instance | BindingFlags.NonPublic);
         var vt = (ValueTask)method!.Invoke(queue, new object[] { value, ct })!;
         await vt.ConfigureAwait(false);
+    }
+
+    private static bool InvokeTryEnqueue(object queue, int value)
+    {
+        var method = queue.GetType().GetMethod("TryEnqueue", BindingFlags.Instance | BindingFlags.Public);
+        return (bool)method!.Invoke(queue, new object[] { value })!;
     }
 
     private static async ValueTask<int> InvokeDequeueAsync(object queue, CancellationToken ct)

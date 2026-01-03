@@ -35,4 +35,10 @@ internal sealed class CacheCollectionFactory : ICacheCollectionFactory
         var codec = _codecProvider.Get<T>();
         return new CacheHash<T>(key, _executor, codec);
     }
+
+    public ICacheSortedSet<T> SortedSet<T>(string key)
+    {
+        var codec = _codecProvider.Get<T>();
+        return new CacheSortedSet<T>(key, _executor, codec);
+    }
 }

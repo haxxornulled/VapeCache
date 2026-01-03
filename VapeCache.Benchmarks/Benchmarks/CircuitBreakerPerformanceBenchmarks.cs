@@ -60,7 +60,9 @@ public class CircuitBreakerPerformanceBenchmarks
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var currentService = new CurrentCacheService();
         var statsRegistry = new CacheStatsRegistry();
-        _inMemory = new InMemoryCacheService(memoryCache, currentService, statsRegistry);
+        var spillOptions = Options.Create(new InMemorySpillOptions { EnableSpillToDisk = false });
+        var spillStore = new FileSpillStore(spillOptions, new NoopSpillEncryptionProvider());
+        _inMemory = new InMemoryCacheService(memoryCache, currentService, statsRegistry, spillOptions, spillStore);
 
         // Prepare test data
         _payload = Encoding.UTF8.GetBytes("Benchmark payload data");

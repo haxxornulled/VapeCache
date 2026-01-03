@@ -9,9 +9,71 @@ cd VapeCache.Benchmarks
 dotnet run -c Release
 ```
 
+### Redis Comparisons (StackExchange.Redis vs VapeCache)
+
+```bash
+$env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
+dotnet run -c Release --filter *RedisClientStackExchangeBenchmarks*
+dotnet run -c Release --filter *RedisClientVapeCacheBenchmarks*
+```
+
+For end-to-end comparisons with fine-grained host options:
+
+```bash
+$env:VAPECACHE_REDIS_HOST = "127.0.0.1"
+$env:VAPECACHE_REDIS_PORT = "6379"
+dotnet run -c Release --filter *RedisEndToEndStackExchangeBenchmarks*
+dotnet run -c Release --filter *RedisEndToEndVapeCacheBenchmarks*
+```
+
+### Redis Module Comparisons
+
+Requires RedisJSON, RediSearch, RedisBloom, and RedisTimeSeries installed on the target Redis instance.
+
+```bash
+$env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
+dotnet run -c Release --filter *RedisModuleStackExchangeBenchmarks*
+dotnet run -c Release --filter *RedisModuleVapeCacheBenchmarks*
+```
+
+### Recent Comparison Results (net10-wks)
+
+**Environment:** Windows 11, i7-14700K, .NET 10.0.1, Redis 192.168.100.50  
+**Payloads:** Client `PayloadBytes=256`, End-to-End `PayloadBytes=32`, Modules `JsonPayloadChars=128`
+
+#### Redis Client (Command-Level)
+| Operation | VapeCache Mean | VapeCache Alloc | StackExchange.Redis Mean | StackExchange.Redis Alloc |
+|---|---:|---:|---:|---:|
+| StringSetGet | 309.3 us | 4.55 KB | 241.9 us | 1024 B |
+| HashSetGet | 214.2 us | 4.52 KB | 234.5 us | 1088 B |
+| ListPushPop | 217.5 us | 4.51 KB | 222.5 us | 1024 B |
+| Ping | 143.8 us | 2.32 KB | 108.3 us | 522 B |
+| ModuleList | 132.7 us | 5.36 KB | 122.0 us | 4198 B |
+
+#### End-to-End (Lease-Based Gets/Pops)
+| Operation | VapeCache Mean | VapeCache Alloc | StackExchange.Redis Mean | StackExchange.Redis Alloc |
+|---|---:|---:|---:|---:|
+| StringGet (lease) | 135.7 us | 2.34 KB | 163.4 us | 512 B |
+| StringSet | 138.6 us | 2.36 KB | 168.2 us | 440 B |
+| HashGet (lease) | 143.5 us | 2.35 KB | 191.2 us | 544 B |
+| HashSet | 134.8 us | 2.32 KB | 187.8 us | 472 B |
+| ListPop (lease) | 216.8 us | 2.34 KB | 291.4 us | 512 B |
+| ListPush | 136.6 us | 2.31 KB | 161.0 us | 440 B |
+
+#### Redis Modules
+| Operation | VapeCache Mean | VapeCache Alloc | StackExchange.Redis Mean | StackExchange.Redis Alloc |
+|---|---:|---:|---:|---:|
+| JSON.GET | 141.3 us | 2.48 KB | 168.0 us | 715 B |
+| JSON.SET | 145.7 us | 2.34 KB | 169.9 us | 571 B |
+| FT.SEARCH | 194.4 us | 3.14 KB | 218.4 us | 1270 B |
+| BF.ADD | 134.6 us | 2.3 KB | 163.1 us | 531 B |
+| BF.EXISTS | 139.1 us | 2.3 KB | 164.8 us | 531 B |
+| TS.ADD | 139.7 us | 2.34 KB | 163.7 us | 587 B |
+| TS.RANGE | 150.4 us | 2.56 KB | 162.0 us | 811 B |
+
 ## Benchmark Categories
 
-### 1. Cache Operation Performance
+### 1. Cache Service API Performance
 
 Measures throughput and latency for core cache operations.
 
@@ -19,12 +81,10 @@ Measures throughput and latency for core cache operations.
 - GET operations (hits and misses)
 - SET operations (various payload sizes)
 - REMOVE operations
-- Bulk operations
+- Typed overloads (JSON serialization)
+- Cache-aside (GetOrSet) hit/miss paths
 
-**Key Metrics:**
-- Operations per second (throughput)
-- P50, P95, P99 latency
-- Memory allocation per operation
+**Benchmark:** `CacheServiceApiBenchmarks`
 
 **Example Results:**
 ```
@@ -36,88 +96,54 @@ Measures throughput and latency for core cache operations.
 | SetLarge_100KB  |  2.145 ms |  4.567 ms |  7.234 ms |   100.8 KB|
 ```
 
-### 2. Connection Pool Performance
+### 2. Typed Collections
 
-Validates connection pool behavior under load.
+Validates typed list/set/hash APIs and hybrid behavior.
 
-**What's Measured:**
-- Connection acquisition time
-- Pool saturation handling
-- Connection reuse efficiency
-- Idle connection management
+**Benchmark:** `TypedCollectionsBenchmarks`
 
-**Key Metrics:**
-- Acquire latency (P50, P95, P99)
-- Pool exhaustion rate
-- Connection lifetime
+### 3. Circuit Breaker + Failover
 
-### 3. Serialization Performance
+Measures the failover path and breaker behavior without requiring Redis.
 
-Compares VapeCache's serialization with alternatives.
+**Benchmark:** `CircuitBreakerPerformanceBenchmarks`
 
-**Benchmark:** `VapeCache.Benchmarks/SerializationBenchmarks.cs`
+### 4. Stampede Protection
 
-**Formats Tested:**
-- MessagePack (VapeCache default)
-- System.Text.Json
-- Newtonsoft.Json
-- Protobuf-net
+Validates coalescing behavior and the overhead of stampede protection.
 
-**Key Metrics:**
-- Serialization throughput (ops/sec)
-- Deserialization throughput (ops/sec)
-- Payload size overhead
-- Memory allocations
+**Benchmark:** `StampedeProtectedCacheServiceBenchmarks`
 
-**Sample Output:**
-```
-| Serializer    | Serialize  | Deserialize | Size   | Alloc/Op |
-|-------------- |-----------:| -----------:| ------:| --------:|
-| MessagePack   | 1,234 μs   | 987 μs      | 1.2 KB | 1.5 KB   |
-| SystemTextJson| 2,456 μs   | 2,123 μs    | 1.8 KB | 3.2 KB   |
-| Newtonsoft    | 3,789 μs   | 3,456 μs    | 2.1 KB | 5.6 KB   |
-```
+### 5. Redis Client Comparisons (StackExchange.Redis)
 
-### 4. Circuit Breaker Resilience
+End-to-end and command-level comparisons against StackExchange.Redis.
 
-Tests fallback behavior during Redis failures.
+**Benchmarks:**
+- `RedisClientStackExchangeBenchmarks` (String/Hash/List/Ping/Module List - SER)
+- `RedisClientVapeCacheBenchmarks` (String/Hash/List/Ping/Module List - VapeCache)
+- `RedisEndToEndStackExchangeBenchmarks` (end-to-end workloads - SER)
+- `RedisEndToEndVapeCacheBenchmarks` (end-to-end workloads - VapeCache)
+- `RedisModuleStackExchangeBenchmarks` (JSON/FT/BF/TS module commands - SER)
+- `RedisModuleVapeCacheBenchmarks` (JSON/FT/BF/TS module commands - VapeCache)
 
-**What's Measured:**
-- Circuit breaker trip time
-- Fallback to in-memory cache
-- Recovery after Redis restoration
-- Request success rate during failures
+### 6. Connection Pool + Transport
 
-**Scenarios:**
-- Redis connection loss
-- Redis timeout
-- Gradual degradation
-- Full recovery
+Low-level pool and transport behavior.
 
-### 5. Cache Stampede Protection
+**Benchmarks:**
+- `RedisConnectionPoolBenchmarks`
+- `RedisMultiplexedConnectionBenchmarks`
+- `RedisRespReaderBenchmarks`
+- `RedisRespProtocolBenchmarks`
+- `RedisRespProtocolWriteBenchmarks`
+- `RespParserLiteBenchmarks`
+- `SocketAwaitableBenchmarks`
 
-Validates that VapeCache prevents thundering herd problems.
+### 7. Sanity Checks
 
-**Benchmark:** `VapeCache.Benchmarks/StampedeBenchmarks.cs`
+Sanity benchmarks for allocations and baseline overhead.
 
-**What's Measured:**
-- Concurrent GET requests for expired key
-- Regeneration count (should be 1)
-- Request latency during stampede
-- Memory pressure
-
-**Expected Behavior:**
-- Only ONE regeneration executes
-- Other requests wait for result
-- No duplicate database queries
-
-**Sample Output:**
-```
-Concurrent Requests: 1000
-Cache Regenerations: 1 ✓
-Mean Wait Time: 0.234 ms
-P99 Wait Time: 1.123 ms
-```
+**Benchmark:** `SanityBenchmarks`
 
 ## Running Specific Benchmarks
 
@@ -348,9 +374,7 @@ VapeCache provides:
 - `redis.cmd.ms` - Redis command latency
 
 **Health Checks:**
-- `/healthz` - Overall application health
-- `/healthz/ready` - Kubernetes readiness probe
-- `/healthz/live` - Kubernetes liveness probe
+- Register health checks in your host and map endpoints as needed (readiness can fail when the breaker is forced open).
 
 **Calculate Hit Rate:**
 ```csharp

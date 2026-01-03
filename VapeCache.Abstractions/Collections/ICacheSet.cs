@@ -26,4 +26,9 @@ public interface ICacheSet<T>
 
     /// <summary>Get the number of items in the set (cardinality)</summary>
     ValueTask<long> CountAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Stream set members using SSCAN to handle large sets efficiently.
+    /// </summary>
+    IAsyncEnumerable<T> StreamAsync(string? pattern = null, int pageSize = 128, CancellationToken ct = default);
 }

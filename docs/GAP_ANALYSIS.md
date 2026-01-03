@@ -22,7 +22,7 @@ VapeCache has **strong fundamentals** in transport, performance, reliability, an
 - ✅ **Serilog correlation**: Span enrichment for trace correlation
 
 ### Ergonomics
-- ✅ **Console host**: HTTP verification endpoints for testing
+- ✅ **Console host**: CLI verification/logging (no HTTP endpoints)
 - ✅ **Secret handling**: Environment variable indirection (CI-friendly)
 
 ## Critical Gaps (Must Fix Before v1.0)
@@ -49,23 +49,23 @@ VapeCache has **strong fundamentals** in transport, performance, reliability, an
 # Redis Protocol Support
 
 ## Supported (RESP2 Baseline)
-✅ String commands (GET, SET, MGET, MSET, GETEX, etc.)
-✅ Hash commands (HGET, HSET, HMGET, HMSET, HDEL, etc.)
-✅ List commands (LPUSH, RPUSH, LPOP, LRANGE, etc.)
-✅ Set commands (SADD, SREM, SMEMBERS, SISMEMBER, etc.)
-✅ Sorted Set commands (ZADD, ZREM, ZRANGE, ZSCORE, etc.)
-✅ Key commands (DEL, EXISTS, EXPIRE, TTL, etc.)
-✅ Connection commands (PING, AUTH, SELECT, QUIT)
-✅ Server commands (INFO, CONFIG GET, DBSIZE)
+✅ String commands (GET, SET, MGET, MSET, GETEX)
+✅ Hash commands (HGET, HSET, HMGET)
+✅ List commands (LPUSH, RPUSH, LPOP, RPOP, LRANGE, LLEN)
+✅ Set commands (SADD, SREM, SMEMBERS, SISMEMBER, SCARD)
+✅ Sorted Set commands (ZADD, ZREM, ZRANGE, ZRANGEBYSCORE, ZSCORE, ZRANK, ZCARD, ZINCRBY)
+✅ Key commands (DEL, UNLINK, TTL, PTTL)
+✅ Connection commands (PING)
+✅ Server commands (MODULE LIST)
 
-## Not Supported (Planned Future Work)
-❌ Lua scripting (EVAL, EVALSHA) - API expansion Phase 2
-❌ Pub/Sub (SUBSCRIBE, PUBLISH) - API expansion Phase 2
-❌ Streams (XADD, XREAD) - API expansion Phase 3
-❌ Transactions (MULTI, EXEC) - API expansion Phase 2
-❌ RESP3 protocol - Future consideration
-❌ Cluster mode (MOVED, ASK) - Future consideration
-❌ Client-side caching - Future consideration
+## Not Supported (Non-Goals)
+❌ Lua scripting (EVAL, EVALSHA)
+❌ Pub/Sub (SUBSCRIBE, PUBLISH)
+❌ Streams (XADD, XREAD)
+❌ Transactions (MULTI, EXEC)
+❌ RESP3 protocol
+❌ Cluster mode (MOVED, ASK)
+❌ Client-side caching
 ```
 
 ---
@@ -434,7 +434,7 @@ if (effective.AllowInvalidCert && IsProductionEnvironment())
 ❌ **Full Redis client** - Not a drop-in replacement for StackExchange.Redis
 ❌ **Cluster support** - Single-instance or sentinel only
 ❌ **Lua scripting** - No EVAL/EVALSHA (planned future work)
-❌ **Pub/Sub** - No SUBSCRIBE/PUBLISH (planned future work)
+❌ **Pub/Sub** - No SUBSCRIBE/PUBLISH (non-goal)
 ❌ **Streams** - No XADD/XREAD (future consideration)
 ❌ **RESP3** - RESP2 only (future consideration)
 

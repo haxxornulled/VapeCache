@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
@@ -26,4 +27,44 @@ public static class RedisTelemetry
 
     public static readonly Counter<long> BytesSent = Meter.CreateCounter<long>("redis.bytes.sent");
     public static readonly Counter<long> BytesReceived = Meter.CreateCounter<long>("redis.bytes.received");
+
+    public static readonly Histogram<double> QueueWaitMs = Meter.CreateHistogram<double>(
+        "redis.queue.wait.ms",
+        unit: "ms",
+        description: "Time spent waiting for a write queue slot");
+
+    private static readonly ConcurrentDictionary<int, Func<QueueDepthSnapshot>> QueueDepthProviders = new();
+
+    public static readonly ObservableGauge<int> QueueDepth = Meter.CreateObservableGauge(
+        "redis.queue.depth",
+        ObserveQueueDepth,
+        unit: "items",
+        description: "Depth of Redis command queues");
+
+    internal static void RegisterQueueDepthProvider(int connectionId, Func<QueueDepthSnapshot> provider)
+    {
+        QueueDepthProviders[connectionId] = provider;
+    }
+
+    internal static void UnregisterQueueDepthProvider(int connectionId)
+    {
+        QueueDepthProviders.TryRemove(connectionId, out _);
+    }
+
+    private static IEnumerable<Measurement<int>> ObserveQueueDepth()
+    {
+        foreach (var entry in QueueDepthProviders)
+        {
+            var snapshot = entry.Value();
+            var connectionId = entry.Key;
+            yield return new Measurement<int>(
+                snapshot.Writes,
+                new TagList { { "queue", "writes" }, { "connection.id", connectionId }, { "capacity", snapshot.WritesCapacity } });
+            yield return new Measurement<int>(
+                snapshot.Pending,
+                new TagList { { "queue", "pending" }, { "connection.id", connectionId }, { "capacity", snapshot.PendingCapacity } });
+        }
+    }
+
+    internal readonly record struct QueueDepthSnapshot(int Writes, int Pending, int WritesCapacity, int PendingCapacity);
 }

@@ -54,7 +54,7 @@ No support for:
 
 **Why:** Lua scripting has complex failure semantics, script management overhead, and testing challenges. Most caching patterns don't need it.
 
-**Planned:** API expansion Phase 2 (Q2 2025) - Basic EVAL/EVALSHA support for power users.
+**Planned:** Not planned (non-goal).
 
 **Workaround:** Use StackExchange.Redis for Lua alongside VapeCache for caching.
 
@@ -66,7 +66,7 @@ No support for:
 - Fire-and-forget semantics (no backpressure)
 - No ordering guarantees across publishers
 
-**Planned:** API expansion Phase 2 (Q2 2025) - Dedicated Pub/Sub API surface.
+**Planned:** Not planned (non-goal).
 
 **Workaround:** Use StackExchange.Redis for Pub/Sub alongside VapeCache for caching.
 
@@ -103,7 +103,7 @@ No support for:
 - Multiplexing assumes independent operations
 - Locking (WATCH) requires dedicated connection
 
-**Planned:** API expansion Phase 2 (Q2 2025) - Batch API with optimistic execution (best-effort atomicity).
+**Planned:** Not planned (non-goal).
 
 **Workaround:** Use StackExchange.Redis for transactions, or design for eventual consistency.
 
@@ -188,7 +188,6 @@ Use **VapeCache + StackExchange.Redis** together:
 // VapeCache for caching (fast, observable, reliable)
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
-builder.Services.AddSingleton<ICacheService>(sp => sp.GetRequiredService<HybridCacheService>());
 
 // StackExchange.Redis for Pub/Sub (when needed)
 builder.Services.AddSingleton<IConnectionMultiplexer>(ConnectionMultiplexer.Connect("localhost:6379"));
@@ -235,7 +234,7 @@ await redis.GetSubscriber().SubscribeAsync("channel", handler);
 **A:** Maybe, if there's demand. Current focus is single-instance + Sentinel (covers 90% of use cases).
 
 ### Q: When will Pub/Sub be supported?
-**A:** API expansion Phase 2 (Q2 2025). Pub/Sub requires different architecture, so it's a dedicated surface.
+**A:** Not planned. Pub/Sub requires different architecture, so it's out of scope for VapeCache.
 
 ### Q: What if I need a command that's not implemented?
 **A:** Three options:

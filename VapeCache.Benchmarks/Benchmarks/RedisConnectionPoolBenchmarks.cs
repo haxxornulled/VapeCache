@@ -58,18 +58,16 @@ public class RedisConnectionPoolBenchmarks
 
     private sealed class FakeFactory : IRedisConnectionFactory
     {
-        private long _id;
         public ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
         {
-            var id = Interlocked.Increment(ref _id);
             var socket = new System.Net.Sockets.Socket(System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
             var stream = Stream.Null;
-            return ValueTask.FromResult(new Result<IRedisConnection>(new FakeConn(id, socket, stream)));
+            return ValueTask.FromResult(new Result<IRedisConnection>(new FakeConn(socket, stream)));
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-        private sealed class FakeConn(long id, System.Net.Sockets.Socket socket, Stream stream) : IRedisConnection
+        private sealed class FakeConn(System.Net.Sockets.Socket socket, Stream stream) : IRedisConnection
         {
             public System.Net.Sockets.Socket Socket => socket;
             public Stream Stream => stream;

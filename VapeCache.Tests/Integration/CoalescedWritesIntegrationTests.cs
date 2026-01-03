@@ -30,16 +30,19 @@ public sealed class CoalescedWritesIntegrationTests
                 EnableCoalescedSocketWrites = true
             }));
 
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var ct = cts.Token;
+
         var key = "vapecache:coalesce:" + Guid.NewGuid().ToString("N");
         var bytes = "hello"u8.ToArray();
 
-        Assert.True(await exec.SetAsync(key, bytes, TimeSpan.FromSeconds(30), CancellationToken.None));
-        var got = await exec.GetAsync(key, CancellationToken.None);
+        Assert.True(await exec.SetAsync(key, bytes, TimeSpan.FromSeconds(30), ct));
+        var got = await exec.GetAsync(key, ct);
         Assert.NotNull(got);
         Assert.Equal(bytes, got);
 
-        Assert.True(await exec.DeleteAsync(key, CancellationToken.None));
-        var missing = await exec.GetAsync(key, CancellationToken.None);
+        Assert.True(await exec.DeleteAsync(key, ct));
+        var missing = await exec.GetAsync(key, ct);
         Assert.Null(missing);
     }
 
@@ -63,14 +66,17 @@ public sealed class CoalescedWritesIntegrationTests
                 EnableCoalescedSocketWrites = true
             }));
 
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var ct = cts.Token;
+
         var keyPrefix = "vapecache:coalesce:" + Guid.NewGuid().ToString("N") + ":";
 
         var tasks = Enumerable.Range(0, 100).Select(async i =>
         {
             var key = keyPrefix + i;
             var payload = BitConverter.GetBytes(i);
-            Assert.True(await exec.SetAsync(key, payload, TimeSpan.FromSeconds(60), CancellationToken.None));
-            var got = await exec.GetAsync(key, CancellationToken.None);
+            Assert.True(await exec.SetAsync(key, payload, TimeSpan.FromSeconds(60), ct));
+            var got = await exec.GetAsync(key, ct);
             Assert.NotNull(got);
             Assert.Equal(i, BitConverter.ToInt32(got));
         });

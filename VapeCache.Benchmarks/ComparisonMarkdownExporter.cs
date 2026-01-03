@@ -41,10 +41,14 @@ internal sealed class ComparisonMarkdownExporter : IExporter
         foreach (var benchmark in summary.BenchmarksCases)
         {
             var report = summary[benchmark];
+            if (report is null)
+                continue;
+
             var stats = report.ResultStatistics;
             var meanUs = stats is null ? double.NaN : stats.Mean / 1_000.0;
             var alloc = report.GcStats.GetBytesAllocatedPerOperation(benchmark);
             var gen0 = report.GcStats.Gen0Collections;
+            var allocText = alloc.ToString();
 
             var payload = benchmark.Parameters["PayloadBytes"]?.ToString() ?? "";
             var category = string.Join(",", benchmark.Descriptor.Categories.OrderBy(c => c));
@@ -60,7 +64,7 @@ internal sealed class ComparisonMarkdownExporter : IExporter
             if (baselineCandidate is not null && !ReferenceEquals(baselineCandidate, benchmark))
             {
                 var baselineReport = summary[baselineCandidate];
-                var baselineMean = baselineReport.ResultStatistics?.Mean;
+                var baselineMean = baselineReport?.ResultStatistics?.Mean;
                 if (baselineMean is not null && baselineMean > 0)
                     ratio = (stats?.Mean ?? 0) / baselineMean.Value;
             }
@@ -70,7 +74,7 @@ internal sealed class ComparisonMarkdownExporter : IExporter
               .Append(payload).Append('|')
               .Append(client).Append('|')
               .Append(meanUs.ToString("0.00")).Append('|')
-              .Append(((double)alloc).ToString("N0")).Append('|')
+              .Append(allocText).Append('|')
               .Append(gen0.ToString("0.###")).Append('|')
               .Append(ratio is null ? "-" : ratio.Value.ToString("0.###")).Append('|')
               .AppendLine();

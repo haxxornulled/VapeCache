@@ -30,4 +30,9 @@ public interface IRedisReconciliationService
     /// Clears all tracked operations (used when reconciliation completes or is abandoned).
     /// </summary>
     void Clear();
+
+    /// <summary>
+    /// Clears any persisted reconciliation state (backing store flush).
+    /// </summary>
+    ValueTask FlushAsync(CancellationToken ct = default);
 }

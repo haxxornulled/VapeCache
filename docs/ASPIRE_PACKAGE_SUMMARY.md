@@ -113,7 +113,7 @@ public static AspireVapeCacheBuilder WithHealthChecks(
 **What it does:**
 - Registers `RedisHealthCheck` with tags: `ready`, `live`
 - Registers `VapeCacheHealthCheck` with tag: `ready`
-- Enables `/health`, `/health/ready`, `/health/live` endpoints
+- Leaves endpoint mapping to the host (e.g., map `/health`, `/health/ready`, `/health/live` if desired)
 
 ### 7. [HealthChecks/RedisHealthCheck.cs](../VapeCache.Extensions.Aspire/HealthChecks/RedisHealthCheck.cs)
 **Purpose:** Validates Redis connection pool health
@@ -173,7 +173,7 @@ public sealed class VapeCacheHealthCheck : IHealthCheck
 - Quick start guide
 - Usage examples (AppHost + API project)
 - Metrics reference (all available metrics)
-- Health check endpoints
+- Health check registration (host maps endpoints)
 - Configuration options
 
 ## Usage Example
@@ -299,7 +299,9 @@ Navigate to **`http://localhost:15888`** to see:
 - Linked to HTTP request traces (if using ASP.NET Core)
 - Visible in Aspire Dashboard Traces tab
 
-## Health Check Endpoints
+## Health Checks (Host-Mapped)
+
+These endpoints are host-defined; examples below assume you map health checks in your app.
 
 ### `/health`
 Returns overall health status (combines all health checks)

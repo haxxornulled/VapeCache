@@ -19,4 +19,9 @@ public interface ICacheHash<T>
 
     /// <summary>Get multiple fields from the hash</summary>
     ValueTask<T?[]> GetManyAsync(string[] fields, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stream hash fields and values using HSCAN to handle large hashes efficiently.
+    /// </summary>
+    IAsyncEnumerable<(string Field, T Value)> StreamAsync(string? pattern = null, int pageSize = 128, CancellationToken ct = default);
 }

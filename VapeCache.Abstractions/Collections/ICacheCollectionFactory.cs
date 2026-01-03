@@ -14,4 +14,7 @@ public interface ICacheCollectionFactory
 
     /// <summary>Create a typed HASH wrapper for the given key</summary>
     ICacheHash<T> Hash<T>(string key);
+
+    /// <summary>Create a typed SORTED SET wrapper for the given key</summary>
+    ICacheSortedSet<T> SortedSet<T>(string key);
 }

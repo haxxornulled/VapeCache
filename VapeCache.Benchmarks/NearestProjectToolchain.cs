@@ -17,8 +17,8 @@ internal sealed class NearestProjectToolchain : Toolchain
         : base(
             name,
             new NearestProjectCsProjGenerator(targetFrameworkMoniker, customDotNetCliPath),
-            new DotNetCliBuilder(targetFrameworkMoniker, customDotNetCliPath),
-            new DotNetCliExecutor(customDotNetCliPath))
+            new DotNetCliBuilder(targetFrameworkMoniker, customDotNetCliPath ?? "dotnet"),
+            new DotNetCliExecutor(customDotNetCliPath ?? "dotnet"))
     {
     }
 }

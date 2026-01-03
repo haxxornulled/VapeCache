@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -37,7 +36,7 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
         {
             (byte)'+' => RedisRespReader.RespValue.SimpleString(await ReadLineAsync(ct).ConfigureAwait(false)),
             (byte)'-' => RedisRespReader.RespValue.Error(await ReadLineAsync(ct).ConfigureAwait(false)),
-            (byte)':' => RedisRespReader.RespValue.Integer(ReadInt64(await ReadLineAsync(ct).ConfigureAwait(false))),
+            (byte)':' => RedisRespReader.RespValue.Integer(await ReadInt64LineAsync(ct).ConfigureAwait(false)),
             (byte)'$' => await ReadBulkStringAsync(poolBulk, ct).ConfigureAwait(false),
             (byte)'*' => await ReadArrayAsync(poolBulk, ct).ConfigureAwait(false),
             _ => throw new InvalidOperationException($"Unsupported RESP type: {(char)prefix}")
@@ -141,24 +140,15 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
         }
     }
 
-    private static long ReadInt64(string line)
-    {
-        if (!long.TryParse(line, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
-            throw new InvalidOperationException($"Invalid integer response: {line}");
-        return value;
-    }
-
     private async ValueTask<RedisRespReader.RespValue> ReadBulkStringAsync(bool poolBulk, CancellationToken ct)
     {
-        var header = await ReadLineAsync(ct).ConfigureAwait(false);
-        if (!int.TryParse(header, out var len))
-            throw new InvalidOperationException($"Invalid bulk length: {header}");
+        var len = await ReadInt32LineAsync(ct).ConfigureAwait(false);
 
         if (len == -1)
             return RedisRespReader.RespValue.NullBulkString();
 
         if (len < 0)
-            throw new InvalidOperationException($"Invalid bulk length: {header}");
+            throw new InvalidOperationException($"Invalid bulk length: {len}");
 
         // CRITICAL: Prevent DoS attacks from malicious Redis server sending huge bulk strings
         if (_maxBulkStringBytes >= 0 && len > _maxBulkStringBytes)
@@ -220,15 +210,13 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
 
     private async ValueTask<RedisRespReader.RespValue> ReadArrayAsync(bool poolBulk, CancellationToken ct)
     {
-        var header = await ReadLineAsync(ct).ConfigureAwait(false);
-        if (!int.TryParse(header, out var len))
-            throw new InvalidOperationException($"Invalid array length: {header}");
+        var len = await ReadInt32LineAsync(ct).ConfigureAwait(false);
 
         if (len == -1)
             return RedisRespReader.RespValue.NullArray();
 
         if (len < 0)
-            throw new InvalidOperationException($"Invalid array length: {header}");
+            throw new InvalidOperationException($"Invalid array length: {len}");
 
         // CRITICAL: Prevent stack overflow from deeply nested arrays
         _currentArrayDepth++;
@@ -258,5 +246,54 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
         ArrayPool<byte>.Shared.Return(_buffer);
         _buffer = Array.Empty<byte>();
         return ValueTask.CompletedTask;
+    }
+
+    private async ValueTask<int> ReadInt32LineAsync(CancellationToken ct)
+    {
+        var value = await ReadInt64LineAsync(ct).ConfigureAwait(false);
+        if (value is < int.MinValue or > int.MaxValue)
+            throw new InvalidOperationException($"Integer value out of range: {value}");
+        return (int)value;
+    }
+
+    private async ValueTask<long> ReadInt64LineAsync(CancellationToken ct)
+    {
+        var value = 0L;
+        var negative = false;
+        var sawDigit = false;
+        var sawSign = false;
+
+        while (true)
+        {
+            if (_pos >= _len)
+                await FillAsync(ct).ConfigureAwait(false);
+
+            var b = _buffer[_pos++];
+            if (b == (byte)'\n')
+                break;
+            if (b == (byte)'\r')
+                continue;
+
+            if (b == (byte)'-' && !sawSign && !sawDigit)
+            {
+                negative = true;
+                sawSign = true;
+                continue;
+            }
+
+            if (b is >= (byte)'0' and <= (byte)'9')
+            {
+                sawDigit = true;
+                value = checked(value * 10 + (b - (byte)'0'));
+                continue;
+            }
+
+            throw new InvalidOperationException($"Invalid integer response byte: {(char)b}");
+        }
+
+        if (!sawDigit)
+            throw new InvalidOperationException("Invalid integer response: empty");
+
+        return negative ? -value : value;
     }
 }

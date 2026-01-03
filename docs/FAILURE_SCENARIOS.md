@@ -209,6 +209,23 @@ systemctl start redis
 
 ---
 
+### Module Commands During Failover
+
+**What Happens:**
+- Redis is unavailable or circuit breaker is open
+- Module commands are invoked (JSON, Search, Bloom, TimeSeries, MODULE LIST, PING)
+
+**VapeCache Behavior:**
+- Uses the in-memory fallback for these commands
+- Semantics are simplified (e.g., search returns empty results; bloom/time-series are in-memory approximations)
+
+**User Experience:**
+- Calls succeed without exceptions
+- Results may differ from Redis module behavior
+ - See `docs/REDIS_MODULES.md` for fallback details
+
+---
+
 ### Scenario 5: Redis Server Slowdown (Gradual Degradation)
 
 **What Happens:**
@@ -349,11 +366,11 @@ systemctl start redis
 **What Happens:**
 - Application receives spike in traffic
 - Connection pool exhausted (all connections in use)
-- `AcquireTimeoutMs` exceeded
+- `AcquireTimeout` exceeded
 
 **VapeCache Behavior:**
 ```
-1. Caller waits up to AcquireTimeoutMs for available connection
+1. Caller waits up to AcquireTimeout for available connection
 2. If timeout → Throw TimeoutException
 3. Circuit breaker: Does NOT open (not a Redis failure)
 ```
@@ -363,7 +380,8 @@ systemctl start redis
 - **Application continues** (cache miss, fetch from database)
 
 **Recovery:**
-- **Manual:** Increase `MaxPoolSize` or `AcquireTimeoutMs`
+- **Manual:** Increase `MaxConnections`/`MaxIdle` or `AcquireTimeout`
+- **Manual:** Increase `MaxConnections`/`MaxIdle` or `AcquireTimeout`
 - **Automatic:** Traffic decreases, pool pressure relieved
 
 **Metrics to Monitor:**
@@ -373,9 +391,10 @@ systemctl start redis
 **Configuration:**
 ```json
 {
-  "RedisConnectionPool": {
-    "MaxPoolSize": 20,           // Increase pool size
-    "AcquireTimeoutMs": 10000    // Increase wait time
+  "RedisConnection": {
+    "MaxConnections": 128,
+    "MaxIdle": 64,
+    "AcquireTimeout": "00:00:10"
   }
 }
 ```
@@ -385,7 +404,7 @@ systemctl start redis
 # 1. Monitor pool exhaustion
 # Watch redis.pool.timeouts metric
 
-# 2. Increase MaxPoolSize if sustained high traffic
+# 2. Increase MaxConnections if sustained high traffic
 # Edit appsettings.json or set environment variable
 
 # 3. Investigate slow commands (may be blocking pool)
@@ -400,7 +419,7 @@ redis-cli SLOWLOG GET 10
 
 **What Happens:**
 - Circuit breaker is open (fallback to in-memory cache)
-- In-memory cache grows beyond `InMemoryCacheSizeLimitMb`
+- In-memory cache grows while Redis is unavailable
 
 **VapeCache Behavior:**
 ```
@@ -414,16 +433,15 @@ redis-cli SLOWLOG GET 10
 - **Database load:** Increases (more cache misses)
 
 **Recovery:**
-- **Manual:** Increase `InMemoryCacheSizeLimitMb` (if memory available)
+- **Manual:** Configure `MemoryCacheOptions.SizeLimit` if you need a hard cap
 - **Automatic:** Circuit closes, Redis becomes available
 
 **Configuration:**
-```json
+```csharp
+services.AddMemoryCache(options =>
 {
-  "CacheService": {
-    "InMemoryCacheSizeLimitMb": 500  // Increase limit
-  }
-}
+    options.SizeLimit = 500L * 1024 * 1024; // 500 MB
+});
 ```
 
 **Runbook:**
@@ -457,13 +475,14 @@ systemctl start redis
 - **Fallback to in-memory cache**
 
 **Recovery:**
-- **Manual:** Reduce `MaxPoolSize` or increase OS socket limit
+- **Manual:** Reduce `MaxConnections` or increase OS socket limit
 
 **Configuration:**
 ```json
 {
-  "RedisConnectionPool": {
-    "MaxPoolSize": 10  // Reduce connection count
+  "RedisConnection": {
+    "MaxConnections": 16,
+    "MaxIdle": 16
   }
 }
 ```
@@ -477,7 +496,7 @@ ulimit -n
 # Edit /etc/security/limits.conf
 # Add: * soft nofile 65536
 
-# 3. Reduce MaxPoolSize if hitting OS limits
+# 3. Reduce MaxConnections if hitting OS limits
 ```
 
 ---
@@ -573,10 +592,10 @@ echo $ASPNETCORE_ENVIRONMENT
 
 ```json
 {
-  "CacheService": {
-    "CircuitBreakerFailureThreshold": 5,        // Failures before opening
-    "CircuitBreakerSamplingDurationSeconds": 30, // Time window for counting
-    "CircuitBreakerBreakDurationSeconds": 60     // How long to wait before half-open
+  "RedisCircuitBreaker": {
+    "ConsecutiveFailuresToOpen": 5,
+    "BreakDuration": "00:00:60",
+    "HalfOpenProbeTimeout": "00:00:00.250"
   }
 }
 ```
@@ -586,18 +605,22 @@ echo $ASPNETCORE_ENVIRONMENT
 **Aggressive (Fail Fast):**
 ```json
 {
-  "CircuitBreakerFailureThreshold": 3,
-  "CircuitBreakerSamplingDurationSeconds": 10,
-  "CircuitBreakerBreakDurationSeconds": 30
+  "RedisCircuitBreaker": {
+    "ConsecutiveFailuresToOpen": 3,
+    "BreakDuration": "00:00:30",
+    "HalfOpenProbeTimeout": "00:00:00.200"
+  }
 }
 ```
 
 **Conservative (Tolerate Transients):**
 ```json
 {
-  "CircuitBreakerFailureThreshold": 10,
-  "CircuitBreakerSamplingDurationSeconds": 60,
-  "CircuitBreakerBreakDurationSeconds": 120
+  "RedisCircuitBreaker": {
+    "ConsecutiveFailuresToOpen": 10,
+    "BreakDuration": "00:02:00",
+    "HalfOpenProbeTimeout": "00:00:01"
+  }
 }
 ```
 
@@ -614,9 +637,9 @@ echo $ASPNETCORE_ENVIRONMENT
 | Redis slowdown | Yes (5x timeouts) | Yes (probe) | Slow → Fast fallback | Fix Redis perf |
 | Redis restart | No (< 5 failures) | Yes (auto-reconnect) | < 100ms disruption | None (automatic) |
 | App startup, no Redis | No (manual) | N/A | Startup fails or deferred | Ensure Redis up |
-| Pool exhaustion | No (not Redis failure) | Auto (traffic decreases) | Timeout exceptions | Increase MaxPoolSize |
-| Memory exhaustion | No (app-level) | Auto (eviction) | Cache miss rate increases | Increase limit or fix Redis |
-| Socket exhaustion | Yes (5x) | Manual | Connection fail → Fallback | Reduce MaxPoolSize or increase limit |
+| Pool exhaustion | No (not Redis failure) | Auto (traffic decreases) | Timeout exceptions | Increase MaxConnections |
+| Memory exhaustion | No (app-level) | Auto (eviction) | Cache miss rate increases | Configure MemoryCacheOptions or fix Redis |
+| Socket exhaustion | Yes (5x) | Manual | Connection fail → Fallback | Reduce MaxConnections or increase limit |
 | Invalid config | No (startup fail) | Manual | App won't start | Fix configuration |
 
 ---
@@ -656,8 +679,8 @@ redis-cli SLOWLOG GET 10
 ### Common Issues
 
 **Issue:** High `redis.pool.timeouts`
-**Cause:** Pool exhaustion (MaxPoolSize too small)
-**Fix:** Increase `MaxPoolSize` or investigate slow commands
+**Cause:** Pool exhaustion (MaxConnections too small)
+**Fix:** Increase `MaxConnections` or investigate slow commands
 
 **Issue:** High `redis.cmd.failures`
 **Cause:** Redis unavailable, network issues, or Redis slowdown

@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
@@ -18,6 +17,7 @@ public static class CacheRegistration
     public static IServiceCollection AddVapecacheCaching(this IServiceCollection services)
     {
         services.AddMemoryCache();
+        services.AddOptions<InMemorySpillOptions>();
 
         services.AddSingleton<ICurrentCacheService>(sp =>
         {
@@ -31,26 +31,19 @@ public static class CacheRegistration
         services.AddSingleton<TimeProvider>(_ => TimeProvider.System);
 
         // Core executors (registered as non-interface for internal use)
-        services.AddSingleton<RedisCommandExecutor>(sp =>
-        {
-            var factory = sp.GetRequiredService<RedisConnectionFactory>();
-            var muxOptions = sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<RedisMultiplexerOptions>>();
-            var connOptions = sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<RedisConnectionOptions>>();
-            return new RedisCommandExecutor(factory, muxOptions, connOptions);
-        });
+        services.AddSingleton<RedisCommandExecutor>();
         services.AddSingleton<InMemoryCommandExecutor>();
+        services.TryAddSingleton<IRedisFallbackCommandExecutor, InMemoryCommandExecutor>();
+
+        services.TryAddSingleton<ISpillEncryptionProvider, NoopSpillEncryptionProvider>();
+        services.TryAddSingleton<IInMemorySpillStore, FileSpillStore>();
 
         // Cache services
         // IMPORTANT: RedisCacheService gets the RAW RedisCommandExecutor (no hybrid wrapper)
         // to avoid circular dependency with HybridCacheService
-        services.AddSingleton<RedisCacheService>(sp =>
-        {
-            var redis = sp.GetRequiredService<RedisCommandExecutor>();
-            var current = sp.GetRequiredService<ICurrentCacheService>();
-            var statsRegistry = sp.GetRequiredService<CacheStatsRegistry>();
-            return new RedisCacheService(redis, current, statsRegistry);
-        });
+        services.AddSingleton<RedisCacheService>();
         services.AddSingleton<InMemoryCacheService>();
+        services.TryAddSingleton<ICacheFallbackService, InMemoryCacheService>();
         services.AddSingleton<HybridCacheService>();
         services.AddSingleton<IRedisCircuitBreakerState>(sp => sp.GetRequiredService<HybridCacheService>());
         services.AddSingleton<IRedisFailoverController>(sp => sp.GetRequiredService<HybridCacheService>());
@@ -66,41 +59,23 @@ public static class CacheRegistration
             .Validate(o => o.BreakDuration > TimeSpan.Zero, "BreakDuration must be greater than zero")
             .Validate(o => o.HalfOpenProbeTimeout > TimeSpan.Zero, "HalfOpenProbeTimeout must be greater than zero to prevent indefinite hangs")
             .ValidateOnStart();
-        services.TryAddSingleton(sp => sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RedisCircuitBreakerOptions>>().Value);
-
-        // Reconciliation service - syncs in-memory writes back to Redis after recovery
-        services.AddOptions<RedisReconciliationOptions>()
-            .Validate(o => o.MaxOperationAge > TimeSpan.Zero, "MaxOperationAge must be greater than zero")
-            .Validate(o => o.MaxRunDuration > TimeSpan.Zero, "MaxRunDuration must be greater than zero")
-            .Validate(o => o.MaxBatchSize >= 0, "MaxBatchSize must be non-negative")
-            .ValidateOnStart();
-        services.TryAddSingleton(sp => sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RedisReconciliationOptions>>().Value);
-        services.AddSingleton<IRedisReconciliationService>(sp =>
-        {
-            var executor = sp.GetRequiredService<RedisCommandExecutor>(); // raw executor (no circuit breaker)
-            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RedisReconciliationOptions>>();
-            var logger = sp.GetRequiredService<ILogger<RedisReconciliationService>>();
-            return new RedisReconciliationService(executor, options, logger);
-        });
-
         // Default cache service is the hybrid implementation, wrapped with stampede protection.
-        services.AddSingleton<ICacheService>(sp =>
-        {
-            var hybrid = sp.GetRequiredService<HybridCacheService>();
-            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CacheStampedeOptions>>();
-            return new StampedeProtectedCacheService(hybrid, options);
-        });
+        services.AddSingleton<ICacheService, HybridStampedeCacheService>();
 
         // Ergonomic typed caching API with codec-based serialization
         services.TryAddSingleton<ICacheCodecProvider>(sp =>
             new SystemTextJsonCodecProvider(new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         services.AddSingleton<IVapeCache, VapeCacheClient>();
+        services.AddSingleton<IJsonCache, JsonCacheService>();
 
         // Typed collection APIs (LIST, SET, HASH)
         services.AddSingleton<ICacheCollectionFactory, CacheCollectionFactory>();
 
         // Redis module detection (for RedisJSON, RediSearch, etc.)
         services.AddSingleton<IRedisModuleDetector, RedisModuleDetector>();
+        services.AddSingleton<IRedisSearchService, RedisSearchService>();
+        services.AddSingleton<IRedisBloomService, RedisBloomService>();
+        services.AddSingleton<IRedisTimeSeriesService, RedisTimeSeriesService>();
 
         return services;
     }

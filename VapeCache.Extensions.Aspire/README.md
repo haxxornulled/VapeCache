@@ -41,7 +41,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Single line to add VapeCache with full Aspire integration
 builder.AddVapeCache()
     .WithRedisFromAspire("redis")     // Bind to AppHost Redis resource
-    .WithHealthChecks()                // Add /health endpoints
+    .WithHealthChecks()                // Add health checks (host maps endpoints)
     .WithAspireTelemetry();            // Send metrics to Aspire Dashboard
 
 var app = builder.Build();
@@ -122,7 +122,7 @@ Adds health checks for Redis and VapeCache.
 ```csharp
 .WithHealthChecks()
 
-// Use in endpoints:
+// Map in your host:
 app.MapHealthChecks("/health");
 app.MapHealthChecks("/health/redis", new HealthCheckOptions
 {
