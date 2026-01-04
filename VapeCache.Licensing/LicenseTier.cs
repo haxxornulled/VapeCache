@@ -2,23 +2,21 @@ namespace VapeCache.Licensing;
 
 /// <summary>
 /// Represents the VapeCache license tier.
+/// Application-based licensing - no per-server or per-cluster limits.
 /// </summary>
 public enum LicenseTier
 {
     /// <summary>
-    /// Free tier - MIT licensed core features only.
+    /// Free tier - MIT licensed core features.
+    /// Unlimited production deployments, any Redis topology (standalone/sentinel/cluster).
     /// </summary>
     Free = 0,
 
     /// <summary>
-    /// Pro tier - $99/month, max 5 production instances.
-    /// Includes Redis modules and advanced telemetry (NO reconciliation).
-    /// </summary>
-    Pro = 1,
-
-    /// <summary>
-    /// Enterprise tier - $499/month, unlimited instances.
-    /// Includes reconciliation (zero data loss), multi-region, compliance, source code access.
+    /// Enterprise tier - $499/month per organization.
+    /// Unlimited production deployments, unlimited Redis topology.
+    /// Includes Persistence (spill-to-disk) and Reconciliation (zero data loss).
+    /// Priority support, SLA guarantees, source code access.
     /// </summary>
     Enterprise = 2
 }

@@ -8,7 +8,7 @@
     <PackageId>VapeCache.Persistence</PackageId>
     <Version>1.0.0</Version>
     <Authors>VapeCache</Authors>
-    <Description>Enterprise-grade persistence features for VapeCache: In-memory spill-to-disk with scatter/gather distribution and encryption at rest. REQUIRES ENTERPRISE LICENSE ($499/month).</Description>
+    <Description>Enterprise-grade persistence for VapeCache: In-memory spill-to-disk with scatter/gather distribution (65K directories) and encryption at rest. Unlimited deployments, any Redis topology. REQUIRES ENTERPRISE LICENSE ($499/month per organization).</Description>
     <PackageTags>cache;redis;persistence;spill;enterprise</PackageTags>
     <PackageLicenseExpression>Proprietary</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>

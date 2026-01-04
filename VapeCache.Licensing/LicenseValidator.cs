@@ -22,8 +22,9 @@ public sealed class LicenseValidator
 
     /// <summary>
     /// Validates a VapeCache license key.
+    /// Application-based licensing - no per-server/cluster counting.
     /// </summary>
-    /// <param name="licenseKey">License key in format: VCPRO-{CUSTOMER_ID}-{EXPIRY}-{INSTANCES}-{SIGNATURE}</param>
+    /// <param name="licenseKey">License key in format: VCENT-{ORG_ID}-{EXPIRY}-{SIGNATURE}</param>
     /// <returns>Validation result with license details or error message.</returns>
     public LicenseValidationResult Validate(string? licenseKey)
     {
@@ -32,23 +33,17 @@ public sealed class LicenseValidator
             return LicenseValidationResult.Free();
 
         var parts = licenseKey.Split('-');
-        if (parts.Length != 5)
-            return LicenseValidationResult.Failure("Invalid license key format. Expected: VCTIER-ID-EXPIRY-INSTANCES-SIGNATURE");
+        if (parts.Length != 4)
+            return LicenseValidationResult.Failure("Invalid license key format. Expected: VCENT-ORG_ID-EXPIRY-SIGNATURE");
 
         var tierPrefix = parts[0];
-        var customerId = parts[1];
+        var organizationId = parts[1];
         var expiryStr = parts[2];
-        var instancesStr = parts[3];
-        var providedSignature = parts[4];
+        var providedSignature = parts[3];
 
-        // Parse tier
-        LicenseTier tier;
-        if (tierPrefix == "VCPRO")
-            tier = LicenseTier.Pro;
-        else if (tierPrefix == "VCENT")
-            tier = LicenseTier.Enterprise;
-        else
-            return LicenseValidationResult.Failure($"Invalid license tier prefix: {tierPrefix}");
+        // Only Enterprise tier has license keys
+        if (tierPrefix != "VCENT")
+            return LicenseValidationResult.Failure($"Invalid license tier prefix: {tierPrefix}. Expected: VCENT");
 
         // Parse expiry
         if (!long.TryParse(expiryStr, out var expiryUnix))
@@ -58,50 +53,28 @@ public sealed class LicenseValidator
         if (expiresAt < DateTimeOffset.UtcNow)
             return LicenseValidationResult.Failure($"License expired on {expiresAt:yyyy-MM-dd}");
 
-        // Parse instances
-        if (!int.TryParse(instancesStr, out var maxInstances))
-            return LicenseValidationResult.Failure("Invalid instance count format");
-
-        // Validate instance count matches tier
-        if (tier == LicenseTier.Pro && maxInstances != 5)
-            return LicenseValidationResult.Failure("Pro licenses must have maxInstances=5");
-
-        if (tier == LicenseTier.Enterprise && maxInstances != 999)
-            return LicenseValidationResult.Failure("Enterprise licenses must have maxInstances=999 (unlimited)");
-
         // Verify HMAC signature
-        var payload = $"{tierPrefix}-{customerId}-{expiryStr}-{instancesStr}";
+        var payload = $"{tierPrefix}-{organizationId}-{expiryStr}";
         var expectedSignature = ComputeSignature(payload);
 
         if (!string.Equals(providedSignature, expectedSignature, StringComparison.OrdinalIgnoreCase))
             return LicenseValidationResult.Failure("Invalid license signature");
 
-        return LicenseValidationResult.Success(tier, customerId, expiresAt, maxInstances);
+        // Enterprise tier = unlimited instances/servers/clusters
+        return LicenseValidationResult.Success(LicenseTier.Enterprise, organizationId, expiresAt, maxInstances: 999);
     }
 
     /// <summary>
-    /// Generates a license key for testing or internal use.
+    /// Generates an Enterprise license key for an organization.
+    /// Application-based licensing - unlimited deployments/servers/clusters.
     /// </summary>
-    public string GenerateLicenseKey(LicenseTier tier, string customerId, DateTimeOffset expiresAt)
+    public string GenerateLicenseKey(string organizationId, DateTimeOffset expiresAt)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(organizationId);
 
-        var tierPrefix = tier switch
-        {
-            LicenseTier.Pro => "VCPRO",
-            LicenseTier.Enterprise => "VCENT",
-            _ => throw new ArgumentException("Cannot generate license key for Free tier", nameof(tier))
-        };
-
-        var maxInstances = tier switch
-        {
-            LicenseTier.Pro => 5,
-            LicenseTier.Enterprise => 999,
-            _ => throw new ArgumentException("Invalid tier", nameof(tier))
-        };
-
+        var tierPrefix = "VCENT"; // Enterprise only
         var expiryUnix = expiresAt.ToUnixTimeSeconds();
-        var payload = $"{tierPrefix}-{customerId}-{expiryUnix}-{maxInstances}";
+        var payload = $"{tierPrefix}-{organizationId}-{expiryUnix}";
         var signature = ComputeSignature(payload);
 
         return $"{payload}-{signature}";

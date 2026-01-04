@@ -27,28 +27,15 @@ internal class Program
 
     private static void GenerateLicenseKey()
     {
-        Console.WriteLine("Select License Tier:");
-        Console.WriteLine("  1. Pro ($99/month, max 5 instances)");
-        Console.WriteLine("  2. Enterprise ($499/month, unlimited instances)");
-        Console.Write("\nEnter tier (1 or 2): ");
-        var tierInput = Console.ReadLine();
+        Console.WriteLine("=== VapeCache Enterprise License Generator ===");
+        Console.WriteLine("Application-based licensing: $499/month per organization");
+        Console.WriteLine("Unlimited deployments, unlimited Redis topology\n");
 
-        LicenseTier tier;
-        if (tierInput == "1")
-            tier = LicenseTier.Pro;
-        else if (tierInput == "2")
-            tier = LicenseTier.Enterprise;
-        else
+        Console.Write("Enter Organization ID (e.g., acme, contoso): ");
+        var organizationId = Console.ReadLine()?.Trim();
+        if (string.IsNullOrWhiteSpace(organizationId))
         {
-            Console.WriteLine("Invalid tier selection. Exiting.");
-            return;
-        }
-
-        Console.Write("Enter Customer ID (e.g., CUST12345): ");
-        var customerId = Console.ReadLine()?.Trim();
-        if (string.IsNullOrWhiteSpace(customerId))
-        {
-            Console.WriteLine("Customer ID cannot be empty. Exiting.");
+            Console.WriteLine("Organization ID cannot be empty. Exiting.");
             return;
         }
 
@@ -70,28 +57,22 @@ internal class Program
         }
 
         var validator = new LicenseValidator(LicenseSecretKey);
-        var licenseKey = validator.GenerateLicenseKey(tier, customerId, expiresAt);
+        var licenseKey = validator.GenerateLicenseKey(organizationId, expiresAt);
 
-        Console.WriteLine("\n=== LICENSE KEY GENERATED ===");
-        Console.WriteLine($"Tier:       {tier}");
-        Console.WriteLine($"Customer:   {customerId}");
-        Console.WriteLine($"Expires:    {expiresAt:yyyy-MM-dd}");
-        Console.WriteLine($"Instances:  {(tier == LicenseTier.Pro ? "5" : "Unlimited")}");
+        Console.WriteLine("\n=== ENTERPRISE LICENSE KEY GENERATED ===");
+        Console.WriteLine($"Tier:         Enterprise");
+        Console.WriteLine($"Organization: {organizationId}");
+        Console.WriteLine($"Expires:      {expiresAt:yyyy-MM-dd}");
+        Console.WriteLine($"Deployments:  Unlimited");
+        Console.WriteLine($"Redis Topology: Any (standalone/sentinel/cluster)");
         Console.WriteLine($"\nLicense Key:\n{licenseKey}");
         Console.WriteLine("\n=== USAGE ===");
         Console.WriteLine("Add to appsettings.json or set environment variable:");
         Console.WriteLine($"  VAPECACHE_LICENSE_KEY={licenseKey}");
-
-        if (tier == LicenseTier.Enterprise)
-        {
-            Console.WriteLine("\nFor reconciliation (Enterprise only):");
-            Console.WriteLine($"  services.AddVapeCacheRedisReconciliation(\"{licenseKey}\");");
-        }
-        else
-        {
-            Console.WriteLine("\nNOTE: Pro tier does NOT include reconciliation.");
-            Console.WriteLine("Pro features: Redis modules, advanced telemetry only.");
-        }
+        Console.WriteLine("\nFor Persistence:");
+        Console.WriteLine($"  services.AddVapeCachePersistence(\"{licenseKey}\");");
+        Console.WriteLine("\nFor Reconciliation:");
+        Console.WriteLine($"  services.AddVapeCacheReconciliation(\"{licenseKey}\");");
     }
 
     private static void ValidateLicenseKey()

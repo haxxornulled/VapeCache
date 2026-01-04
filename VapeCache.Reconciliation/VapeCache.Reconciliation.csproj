@@ -10,7 +10,7 @@
     <Authors>VapeCache Contributors</Authors>
     <Company>VapeCache</Company>
     <Product>VapeCache</Product>
-    <Description>Redis reconciliation services for VapeCache. Tracks in-memory writes during outages and syncs back on recovery. COMMERCIAL LICENSE REQUIRED - Visit vapecache.com for pricing.</Description>
+    <Description>Zero data loss reconciliation for VapeCache. SQLite-backed tracking of writes during Redis outages with automatic sync-back on recovery. Unlimited deployments, any Redis topology. ENTERPRISE LICENSE REQUIRED ($499/month per organization).</Description>
     <PackageTags>redis;cache;reconciliation;failover;circuit-breaker;commercial</PackageTags>
     <PackageLicenseExpression>COMMERCIAL</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
