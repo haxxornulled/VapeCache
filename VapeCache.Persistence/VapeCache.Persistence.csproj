@@ -12,7 +12,7 @@
     <PackageTags>cache;redis;persistence;spill;enterprise</PackageTags>
     <PackageLicenseExpression>Proprietary</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
-    <RepositoryUrl>https://github.com/your-org/vapecache</RepositoryUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 

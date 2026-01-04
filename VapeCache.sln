@@ -15,7 +15,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Tests", "VapeCach
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Benchmarks", "VapeCache.Benchmarks\VapeCache.Benchmarks.csproj", "{C76E03BA-1CCC-4130-8B2F-D9D93C2A6809}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCahe.Core", "VapeCahe.Core\VapeCahe.Core.csproj", "{C974347F-443D-4D51-8601-6DCF5E3E4334}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Core", "VapeCache.Core\VapeCache.Core.csproj", "{C974347F-443D-4D51-8601-6DCF5E3E4334}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Extensions.Aspire", "VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj", "{6234C7AF-32C6-476C-9F94-32C198E78671}"
 EndProject
@@ -26,6 +26,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.LicenseGenerator", "VapeCache.LicenseGenerator\VapeCache.LicenseGenerator.csproj", "{1BD1ADBB-0B89-4E9D-84A7-E8B76169E366}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Persistence", "VapeCache.Persistence\VapeCache.Persistence.csproj", "{94168A16-2FC1-42CB-8C32-4BC870D7F7C2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Reconciliation", "VapeCache.Reconciliation\VapeCache.Reconciliation.csproj", "{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -181,6 +183,18 @@ Global
 		{94168A16-2FC1-42CB-8C32-4BC870D7F7C2}.Release|x64.Build.0 = Release|Any CPU
 		{94168A16-2FC1-42CB-8C32-4BC870D7F7C2}.Release|x86.ActiveCfg = Release|Any CPU
 		{94168A16-2FC1-42CB-8C32-4BC870D7F7C2}.Release|x86.Build.0 = Release|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Debug|x64.Build.0 = Debug|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Debug|x86.Build.0 = Debug|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Release|x64.ActiveCfg = Release|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Release|x64.Build.0 = Release|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Release|x86.ActiveCfg = Release|Any CPU
+		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -14,10 +14,10 @@
     <PackageTags>redis;cache;reconciliation;failover;circuit-breaker;commercial</PackageTags>
     <PackageLicenseExpression>COMMERCIAL</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
-    <RepositoryUrl>https://github.com/yourusername/VapeCache</RepositoryUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/yourusername/VapeCache</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
     <Copyright>Copyright (c) 2025 VapeCache Contributors</Copyright>
   </PropertyGroup>
 

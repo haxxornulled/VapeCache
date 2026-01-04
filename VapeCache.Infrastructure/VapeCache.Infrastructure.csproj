@@ -14,10 +14,10 @@
     <Description>VapeCache - High-performance Redis client for .NET optimized for caching workloads. Features coalesced writes (29% faster SETs), zero-allocation pooling, circuit breaker failover, and OpenTelemetry observability. 5-30% faster than StackExchange.Redis.</Description>
     <PackageTags>redis;cache;performance;distributed-cache;async;netcore;hybrid-cache;circuit-breaker;opentelemetry</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/yourusername/VapeCache</RepositoryUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/yourusername/VapeCache</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
     <Copyright>Copyright (c) 2025 VapeCache Contributors</Copyright>
   </PropertyGroup>
 
