@@ -30,7 +30,7 @@ public class StampedeProtectedCacheServiceBenchmarks
     public void Setup()
     {
         _inner = new FakeCacheService();
-        _svc = new StampedeProtectedCacheService(_inner, Options.Create(new CacheStampedeOptions { Enabled = Enabled, MaxKeys = 100_000 }));
+        _svc = new StampedeProtectedCacheService(_inner, new BenchmarkOptionsMonitor<CacheStampedeOptions>(new CacheStampedeOptions { Enabled = Enabled, MaxKeys = 100_000 }));
         _entryOptions = new CacheEntryOptions(TimeSpan.FromMinutes(5));
 
         _inner.SetRaw("bench:hit", BitConverter.GetBytes(1234));

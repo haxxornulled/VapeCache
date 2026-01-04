@@ -66,7 +66,7 @@ public class CacheServiceApiBenchmarks
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var currentService = new CurrentCacheService();
         var statsRegistry = new CacheStatsRegistry();
-        var spillOptions = Options.Create(new InMemorySpillOptions { EnableSpillToDisk = false });
+        var spillOptions = new BenchmarkOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions { EnableSpillToDisk = false });
         var spillStore = new FileSpillStore(spillOptions, new NoopSpillEncryptionProvider());
         _inMemoryCache = new InMemoryCacheService(memoryCache, currentService, statsRegistry, spillOptions, spillStore);
 

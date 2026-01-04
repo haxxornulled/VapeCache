@@ -10,8 +10,8 @@ internal sealed class SqliteReconciliationStore : IRedisReconciliationStore
     private int _initialized;
     private readonly SemaphoreSlim _initGate = new(1, 1);
 
-    public SqliteReconciliationStore(Microsoft.Extensions.Options.IOptions<RedisReconciliationStoreOptions> options)
-        : this(options.Value)
+    public SqliteReconciliationStore(Microsoft.Extensions.Options.IOptionsMonitor<RedisReconciliationStoreOptions> options)
+        : this(options.CurrentValue)
     {
     }
 

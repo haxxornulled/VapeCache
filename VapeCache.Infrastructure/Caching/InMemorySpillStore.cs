@@ -21,9 +21,9 @@ internal sealed class FileSpillStore : IInMemorySpillStore
     private long _lastCleanupTicks;
     private int _cleanupRunning;
 
-    public FileSpillStore(IOptions<InMemorySpillOptions> options, ISpillEncryptionProvider encryption)
+    public FileSpillStore(IOptionsMonitor<InMemorySpillOptions> options, ISpillEncryptionProvider encryption)
     {
-        _options = options.Value;
+        _options = options.CurrentValue;
         _rootPath = ResolveRoot(_options.SpillDirectory);
         _encryption = encryption;
         _cleanupIntervalTicks = ToStopwatchTicks(_options.OrphanCleanupInterval);

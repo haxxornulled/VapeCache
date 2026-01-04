@@ -1,7 +1,7 @@
 using System.Buffers;
-using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
+using VapeCache.Tests.Infrastructure;
 using Xunit;
 
 namespace VapeCache.Tests.Caching;
@@ -12,7 +12,7 @@ public sealed class StampedeProtectedCacheServiceTests
     public async Task GetOrSetAsync_is_single_flight_per_key()
     {
         var inner = new FakeCache();
-        var svc = new StampedeProtectedCacheService(inner, Options.Create(new CacheStampedeOptions { Enabled = true }));
+        var svc = new StampedeProtectedCacheService(inner, new TestOptionsMonitor<CacheStampedeOptions>(new CacheStampedeOptions { Enabled = true }));
 
         var calls = 0;
         ValueTask<int> Factory(CancellationToken ct)
@@ -41,7 +41,7 @@ public sealed class StampedeProtectedCacheServiceTests
     public async Task GetOrSetAsync_releases_lock_on_factory_failure()
     {
         var inner = new FakeCache();
-        var svc = new StampedeProtectedCacheService(inner, Options.Create(new CacheStampedeOptions { Enabled = true }));
+        var svc = new StampedeProtectedCacheService(inner, new TestOptionsMonitor<CacheStampedeOptions>(new CacheStampedeOptions { Enabled = true }));
 
         var first = true;
         async ValueTask<int> Factory(CancellationToken ct)

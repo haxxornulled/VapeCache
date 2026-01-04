@@ -19,13 +19,13 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         IMemoryCache cache,
         ICurrentCacheService current,
         CacheStatsRegistry statsRegistry,
-        IOptions<InMemorySpillOptions> spillOptions,
+        IOptionsMonitor<InMemorySpillOptions> spillOptions,
         IInMemorySpillStore spillStore)
     {
         _cache = cache;
         _current = current;
         _stats = statsRegistry.GetOrCreate(CacheStatsNames.Memory);
-        _spillOptions = spillOptions.Value;
+        _spillOptions = spillOptions.CurrentValue;
         _spillStore = spillStore;
     }
 

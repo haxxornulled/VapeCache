@@ -18,10 +18,10 @@ internal sealed class StampedeProtectedCacheService : ICacheService
     private readonly CacheStampedeOptions _options;
     private readonly ConcurrentDictionary<string, LockEntry> _locks = new(StringComparer.Ordinal);
 
-    public StampedeProtectedCacheService(ICacheService inner, IOptions<CacheStampedeOptions> options)
+    public StampedeProtectedCacheService(ICacheService inner, IOptionsMonitor<CacheStampedeOptions> options)
     {
         _inner = inner;
-        _options = options.Value;
+        _options = options.CurrentValue;
     }
 
     public string Name => _inner.Name;

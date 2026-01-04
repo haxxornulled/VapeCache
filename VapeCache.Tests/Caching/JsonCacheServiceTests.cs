@@ -5,6 +5,7 @@ using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Modules;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
+using VapeCache.Tests.Infrastructure;
 
 namespace VapeCache.Tests.Caching;
 
@@ -100,7 +101,7 @@ public sealed class JsonCacheServiceTests
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var current = new CurrentCacheService();
         var stats = new CacheStatsRegistry();
-        var spillOptions = Microsoft.Extensions.Options.Options.Create(new InMemorySpillOptions { EnableSpillToDisk = false });
+        var spillOptions = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions { EnableSpillToDisk = false });
         var spillStore = new FileSpillStore(spillOptions, new NoopSpillEncryptionProvider());
         return new InMemoryCacheService(memoryCache, current, stats, spillOptions, spillStore);
     }

@@ -2,9 +2,9 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
+using VapeCache.Tests.Infrastructure;
 using Xunit;
 
 namespace VapeCache.Tests.Caching;
@@ -17,7 +17,7 @@ public sealed class InMemoryCacheSpillTests
         var root = Path.Combine(Path.GetTempPath(), "vapecache-spill", Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(root);
 
-        var options = Options.Create(new InMemorySpillOptions
+        var options = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions
         {
             EnableSpillToDisk = true,
             SpillThresholdBytes = 16,

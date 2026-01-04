@@ -19,13 +19,13 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
 
     public RedisReconciliationService(
         IRedisReconciliationExecutor redis,
-        IOptions<RedisReconciliationOptions> options,
+        IOptionsMonitor<RedisReconciliationOptions> options,
         ILogger<RedisReconciliationService> logger,
         TimeProvider timeProvider,
         IRedisReconciliationStore store)
     {
         _redis = redis;
-        _options = options.Value;
+        _options = options.CurrentValue;
         _logger = logger;
         _timeProvider = timeProvider;
         _store = store;

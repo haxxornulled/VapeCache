@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Reconciliation;
+using VapeCache.Tests.Infrastructure;
 
 namespace VapeCache.Tests.Caching;
 
@@ -12,7 +12,7 @@ public sealed class RedisReconciliationServiceTests
     {
         var time = new ManualTimeProvider(new DateTimeOffset(2025, 12, 31, 0, 0, 0, TimeSpan.Zero));
         var executor = new FakeExecutor();
-        var options = Options.Create(new RedisReconciliationOptions
+        var options = new TestOptionsMonitor<RedisReconciliationOptions>(new RedisReconciliationOptions
         {
             MaxOperationAge = TimeSpan.FromMinutes(5),
             MaxRunDuration = TimeSpan.FromSeconds(30),
@@ -41,7 +41,7 @@ public sealed class RedisReconciliationServiceTests
     {
         var time = new ManualTimeProvider(new DateTimeOffset(2025, 12, 31, 0, 0, 0, TimeSpan.Zero));
         var executor = new FakeExecutor();
-        var options = Options.Create(new RedisReconciliationOptions
+        var options = new TestOptionsMonitor<RedisReconciliationOptions>(new RedisReconciliationOptions
         {
             MaxOperationAge = TimeSpan.FromMinutes(5),
             MaxRunDuration = TimeSpan.FromSeconds(30),
@@ -68,7 +68,7 @@ public sealed class RedisReconciliationServiceTests
     {
         var time = new ManualTimeProvider(new DateTimeOffset(2025, 12, 31, 0, 0, 0, TimeSpan.Zero));
         var executor = new FakeExecutor();
-        var options = Options.Create(new RedisReconciliationOptions
+        var options = new TestOptionsMonitor<RedisReconciliationOptions>(new RedisReconciliationOptions
         {
             MaxOperationAge = TimeSpan.FromSeconds(1),
             MaxRunDuration = TimeSpan.FromSeconds(30),
@@ -95,7 +95,7 @@ public sealed class RedisReconciliationServiceTests
     {
         var time = new ManualTimeProvider(new DateTimeOffset(2025, 12, 31, 0, 0, 0, TimeSpan.Zero));
         var executor = new FakeExecutor();
-        var options = Options.Create(new RedisReconciliationOptions
+        var options = new TestOptionsMonitor<RedisReconciliationOptions>(new RedisReconciliationOptions
         {
             MaxPendingOperations = 1,
             MaxOperationAge = TimeSpan.FromMinutes(5),
@@ -120,7 +120,7 @@ public sealed class RedisReconciliationServiceTests
     {
         var time = new ManualTimeProvider(new DateTimeOffset(2025, 12, 31, 0, 0, 0, TimeSpan.Zero));
         var executor = new FakeExecutor { ThrowOnSet = true };
-        var options = Options.Create(new RedisReconciliationOptions
+        var options = new TestOptionsMonitor<RedisReconciliationOptions>(new RedisReconciliationOptions
         {
             MaxOperationAge = TimeSpan.FromMinutes(5),
             MaxRunDuration = TimeSpan.FromSeconds(30),
@@ -145,7 +145,7 @@ public sealed class RedisReconciliationServiceTests
     {
         var time = new ManualTimeProvider(new DateTimeOffset(2025, 12, 31, 0, 0, 0, TimeSpan.Zero));
         var executor = new FakeExecutor();
-        var options = Options.Create(new RedisReconciliationOptions
+        var options = new TestOptionsMonitor<RedisReconciliationOptions>(new RedisReconciliationOptions
         {
             MaxOperationAge = TimeSpan.FromMinutes(5),
             MaxRunDuration = TimeSpan.FromSeconds(30),

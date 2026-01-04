@@ -17,7 +17,7 @@ internal sealed class HybridCacheService(
     ICacheFallbackService fallback,
     ICurrentCacheService current,
     TimeProvider timeProvider,
-    IOptions<RedisCircuitBreakerOptions> breakerOptions,
+    IOptionsMonitor<RedisCircuitBreakerOptions> breakerOptions,
     CacheStatsRegistry statsRegistry,
     ILogger<HybridCacheService> logger,
     IRedisReconciliationService? reconciliation = null) : ICacheService
@@ -28,7 +28,7 @@ internal sealed class HybridCacheService(
     public string Name => "hybrid";
 
     private readonly CacheStats _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
-    private readonly RedisCircuitBreakerOptions _breaker = breakerOptions.Value;
+    private readonly RedisCircuitBreakerOptions _breaker = breakerOptions.CurrentValue;
     private int _failures;
     private long _openUntilTicks;
     private int _halfOpenProbeInFlight;

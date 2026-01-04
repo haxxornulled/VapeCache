@@ -3,12 +3,12 @@ using System.Diagnostics;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 using VapeCache.Reconciliation;
+using VapeCache.Tests.Infrastructure;
 using Xunit;
 
 namespace VapeCache.Tests.Caching;
@@ -29,7 +29,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
 
         await memory.SetAsync("k", "v"u8.ToArray(), new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None);
 
-        var breaker = Options.Create(new RedisCircuitBreakerOptions
+        var breaker = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
         {
             Enabled = true,
             ConsecutiveFailuresToOpen = 2,
@@ -68,7 +68,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         var memory = CreateMemoryCacheService(current, statsRegistry);
         await memory.SetAsync("k", "v"u8.ToArray(), new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None);
 
-        var breaker = Options.Create(new RedisCircuitBreakerOptions
+        var breaker = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
         {
             Enabled = true,
             ConsecutiveFailuresToOpen = 2,
@@ -102,7 +102,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         var redis = new RedisCacheService(flakyRedis, current, statsRegistry);
         var memory = CreateMemoryCacheService(current, statsRegistry);
 
-        var breaker = Options.Create(new RedisCircuitBreakerOptions
+        var breaker = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
         {
             Enabled = true,
             ConsecutiveFailuresToOpen = 1,
@@ -110,7 +110,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
             HalfOpenProbeTimeout = TimeSpan.FromMilliseconds(50)
         });
 
-        var reconciliationOptions = Options.Create(new RedisReconciliationOptions
+        var reconciliationOptions = new TestOptionsMonitor<RedisReconciliationOptions>(new RedisReconciliationOptions
         {
             Enabled = true,
             BatchSize = 100,
@@ -394,7 +394,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
     private static InMemoryCacheService CreateMemoryCacheService(ICurrentCacheService current, CacheStatsRegistry statsRegistry)
     {
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        var spillOptions = Options.Create(new InMemorySpillOptions { EnableSpillToDisk = false });
+        var spillOptions = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions { EnableSpillToDisk = false });
         var spillStore = new FileSpillStore(spillOptions, new NoopSpillEncryptionProvider());
         return new InMemoryCacheService(memoryCache, current, statsRegistry, spillOptions, spillStore);
     }
