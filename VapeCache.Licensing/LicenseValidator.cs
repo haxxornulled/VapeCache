@@ -63,8 +63,8 @@ public sealed class LicenseValidator
             return LicenseValidationResult.Failure("Invalid instance count format");
 
         // Validate instance count matches tier
-        if (tier == LicenseTier.Pro && maxInstances != 3)
-            return LicenseValidationResult.Failure("Pro licenses must have maxInstances=3");
+        if (tier == LicenseTier.Pro && maxInstances != 5)
+            return LicenseValidationResult.Failure("Pro licenses must have maxInstances=5");
 
         if (tier == LicenseTier.Enterprise && maxInstances != 999)
             return LicenseValidationResult.Failure("Enterprise licenses must have maxInstances=999 (unlimited)");
@@ -95,7 +95,7 @@ public sealed class LicenseValidator
 
         var maxInstances = tier switch
         {
-            LicenseTier.Pro => 3,
+            LicenseTier.Pro => 5,
             LicenseTier.Enterprise => 999,
             _ => throw new ArgumentException("Invalid tier", nameof(tier))
         };

@@ -11,14 +11,14 @@ public enum LicenseTier
     Free = 0,
 
     /// <summary>
-    /// Pro tier - $29/month, max 3 production instances.
-    /// Includes reconciliation, Redis modules, advanced telemetry.
+    /// Pro tier - $99/month, max 5 production instances.
+    /// Includes Redis modules and advanced telemetry (NO reconciliation).
     /// </summary>
     Pro = 1,
 
     /// <summary>
-    /// Enterprise tier - $299/month, unlimited instances.
-    /// Includes all Pro features plus multi-region, compliance, source code access.
+    /// Enterprise tier - $499/month, unlimited instances.
+    /// Includes reconciliation (zero data loss), multi-region, compliance, source code access.
     /// </summary>
     Enterprise = 2
 }

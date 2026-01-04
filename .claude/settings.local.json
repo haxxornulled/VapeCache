@@ -103,7 +103,8 @@
       "Bash(7z l:*)",
       "Bash(unzip:*)",
       "Bash(git mv:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(dotnet run)"
     ]
   }
 }

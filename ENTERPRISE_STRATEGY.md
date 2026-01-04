@@ -14,25 +14,26 @@
 
 ---
 
-### VapeCache Pro - $29/month per instance
-**Target:** Startups, SMBs (max 3 production instances)
+### VapeCache Pro - $99/month
+**Target:** Startups, SMBs (max 5 production instances)
 
 **Premium Features:**
-- ✅ **Zero Data Loss Reconciliation** (SQLite-backed persistence)
-- ✅ Advanced circuit breaker
 - ✅ Redis Modules (Bloom, Search, TimeSeries, JSON)
-- ✅ Advanced telemetry
-- ✅ Priority email support (48h SLA)
+- ✅ Advanced telemetry & distributed tracing
+- ✅ Production health checks & diagnostics
+- ✅ Priority email support (24h SLA)
+- ✅ Community Slack access
 
 ---
 
-### VapeCache Enterprise - $299/month unlimited
+### VapeCache Enterprise - $499/month unlimited
 **Target:** Fortune 500, regulated industries
 
 **Premium Features (Pro + Below):**
+- ✅ **ZERO DATA LOSS RECONCILIATION** (SQLite-backed persistence) - ENTERPRISE ONLY
 - ✅ Unlimited instances
 - ✅ Multi-region replication
-- ✅ Compliance suite (GDPR/HIPAA audit logs, encryption)
+- ✅ Compliance suite (GDPR/HIPAA audit logs, encryption at rest)
 - ✅ Cloud optimizations (Azure/AWS/GCP)
 - ✅ 24/7 support (4h SLA)
 - ✅ Source code access
@@ -44,29 +45,31 @@
 
 ### Year 1 Targets
 - **Month 3:** 1,000 GitHub stars, 0 paid customers
-- **Month 6:** 2,500 GitHub stars, 100 Pro customers ($2,900 MRR)
-- **Month 12:** 5,000 GitHub stars, 200 Pro + 20 Enterprise ($11,780 MRR)
+- **Month 6:** 2,500 GitHub stars, 50 Pro customers ($4,950 MRR)
+- **Month 12:** 5,000 GitHub stars, 100 Pro + 20 Enterprise ($19,880 MRR)
 
 ### Year 2 Targets
-- **Month 24:** 10,000 GitHub stars, 500 Pro + 50 Enterprise ($29,450 MRR)
+- **Month 24:** 10,000 GitHub stars, 200 Pro + 50 Enterprise ($44,750 MRR)
 
-**Exit Potential:** $5-10M acquisition (20-30x ARR at $353K ARR)
+**Exit Potential:** $10-20M acquisition (20-30x ARR at $537K ARR)
 
 ---
 
 ## 🔒 License Enforcement
 
 ### Technical
-- Pro/Enterprise packages require license key validation on startup
-- Phone home every 24h for activation check
-- 30-day grace period for offline operation
-- Usage telemetry (anonymous, privacy-friendly)
+- Enterprise reconciliation package requires license key validation on startup
+- License validation via HMAC-SHA256 signature
+- Reads from VAPECACHE_LICENSE_KEY environment variable
+- Grace period for offline operation (expiry date validation only)
 
 ### License Key Format
 ```
-Pro:        VCPRO-{CUSTOMER_ID}-{EXPIRY}-3-{SIGNATURE}
+Pro:        VCPRO-{CUSTOMER_ID}-{EXPIRY}-5-{SIGNATURE}
 Enterprise: VCENT-{CUSTOMER_ID}-{EXPIRY}-999-{SIGNATURE}
 ```
+
+**Note:** Reconciliation is ENTERPRISE-ONLY. Pro tier gets Redis modules and advanced telemetry only.
 
 ---
 
@@ -105,15 +108,15 @@ Open Source (GitHub):
     └── VapeCache.Extensions.Aspire (MIT)
 
 Commercial (NuGet only):
-├── VapeCache.Pro
-│   ├── VapeCache.Pro.Reconciliation
-│   ├── VapeCache.Pro.Modules
-│   └── VapeCache.Pro.Telemetry
+├── VapeCache.Pro (Future)
+│   ├── VapeCache.Modules (Redis Bloom, Search, TimeSeries, JSON)
+│   └── VapeCache.Pro.Telemetry (Advanced metrics & health checks)
 │
 └── VapeCache.Enterprise
-    ├── VapeCache.Enterprise.Replication
-    ├── VapeCache.Enterprise.Compliance
-    └── VapeCache.Enterprise.Cloud
+    ├── VapeCache.Reconciliation (ENTERPRISE ONLY - zero data loss)
+    ├── VapeCache.Enterprise.Replication (Future)
+    ├── VapeCache.Enterprise.Compliance (Future)
+    └── VapeCache.Enterprise.Cloud (Future)
 ```
 
 ---
@@ -121,17 +124,18 @@ Commercial (NuGet only):
 ## 💡 Key Success Factors
 
 1. **Free tier must be genuinely useful** (better than StackExchange.Redis)
-2. **Paid tier solves real pain** (zero data loss = $29/month no-brainer)
-3. **Clear upgrade path** (Pro → Enterprise as companies scale)
+2. **Enterprise tier solves mission-critical pain** (zero data loss = $499/month for F500)
+3. **Clear upgrade path** (Free → Pro for modules → Enterprise for reconciliation)
 4. **Excellent documentation** (minimize support burden)
-5. **Active community** (GitHub issues, Slack)
+5. **Active community** (GitHub issues, Slack for Pro+)
 
 ---
 
 ## 📞 Next Actions
 
-- [ ] Move reconciliation to separate NuGet package
-- [ ] Implement license key validation
+- [x] Move reconciliation to separate NuGet package (VapeCache.Reconciliation)
+- [x] Implement license key validation (HMAC-SHA256, Enterprise-only)
+- [ ] Build Pro packages (VapeCache.Modules, VapeCache.Pro.Telemetry)
 - [ ] Create pricing page (vapecache.com)
 - [ ] Set up Stripe/Paddle billing
 - [ ] Launch landing page

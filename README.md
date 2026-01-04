@@ -49,31 +49,32 @@ VapeCache uses an **Open Core** model to maximize community adoption while offer
 - ✅ OpenTelemetry metrics & tracing
 - ✅ 5-30% faster than StackExchange.Redis
 
-### Pro Tier - $29/month 💎
+### Pro Tier - $99/month 💎
 
-**Perfect for startups and small teams (max 3 production instances)**
+**Perfect for startups and small teams (max 5 production instances)**
 
 **Premium Packages:**
-- VapeCache.Reconciliation (SQLite-backed zero data loss)
 - VapeCache.Modules (Redis Bloom, Search, TimeSeries, JSON)
+- VapeCache.Pro.Telemetry (Advanced metrics & health checks)
 
 **Additional Features:**
-- ✅ **Zero data loss reconciliation** (SQLite persistence)
-- ✅ Advanced circuit breaker with operation replay
-- ✅ Redis module support (Bloom filters, Search, TimeSeries)
-- ✅ Advanced telemetry & health checks
-- ✅ Priority email support (48h SLA)
+- ✅ Redis module support (Bloom filters, Search, TimeSeries, JSON)
+- ✅ Advanced telemetry & distributed tracing
+- ✅ Production health checks & diagnostics
+- ✅ Priority email support (24h SLA)
+- ✅ Community Slack access
 
 [**Start Pro Trial →**](https://vapecache.com/pricing)
 
-### Enterprise Tier - $299/month 🏢
+### Enterprise Tier - $499/month 🏢
 
 **For Fortune 500 and regulated industries (unlimited instances)**
 
 **Everything in Pro, plus:**
+- ✅ **ZERO DATA LOSS RECONCILIATION** (SQLite-backed persistence)
 - ✅ Unlimited production instances
 - ✅ Multi-region replication
-- ✅ Compliance suite (GDPR/HIPAA audit logs, encryption)
+- ✅ Compliance suite (GDPR/HIPAA audit logs, encryption at rest)
 - ✅ Cloud optimizations (Azure, AWS, GCP)
 - ✅ 24/7 support (4h SLA)
 - ✅ Source code access
@@ -85,16 +86,16 @@ VapeCache uses an **Open Core** model to maximize community adoption while offer
 
 **License Keys:**
 
-To use Pro/Enterprise features, set your license key as an environment variable or pass it during registration:
+To use Enterprise features (reconciliation), set your license key as an environment variable or pass it during registration:
 
 ```bash
 # Environment variable
-export VAPECACHE_LICENSE_KEY="VCPRO-CUST12345-1735689600-3-A1B2C3D4E5F6G7H8"
+export VAPECACHE_LICENSE_KEY="VCENT-CUST12345-1735689600-999-A1B2C3D4E5F6G7H8"
 ```
 
 ```csharp
-// Or pass directly
-builder.Services.AddVapeCacheRedisReconciliation("VCPRO-...");
+// Or pass directly to reconciliation
+builder.Services.AddVapeCacheRedisReconciliation("VCENT-...");
 ```
 
 Trial keys available at [vapecache.com/trial](https://vapecache.com/trial)
@@ -112,7 +113,7 @@ dotnet add package VapeCache
 # Or just the abstractions (for library authors)
 dotnet add package VapeCache.Abstractions
 
-# Redis reconciliation (COMMERCIAL - requires Pro/Enterprise license)
+# Redis reconciliation (COMMERCIAL - requires Enterprise license)
 dotnet add package VapeCache.Reconciliation
 
 # .NET Aspire integration (optional)
@@ -167,14 +168,14 @@ dotnet add package VapeCache.Extensions.Aspire
 
 📖 **[Complete Configuration Reference](docs/CONFIGURATION.md)** - All appsettings.json options documented
 
-### Redis Reconciliation (Pro/Enterprise Feature)
+### Redis Reconciliation (Enterprise Feature)
 
-**⚠️ Requires commercial license** - Visit [vapecache.com/pricing](https://vapecache.com/pricing)
+**⚠️ Requires Enterprise license** - Contact [vapecache.com/enterprise](https://vapecache.com/enterprise)
 
 ```csharp
-// Pass your license key (or set VAPECACHE_LICENSE_KEY environment variable)
+// Pass your Enterprise license key (or set VAPECACHE_LICENSE_KEY environment variable)
 builder.Services.AddVapeCacheRedisReconciliation(
-    licenseKey: "VCPRO-CUST12345-...",
+    licenseKey: "VCENT-CUST12345-...",
     configure: options =>
     {
         options.MaxOperationAge = TimeSpan.FromMinutes(5);

@@ -28,8 +28,8 @@ internal class Program
     private static void GenerateLicenseKey()
     {
         Console.WriteLine("Select License Tier:");
-        Console.WriteLine("  1. Pro ($29/month, max 3 instances)");
-        Console.WriteLine("  2. Enterprise ($299/month, unlimited instances)");
+        Console.WriteLine("  1. Pro ($99/month, max 5 instances)");
+        Console.WriteLine("  2. Enterprise ($499/month, unlimited instances)");
         Console.Write("\nEnter tier (1 or 2): ");
         var tierInput = Console.ReadLine();
 
@@ -76,13 +76,22 @@ internal class Program
         Console.WriteLine($"Tier:       {tier}");
         Console.WriteLine($"Customer:   {customerId}");
         Console.WriteLine($"Expires:    {expiresAt:yyyy-MM-dd}");
-        Console.WriteLine($"Instances:  {(tier == LicenseTier.Pro ? "3" : "Unlimited")}");
+        Console.WriteLine($"Instances:  {(tier == LicenseTier.Pro ? "5" : "Unlimited")}");
         Console.WriteLine($"\nLicense Key:\n{licenseKey}");
         Console.WriteLine("\n=== USAGE ===");
         Console.WriteLine("Add to appsettings.json or set environment variable:");
         Console.WriteLine($"  VAPECACHE_LICENSE_KEY={licenseKey}");
-        Console.WriteLine("\nOr pass directly to AddVapeCacheRedisReconciliation:");
-        Console.WriteLine($"  services.AddVapeCacheRedisReconciliation(\"{licenseKey}\");");
+
+        if (tier == LicenseTier.Enterprise)
+        {
+            Console.WriteLine("\nFor reconciliation (Enterprise only):");
+            Console.WriteLine($"  services.AddVapeCacheRedisReconciliation(\"{licenseKey}\");");
+        }
+        else
+        {
+            Console.WriteLine("\nNOTE: Pro tier does NOT include reconciliation.");
+            Console.WriteLine("Pro features: Redis modules, advanced telemetry only.");
+        }
     }
 
     private static void ValidateLicenseKey()

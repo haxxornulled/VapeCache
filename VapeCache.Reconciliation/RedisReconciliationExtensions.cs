@@ -31,7 +31,7 @@ public static class RedisReconciliationExtensions
         Action<RedisReconciliationOptions>? configure = null,
         Action<RedisReconciliationStoreOptions>? configureStore = null)
     {
-        // COMMERCIAL LICENSE VALIDATION - Reconciliation is a paid feature
+        // COMMERCIAL LICENSE VALIDATION - Reconciliation is an ENTERPRISE-ONLY feature
         // Secret key for HMAC signature verification (would be securely stored in production)
         const string LicenseSecretKey = "VapeCache-HMAC-Secret-2026-Production";
         var validator = new LicenseValidator(LicenseSecretKey);
@@ -41,13 +41,13 @@ public static class RedisReconciliationExtensions
 
         var validationResult = validator.Validate(licenseKey);
 
-        // Free tier users cannot use reconciliation
-        if (validationResult.Tier == LicenseTier.Free)
+        // Only Enterprise tier can use reconciliation
+        if (validationResult.Tier != LicenseTier.Enterprise)
         {
             throw new VapeCacheLicenseException(
-                "VapeCache Reconciliation requires a Pro or Enterprise license. " +
-                "This premium feature provides zero-data-loss failover by persisting cache writes during Redis outages. " +
-                "Visit https://vapecache.com/pricing to purchase a license or use the free tier without reconciliation.");
+                "VapeCache Reconciliation is an ENTERPRISE-ONLY feature. " +
+                "This premium capability provides zero-data-loss failover with SQLite-backed persistence of cache writes during Redis outages. " +
+                "Contact sales at https://vapecache.com/enterprise or use the free tier without reconciliation.");
         }
 
         // Validate license is not expired
@@ -56,14 +56,6 @@ public static class RedisReconciliationExtensions
             throw new VapeCacheLicenseException(
                 $"VapeCache license validation failed: {validationResult.ErrorMessage}. " +
                 "Visit https://vapecache.com to renew your license.");
-        }
-
-        // Pro tier: validate instance count (max 3)
-        if (validationResult.Tier == LicenseTier.Pro && validationResult.MaxInstances != 3)
-        {
-            throw new VapeCacheLicenseException(
-                $"VapeCache Pro license is limited to 3 production instances. " +
-                "Upgrade to Enterprise for unlimited instances at https://vapecache.com/pricing");
         }
 
         var optionsBuilder = services.AddOptions<RedisReconciliationOptions>()
