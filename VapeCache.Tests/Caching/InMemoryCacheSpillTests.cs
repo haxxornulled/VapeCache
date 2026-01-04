@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Memory;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
+using VapeCache.Persistence;
 using VapeCache.Tests.Infrastructure;
 using Xunit;
 

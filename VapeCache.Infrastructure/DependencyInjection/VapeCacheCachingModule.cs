@@ -36,8 +36,9 @@ public sealed class VapeCacheCachingModule : Module
             .AsSelf()
             .As<IRedisFallbackCommandExecutor>()
             .SingleInstance();
-        builder.RegisterType<NoopSpillEncryptionProvider>().As<ISpillEncryptionProvider>().SingleInstance();
-        builder.RegisterType<FileSpillStore>().As<IInMemorySpillStore>().SingleInstance();
+        // Free tier: No-op spill store (no disk persistence)
+        // For Enterprise spill-to-disk, install VapeCache.Persistence package
+        builder.RegisterType<NoopSpillStore>().As<IInMemorySpillStore>().SingleInstance();
 
         builder.RegisterType<RedisCacheService>().AsSelf().SingleInstance();
         builder.RegisterType<InMemoryCacheService>().AsSelf().As<ICacheFallbackService>().SingleInstance();

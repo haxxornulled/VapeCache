@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>VapeCache.Persistence</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>VapeCache</Authors>
+    <Description>Enterprise-grade persistence features for VapeCache: In-memory spill-to-disk with scatter/gather distribution and encryption at rest. REQUIRES ENTERPRISE LICENSE ($499/month).</Description>
+    <PackageTags>cache;redis;persistence;spill;enterprise</PackageTags>
+    <PackageLicenseExpression>Proprietary</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <RepositoryUrl>https://github.com/your-org/vapecache</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
+    <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
+    <ProjectReference Include="..\VapeCache.Licensing\VapeCache.Licensing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

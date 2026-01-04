@@ -9,6 +9,7 @@ using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
+using VapeCache.Persistence;
 
 namespace VapeCache.Benchmarks.Benchmarks;
 

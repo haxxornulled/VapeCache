@@ -31,6 +31,7 @@
 
 **Premium Features (Pro + Below):**
 - ✅ **ZERO DATA LOSS RECONCILIATION** (SQLite-backed persistence) - ENTERPRISE ONLY
+- ✅ **IN-MEMORY SPILL-TO-DISK** (Scatter/gather persistence, encryption at rest) - ENTERPRISE ONLY
 - ✅ Unlimited instances
 - ✅ Multi-region replication
 - ✅ Compliance suite (GDPR/HIPAA audit logs, encryption at rest)
@@ -113,7 +114,8 @@ Commercial (NuGet only):
 │   └── VapeCache.Pro.Telemetry (Advanced metrics & health checks)
 │
 └── VapeCache.Enterprise
-    ├── VapeCache.Reconciliation (ENTERPRISE ONLY - zero data loss)
+    ├── VapeCache.Reconciliation (ENTERPRISE ONLY - zero data loss reconciliation)
+    ├── VapeCache.Persistence (ENTERPRISE ONLY - spill-to-disk with encryption)
     ├── VapeCache.Enterprise.Replication (Future)
     ├── VapeCache.Enterprise.Compliance (Future)
     └── VapeCache.Enterprise.Cloud (Future)

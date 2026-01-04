@@ -5,6 +5,7 @@ using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Modules;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
+using VapeCache.Persistence;
 using VapeCache.Tests.Infrastructure;
 
 namespace VapeCache.Tests.Caching;
