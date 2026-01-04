@@ -50,6 +50,14 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
                     Console.WriteLine(
                         $"\n🔥🔥🔥 ⚡ CIRCUIT BREAKER OPENED! Switching to IN-MEMORY mode for {_options.BreakDuration.TotalSeconds} seconds 🔥🔥🔥\n");
 
+                    // Warn free tier users about data loss without reconciliation
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("⚠️  WARNING: Cache writes during this outage will NOT be synced back to Redis!");
+                    Console.WriteLine("⚠️  Upgrade to VapeCache Pro for zero-data-loss reconciliation with SQLite persistence.");
+                    Console.WriteLine("⚠️  Visit https://vapecache.com/pricing for details.");
+                    Console.ResetColor();
+                    Console.WriteLine();
+
                     return ValueTask.CompletedTask;
                 },
                 OnClosed = args =>

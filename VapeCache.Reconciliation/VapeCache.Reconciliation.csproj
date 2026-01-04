@@ -10,9 +10,10 @@
     <Authors>VapeCache Contributors</Authors>
     <Company>VapeCache</Company>
     <Product>VapeCache</Product>
-    <Description>Redis reconciliation services for VapeCache. Tracks in-memory writes during outages and syncs back on recovery.</Description>
-    <PackageTags>redis;cache;reconciliation;failover;circuit-breaker</PackageTags>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Description>Redis reconciliation services for VapeCache. Tracks in-memory writes during outages and syncs back on recovery. COMMERCIAL LICENSE REQUIRED - Visit vapecache.com for pricing.</Description>
+    <PackageTags>redis;cache;reconciliation;failover;circuit-breaker;commercial</PackageTags>
+    <PackageLicenseExpression>COMMERCIAL</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <RepositoryUrl>https://github.com/yourusername/VapeCache</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -40,6 +41,7 @@
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
+    <ProjectReference Include="..\VapeCache.Licensing\VapeCache.Licensing.csproj" />
   </ItemGroup>
 
 </Project>

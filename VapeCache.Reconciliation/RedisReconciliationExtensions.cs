@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Connections;
+using VapeCache.Licensing;
 
 namespace VapeCache.Reconciliation;
 
@@ -12,6 +13,7 @@ public static class RedisReconciliationExtensions
     public static IServiceCollection AddVapeCacheRedisReconciliation(
         this IServiceCollection services,
         IConfiguration configuration,
+        string? licenseKey = null,
         Action<RedisReconciliationOptions>? configure = null,
         Action<RedisReconciliationStoreOptions>? configureStore = null)
     {
@@ -20,14 +22,50 @@ public static class RedisReconciliationExtensions
         services.AddOptions<RedisReconciliationStoreOptions>()
             .Configure(o => configuration.GetSection("RedisReconciliationStore").Bind(o));
 
-        return services.AddVapeCacheRedisReconciliation(configure, configureStore);
+        return services.AddVapeCacheRedisReconciliation(licenseKey, configure, configureStore);
     }
 
     public static IServiceCollection AddVapeCacheRedisReconciliation(
         this IServiceCollection services,
+        string? licenseKey = null,
         Action<RedisReconciliationOptions>? configure = null,
         Action<RedisReconciliationStoreOptions>? configureStore = null)
     {
+        // COMMERCIAL LICENSE VALIDATION - Reconciliation is a paid feature
+        // Secret key for HMAC signature verification (would be securely stored in production)
+        const string LicenseSecretKey = "VapeCache-HMAC-Secret-2026-Production";
+        var validator = new LicenseValidator(LicenseSecretKey);
+
+        // If no license key provided, try to read from environment variable
+        licenseKey ??= Environment.GetEnvironmentVariable("VAPECACHE_LICENSE_KEY");
+
+        var validationResult = validator.Validate(licenseKey);
+
+        // Free tier users cannot use reconciliation
+        if (validationResult.Tier == LicenseTier.Free)
+        {
+            throw new VapeCacheLicenseException(
+                "VapeCache Reconciliation requires a Pro or Enterprise license. " +
+                "This premium feature provides zero-data-loss failover by persisting cache writes during Redis outages. " +
+                "Visit https://vapecache.com/pricing to purchase a license or use the free tier without reconciliation.");
+        }
+
+        // Validate license is not expired
+        if (!validationResult.IsValid)
+        {
+            throw new VapeCacheLicenseException(
+                $"VapeCache license validation failed: {validationResult.ErrorMessage}. " +
+                "Visit https://vapecache.com to renew your license.");
+        }
+
+        // Pro tier: validate instance count (max 3)
+        if (validationResult.Tier == LicenseTier.Pro && validationResult.MaxInstances != 3)
+        {
+            throw new VapeCacheLicenseException(
+                $"VapeCache Pro license is limited to 3 production instances. " +
+                "Upgrade to Enterprise for unlimited instances at https://vapecache.com/pricing");
+        }
+
         var optionsBuilder = services.AddOptions<RedisReconciliationOptions>()
             .Validate(o => o.MaxOperationAge > TimeSpan.Zero, "MaxOperationAge must be greater than zero")
             .Validate(o => o.MaxRunDuration > TimeSpan.Zero, "MaxRunDuration must be greater than zero")
