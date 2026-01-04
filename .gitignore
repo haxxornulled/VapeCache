@@ -49,3 +49,31 @@ run_comparison.ps1
 
 # Temporary files
 nul
+
+# ===================================
+# ENTERPRISE / PRIVATE CODE
+# ===================================
+# These projects contain proprietary code and secrets
+# They should NEVER be committed to the public repository
+
+# Enterprise licensing (contains HMAC secret key)
+VapeCache.Licensing/
+VapeCache.LicenseGenerator/
+
+# Enterprise features (proprietary NuGet packages)
+VapeCache.Persistence/
+VapeCache.Reconciliation/
+
+# Internal application layer (if contains enterprise logic)
+VapeCache.Application/
+
+# Enterprise strategy and business docs
+ENTERPRISE_STRATEGY.md
+BUSINESS_MODEL.md
+REVENUE_PROJECTIONS.md
+
+# License keys and customer data
+*.license
+*.key
+licenses/
+customers/
