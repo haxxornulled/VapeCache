@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Connections;
@@ -87,6 +88,49 @@ public static class RedisReconciliationExtensions
         services.TryAddSingleton<IRedisReconciliationService, RedisReconciliationService>();
 
         return services;
+    }
+
+    /// <summary>
+    /// Adds the RedisReconciliationReaper background service that automatically runs reconciliation on a schedule.
+    /// Call this method after AddVapeCacheRedisReconciliation() to enable automatic background reconciliation.
+    /// </summary>
+    /// <param name="services">Service collection</param>
+    /// <param name="configure">Optional configuration for the Reaper (interval, initial delay)</param>
+    /// <returns>Service collection for chaining</returns>
+    public static IServiceCollection AddReconciliationReaper(
+        this IServiceCollection services,
+        Action<RedisReconciliationReaperOptions>? configure = null)
+    {
+        var optionsBuilder = services.AddOptions<RedisReconciliationReaperOptions>()
+            .Validate(o => o.Interval > TimeSpan.Zero, "Interval must be greater than zero")
+            .Validate(o => o.InitialDelay >= TimeSpan.Zero, "InitialDelay must be non-negative")
+            .ValidateOnStart();
+
+        if (configure is not null)
+            optionsBuilder.Configure(configure);
+
+        services.AddHostedService<RedisReconciliationReaper>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Adds the RedisReconciliationReaper background service with configuration from appsettings.json.
+    /// Call this method after AddVapeCacheRedisReconciliation() to enable automatic background reconciliation.
+    /// </summary>
+    /// <param name="services">Service collection</param>
+    /// <param name="configuration">Configuration source (appsettings.json)</param>
+    /// <param name="configure">Optional additional configuration</param>
+    /// <returns>Service collection for chaining</returns>
+    public static IServiceCollection AddReconciliationReaper(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        Action<RedisReconciliationReaperOptions>? configure = null)
+    {
+        services.AddOptions<RedisReconciliationReaperOptions>()
+            .Configure(o => configuration.GetSection("RedisReconciliationReaper").Bind(o));
+
+        return services.AddReconciliationReaper(configure);
     }
 
     public static IServiceCollection UseSqliteBackingStore(

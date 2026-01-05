@@ -62,7 +62,8 @@ VapeCache.LicenseGenerator/
 
 # Enterprise features (proprietary NuGet packages)
 VapeCache.Persistence/
-VapeCache.Reconciliation/
+# Note: VapeCache.Reconciliation is tracked in Enterprise repo (source code)
+# Only the built NuGet package is published (binary distribution)
 
 # Internal application layer (if contains enterprise logic)
 VapeCache.Application/
