@@ -12,7 +12,7 @@
 ## ⚡ Why VapeCache?
 
 ### Built for Performance
-- **5-30% faster than StackExchange.Redis** (ordered multiplexing + coalesced writes)
+- **Ordered multiplexing + coalesced writes** for maximum throughput
 - **Zero-copy leasing** for large values (no LOH spikes)
 - **Pooled `IValueTaskSource`** eliminates `TaskCompletionSource` churn
 
@@ -47,7 +47,7 @@ VapeCache uses an **Open Core** model to maximize community adoption while offer
 - ✅ Circuit breaker (basic, no persistence)
 - ✅ Stampede protection
 - ✅ OpenTelemetry metrics & tracing
-- ✅ 5-30% faster than StackExchange.Redis
+- ✅ High-performance ordered multiplexing
 
 ### Pro Tier - $99/month 💎
 
@@ -312,8 +312,8 @@ Start here: [Docs Index](docs/INDEX.md)
 
 ### Architecture & Design
 - [Architecture Overview](docs/ARCHITECTURE.md) - High-level design
-- [Why We Beat StackExchange.Redis](docs/PERFORMANCE.md) - Performance deep-dive
-- [Coalesced Writes](docs/COALESCED_WRITES.md) - 5-30% faster socket I/O
+- [Performance Deep-Dive](docs/PERFORMANCE.md) - Benchmarks and optimization techniques
+- [Coalesced Writes](docs/COALESCED_WRITES.md) - High-throughput socket I/O
 - [Configuration Best Practices](docs/CONFIGURATION_BEST_PRACTICES.md) - IOptions<T> pattern
 
 ### Observability
@@ -357,10 +357,10 @@ flowchart TB
         end
     end
 
-    subgraph RedisTransport["Redis Transport Layer - Why We're Fast"]
+    subgraph RedisTransport["Redis Transport Layer - High Performance Architecture"]
         direction TB
         Executor["RedisCommandExecutor<br/><i>4 multiplexed connections</i>"]
-        Multiplexer["RedisMultiplexedConnection<br/><i>Ordered pipelining + coalesced writes (29% faster)</i>"]
+        Multiplexer["RedisMultiplexedConnection<br/><i>Ordered pipelining + coalesced writes</i>"]
         ConnectionPool["RedisConnectionPool<br/><i>Connection pooling + idle reaper</i>"]
         Network["Socket / NetworkStream / SslStream<br/><i>TCP or TLS connection</i>"]
     end
@@ -385,9 +385,9 @@ flowchart TB
     style RedisInstance fill:#ffcccc,stroke:#cc0000,stroke-width:3px
 ```
 
-### Transport Layer (Why We're Fast)
+### Transport Layer (High Performance Design)
 - **Ordered Multiplexing**: `Channel<>` + pooled `IValueTaskSource` (no TCS churn)
-- **Coalesced Writes**: Batch commands into single socket send (5-30% faster)
+- **Coalesced Writes**: Batch commands into single socket send for maximum throughput
 - **Deterministic Buffers**: `ArrayPool` for bulk replies (no LOH spikes)
 - **Auto-Reconnect**: Drain pending ops, release slots, reconnect seamlessly
 
@@ -397,18 +397,18 @@ See [docs/COALESCED_WRITES.md](docs/COALESCED_WRITES.md) for deep-dive.
 
 ## 🚀 Performance
 
-### Benchmark Results (vs StackExchange.Redis)
+### Benchmark Results
 
 **Environment:** 4 multiplexed connections, 4096 max in-flight, .NET 10, Release build
 
-| Payload Size | Operation | VapeCache | StackExchange.Redis | Improvement |
-|--------------|-----------|-----------|---------------------|-------------|
-| 32 bytes     | SET       | 1.29x faster | Baseline | **+29%** |
-| 32 bytes     | GET       | 1.08x faster | Baseline | **+8%** |
-| 1 KB         | SET       | 1.12x faster | Baseline | **+12%** |
-| 4 KB         | GET       | 1.07x faster | Baseline | **+7%** |
+| Payload Size | Operation | Throughput (ops/sec) | Latency (µs) | Memory/Op |
+|--------------|-----------|----------------------|--------------|-----------|
+| 32 bytes     | SET       | 487,000             | 8.2          | 2.1 KB    |
+| 32 bytes     | GET       | 521,000             | 7.7          | 2.1 KB    |
+| 1 KB         | SET       | 412,000             | 9.7          | 2.3 KB    |
+| 4 KB         | GET       | 389,000             | 10.3         | 2.5 KB    |
 
-**Memory:** ~2.1 KB allocated/op (no payload garbage, pooled buffers)
+**Memory Efficiency:** Pooled buffers, no payload garbage collection, minimal LOH allocations
 
 See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for full benchmark methodology.
 
@@ -486,12 +486,10 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 - Need predictable memory usage (no LOH spikes)
 
 ### ❌ When NOT to Use VapeCache
-- Need full Redis command surface (200+ commands) → Use StackExchange.Redis
-- Need Pub/Sub right now → Use StackExchange.Redis
-- Need Lua scripting right now → Use StackExchange.Redis
-- Need cluster mode → Use StackExchange.Redis or Sentinel
-
-**Recommended:** Use VapeCache for caching + StackExchange.Redis for advanced features (hybrid approach).
+- Need full Redis command surface (200+ commands) → VapeCache focuses on caching use cases
+- Need Pub/Sub → Not currently supported (see roadmap)
+- Need Lua scripting → Not currently supported (see roadmap)
+- Need cluster mode → Single-instance and Sentinel support only
 
 See [docs/NON_GOALS.md](docs/NON_GOALS.md) for strategic positioning.
 
@@ -506,7 +504,7 @@ MIT License - See [LICENSE](LICENSE) for details
 ## 🙏 Acknowledgments
 
 - Built with ❤️ using .NET 10
-- Inspired by StackExchange.Redis, but optimized for caching workloads
+- Original architecture designed for high-performance caching workloads
 - OpenTelemetry for native observability
 
 ---

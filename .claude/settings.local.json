@@ -106,7 +106,8 @@
       "Bash(dir:*)",
       "Bash(dotnet run)",
       "Bash(git grep:*)",
-      "Bash(cmd.exe /c \"move VapeCahe.Core VapeCache.Core\")"
+      "Bash(cmd.exe /c \"move VapeCahe.Core VapeCache.Core\")",
+      "Bash(git remote set-url:*)"
     ]
   }
 }
