@@ -3,7 +3,7 @@
 **Enterprise-grade Redis caching library for .NET 10** with hybrid fallback, circuit breaker, and production observability.
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/haxxornulled/VapeCache)
-[![NuGet VapeCache](https://img.shields.io/badge/nuget-v1.0.0-blue)](https://github.com/haxxornulled/VapeCache/releases)
+[![NuGet VapeCache](https://img.shields.io/badge/nuget-v1.0.1-blue)](https://github.com/haxxornulled/VapeCache/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-purple)](https://dot.net)
 
@@ -33,7 +33,7 @@
 
 VapeCache uses an **Open Core** model to maximize community adoption while offering enterprise-grade paid features.
 
-### Free Tier (MIT License) ✅
+### Free Tier (MIT/Apache-2.0) ✅
 
 **Core packages are 100% free and open source:**
 - VapeCache (core library)
@@ -48,39 +48,29 @@ VapeCache uses an **Open Core** model to maximize community adoption while offer
 - ✅ Stampede protection
 - ✅ OpenTelemetry metrics & tracing
 - ✅ High-performance ordered multiplexing
+- ✅ Community support via GitHub Issues & Discussions
 
-### Pro Tier - $99/month 💎
-
-**Perfect for startups and small teams (max 5 production instances)**
-
-**Premium Packages:**
-- VapeCache.Modules (Redis Bloom, Search, TimeSeries, JSON)
-- VapeCache.Pro.Telemetry (Advanced metrics & health checks)
-
-**Additional Features:**
-- ✅ Redis module support (Bloom filters, Search, TimeSeries, JSON)
-- ✅ Advanced telemetry & distributed tracing
-- ✅ Production health checks & diagnostics
-- ✅ Priority email support (24h SLA)
-- ✅ Community Slack access
-
-[**Start Pro Trial →**](https://vapecache.com/pricing)
+**This is a solo developer project focused on building a strong open source foundation.** We're prioritizing community feedback and adoption before expanding paid offerings.
 
 ### Enterprise Tier - $499/month 🏢
 
-**For Fortune 500 and regulated industries (unlimited instances)**
+**For production applications requiring zero data loss guarantees (unlimited deployments)**
 
-**Everything in Pro, plus:**
+**Enterprise Packages (Proprietary License):**
+- VapeCache.Persistence (spill-to-disk during Redis outages)
+- VapeCache.Reconciliation (SQLite-backed write tracking + auto sync-back)
+
+**Additional Features:**
 - ✅ **ZERO DATA LOSS RECONCILIATION** (SQLite-backed persistence)
 - ✅ Unlimited production instances
-- ✅ Multi-region replication
-- ✅ Compliance suite (GDPR/HIPAA audit logs, encryption at rest)
-- ✅ Cloud optimizations (Azure, AWS, GCP)
-- ✅ 24/7 support (4h SLA)
-- ✅ Source code access
-- ✅ Quarterly architecture reviews
+- ✅ Any Redis topology (standalone, Sentinel, Cluster)
+- ✅ Per-organization pricing (not per server)
+- ✅ Best-effort email support
+- ✅ Source code access to enterprise packages
 
-[**Contact Sales →**](https://vapecache.com/enterprise)
+**Important:** This is a solo developer project. Support is community-based and best-effort. Enterprise features are production-tested, but there are no SLA guarantees. Purchase only if the technical features (zero data loss) meet your needs.
+
+[**Contact for Trial License →**](https://github.com/haxxornulled/VapeCache/issues)
 
 ---
 
@@ -98,7 +88,7 @@ export VAPECACHE_LICENSE_KEY="VCENT-CUST12345-1735689600-999-A1B2C3D4E5F6G7H8"
 builder.Services.AddVapeCacheRedisReconciliation("VCENT-...");
 ```
 
-Trial keys available at [vapecache.com/trial](https://vapecache.com/trial)
+For trial licenses or questions, open a [GitHub Issue](https://github.com/haxxornulled/VapeCache/issues)
 
 ---
 
@@ -170,7 +160,7 @@ dotnet add package VapeCache.Extensions.Aspire
 
 ### Redis Reconciliation (Enterprise Feature)
 
-**⚠️ Requires Enterprise license** - Contact [vapecache.com/enterprise](https://vapecache.com/enterprise)
+**⚠️ Requires Enterprise license** - Request trial via [GitHub Issues](https://github.com/haxxornulled/VapeCache/issues)
 
 ```csharp
 // Pass your Enterprise license key (or set VAPECACHE_LICENSE_KEY environment variable)
