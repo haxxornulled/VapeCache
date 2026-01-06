@@ -436,14 +436,14 @@ VapeCache.Reconciliation is an **Enterprise feature** requiring a valid license 
 
 **Pricing**: $499/month per organization (unlimited deployments, any Redis topology)
 
-**Get a license**: https://vapecache.com/enterprise
+**Important**: This is a solo developer project. Support is community-based and best-effort via GitHub Issues. Enterprise features are production-tested, but there are no SLA guarantees. Purchase only if the technical features (zero data loss) meet your needs.
 
-**Trial**: Contact sales@vapecache.com for a 30-day trial license.
+**Request trial license**: https://github.com/haxxornulled/VapeCache/issues
 
 ---
 
 ## Support
 
-- **Documentation**: https://vapecache.com/docs/reconciliation
-- **Enterprise Support**: support@vapecache.com (4-hour SLA)
-- **GitHub Issues**: https://github.com/haxxornulled/VapeCache/issues (for OSS features only)
+- **Documentation**: https://github.com/haxxornulled/VapeCache/tree/main/docs
+- **Community Support**: https://github.com/haxxornulled/VapeCache/issues
+- **Discussions**: https://github.com/haxxornulled/VapeCache/discussions (coming soon)

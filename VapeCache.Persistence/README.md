@@ -92,8 +92,11 @@ InMemoryCacheService
 
 ## Pricing
 
-- **Enterprise**: $499/month, unlimited instances
-- Includes: Reconciliation + Persistence + Multi-region + Compliance + 24/7 support
+- **Enterprise**: $499/month per organization, unlimited instances
+- Includes: Reconciliation + Persistence packages
+- **Support**: Community-based, best-effort via GitHub Issues
 
-Contact: sales@vapecache.com
-Docs: https://vapecache.com/docs/persistence
+**Important**: This is a solo developer project. Purchase only if the technical features meet your needs. No SLA guarantees.
+
+Request trial license: https://github.com/haxxornulled/VapeCache/issues
+Documentation: https://github.com/haxxornulled/VapeCache/tree/main/docs
