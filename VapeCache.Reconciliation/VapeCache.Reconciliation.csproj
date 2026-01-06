@@ -10,8 +10,8 @@
     <Authors>VapeCache Contributors</Authors>
     <Company>VapeCache</Company>
     <Product>VapeCache.Reconciliation</Product>
-    <Description>Zero data loss reconciliation for VapeCache. SQLite-backed tracking of writes during Redis outages with automatic sync-back on recovery (Reaper background service). Unlimited deployments, any Redis topology. ENTERPRISE LICENSE REQUIRED ($499/month per organization).</Description>
-    <PackageTags>redis;cache;reconciliation;failover;circuit-breaker;commercial;enterprise;zero-data-loss;sqlite;background-service</PackageTags>
+    <Description>Data loss mitigation for VapeCache during Redis outages. SQLite-backed tracking of writes with automatic sync-back on recovery (Reaper background service). Mitigates but cannot guarantee zero data loss. Unlimited deployments, any Redis topology. ENTERPRISE LICENSE REQUIRED ($499/month per organization).</Description>
+    <PackageTags>redis;cache;reconciliation;failover;circuit-breaker;commercial;enterprise;data-loss-mitigation;sqlite;background-service</PackageTags>
     <PackageLicenseExpression>Proprietary</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>

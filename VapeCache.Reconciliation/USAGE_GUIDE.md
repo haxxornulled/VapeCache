@@ -2,9 +2,11 @@
 
 ## Overview
 
-VapeCache.Reconciliation provides **zero data loss** during Redis outages by tracking cache writes to a local SQLite database and automatically syncing them back to Redis when it recovers.
+VapeCache.Reconciliation provides **data loss mitigation** during Redis outages by tracking cache writes to a local SQLite database and automatically syncing them back to Redis when it recovers.
 
 **Enterprise Feature**: Requires Enterprise license ($499/month per organization)
+
+**Important**: This feature mitigates data loss but cannot guarantee zero data loss in all scenarios (e.g., application crashes, disk failures, or extreme edge cases).
 
 ---
 
@@ -436,7 +438,7 @@ VapeCache.Reconciliation is an **Enterprise feature** requiring a valid license 
 
 **Pricing**: $499/month per organization (unlimited deployments, any Redis topology)
 
-**Important**: This is a solo developer project. Support is community-based and best-effort via GitHub Issues. Enterprise features are production-tested, but there are no SLA guarantees. Purchase only if the technical features (zero data loss) meet your needs.
+**Important**: This is a solo developer project. Support is community-based and best-effort via GitHub Issues. Enterprise features are production-tested, but there are no SLA guarantees. Purchase only if the technical features (data loss mitigation) meet your needs.
 
 **Request trial license**: https://github.com/haxxornulled/VapeCache/issues
 

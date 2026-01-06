@@ -54,21 +54,21 @@ VapeCache uses an **Open Core** model to maximize community adoption while offer
 
 ### Enterprise Tier - $499/month 🏢
 
-**For production applications requiring zero data loss guarantees (unlimited deployments)**
+**For production applications requiring data loss mitigation during Redis outages (unlimited deployments)**
 
 **Enterprise Packages (Proprietary License):**
 - VapeCache.Persistence (spill-to-disk during Redis outages)
 - VapeCache.Reconciliation (SQLite-backed write tracking + auto sync-back)
 
 **Additional Features:**
-- ✅ **ZERO DATA LOSS RECONCILIATION** (SQLite-backed persistence)
+- ✅ **Data loss mitigation** - SQLite-backed reconciliation syncs writes back to Redis after outages
 - ✅ Unlimited production instances
 - ✅ Any Redis topology (standalone, Sentinel, Cluster)
 - ✅ Per-organization pricing (not per server)
 - ✅ Best-effort email support
 - ✅ Source code access to enterprise packages
 
-**Important:** This is a solo developer project. Support is community-based and best-effort. Enterprise features are production-tested, but there are no SLA guarantees. Purchase only if the technical features (zero data loss) meet your needs.
+**Important:** This is a solo developer project. Support is community-based and best-effort. Enterprise features are production-tested, but there are no SLA guarantees. Reconciliation mitigates data loss during outages but cannot guarantee zero data loss in all scenarios.
 
 [**Contact for Trial License →**](https://github.com/haxxornulled/VapeCache/issues)
 
@@ -103,7 +103,7 @@ dotnet add package VapeCache
 # Or just the abstractions (for library authors)
 dotnet add package VapeCache.Abstractions
 
-# Redis reconciliation (COMMERCIAL - requires Enterprise license)
+# Redis reconciliation (ENTERPRISE - mitigates data loss during outages)
 dotnet add package VapeCache.Reconciliation
 
 # .NET Aspire integration (optional)
