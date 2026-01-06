@@ -12,12 +12,14 @@
 
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" Version="0.15.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
     <PackageReference Include="StackExchange.Redis" Version="2.9.11" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
+    <ProjectReference Include="..\VapeCache.Persistence\VapeCache.Persistence.csproj" />
   </ItemGroup>
 
 </Project>

@@ -11,7 +11,7 @@
   <PropertyGroup>
     <!-- NuGet Package Metadata -->
     <PackageId>VapeCache.Extensions.Aspire</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Description>.NET Aspire integration for VapeCache - Service discovery, health checks, and telemetry. Seamless integration with Aspire Dashboard for distributed caching observability.</Description>
     <Authors>VapeCache Contributors</Authors>
     <Company>VapeCache</Company>
@@ -23,6 +23,7 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
     <Copyright>Copyright (c) 2025 VapeCache Contributors</Copyright>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
 
   <ItemGroup>

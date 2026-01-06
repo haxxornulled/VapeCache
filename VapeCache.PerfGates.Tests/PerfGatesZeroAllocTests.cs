@@ -40,7 +40,7 @@ public class PerfGatesZeroAllocTests
     }
 
     [Fact]
-    public void SocketAwaitableEventArgs_SimulatedCompletion_ZeroAlloc()
+    public async Task SocketAwaitableEventArgs_SimulatedCompletion_ZeroAlloc()
     {
         var args = new SocketIoAwaitableEventArgs();
         var buffers = new[] { new ArraySegment<byte>(Array.Empty<byte>()) };
@@ -55,7 +55,7 @@ public class PerfGatesZeroAllocTests
             args.SetBuffer(buffers, 1);
             var warmVt = args.WaitAsync();
             args.CompleteForTests(0);
-            warmVt.GetAwaiter().GetResult();
+            await warmVt;
         }
 
         const int iterations = 100_000;
@@ -66,25 +66,26 @@ public class PerfGatesZeroAllocTests
             args.SetBuffer(buffers, 1);
             var vt = args.WaitAsync();
             args.CompleteForTests(0);
-            vt.GetAwaiter().GetResult();
+            await vt;
         }
         var allocated = GC.GetAllocatedBytesForCurrentThread() - baseline;
         Assert.True(allocated <= 32, $"SAEA send awaitable allocated {allocated} bytes.");
     }
 
     [Fact]
-    public void AwaitableSocketArgs_SimulatedCompletion_ZeroAlloc()
+    public async Task AwaitableSocketArgs_SimulatedCompletion_ZeroAlloc()
     {
         var args = new SocketIoAwaitableEventArgs();
 
-        args.BeginForTests();
+        var initVt = args.BeginForTests();
         args.CompleteForTests(0);
+        await initVt;
 
         for (var i = 0; i < 1000; i++)
         {
             var warmVt = args.BeginForTests();
             args.CompleteForTests(0);
-            warmVt.GetAwaiter().GetResult();
+            await warmVt;
         }
 
         const int iterations = 100_000;
@@ -93,34 +94,34 @@ public class PerfGatesZeroAllocTests
         {
             var vt = args.BeginForTests();
             args.CompleteForTests(0);
-            vt.GetAwaiter().GetResult();
+            await vt;
         }
         var allocated = GC.GetAllocatedBytesForCurrentThread() - baseline;
         Assert.Equal(0, allocated);
     }
 
     [Fact]
-    public void SocketAwaitableEventArgs_SyncError_Completes()
+    public async Task SocketAwaitableEventArgs_SyncError_Completes()
     {
         var args = new SocketIoAwaitableEventArgs();
         args.Reset();
         args.SetBuffer(new[] { new ArraySegment<byte>(Array.Empty<byte>()) }, 1);
         var vt = args.WaitAsync();
         args.CompleteForTests(0, System.Net.Sockets.SocketError.ConnectionReset);
-        Assert.Throws<System.Net.Sockets.SocketException>(() => vt.GetAwaiter().GetResult());
+        await Assert.ThrowsAsync<System.Net.Sockets.SocketException>(async () => await vt);
     }
 
     [Fact]
-    public void AwaitableSocketArgs_SyncError_Completes()
+    public async Task AwaitableSocketArgs_SyncError_Completes()
     {
         var args = new SocketIoAwaitableEventArgs();
         var vt = args.BeginForTests();
         args.CompleteForTests(0, System.Net.Sockets.SocketError.ConnectionReset);
-        Assert.Throws<System.Net.Sockets.SocketException>(() => vt.GetAwaiter().GetResult());
+        await Assert.ThrowsAsync<System.Net.Sockets.SocketException>(async () => await vt);
     }
 
     [Fact]
-    public void SocketAwaitableEventArgs_DoubleCompletion_Idempotent()
+    public async Task SocketAwaitableEventArgs_DoubleCompletion_Idempotent()
     {
         var args = new SocketIoAwaitableEventArgs();
         args.Reset();
@@ -128,25 +129,19 @@ public class PerfGatesZeroAllocTests
         var vt = args.WaitAsync();
         args.CompleteForTests(1);
         args.CompleteForTests(1); // should be ignored
-        Assert.Equal(1, vt.GetAwaiter().GetResult());
+        Assert.Equal(1, await vt);
     }
 
     [Fact]
-    public void AwaitableSocketArgs_DoubleCompletion_Idempotent()
+    public async Task AwaitableSocketArgs_DoubleCompletion_Idempotent()
     {
         var args = new SocketIoAwaitableEventArgs();
         var vt = args.BeginForTests();
         args.CompleteForTests(2);
         args.CompleteForTests(2); // ignored
-        Assert.Equal(2, vt.GetAwaiter().GetResult());
+        Assert.Equal(2, await vt);
     }
 
-    [Fact]
-    public void PendingOperationForTests_RejectsDoubleResult()
-    {
-        var op = new RedisMultiplexedConnection.PendingOperationForTests();
-        op.Start();
-        op.SetResult(1);
-        Assert.Throws<InvalidOperationException>(() => op.SetResult(2));
-    }
+    // Removed: PendingOperationForTests no longer exists
+    // The internal PendingOperation class is tested through integration tests
 }

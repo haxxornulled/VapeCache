@@ -107,7 +107,9 @@
       "Bash(dotnet run)",
       "Bash(git grep:*)",
       "Bash(cmd.exe /c \"move VapeCahe.Core VapeCache.Core\")",
-      "Bash(git remote set-url:*)"
+      "Bash(git remote set-url:*)",
+      "Bash(for pkg in VapeCache.Abstractions VapeCache.Infrastructure VapeCache.Extensions.Aspire VapeCache.Persistence VapeCache.Reconciliation)",
+      "Bash(do grep -h \"<Version>\" \"$pkg/$pkg.csproj\")"
     ]
   }
 }

@@ -2,8 +2,16 @@
   <Project Path="VapeCache.Abstractions/VapeCache.Abstractions.csproj" />
   <Project Path="VapeCache.Application/VapeCache.Application.csproj" />
   <Project Path="VapeCache.Benchmarks/VapeCache.Benchmarks.csproj" />
+  <Project Path="VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj" />
   <Project Path="VapeCache.Console/VapeCache.Console.csproj" />
+  <Project Path="VapeCache.Core/VapeCache.Core.csproj" />
+  <Project Path="VapeCache.Extensions.Aspire/VapeCache.Extensions.Aspire.csproj" />
   <Project Path="VapeCache.Infrastructure/VapeCache.Infrastructure.csproj" />
+  <Project Path="VapeCache.LicenseGenerator/VapeCache.LicenseGenerator.csproj" />
+  <Project Path="VapeCache.Licensing/VapeCache.Licensing.csproj" />
+  <Project Path="VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj" />
+  <Project Path="VapeCache.Persistence/VapeCache.Persistence.csproj" />
   <Project Path="VapeCache.Reconciliation/VapeCache.Reconciliation.csproj" />
   <Project Path="VapeCache.Tests/VapeCache.Tests.csproj" />
+  <Project Path="samples/VapeCache.Sample/VapeCache.Sample.csproj" />
 </Solution>
