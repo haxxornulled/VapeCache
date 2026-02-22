@@ -4,6 +4,7 @@ using Autofac.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -71,9 +72,7 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
 
                 m.AddOtlpExporter(otlp =>
                 {
-                    var endpoint = context.Configuration["OpenTelemetry:Otlp:Endpoint"];
-                    if (!string.IsNullOrWhiteSpace(endpoint))
-                        otlp.Endpoint = new Uri(endpoint);
+                    ConfigureOtlpForSignal(context.Configuration, otlp, signal: "metrics");
                 });
             })
             .WithTracing(t =>
@@ -84,9 +83,7 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
 
                 t.AddOtlpExporter(otlp =>
                 {
-                    var endpoint = context.Configuration["OpenTelemetry:Otlp:Endpoint"];
-                    if (!string.IsNullOrWhiteSpace(endpoint))
-                        otlp.Endpoint = new Uri(endpoint);
+                    ConfigureOtlpForSignal(context.Configuration, otlp, signal: "traces");
                 });
             });
 
@@ -226,4 +223,54 @@ finally
 {
     try { await host.StopAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); } catch { }
     Log.CloseAndFlush();
+}
+
+static void ConfigureOtlpForSignal(IConfiguration configuration, OtlpExporterOptions otlp, string signal)
+{
+    var endpoint = configuration["OpenTelemetry:Otlp:Endpoint"];
+    if (string.IsNullOrWhiteSpace(endpoint))
+    {
+        endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+    }
+
+    // Default to Seq OTLP ingestion when no endpoint is configured.
+    endpoint ??= "http://localhost:5341/ingest/otlp";
+
+    if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
+        return;
+
+    var isHttpProtobuf = endpointUri.Port == 5341 ||
+                         endpointUri.Port == 4318 ||
+                         endpointUri.AbsolutePath.Contains("/ingest/otlp", StringComparison.OrdinalIgnoreCase) ||
+                         endpointUri.AbsolutePath.Contains("/v1/", StringComparison.OrdinalIgnoreCase);
+
+    if (isHttpProtobuf)
+    {
+        otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
+        otlp.Endpoint = ResolveSignalEndpoint(endpointUri, signal);
+        return;
+    }
+
+    otlp.Protocol = OtlpExportProtocol.Grpc;
+    otlp.Endpoint = endpointUri;
+}
+
+static Uri ResolveSignalEndpoint(Uri endpoint, string signal)
+{
+    var endpointText = endpoint.ToString().TrimEnd('/');
+    var signalSuffix = $"/v1/{signal}";
+
+    if (endpointText.EndsWith(signalSuffix, StringComparison.OrdinalIgnoreCase))
+        return endpoint;
+
+    if (endpointText.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        return new Uri($"{endpointText}/{signal}", UriKind.Absolute);
+
+    if (endpointText.EndsWith("/ingest/otlp", StringComparison.OrdinalIgnoreCase))
+        return new Uri($"{endpointText}{signalSuffix}", UriKind.Absolute);
+
+    if (endpointText.Contains("/v1/", StringComparison.OrdinalIgnoreCase))
+        return endpoint;
+
+    return new Uri($"{endpointText}{signalSuffix}", UriKind.Absolute);
 }

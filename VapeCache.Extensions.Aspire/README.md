@@ -8,6 +8,8 @@
 ✅ **Health Checks** - Redis connectivity and circuit breaker monitoring
 ✅ **Telemetry** - Cache hit/miss metrics visible in Aspire Dashboard
 ✅ **Distributed Tracing** - End-to-end traces for Redis operations
+✅ **SEQ by Default** - OTLP exporter falls back to Seq when no endpoint is configured
+✅ **Wrapper-Friendly API** - Custom metrics/tracing exporters via options callback
 ✅ **Zero Configuration** - Single line to enable all features
 
 ## Installation
@@ -132,10 +134,36 @@ app.MapHealthChecks("/health/redis", new HealthCheckOptions
 
 ### `WithAspireTelemetry()`
 
-Configures OpenTelemetry to send metrics/traces to Aspire Dashboard.
+Configures OpenTelemetry for VapeCache metrics/traces and OTLP export.
+Resolution order for OTLP endpoint:
+
+1. `options.OtlpEndpoint`
+2. `OpenTelemetry:Otlp:Endpoint` (configuration)
+3. `OTEL_EXPORTER_OTLP_ENDPOINT` (environment)
+4. `DOTNET_DASHBOARD_OTLP_ENDPOINT_URL` (Aspire dashboard fallback)
+5. Seq default: `http://localhost:5341/ingest/otlp`
 
 ```csharp
 .WithAspireTelemetry()
+```
+
+### Custom Wrapper/Exporter Scenario
+
+```csharp
+builder.AddVapeCache()
+    .WithAspireTelemetry(options =>
+    {
+        options.UseSeqAsDefaultExporter = false;
+        options.OtlpEndpoint = "http://localhost:4318";
+        options.ConfigureMetrics = m =>
+        {
+            // Add custom metric exporter extensions here
+        };
+        options.ConfigureTracing = t =>
+        {
+            // Add custom trace exporter extensions here
+        };
+    });
 ```
 
 ## Health Check Details
