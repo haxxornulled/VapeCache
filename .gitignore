@@ -53,20 +53,8 @@ nul
 # ===================================
 # ENTERPRISE / PRIVATE CODE
 # ===================================
-# These projects contain proprietary code and secrets
-# They should NEVER be committed to the public repository
-
-# Enterprise licensing (contains HMAC secret key)
-VapeCache.Licensing/
-VapeCache.LicenseGenerator/
-
-# Enterprise features (proprietary NuGet packages)
-VapeCache.Persistence/
-# Note: VapeCache.Reconciliation is tracked in Enterprise repo (source code)
-# Only the built NuGet package is published (binary distribution)
-
-# Internal application layer (if contains enterprise logic)
-VapeCache.Application/
+# Do not ignore tracked enterprise source folders in the private repository.
+# OSS publishing must be done via the dedicated sync workflow/remotes.
 
 # Enterprise strategy and business docs
 ENTERPRISE_STRATEGY.md
