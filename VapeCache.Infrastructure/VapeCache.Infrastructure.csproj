@@ -7,23 +7,30 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache</PackageId>
+    <Title>VapeCache</Title>
     <Version>1.0.1</Version>
-    <Authors>VapeCache Contributors</Authors>
-    <Company>VapeCache</Company>
+    <Authors>HaxxorNulled</Authors>
+    <Company>HaxxorNulled</Company>
     <Product>VapeCache</Product>
     <Description>VapeCache - High-performance Redis client for .NET optimized for caching workloads. Features coalesced writes (29% faster SETs), zero-allocation pooling, circuit breaker failover, and OpenTelemetry observability. 5-30% faster than StackExchange.Redis.</Description>
     <PackageTags>redis;cache;performance;distributed-cache;async;netcore;hybrid-cache;circuit-breaker;opentelemetry</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>vapecache-icon.png</PackageIcon>
+    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
     <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <Copyright>Copyright (c) 2025 VapeCache Contributors</Copyright>
+    <PackageReleaseNotes>Performance-focused Redis caching library for .NET with polished NuGet metadata and package docs.</PackageReleaseNotes>
+    <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
