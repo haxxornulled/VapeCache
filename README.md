@@ -9,6 +9,61 @@
 
 ---
 
+## 🚀 TL;DR Quick Start (For Impatient Humans)
+
+If you just want it running right now:
+
+### 1. Run Redis
+
+```bash
+docker run --name vapecache-redis -p 6379:6379 -d redis:7
+```
+
+### 2. Install Package
+
+```bash
+dotnet add package VapeCache
+```
+
+### 3. Add Minimal Config (`appsettings.json`)
+
+```json
+{
+  "RedisConnection": {
+    "Host": "localhost",
+    "Port": 6379,
+    "Database": 0
+  }
+}
+```
+
+### 4. Register VapeCache (`Program.cs`)
+
+```csharp
+builder.Services.AddVapecacheRedisConnections();
+builder.Services.AddVapecacheCaching();
+```
+
+### 5. Use It
+
+```csharp
+public sealed class PingService(ICacheService cache)
+{
+    public Task<string?> GetAsync(CancellationToken ct) =>
+        cache.GetOrSetAsync(
+            "demo:ping",
+            _ => Task.FromResult("pong"),
+            (writer, value) => JsonSerializer.Serialize(writer, value),
+            bytes => JsonSerializer.Deserialize<string>(bytes),
+            new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(1)),
+            ct);
+}
+```
+
+Need the full setup, enterprise features, and tuning knobs? Jump to [📦 Quick Start](#-quick-start) below.
+
+---
+
 ## ⚡ Why VapeCache Over StackExchange.Redis?
 
 VapeCache is a **from-scratch Redis client** optimized for **caching workloads** with architectural innovations that deliver measurable performance and reliability improvements.
@@ -162,13 +217,17 @@ To use Enterprise features (reconciliation), set your license key as an environm
 
 ```bash
 # Environment variable
-export VAPECACHE_LICENSE_KEY="VCENT-CUST12345-1735689600-999-A1B2C3D4E5F6G7H8"
+export VAPECACHE_LICENSE_KEY="VC2.<base64url-header>.<base64url-payload>.<base64url-signature>"
 ```
 
 ```csharp
 // Or pass directly to reconciliation
-builder.Services.AddVapeCacheRedisReconciliation("VCENT-...");
+builder.Services.AddVapeCacheRedisReconciliation("VC2....");
 ```
+
+Enterprise tokens are ES256-signed and validated with a public key (`kid` + signature):
+- `VAPECACHE_LICENSE_PUBLIC_KEY_ID`
+- `VAPECACHE_LICENSE_PUBLIC_KEY_PEM`
 
 For trial licenses or questions, open a [GitHub Issue](https://github.com/haxxornulled/VapeCache/issues)
 
@@ -247,7 +306,7 @@ dotnet add package VapeCache.Extensions.Aspire
 ```csharp
 // Pass your Enterprise license key (or set VAPECACHE_LICENSE_KEY environment variable)
 builder.Services.AddVapeCacheRedisReconciliation(
-    licenseKey: "VCENT-CUST12345-...",
+    licenseKey: "VC2....",
     configure: options =>
     {
         options.MaxOperationAge = TimeSpan.FromMinutes(5);
