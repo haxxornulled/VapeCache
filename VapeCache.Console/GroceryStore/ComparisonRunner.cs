@@ -97,7 +97,7 @@ public static class ComparisonRunner
 
         services.AddVapecacheRedisConnections();
         services.AddVapecacheCaching();
-        services.AddSingleton<IGroceryStoreService, GroceryStoreService>();
+        services.AddSingleton<IGroceryStoreService, VapeCacheRawGroceryStoreService>();
 
         var provider = services.BuildServiceProvider();
         var service = provider.GetRequiredService<IGroceryStoreService>();
