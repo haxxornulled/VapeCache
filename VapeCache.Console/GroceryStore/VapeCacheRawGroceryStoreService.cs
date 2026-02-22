@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Globalization;
+using System.Text;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 
@@ -8,7 +10,7 @@ namespace VapeCache.Console.GroceryStore;
 /// Low-level VapeCache implementation for head-to-head benchmarking.
 /// Uses IRedisCommandExecutor directly to minimize abstraction overhead.
 /// </summary>
-public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService
+public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICartBatchWriter
 {
     private readonly IRedisCommandExecutor _redis;
     private static readonly Product[] Products = GroceryStoreService.GetAllProducts();
@@ -53,10 +55,33 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService
         await _redis.RPushAsync(key, serialized, CancellationToken.None);
     }
 
+    public async Task AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items)
+    {
+        if (items.Count == 0)
+            return;
+
+        var optimizedCartKey = GetOptimizedCartKey(userId);
+        var optimizedCountKey = GetOptimizedCartCountKey(userId);
+        var cartPayload = Serialize(items);
+        var countPayload = Encoding.UTF8.GetBytes(items.Count.ToString(CultureInfo.InvariantCulture));
+
+        await using var batch = _redis.CreateBatch();
+        _ = batch.QueueAsync((executor, ct) =>
+            executor.SetAsync(optimizedCartKey, cartPayload, TimeSpan.FromMinutes(15), ct), CancellationToken.None);
+        _ = batch.QueueAsync((executor, ct) =>
+            executor.SetAsync(optimizedCountKey, countPayload, TimeSpan.FromMinutes(15), ct), CancellationToken.None);
+        await batch.ExecuteAsync(CancellationToken.None).ConfigureAwait(false);
+    }
+
     public async Task<CartItem[]> GetCartAsync(string userId)
     {
-        var key = $"cart:{userId}";
-        var values = await _redis.LRangeAsync(key, 0, -1, CancellationToken.None);
+        var optimized = await _redis.GetAsync(GetOptimizedCartKey(userId), CancellationToken.None);
+        if (optimized is not null)
+        {
+            return Deserialize<CartItem[]>(optimized);
+        }
+
+        var values = await _redis.LRangeAsync($"cart:{userId}", 0, -1, CancellationToken.None);
         if (values.Length == 0)
         {
             return Array.Empty<CartItem>();
@@ -73,12 +98,26 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService
 
     public async Task<long> GetCartCountAsync(string userId)
     {
+        var optimizedCount = await _redis.GetAsync(GetOptimizedCartCountKey(userId), CancellationToken.None);
+        if (optimizedCount is not null && long.TryParse(
+                Encoding.UTF8.GetString(optimizedCount),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var count))
+        {
+            return count;
+        }
+
         return await _redis.LLenAsync($"cart:{userId}", CancellationToken.None);
     }
 
     public async Task ClearCartAsync(string userId)
     {
-        await _redis.DeleteAsync($"cart:{userId}", CancellationToken.None);
+        await using var batch = _redis.CreateBatch();
+        _ = batch.QueueAsync((executor, ct) => executor.DeleteAsync($"cart:{userId}", ct), CancellationToken.None);
+        _ = batch.QueueAsync((executor, ct) => executor.DeleteAsync(GetOptimizedCartKey(userId), ct), CancellationToken.None);
+        _ = batch.QueueAsync((executor, ct) => executor.DeleteAsync(GetOptimizedCartCountKey(userId), ct), CancellationToken.None);
+        await batch.ExecuteAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     public async Task JoinFlashSaleAsync(string saleId, string userId)
@@ -128,4 +167,8 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService
 
         return map;
     }
+
+    private static string GetOptimizedCartKey(string userId) => $"cart:optimized:{userId}";
+
+    private static string GetOptimizedCartCountKey(string userId) => $"cart:optimized:{userId}:count";
 }

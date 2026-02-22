@@ -55,4 +55,31 @@ public sealed class VapeCacheRawGroceryStoreServiceTests
         Assert.NotNull(loaded);
         Assert.Equal("u1", loaded!.UserId);
     }
+
+    [Fact]
+    public async Task Batched_cart_operations_use_optimized_round_trip()
+    {
+        await using var executor = new InMemoryCommandExecutor();
+        var sut = new VapeCacheRawGroceryStoreService(executor);
+
+        var userId = "user-batch";
+        var items = new[]
+        {
+            new CartItem("prod-001", "Organic Bananas", 2.99m, 1, DateTime.UtcNow),
+            new CartItem("prod-002", "Milk", 4.29m, 2, DateTime.UtcNow),
+            new CartItem("prod-003", "Bread", 3.49m, 1, DateTime.UtcNow)
+        };
+
+        await sut.AddToCartBatchAsync(userId, items);
+
+        var count = await sut.GetCartCountAsync(userId);
+        var cart = await sut.GetCartAsync(userId);
+
+        Assert.Equal(3, count);
+        Assert.Equal(3, cart.Length);
+
+        await sut.ClearCartAsync(userId);
+        Assert.Equal(0, await sut.GetCartCountAsync(userId));
+        Assert.Empty(await sut.GetCartAsync(userId));
+    }
 }

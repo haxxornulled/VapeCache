@@ -26,6 +26,9 @@ public static class MenuRunner
         // Auto-run with default settings when running in non-interactive mode
         var autoRun = Environment.GetEnvironmentVariable("VAPECACHE_RUN_COMPARISON")?.ToLowerInvariant() == "true";
         int shopperCount = 10_000;
+        var maxCartSize = 35;
+        if (int.TryParse(Environment.GetEnvironmentVariable("VAPECACHE_MAX_CART_SIZE"), out var envMaxCartSize) && envMaxCartSize > 0)
+            maxCartSize = envMaxCartSize;
 
         if (!autoRun)
         {
@@ -55,13 +58,13 @@ public static class MenuRunner
         if (shopperCount > 0)
         {
             System.Console.WriteLine();
-            System.Console.WriteLine($"Starting comparison with {shopperCount:N0} shoppers...");
+            System.Console.WriteLine($"Starting comparison with {shopperCount:N0} shoppers (max cart size: {maxCartSize})...");
             System.Console.WriteLine("This may take a few minutes. Please wait...");
             System.Console.WriteLine();
 
             try
             {
-                await ComparisonRunner.RunComparisonAsync(redisHost, redisPassword, shopperCount);
+                await ComparisonRunner.RunComparisonAsync(redisHost, redisPassword, shopperCount, maxCartSize);
             }
             catch (Exception ex)
             {

@@ -96,3 +96,11 @@ public interface IGroceryStoreService
     Task SaveSessionAsync(string sessionId, UserSession session);
     Task<UserSession?> GetSessionAsync(string sessionId);
 }
+
+/// <summary>
+/// Optional fast-path for batching cart writes in stress tests.
+/// </summary>
+public interface ICartBatchWriter
+{
+    Task AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items);
+}

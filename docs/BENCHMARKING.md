@@ -9,6 +9,41 @@ cd VapeCache.Benchmarks
 dotnet run -c Release
 ```
 
+### Grocery Store Head-to-Head (50k Shoppers, 40 Items)
+
+Use the console comparison runner with explicit transport tuning:
+
+```powershell
+$env:VAPECACHE_MAX_CART_SIZE = "40"
+$env:VAPECACHE_BENCH_MUX_CONNECTIONS = "4"
+$env:VAPECACHE_BENCH_MUX_INFLIGHT = "8192"
+$env:VAPECACHE_BENCH_MUX_COALESCE = "true"
+$env:VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS = "0"
+"2" | dotnet run --project VapeCache.Console/VapeCache.Console.csproj -c Release -- --compare
+```
+
+`VAPECACHE_BENCH_MUX_*` knobs are optional and affect only the comparison runner's VapeCache path.
+
+For repeatable median gating across multiple runs:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
+  -Trials 5 `
+  -ShopperCount 50000 `
+  -MaxCartSize 40 `
+  -MuxConnections 4 `
+  -MuxInFlight 8192 `
+  -MuxCoalesce true `
+  -MuxResponseTimeoutMs 0 `
+  -FailBelowRatio 1.0
+```
+
+Recent sample runs on February 22, 2026 (same host/Redis target) showed:
+
+- Run 1: Vape `23,021` shoppers/sec vs SER `9,295` shoppers/sec (`2.48x` faster)
+- Run 2: Vape `20,052` shoppers/sec vs SER `12,257` shoppers/sec (`1.64x` faster)
+- Run 3: Vape `20,293` shoppers/sec vs SER `10,129` shoppers/sec (`2.00x` faster)
+
 ### Redis Comparisons (StackExchange.Redis vs VapeCache)
 
 ```bash
@@ -20,6 +55,25 @@ Run all head-to-head suites in one command (client/end-to-end/modules) and colle
 
 ```bash
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short
+```
+
+Run the same suites with optional packet capture + Wireshark summaries:
+
+```bash
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-with-capture.ps1 `
+  -Job Short `
+  -ConnectionString "redis://localhost:6379/0" `
+  -Interface 1 `
+  -RedisPort 6379
+```
+
+If capture is not needed:
+
+```bash
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-with-capture.ps1 `
+  -Job Short `
+  -ConnectionString "redis://localhost:6379/0" `
+  -SkipCapture
 ```
 
 For end-to-end comparisons with fine-grained host options:
@@ -469,6 +523,7 @@ dotnet run -c Release --filter "*RegressionBenchmark*" | \
 - **VapeCache Example Benchmarks**: [VapeCache.Benchmarks](../VapeCache.Benchmarks/)
 - **OpenTelemetry Metrics**: https://opentelemetry.io/docs/specs/otel/metrics/
 - **.NET Aspire Dashboard**: https://aspire.dev/docs/fundamentals/dashboard/
+- **Analyzer + Profiling Playbook**: [ENGINEERING_PLAYBOOK.md](ENGINEERING_PLAYBOOK.md)
 
 ## Getting Help
 

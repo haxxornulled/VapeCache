@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 using StackExchange.Redis;
@@ -13,7 +15,7 @@ namespace VapeCache.Console.GroceryStore;
 /// </summary>
 public static class ComparisonRunner
 {
-    public static async Task RunComparisonAsync(string redisHost, string redisPassword, int shopperCount = 10_000)
+    public static async Task RunComparisonAsync(string redisHost, string redisPassword, int shopperCount = 10_000, int maxCartSize = 35)
     {
         System.Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
         System.Console.WriteLine("║       VapeCache vs StackExchange.Redis Showdown             ║");
@@ -21,14 +23,14 @@ public static class ComparisonRunner
         System.Console.WriteLine();
 
         // Run VapeCache test
-        var vapeCacheResult = await RunVapeCacheTestAsync(redisHost, redisPassword, shopperCount);
+        var vapeCacheResult = await RunVapeCacheTestAsync(redisHost, redisPassword, shopperCount, maxCartSize);
 
         System.Console.WriteLine();
         System.Console.WriteLine("════════════════════════════════════════════════════════════════");
         System.Console.WriteLine();
 
         // Run StackExchange.Redis test
-        var stackExchangeResult = await RunStackExchangeRedisTestAsync(redisHost, redisPassword, shopperCount);
+        var stackExchangeResult = await RunStackExchangeRedisTestAsync(redisHost, redisPassword, shopperCount, maxCartSize);
 
         System.Console.WriteLine();
         System.Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
@@ -39,9 +41,16 @@ public static class ComparisonRunner
         PrintComparison(vapeCacheResult, stackExchangeResult);
     }
 
-    private static async Task<StressTestResult> RunVapeCacheTestAsync(string redisHost, string redisPassword, int shopperCount)
+    private static async Task<StressTestResult> RunVapeCacheTestAsync(string redisHost, string redisPassword, int shopperCount, int maxCartSize)
     {
         var services = new ServiceCollection();
+        var muxConnections = GetIntFromEnv("VAPECACHE_BENCH_MUX_CONNECTIONS", 8);
+        var muxInFlight = GetIntFromEnv("VAPECACHE_BENCH_MUX_INFLIGHT", 8192);
+        var muxResponseTimeoutMs = GetIntFromEnv("VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS", 0);
+        var muxCoalesce = GetBoolFromEnv("VAPECACHE_BENCH_MUX_COALESCE", true);
+
+        System.Console.WriteLine(
+            $"[VapeConfig] Mux.Connections={muxConnections}, Mux.MaxInFlight={muxInFlight}, Mux.Coalesce={muxCoalesce}, Mux.ResponseTimeoutMs={muxResponseTimeoutMs}");
 
         // Logging
         services.AddLogging(builder =>
@@ -82,6 +91,24 @@ public static class ComparisonRunner
                     .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.Warm))!
                     .SetValue(options, 32);
             });
+        services.AddOptions<RedisMultiplexerOptions>().Configure(options =>
+        {
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.EnableCommandInstrumentation))!
+                .SetValue(options, false);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.Connections))!
+                .SetValue(options, muxConnections);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.MaxInFlightPerConnection))!
+                .SetValue(options, muxInFlight);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.EnableCoalescedSocketWrites))!
+                .SetValue(options, muxCoalesce);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.ResponseTimeout))!
+                .SetValue(options, muxResponseTimeoutMs <= 0 ? TimeSpan.Zero : TimeSpan.FromMilliseconds(muxResponseTimeoutMs));
+        });
         services.AddOptions<RedisCircuitBreakerOptions>().Configure(options =>
         {
             typeof(RedisCircuitBreakerOptions)
@@ -95,8 +122,9 @@ public static class ComparisonRunner
                 .SetValue(options, false);
         });
 
+        RegisterInternalBenchmarkServices(services);
         services.AddVapecacheRedisConnections();
-        services.AddVapecacheCaching();
+        services.AddSingleton<IRedisCommandExecutor>(CreateRawRedisExecutor);
         services.AddSingleton<IGroceryStoreService, VapeCacheRawGroceryStoreService>();
 
         var provider = services.BuildServiceProvider();
@@ -104,10 +132,10 @@ public static class ComparisonRunner
         var logger = provider.GetRequiredService<ILogger<GroceryStoreComparisonStressTest>>();
 
         var test = new GroceryStoreComparisonStressTest(service, logger, "VapeCache");
-        return await test.RunStressTestAsync(shopperCount);
+        return await test.RunStressTestAsync(shopperCount, maxCartSize);
     }
 
-    private static async Task<StressTestResult> RunStackExchangeRedisTestAsync(string redisHost, string redisPassword, int shopperCount)
+    private static async Task<StressTestResult> RunStackExchangeRedisTestAsync(string redisHost, string redisPassword, int shopperCount, int maxCartSize)
     {
         var services = new ServiceCollection();
 
@@ -139,7 +167,7 @@ public static class ComparisonRunner
         var logger = provider.GetRequiredService<ILogger<GroceryStoreComparisonStressTest>>();
 
         var test = new GroceryStoreComparisonStressTest(service, logger, "StackExchange.Redis");
-        return await test.RunStressTestAsync(shopperCount);
+        return await test.RunStressTestAsync(shopperCount, maxCartSize);
     }
 
     private static void PrintComparison(StressTestResult vapeCache, StressTestResult stackExchange)
@@ -226,5 +254,57 @@ public static class ComparisonRunner
         var sign = improvement > 0 ? "+" : "";
 
         System.Console.WriteLine($"{name,-27} {vapeCacheValue,12:N2}   {stackExchangeValue,18:N2}   {winner,-15} ({sign}{improvement:F1}%)");
+    }
+
+    private static IRedisCommandExecutor CreateRawRedisExecutor(IServiceProvider services)
+    {
+        var executorType = typeof(RedisConnectionRegistration).Assembly.GetType(
+            "VapeCache.Infrastructure.Connections.RedisCommandExecutor",
+            throwOnError: true)!;
+
+        var ctor = executorType.GetConstructor(new[]
+        {
+            typeof(IRedisConnectionFactory),
+            typeof(IOptionsMonitor<RedisMultiplexerOptions>),
+            typeof(IOptionsMonitor<RedisConnectionOptions>)
+        });
+
+        if (ctor is null)
+        {
+            throw new InvalidOperationException("Unable to resolve RedisCommandExecutor constructor for raw benchmark mode.");
+        }
+
+        var instance = ctor.Invoke(new object[]
+        {
+            services.GetRequiredService<IRedisConnectionFactory>(),
+            services.GetRequiredService<IOptionsMonitor<RedisMultiplexerOptions>>(),
+            services.GetRequiredService<IOptionsMonitor<RedisConnectionOptions>>()
+        });
+
+        return (IRedisCommandExecutor)instance;
+    }
+
+    private static void RegisterInternalBenchmarkServices(IServiceCollection services)
+    {
+        var infrastructureAssembly = typeof(RedisConnectionRegistration).Assembly;
+        var cacheStatsRegistryType = infrastructureAssembly.GetType(
+            "VapeCache.Infrastructure.Caching.CacheStatsRegistry",
+            throwOnError: true)!;
+
+        services.AddSingleton(
+            cacheStatsRegistryType,
+            _ => Activator.CreateInstance(cacheStatsRegistryType)!);
+    }
+
+    private static int GetIntFromEnv(string name, int fallback)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : fallback;
+    }
+
+    private static bool GetBoolFromEnv(string name, bool fallback)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        return bool.TryParse(value, out var parsed) ? parsed : fallback;
     }
 }

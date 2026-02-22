@@ -27,6 +27,20 @@ public sealed class GroceryStoreComparisonStressTestTests
         Assert.True(result.P99LatencyMs >= result.P95LatencyMs);
     }
 
+    [Fact]
+    public async Task RunStressTestAsync_prefers_batch_writer_when_available()
+    {
+        var service = new BatchCapableFakeService();
+        var sut = new GroceryStoreComparisonStressTest(service, NullLogger<GroceryStoreComparisonStressTest>.Instance, "VapeCache");
+
+        var result = await sut.RunStressTestAsync(shopperCount: 20, maxCartSize: 15);
+
+        Assert.Equal(20, result.SuccessCount);
+        Assert.Equal(20, service.BatchCalls);
+        Assert.Equal(0, service.SingleItemCalls);
+        Assert.Equal(300, service.BatchedItemCount);
+    }
+
     private sealed class Harness : IAsyncDisposable
     {
         private readonly InMemoryCommandExecutor _executor;
@@ -62,6 +76,106 @@ public sealed class GroceryStoreComparisonStressTestTests
         {
             _memoryCache.Dispose();
             await _executor.DisposeAsync();
+        }
+    }
+
+    private sealed class BatchCapableFakeService : IGroceryStoreService, ICartBatchWriter
+    {
+        private readonly Dictionary<string, CartItem[]> _carts = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _flashSales = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, UserSession> _sessions = new(StringComparer.Ordinal);
+
+        public int BatchCalls;
+        public int SingleItemCalls;
+        public int BatchedItemCount;
+
+        public Task<Product?> GetProductAsync(string productId)
+            => Task.FromResult<Product?>(new Product(productId, "name", "cat", 1m, 1, "/"));
+
+        public Task CacheProductAsync(Product product, TimeSpan ttl) => Task.CompletedTask;
+
+        public Task AddToCartAsync(string userId, CartItem item)
+        {
+            Interlocked.Increment(ref SingleItemCalls);
+            return Task.CompletedTask;
+        }
+
+        public Task AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items)
+        {
+            Interlocked.Increment(ref BatchCalls);
+            Interlocked.Add(ref BatchedItemCount, items.Count);
+            lock (_carts)
+            {
+                _carts[userId] = items.ToArray();
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task<CartItem[]> GetCartAsync(string userId)
+        {
+            lock (_carts)
+            {
+                return Task.FromResult(_carts.TryGetValue(userId, out var items) ? items : Array.Empty<CartItem>());
+            }
+        }
+
+        public Task<long> GetCartCountAsync(string userId)
+        {
+            lock (_carts)
+            {
+                return Task.FromResult(_carts.TryGetValue(userId, out var items) ? (long)items.Length : 0L);
+            }
+        }
+
+        public Task ClearCartAsync(string userId)
+        {
+            lock (_carts)
+            {
+                _carts.Remove(userId);
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task JoinFlashSaleAsync(string saleId, string userId)
+        {
+            lock (_flashSales)
+            {
+                _flashSales.Add($"{saleId}:{userId}");
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> IsInFlashSaleAsync(string saleId, string userId)
+        {
+            lock (_flashSales)
+            {
+                return Task.FromResult(_flashSales.Contains($"{saleId}:{userId}"));
+            }
+        }
+
+        public Task<long> GetFlashSaleParticipantCountAsync(string saleId)
+        {
+            lock (_flashSales)
+            {
+                return Task.FromResult((long)_flashSales.Count(entry => entry.StartsWith($"{saleId}:", StringComparison.Ordinal)));
+            }
+        }
+
+        public Task SaveSessionAsync(string sessionId, UserSession session)
+        {
+            lock (_sessions)
+            {
+                _sessions[sessionId] = session;
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task<UserSession?> GetSessionAsync(string sessionId)
+        {
+            lock (_sessions)
+            {
+                return Task.FromResult(_sessions.TryGetValue(sessionId, out var session) ? session : null);
+            }
         }
     }
 }

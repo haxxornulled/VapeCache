@@ -52,6 +52,7 @@ public class GroceryStoreComparisonStressTest
 
         var shopperStart = Stopwatch.StartNew();
         var maxDegree = Math.Max(32, Environment.ProcessorCount * 8);
+        var batchWriter = _service as ICartBatchWriter;
 
         await Parallel.ForEachAsync(
             Enumerable.Range(0, shopperCount),
@@ -74,16 +75,28 @@ public class GroceryStoreComparisonStressTest
 
                     // 3. Add random items to cart (15-35 items)
                     var cartSize = random.Next(15, maxCartSize + 1);
+                    var items = new CartItem[cartSize];
                     for (int i = 0; i < cartSize; i++)
                     {
                         var product = products[random.Next(products.Length)];
-                        var cartItem = new CartItem(
+                        items[i] = new CartItem(
                             product.Id,
                             product.Name,
                             product.Price,
                             random.Next(1, 4),
                             DateTime.UtcNow);
-                        await _service.AddToCartAsync(userId, cartItem);
+                    }
+
+                    if (batchWriter is not null)
+                    {
+                        await batchWriter.AddToCartBatchAsync(userId, items).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        for (var i = 0; i < items.Length; i++)
+                        {
+                            await _service.AddToCartAsync(userId, items[i]).ConfigureAwait(false);
+                        }
                     }
 
                     // 4. Get cart count
