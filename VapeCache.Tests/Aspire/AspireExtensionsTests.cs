@@ -56,4 +56,34 @@ public sealed class AspireExtensionsTests
 
         Assert.Same(builder, result);
     }
+
+    [Fact]
+    public void WithAspireTelemetry_AllowsCustomTelemetryWrapperConfiguration()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        var builder = hostBuilder.AddVapeCache();
+        var metricsConfigured = false;
+        var tracingConfigured = false;
+
+        var result = builder.WithAspireTelemetry(options =>
+        {
+            options.UseSeqAsDefaultExporter = false;
+            options.ConfigureMetrics = _ => metricsConfigured = true;
+            options.ConfigureTracing = _ => tracingConfigured = true;
+        });
+
+        Assert.Same(builder, result);
+        Assert.True(metricsConfigured);
+        Assert.True(tracingConfigured);
+    }
+
+    [Fact]
+    public void WithAspireTelemetry_InvalidEndpoint_Throws()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        var builder = hostBuilder.AddVapeCache();
+
+        Assert.Throws<ArgumentException>(() =>
+            builder.WithAspireTelemetry(options => options.OtlpEndpoint = "not-a-uri"));
+    }
 }

@@ -396,7 +396,7 @@ var api = builder.AddProject<Projects.MyApi>("api")
 builder.AddVapeCache()
     .WithRedisFromAspire("redis")
     .WithHealthChecks()
-    .WithAspireTelemetry();  // Cache hits/misses → Aspire Dashboard
+    .WithAspireTelemetry();  // Cache hits/misses + traces (Aspire/OTLP, Seq fallback by default)
 
 // View metrics at http://localhost:15888
 ```
