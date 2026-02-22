@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Console.GroceryStore;
 
@@ -13,18 +14,22 @@ public class GroceryStoreService : IGroceryStoreService
 {
     private readonly ICacheCollectionFactory _collections;
     private readonly IVapeCache _cache;
+    private readonly IRedisCommandExecutor _executor;
     private readonly ILogger<GroceryStoreService> _logger;
 
     // Pre-defined product catalog
     private static readonly Product[] Products = GenerateProducts();
+    private static readonly IReadOnlyDictionary<string, Product> ProductsById = BuildProductMap(Products);
 
     public GroceryStoreService(
         ICacheCollectionFactory collections,
         IVapeCache cache,
+        IRedisCommandExecutor executor,
         ILogger<GroceryStoreService> logger)
     {
         _collections = collections;
         _cache = cache;
+        _executor = executor;
         _logger = logger;
     }
 
@@ -37,7 +42,8 @@ public class GroceryStoreService : IGroceryStoreService
     {
         var cart = _collections.List<CartItem>($"cart:{userId}");
         await cart.PushFrontAsync(item);  // Most recent items first
-        _logger.LogDebug("Added {Product} to cart for user {UserId}", item.ProductName, userId);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("Added {Product} to cart for user {UserId}", item.ProductName, userId);
     }
 
     /// <summary>
@@ -47,7 +53,7 @@ public class GroceryStoreService : IGroceryStoreService
     {
         var cart = _collections.List<CartItem>($"cart:{userId}");
         var removed = await cart.PopBackAsync();
-        if (removed != null)
+        if (removed != null && _logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("Removed {Product} from cart for user {UserId}", removed.ProductName, userId);
         return removed;
     }
@@ -71,15 +77,16 @@ public class GroceryStoreService : IGroceryStoreService
     }
 
     /// <summary>
-    /// Clear cart (pop all items)
+    /// Clear cart by deleting the cart key in one operation.
     /// </summary>
     public async Task ClearCartAsync(string userId)
     {
-        var cart = _collections.List<CartItem>($"cart:{userId}");
-        var count = 0;
-        while (await cart.PopFrontAsync() != null)
-            count++;
-        _logger.LogInformation("Cleared {Count} items from cart for user {UserId}", count, userId);
+        var cartKey = $"cart:{userId}";
+        var cart = _collections.List<CartItem>(cartKey);
+        var count = await cart.LengthAsync();
+        await _executor.DeleteAsync(cartKey, CancellationToken.None);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("Cleared {Count} items from cart for user {UserId}", count, userId);
     }
 
     // ========== Flash Sale Participants (SET) ==========
@@ -91,8 +98,8 @@ public class GroceryStoreService : IGroceryStoreService
     {
         var participants = _collections.Set<string>($"sale:{saleId}:participants");
         var added = await participants.AddAsync(userId);
-        if (added > 0)
-            _logger.LogInformation("User {UserId} joined flash sale {SaleId}", userId, saleId);
+        if (added > 0 && _logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("User {UserId} joined flash sale {SaleId}", userId, saleId);
     }
 
     /// <summary>
@@ -129,8 +136,8 @@ public class GroceryStoreService : IGroceryStoreService
     {
         var participants = _collections.Set<string>($"sale:{saleId}:participants");
         var removed = await participants.RemoveAsync(userId);
-        if (removed > 0)
-            _logger.LogInformation("User {UserId} left flash sale {SaleId}", userId, saleId);
+        if (removed > 0 && _logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("User {UserId} left flash sale {SaleId}", userId, saleId);
         return removed > 0;
     }
 
@@ -143,7 +150,8 @@ public class GroceryStoreService : IGroceryStoreService
     {
         var sessions = _collections.Hash<UserSession>("sessions:active");
         await sessions.SetAsync(sessionId, session);
-        _logger.LogDebug("Saved session {SessionId} for user {UserId}", sessionId, session.UserId);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("Saved session {SessionId} for user {UserId}", sessionId, session.UserId);
     }
 
     /// <summary>
@@ -176,11 +184,14 @@ public class GroceryStoreService : IGroceryStoreService
         if (product != null) return product;
 
         // Cache miss - load from "database" (our static array)
-        product = Products.FirstOrDefault(p => p.Id == productId);
+        if (!ProductsById.TryGetValue(productId, out product))
+            return null;
+
         if (product != null)
         {
             await _cache.SetAsync(key, product, new CacheEntryOptions { Ttl = TimeSpan.FromMinutes(10) });
-            _logger.LogDebug("Cached product {ProductId} from database", productId);
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("Cached product {ProductId} from database", productId);
         }
 
         return product;
@@ -193,7 +204,8 @@ public class GroceryStoreService : IGroceryStoreService
     {
         var key = new CacheKey<Product>($"product:{product.Id}");
         await _cache.SetAsync(key, product, new CacheEntryOptions { Ttl = ttl });
-        _logger.LogDebug("Cached product {ProductId} with TTL {Ttl}", product.Id, ttl);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("Cached product {ProductId} with TTL {Ttl}", product.Id, ttl);
     }
 
     /// <summary>
@@ -314,6 +326,17 @@ public class GroceryStoreService : IGroceryStoreService
             new Product("prod-024", "Ice Cream Pint", "Frozen", 5.49m, 200, "/img/icecream.jpg"),
             new Product("prod-025", "Frozen Pizza", "Frozen", 6.99m, 250, "/img/pizza.jpg"),
         };
+    }
+
+    private static IReadOnlyDictionary<string, Product> BuildProductMap(Product[] products)
+    {
+        var map = new Dictionary<string, Product>(products.Length, StringComparer.Ordinal);
+        foreach (var product in products)
+        {
+            map[product.Id] = product;
+        }
+
+        return map;
     }
 
     public static Product[] GetAllProducts() => Products;

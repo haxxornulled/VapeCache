@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Diagnostics;
-using System.Threading.Channels;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Modules;
 
@@ -21,89 +21,94 @@ public class GroceryStoreStressTest : BackgroundService
     private readonly GroceryStoreService _store;
     private readonly ICacheStats _stats;
     private readonly IRedisModuleDetector _moduleDetector;
+    private readonly IOptionsMonitor<GroceryStoreStressOptions> _optionsMonitor;
     private readonly ILogger<GroceryStoreStressTest> _logger;
 
-    private const int ConcurrentShoppers = 2000;  // Simulated concurrent users
-    private const int TotalShoppers = 100000;     // Total users over test duration
-    private const int TestDurationSeconds = 180;   // 3 minute stress test
-
-    private readonly Random _random = new();
     private readonly Product[] _products = GroceryStoreService.GetAllProducts();
 
     public GroceryStoreStressTest(
         GroceryStoreService store,
         ICacheStats stats,
         IRedisModuleDetector moduleDetector,
+        IOptionsMonitor<GroceryStoreStressOptions> optionsMonitor,
         ILogger<GroceryStoreStressTest> logger)
     {
         _store = store;
         _stats = stats;
         _moduleDetector = moduleDetector;
+        _optionsMonitor = optionsMonitor;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var configured = _optionsMonitor.CurrentValue;
+        if (!configured.Enabled)
+        {
+            _logger.LogInformation("Grocery store stress test is disabled.");
+            return;
+        }
+
+        var workload = Normalize(configured);
+        var workerCount = Math.Min(workload.ConcurrentShoppers, workload.TotalShoppers);
+
         // Wait for startup to complete
-        await Task.Delay(5000, stoppingToken);
+        if (workload.StartupDelay > TimeSpan.Zero)
+            await Task.Delay(workload.StartupDelay, stoppingToken).ConfigureAwait(false);
 
         _logger.LogInformation("==================================================");
         _logger.LogInformation("  GROCERY STORE STRESS TEST - BLACK FRIDAY MODE");
         _logger.LogInformation("==================================================");
-        _logger.LogInformation("Concurrent Shoppers: {Count}", ConcurrentShoppers);
-        _logger.LogInformation("Total Shoppers: {Count}", TotalShoppers);
-        _logger.LogInformation("Test Duration: {Duration} seconds", TestDurationSeconds);
+        _logger.LogInformation("Concurrent Shoppers: {Count}", workerCount);
+        _logger.LogInformation("Total Shoppers: {Count}", workload.TotalShoppers);
+        _logger.LogInformation("Target Duration: {Duration} seconds", workload.TargetDuration.TotalSeconds);
 
         // Detect Redis modules
-        var modules = await _moduleDetector.GetInstalledModulesAsync(stoppingToken);
+        var modules = await _moduleDetector.GetInstalledModulesAsync(stoppingToken).ConfigureAwait(false);
         if (modules.Length > 0)
             _logger.LogInformation("Redis Modules Detected: {Modules}", string.Join(", ", modules));
         else
             _logger.LogInformation("No Redis modules detected (vanilla Redis or in-memory mode)");
 
         // Create flash sales
-        var flashSales = await CreateFlashSalesAsync(stoppingToken);
+        var flashSales = await CreateFlashSalesAsync(stoppingToken).ConfigureAwait(false);
         _logger.LogInformation("Created {Count} flash sales", flashSales.Length);
 
-        _logger.LogInformation("Starting stress test in 3 seconds...");
-        await Task.Delay(3000, stoppingToken);
+        _logger.LogInformation("Starting stress test in {Countdown} seconds...", workload.CountdownDelay.TotalSeconds);
+        if (workload.CountdownDelay > TimeSpan.Zero)
+            await Task.Delay(workload.CountdownDelay, stoppingToken).ConfigureAwait(false);
 
         var sw = Stopwatch.StartNew();
         var completedShoppers = 0;
-        var channel = Channel.CreateBounded<int>(new BoundedChannelOptions(ConcurrentShoppers)
+        var nextShopperId = 0;
+
+        using var statsCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var statsTask = ReportStatsAsync(sw, workload.TargetDuration, workload.StatsInterval, statsCts.Token);
+
+        var workerTasks = new Task[workerCount];
+        for (var i = 0; i < workerCount; i++)
         {
-            FullMode = BoundedChannelFullMode.Wait
-        });
-
-        // Stats reporting task
-        var statsTask = ReportStatsAsync(sw, stoppingToken);
-
-        // Producer: Generate shopper IDs (removed pacing delay for max throughput test)
-        var producerTask = Task.Run(async () =>
-        {
-            for (var i = 1; i <= TotalShoppers && !stoppingToken.IsCancellationRequested; i++)
+            workerTasks[i] = Task.Run(async () =>
             {
-                await channel.Writer.WriteAsync(i, stoppingToken);
-            }
-            channel.Writer.Complete();
-        }, stoppingToken);
-
-        // Consumers: Simulate shoppers
-        var consumerTasks = Enumerable.Range(0, ConcurrentShoppers)
-            .Select(async workerId =>
-            {
-                await foreach (var shopperId in channel.Reader.ReadAllAsync(stoppingToken))
+                while (!stoppingToken.IsCancellationRequested)
                 {
-                    await SimulateShopperAsync(shopperId, flashSales, stoppingToken);
+                    var shopperId = Interlocked.Increment(ref nextShopperId);
+                    if (shopperId > workload.TotalShoppers)
+                    {
+                        break;
+                    }
+
+                    await SimulateShopperAsync(shopperId, flashSales, workload, stoppingToken).ConfigureAwait(false);
                     Interlocked.Increment(ref completedShoppers);
                 }
-            })
-            .ToArray();
+            }, stoppingToken);
+        }
 
-        // Wait for completion
-        await producerTask;
-        await Task.WhenAll(consumerTasks);
+        await Task.WhenAll(workerTasks).ConfigureAwait(false);
         sw.Stop();
+
+        statsCts.Cancel();
+        await AwaitStatsTaskAsync(statsTask).ConfigureAwait(false);
 
         _logger.LogInformation("");
         _logger.LogInformation("==================================================");
@@ -111,89 +116,92 @@ public class GroceryStoreStressTest : BackgroundService
         _logger.LogInformation("==================================================");
         _logger.LogInformation("Total Shoppers Simulated: {Count}", completedShoppers);
         _logger.LogInformation("Total Duration: {Duration:F2} seconds", sw.Elapsed.TotalSeconds);
-        _logger.LogInformation("Throughput: {Ops:F0} shoppers/sec", completedShoppers / sw.Elapsed.TotalSeconds);
+        _logger.LogInformation("Throughput: {Ops:F0} shoppers/sec", sw.Elapsed.TotalSeconds > 0 ? completedShoppers / sw.Elapsed.TotalSeconds : 0);
 
         // Final stats
-        await ReportFinalStatsAsync();
+        await ReportFinalStatsAsync(flashSales).ConfigureAwait(false);
     }
 
-    private async Task SimulateShopperAsync(int shopperId, FlashSale[] flashSales, CancellationToken ct)
+    private async Task SimulateShopperAsync(int shopperId, FlashSale[] flashSales, StressWorkload workload, CancellationToken ct)
     {
         var userId = $"user-{shopperId:D6}";
         var sessionId = $"session-{shopperId:D6}";
+        var random = Random.Shared;
 
         try
         {
+            ct.ThrowIfCancellationRequested();
+
             // 1. Create user session (HSET)
+            var now = DateTime.UtcNow;
             var session = new UserSession(
                 userId,
                 sessionId,
-                DateTime.UtcNow,
-                DateTime.UtcNow,
+                now,
+                now,
                 Array.Empty<string>(),
                 null);
-            await _store.SaveSessionAsync(sessionId, session);
+            await _store.SaveSessionAsync(sessionId, session).ConfigureAwait(false);
 
-            // 2. Browse products (70% of shoppers)
-            if (_random.Next(100) < 70)
+            // 2. Browse products
+            if (random.Next(100) < workload.BrowseChancePercent)
             {
-                var browsedProducts = Enumerable.Range(0, _random.Next(10, 25)) // Increased from 3-8 to 10-25 products browsed
-                    .Select(_ => _products[_random.Next(_products.Length)])
-                    .ToArray();
-
-                foreach (var product in browsedProducts)
+                var browseCount = random.Next(workload.BrowseMinProducts, workload.BrowseMaxProducts + 1);
+                for (var i = 0; i < browseCount; i++)
                 {
-                    await _store.GetProductAsync(product.Id);
+                    var product = _products[random.Next(_products.Length)];
+                    await _store.GetProductAsync(product.Id).ConfigureAwait(false);
                 }
             }
 
-            // 3. Join flash sale (30% of shoppers)
-            if (_random.Next(100) < 30 && flashSales.Length > 0)
+            // 3. Join flash sale
+            if (flashSales.Length > 0 && random.Next(100) < workload.FlashSaleJoinChancePercent)
             {
-                var sale = flashSales[_random.Next(flashSales.Length)];
-                await _store.JoinFlashSaleAsync(sale.Id, userId);
+                var sale = flashSales[random.Next(flashSales.Length)];
+                await _store.JoinFlashSaleAsync(sale.Id, userId).ConfigureAwait(false);
 
                 // Check if already in sale (test SISMEMBER)
-                await _store.IsInFlashSaleAsync(sale.Id, userId);
+                await _store.IsInFlashSaleAsync(sale.Id, userId).ConfigureAwait(false);
             }
 
-            // 4. Add items to cart (50% of shoppers)
-            if (_random.Next(100) < 50)
+            // 4. Add items to cart
+            if (random.Next(100) < workload.AddToCartChancePercent)
             {
-                var cartItems = _random.Next(15, 35); // Increased from 1-6 to 15-35 items per cart
+                var cartItems = random.Next(workload.CartItemsMin, workload.CartItemsMax + 1);
+                var addedAt = DateTime.UtcNow;
                 for (var i = 0; i < cartItems; i++)
                 {
-                    var product = _products[_random.Next(_products.Length)];
+                    var product = _products[random.Next(_products.Length)];
                     var item = new CartItem(
                         product.Id,
                         product.Name,
                         product.Price,
-                        _random.Next(1, 10), // Increased quantity from 1-4 to 1-10 per item
-                        DateTime.UtcNow);
+                        random.Next(workload.CartItemQuantityMin, workload.CartItemQuantityMax + 1),
+                        addedAt);
 
-                    await _store.AddToCartAsync(userId, item);
+                    await _store.AddToCartAsync(userId, item).ConfigureAwait(false);
                 }
 
                 // Get cart count
-                await _store.GetCartCountAsync(userId);
+                await _store.GetCartCountAsync(userId).ConfigureAwait(false);
             }
 
-            // 5. View cart (30% of shoppers)
-            if (_random.Next(100) < 30)
+            // 5. View cart
+            if (random.Next(100) < workload.ViewCartChancePercent)
             {
-                await _store.GetCartAsync(userId);
+                await _store.GetCartAsync(userId).ConfigureAwait(false);
             }
 
-            // 6. Checkout/Clear cart (20% of shoppers)
-            if (_random.Next(100) < 20)
+            // 6. Checkout/Clear cart
+            if (random.Next(100) < workload.CheckoutChancePercent)
             {
-                await _store.ClearCartAsync(userId);
+                await _store.ClearCartAsync(userId).ConfigureAwait(false);
             }
 
-            // 7. Remove item from cart (10% of shoppers)
-            if (_random.Next(100) < 10)
+            // 7. Remove item from cart
+            if (random.Next(100) < workload.RemoveFromCartChancePercent)
             {
-                await _store.RemoveFromCartAsync(userId);
+                await _store.RemoveFromCartAsync(userId).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -204,29 +212,39 @@ public class GroceryStoreStressTest : BackgroundService
 
     private async Task<FlashSale[]> CreateFlashSalesAsync(CancellationToken ct)
     {
-        var sales = new List<FlashSale>();
-
-        // Create 5 flash sales with different products
-        var saleProducts = _products.OrderBy(_ => _random.Next()).Take(5).ToArray();
-        foreach (var product in saleProducts)
+        var saleCount = Math.Min(5, _products.Length);
+        if (saleCount == 0)
         {
-            var sale = await _store.CreateFlashSaleAsync(
-                product.Id,
-                product.Price * 0.5m,  // 50% off
-                _random.Next(50, 200),   // Limited quantity
-                TimeSpan.FromMinutes(10));
-
-            sales.Add(sale);
+            return Array.Empty<FlashSale>();
         }
 
-        return sales.ToArray();
+        var random = Random.Shared;
+        var selectedProductIndexes = SelectDistinctProductIndexes(_products.Length, saleCount);
+        var sales = new FlashSale[saleCount];
+
+        for (var i = 0; i < saleCount; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var product = _products[selectedProductIndexes[i]];
+            sales[i] = await _store.CreateFlashSaleAsync(
+                product.Id,
+                product.Price * 0.5m,  // 50% off
+                random.Next(50, 201),   // Limited quantity
+                TimeSpan.FromMinutes(10)).ConfigureAwait(false);
+        }
+
+        return sales;
     }
 
-    private async Task ReportStatsAsync(Stopwatch sw, CancellationToken ct)
+    private async Task ReportStatsAsync(Stopwatch sw, TimeSpan targetDuration, TimeSpan statsInterval, CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested && sw.Elapsed < TimeSpan.FromSeconds(TestDurationSeconds))
+        while (!ct.IsCancellationRequested && sw.Elapsed < targetDuration)
         {
-            await Task.Delay(10000, ct);  // Report every 10 seconds
+            await Task.Delay(statsInterval, ct).ConfigureAwait(false);
+            if (ct.IsCancellationRequested)
+            {
+                break;
+            }
 
             var elapsed = sw.Elapsed.TotalSeconds;
             var snapshot = _stats.Snapshot;
@@ -238,22 +256,25 @@ public class GroceryStoreStressTest : BackgroundService
         }
     }
 
-    private async Task ReportFinalStatsAsync()
+    private async Task ReportFinalStatsAsync(FlashSale[] flashSales)
     {
         // Sample some data to show what's cached
         _logger.LogInformation("");
         _logger.LogInformation("Sample Cached Data:");
 
-        // Check a few flash sale participant counts
-        var sale = await _store.GetFlashSaleAsync("sale-001");
-        if (sale != null)
+        // Check a flash sale participant count
+        if (flashSales.Length > 0)
         {
-            var count = await _store.GetFlashSaleParticipantCountAsync(sale.Id);
-            _logger.LogInformation("  Flash Sale '{Name}': {Count} participants", sale.ProductName, count);
+            var sale = await _store.GetFlashSaleAsync(flashSales[0].Id).ConfigureAwait(false);
+            if (sale != null)
+            {
+                var count = await _store.GetFlashSaleParticipantCountAsync(sale.Id).ConfigureAwait(false);
+                _logger.LogInformation("  Flash Sale '{Name}': {Count} participants", sale.ProductName, count);
+            }
         }
 
         // Check a random cart
-        var cartCount = await _store.GetCartCountAsync("user-000042");
+        var cartCount = await _store.GetCartCountAsync("user-000042").ConfigureAwait(false);
         _logger.LogInformation("  Sample Cart (user-000042): {Count} items", cartCount);
 
         // Cache stats
@@ -269,4 +290,88 @@ public class GroceryStoreStressTest : BackgroundService
         _logger.LogInformation("  Fallback Events: {Fallback}", finalSnapshot.FallbackToMemory);
         _logger.LogInformation("  Circuit Breaker Opens: {Opens}", finalSnapshot.RedisBreakerOpened);
     }
+
+    private static async Task AwaitStatsTaskAsync(Task statsTask)
+    {
+        try
+        {
+            await statsTask.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown/completion.
+        }
+    }
+
+    private static int[] SelectDistinctProductIndexes(int productCount, int takeCount)
+    {
+        var indexes = new int[productCount];
+        for (var i = 0; i < productCount; i++)
+        {
+            indexes[i] = i;
+        }
+
+        var random = Random.Shared;
+        for (var i = 0; i < takeCount; i++)
+        {
+            var swapWith = random.Next(i, productCount);
+            (indexes[i], indexes[swapWith]) = (indexes[swapWith], indexes[i]);
+        }
+
+        var result = new int[takeCount];
+        Array.Copy(indexes, result, takeCount);
+        return result;
+    }
+
+    private static StressWorkload Normalize(GroceryStoreStressOptions options)
+    {
+        var browseMinProducts = Math.Max(0, options.BrowseMinProducts);
+        var browseMaxProducts = Math.Max(browseMinProducts, options.BrowseMaxProducts);
+
+        var cartItemsMin = Math.Max(0, options.CartItemsMin);
+        var cartItemsMax = Math.Max(cartItemsMin, options.CartItemsMax);
+
+        var cartQuantityMin = Math.Max(1, options.CartItemQuantityMin);
+        var cartQuantityMax = Math.Max(cartQuantityMin, options.CartItemQuantityMax);
+
+        return new StressWorkload(
+            ConcurrentShoppers: Math.Max(1, options.ConcurrentShoppers),
+            TotalShoppers: Math.Max(1, options.TotalShoppers),
+            TargetDuration: TimeSpan.FromSeconds(Math.Max(1, options.TargetDurationSeconds)),
+            StartupDelay: TimeSpan.FromSeconds(Math.Max(0, options.StartupDelaySeconds)),
+            CountdownDelay: TimeSpan.FromSeconds(Math.Max(0, options.CountdownSeconds)),
+            BrowseChancePercent: Math.Clamp(options.BrowseChancePercent, 0, 100),
+            BrowseMinProducts: browseMinProducts,
+            BrowseMaxProducts: browseMaxProducts,
+            FlashSaleJoinChancePercent: Math.Clamp(options.FlashSaleJoinChancePercent, 0, 100),
+            AddToCartChancePercent: Math.Clamp(options.AddToCartChancePercent, 0, 100),
+            CartItemsMin: cartItemsMin,
+            CartItemsMax: cartItemsMax,
+            CartItemQuantityMin: cartQuantityMin,
+            CartItemQuantityMax: cartQuantityMax,
+            ViewCartChancePercent: Math.Clamp(options.ViewCartChancePercent, 0, 100),
+            CheckoutChancePercent: Math.Clamp(options.CheckoutChancePercent, 0, 100),
+            RemoveFromCartChancePercent: Math.Clamp(options.RemoveFromCartChancePercent, 0, 100),
+            StatsInterval: TimeSpan.FromSeconds(Math.Max(1, options.StatsIntervalSeconds)));
+    }
+
+    private readonly record struct StressWorkload(
+        int ConcurrentShoppers,
+        int TotalShoppers,
+        TimeSpan TargetDuration,
+        TimeSpan StartupDelay,
+        TimeSpan CountdownDelay,
+        int BrowseChancePercent,
+        int BrowseMinProducts,
+        int BrowseMaxProducts,
+        int FlashSaleJoinChancePercent,
+        int AddToCartChancePercent,
+        int CartItemsMin,
+        int CartItemsMax,
+        int CartItemQuantityMin,
+        int CartItemQuantityMax,
+        int ViewCartChancePercent,
+        int CheckoutChancePercent,
+        int RemoveFromCartChancePercent,
+        TimeSpan StatsInterval);
 }

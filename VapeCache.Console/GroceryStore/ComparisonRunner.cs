@@ -122,9 +122,17 @@ public static class ComparisonRunner
 
     private static void PrintComparison(StressTestResult vapeCache, StressTestResult stackExchange)
     {
-        var throughputRatio = vapeCache.ThroughputShoppersPerSec / stackExchange.ThroughputShoppersPerSec;
-        var latencyImprovement = ((stackExchange.AverageLatencyMs - vapeCache.AverageLatencyMs) / stackExchange.AverageLatencyMs) * 100;
-        var p99Improvement = ((stackExchange.P99LatencyMs - vapeCache.P99LatencyMs) / stackExchange.P99LatencyMs) * 100;
+        var throughputRatio = stackExchange.ThroughputShoppersPerSec <= 0
+            ? 0
+            : vapeCache.ThroughputShoppersPerSec / stackExchange.ThroughputShoppersPerSec;
+
+        var avgLatencyDeltaPercent = stackExchange.AverageLatencyMs <= 0
+            ? 0
+            : ((stackExchange.AverageLatencyMs - vapeCache.AverageLatencyMs) / stackExchange.AverageLatencyMs) * 100;
+
+        var p99LatencyDeltaPercent = stackExchange.P99LatencyMs <= 0
+            ? 0
+            : ((stackExchange.P99LatencyMs - vapeCache.P99LatencyMs) / stackExchange.P99LatencyMs) * 100;
 
         System.Console.WriteLine($"Metric                      VapeCache          StackExchange.Redis     Winner");
         System.Console.WriteLine("─────────────────────────────────────────────────────────────────────────────");
@@ -166,9 +174,20 @@ public static class ComparisonRunner
 
         System.Console.WriteLine();
         System.Console.WriteLine("═══════════════════════════════════════════════════════════════════════════");
-        System.Console.WriteLine($"🏆 VapeCache is {throughputRatio:F2}x FASTER than StackExchange.Redis");
-        System.Console.WriteLine($"📉 VapeCache has {latencyImprovement:F1}% LOWER average latency");
-        System.Console.WriteLine($"🚀 VapeCache has {p99Improvement:F1}% BETTER p99 latency");
+        if (throughputRatio >= 1.0)
+        {
+            System.Console.WriteLine($"🏆 VapeCache is {throughputRatio:F2}x FASTER than StackExchange.Redis");
+        }
+        else
+        {
+            var slowerRatio = throughputRatio <= 0 ? 0 : 1.0 / throughputRatio;
+            System.Console.WriteLine($"🏆 VapeCache is {slowerRatio:F2}x SLOWER than StackExchange.Redis");
+        }
+
+        var avgLatencyLabel = avgLatencyDeltaPercent >= 0 ? "LOWER" : "HIGHER";
+        var p99LatencyLabel = p99LatencyDeltaPercent >= 0 ? "LOWER" : "HIGHER";
+        System.Console.WriteLine($"📉 VapeCache has {Math.Abs(avgLatencyDeltaPercent):F1}% {avgLatencyLabel} average latency");
+        System.Console.WriteLine($"🚀 VapeCache has {Math.Abs(p99LatencyDeltaPercent):F1}% {p99LatencyLabel} p99 latency");
         System.Console.WriteLine("═══════════════════════════════════════════════════════════════════════════");
     }
 

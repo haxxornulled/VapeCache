@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 
@@ -45,17 +44,22 @@ public class GroceryStoreComparisonStressTest
         _logger.LogInformation("Pre-cached {Count} products in {Ms}ms", products.Length, cacheTime.TotalMilliseconds);
 
         // Concurrent shopper operations
-        var random = new Random();
-        var stats = new ConcurrentBag<ShopperStats>();
-        var errors = new ConcurrentBag<Exception>();
+        var latencyMs = new double[shopperCount];
+        var cartSizes = new int[shopperCount];
+        var successCount = 0;
+        var errorCount = 0;
+        Exception? firstError = null;
 
         var shopperStart = Stopwatch.StartNew();
+        var maxDegree = Math.Max(32, Environment.ProcessorCount * 8);
 
         await Parallel.ForEachAsync(
             Enumerable.Range(0, shopperCount),
-            new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount * 2 },
+            new ParallelOptions { MaxDegreeOfParallelism = maxDegree },
             async (shopperIndex, ct) =>
             {
+                var random = Random.Shared;
+
                 try
                 {
                     var shopperSw = Stopwatch.StartNew();
@@ -66,7 +70,7 @@ public class GroceryStoreComparisonStressTest
                     await _service.JoinFlashSaleAsync(saleId, userId);
 
                     // 2. Check if in sale
-                    var inSale = await _service.IsInFlashSaleAsync(saleId, userId);
+                    await _service.IsInFlashSaleAsync(saleId, userId);
 
                     // 3. Add random items to cart (15-35 items)
                     var cartSize = random.Next(15, maxCartSize + 1);
@@ -83,10 +87,10 @@ public class GroceryStoreComparisonStressTest
                     }
 
                     // 4. Get cart count
-                    var count = await _service.GetCartCountAsync(userId);
+                    await _service.GetCartCountAsync(userId);
 
                     // 5. View cart
-                    var cart = await _service.GetCartAsync(userId);
+                    await _service.GetCartAsync(userId);
 
                     // 6. Save session
                     var session = new UserSession(
@@ -99,24 +103,23 @@ public class GroceryStoreComparisonStressTest
                     await _service.SaveSessionAsync($"session:{userId}", session);
 
                     // 7. Get session
-                    var retrievedSession = await _service.GetSessionAsync($"session:{userId}");
+                    await _service.GetSessionAsync($"session:{userId}");
 
                     // 8. Get participant count
-                    var participantCount = await _service.GetFlashSaleParticipantCountAsync(saleId);
+                    await _service.GetFlashSaleParticipantCountAsync(saleId);
 
                     // 9. Clear cart (checkout)
                     await _service.ClearCartAsync(userId);
 
                     shopperSw.Stop();
-                    stats.Add(new ShopperStats(
-                        userId,
-                        cartSize,
-                        cart.Length,
-                        shopperSw.Elapsed));
+                    var slot = Interlocked.Increment(ref successCount) - 1;
+                    latencyMs[slot] = shopperSw.Elapsed.TotalMilliseconds;
+                    cartSizes[slot] = cartSize;
                 }
                 catch (Exception ex)
                 {
-                    errors.Add(ex);
+                    Interlocked.Increment(ref errorCount);
+                    Interlocked.CompareExchange(ref firstError, ex, comparand: null);
                     _logger.LogError(ex, "Shopper {Index} failed", shopperIndex);
                 }
             });
@@ -125,19 +128,24 @@ public class GroceryStoreComparisonStressTest
         sw.Stop();
 
         // Calculate statistics
-        var statsList = stats.ToList();
-        var avgCartSize = statsList.Average(s => s.CartSize);
-        var avgLatency = statsList.Average(s => s.Latency.TotalMilliseconds);
-        var p50Latency = statsList.OrderBy(s => s.Latency).ElementAt(statsList.Count / 2).Latency.TotalMilliseconds;
-        var p95Latency = statsList.OrderBy(s => s.Latency).ElementAt((int)(statsList.Count * 0.95)).Latency.TotalMilliseconds;
-        var p99Latency = statsList.OrderBy(s => s.Latency).ElementAt((int)(statsList.Count * 0.99)).Latency.TotalMilliseconds;
-        var throughput = shopperCount / shopperStart.Elapsed.TotalSeconds;
+        var avgCartSize = successCount == 0 ? 0 : Average(cartSizes, successCount);
+        var avgLatency = successCount == 0 ? 0 : Average(latencyMs, successCount);
+
+        if (successCount > 0)
+        {
+            Array.Sort(latencyMs, 0, successCount);
+        }
+
+        var p50Latency = successCount == 0 ? 0 : Percentile(latencyMs, successCount, 0.50);
+        var p95Latency = successCount == 0 ? 0 : Percentile(latencyMs, successCount, 0.95);
+        var p99Latency = successCount == 0 ? 0 : Percentile(latencyMs, successCount, 0.99);
+        var throughput = shopperStart.Elapsed.TotalSeconds > 0 ? successCount / shopperStart.Elapsed.TotalSeconds : 0;
 
         var result = new StressTestResult(
             ProviderName: _providerName,
             ShopperCount: shopperCount,
-            SuccessCount: statsList.Count,
-            ErrorCount: errors.Count,
+            SuccessCount: successCount,
+            ErrorCount: errorCount,
             TotalDuration: sw.Elapsed,
             ShopperDuration: shopperStart.Elapsed,
             PreCacheDuration: cacheTime,
@@ -163,20 +171,53 @@ public class GroceryStoreComparisonStressTest
             result.AverageLatencyMs, result.P50LatencyMs, result.P95LatencyMs, result.P99LatencyMs);
         _logger.LogInformation("");
 
-        if (errors.Any())
+        if (firstError != null)
         {
-            _logger.LogWarning("First error: {Error}", errors.First().Message);
+            _logger.LogWarning("First error: {Error}", firstError.Message);
         }
 
         return result;
     }
-}
 
-public record ShopperStats(
-    string UserId,
-    int CartSize,
-    int RetrievedCartSize,
-    TimeSpan Latency);
+    private static double Percentile(double[] sortedValues, int count, double percentile)
+    {
+        if (count <= 0)
+            return 0;
+
+        var index = (int)Math.Ceiling((count - 1) * percentile);
+        if (index < 0) index = 0;
+        if (index >= count) index = count - 1;
+        return sortedValues[index];
+    }
+
+    private static double Average(int[] values, int count)
+    {
+        if (count <= 0)
+            return 0;
+
+        long sum = 0;
+        for (var i = 0; i < count; i++)
+        {
+            sum += values[i];
+        }
+
+        return sum / (double)count;
+    }
+
+    private static double Average(double[] values, int count)
+    {
+        if (count <= 0)
+            return 0;
+
+        double sum = 0;
+        for (var i = 0; i < count; i++)
+        {
+            sum += values[i];
+        }
+
+        return sum / count;
+    }
+}
 
 public record StressTestResult(
     string ProviderName,
