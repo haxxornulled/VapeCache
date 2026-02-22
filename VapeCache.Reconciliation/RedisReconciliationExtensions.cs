@@ -33,14 +33,20 @@ public static class RedisReconciliationExtensions
         Action<RedisReconciliationStoreOptions>? configureStore = null)
     {
         // COMMERCIAL LICENSE VALIDATION - Reconciliation is an ENTERPRISE-ONLY feature
-        // Secret key for HMAC signature verification (would be securely stored in production)
-        const string LicenseSecretKey = "VapeCache-HMAC-Secret-2026-Production";
-        var validator = new LicenseValidator(LicenseSecretKey);
+        var validator = new LicenseValidator(LicenseValidationOptions.ResolveValidationSecret());
 
         // If no license key provided, try to read from environment variable
         licenseKey ??= Environment.GetEnvironmentVariable("VAPECACHE_LICENSE_KEY");
 
         var validationResult = validator.Validate(licenseKey);
+
+        // Validate license is not expired
+        if (!validationResult.IsValid)
+        {
+            throw new VapeCacheLicenseException(
+                $"VapeCache license validation failed: {validationResult.ErrorMessage}. " +
+                "Visit https://vapecache.com to renew your license.");
+        }
 
         // Only Enterprise tier can use reconciliation
         if (validationResult.Tier != LicenseTier.Enterprise)
@@ -49,14 +55,6 @@ public static class RedisReconciliationExtensions
                 "VapeCache Reconciliation is an ENTERPRISE-ONLY feature. " +
                 "This premium capability provides zero-data-loss failover with SQLite-backed persistence of cache writes during Redis outages. " +
                 "Contact sales at https://vapecache.com/enterprise or use the free tier without reconciliation.");
-        }
-
-        // Validate license is not expired
-        if (!validationResult.IsValid)
-        {
-            throw new VapeCacheLicenseException(
-                $"VapeCache license validation failed: {validationResult.ErrorMessage}. " +
-                "Visit https://vapecache.com to renew your license.");
         }
 
         var optionsBuilder = services.AddOptions<RedisReconciliationOptions>()

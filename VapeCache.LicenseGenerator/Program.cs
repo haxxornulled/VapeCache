@@ -8,13 +8,18 @@ namespace VapeCache.LicenseGenerator;
 /// </summary>
 internal class Program
 {
-    // IMPORTANT: This secret key MUST match the key used in RedisReconciliationExtensions
-    private const string LicenseSecretKey = "VapeCache-HMAC-Secret-2026-Production";
+    private static readonly string LicenseSecretKey = LicenseValidationOptions.ResolveValidationSecret();
 
     static void Main(string[] args)
     {
         Console.WriteLine("=== VapeCache License Key Generator ===");
         Console.WriteLine("FOR INTERNAL USE ONLY - DO NOT DISTRIBUTE\n");
+
+        if (LicenseSecretKey == LicenseValidationOptions.DefaultValidationSecret)
+        {
+            Console.WriteLine(
+                $"WARNING: Using default validation secret. Set {LicenseValidationOptions.ValidationSecretEnvironmentVariable} to rotate it.\n");
+        }
 
         if (args.Length > 0 && args[0] == "--validate")
         {

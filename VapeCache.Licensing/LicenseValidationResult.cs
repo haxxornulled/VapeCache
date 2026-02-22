@@ -27,7 +27,7 @@ public sealed class LicenseValidationResult
 
     /// <summary>
     /// Maximum allowed instances for this license.
-    /// 0 = unlimited (Enterprise), 3 = Pro tier limit.
+    /// 0 = unlimited or not applicable.
     /// </summary>
     public int MaxInstances { get; init; }
 

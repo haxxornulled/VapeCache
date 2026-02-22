@@ -20,7 +20,7 @@ public static class PersistenceServiceExtensions
         Action<InMemorySpillOptions>? configure = null)
     {
         // Validate Enterprise license
-        var validator = new LicenseValidator(LicenseConstants.SecretKey);
+        var validator = new LicenseValidator(LicenseValidationOptions.ResolveValidationSecret());
         var result = validator.Validate(licenseKey);
 
         if (!result.IsValid)
@@ -57,7 +57,7 @@ public static class PersistenceServiceExtensions
         where TEncryption : class, ISpillEncryptionProvider
     {
         // Validate license (same as above)
-        var validator = new LicenseValidator(LicenseConstants.SecretKey);
+        var validator = new LicenseValidator(LicenseValidationOptions.ResolveValidationSecret());
         var result = validator.Validate(licenseKey);
 
         if (!result.IsValid)
@@ -79,13 +79,4 @@ public static class PersistenceServiceExtensions
 
         return services;
     }
-}
-
-/// <summary>
-/// Internal constants for license validation.
-/// Matches the secret key in LicenseGenerator.
-/// </summary>
-internal static class LicenseConstants
-{
-    internal const string SecretKey = "VapeCache-HMAC-Secret-2026-Production";
 }

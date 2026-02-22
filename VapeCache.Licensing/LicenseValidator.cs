@@ -8,6 +8,7 @@ namespace VapeCache.Licensing;
 /// </summary>
 public sealed class LicenseValidator
 {
+    private const int SignatureHexLength = 16;
     private readonly byte[] _secretKey;
 
     /// <summary>
@@ -41,6 +42,9 @@ public sealed class LicenseValidator
         var expiryStr = parts[2];
         var providedSignature = parts[3];
 
+        if (string.IsNullOrWhiteSpace(organizationId))
+            return LicenseValidationResult.Failure("Invalid organization ID");
+
         // Only Enterprise tier has license keys
         if (tierPrefix != "VCENT")
             return LicenseValidationResult.Failure($"Invalid license tier prefix: {tierPrefix}. Expected: VCENT");
@@ -49,7 +53,16 @@ public sealed class LicenseValidator
         if (!long.TryParse(expiryStr, out var expiryUnix))
             return LicenseValidationResult.Failure("Invalid expiry date format");
 
-        var expiresAt = DateTimeOffset.FromUnixTimeSeconds(expiryUnix);
+        DateTimeOffset expiresAt;
+        try
+        {
+            expiresAt = DateTimeOffset.FromUnixTimeSeconds(expiryUnix);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return LicenseValidationResult.Failure("Invalid expiry date range");
+        }
+
         if (expiresAt < DateTimeOffset.UtcNow)
             return LicenseValidationResult.Failure($"License expired on {expiresAt:yyyy-MM-dd}");
 
@@ -57,7 +70,10 @@ public sealed class LicenseValidator
         var payload = $"{tierPrefix}-{organizationId}-{expiryStr}";
         var expectedSignature = ComputeSignature(payload);
 
-        if (!string.Equals(providedSignature, expectedSignature, StringComparison.OrdinalIgnoreCase))
+        if (providedSignature.Length != SignatureHexLength)
+            return LicenseValidationResult.Failure("Invalid license signature length");
+
+        if (!IsSignatureMatch(providedSignature, expectedSignature))
             return LicenseValidationResult.Failure("Invalid license signature");
 
         // Enterprise tier = unlimited instances/servers/clusters
@@ -84,6 +100,40 @@ public sealed class LicenseValidator
     {
         using var hmac = new HMACSHA256(_secretKey);
         var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
-        return Convert.ToHexString(hash).Substring(0, 16); // First 16 chars for brevity
+        return Convert.ToHexString(hash).Substring(0, SignatureHexLength); // First 16 chars for brevity
+    }
+
+    private static bool IsSignatureMatch(string providedSignature, string expectedSignature)
+    {
+        if (!TryDecodeHex(providedSignature, out var providedBytes))
+            return false;
+
+        if (!TryDecodeHex(expectedSignature, out var expectedBytes))
+            return false;
+
+        if (providedBytes.Length != expectedBytes.Length)
+            return false;
+
+        return CryptographicOperations.FixedTimeEquals(providedBytes, expectedBytes);
+    }
+
+    private static bool TryDecodeHex(string value, out byte[] bytes)
+    {
+        if (string.IsNullOrWhiteSpace(value) || (value.Length % 2) != 0)
+        {
+            bytes = Array.Empty<byte>();
+            return false;
+        }
+
+        try
+        {
+            bytes = Convert.FromHexString(value);
+            return true;
+        }
+        catch (FormatException)
+        {
+            bytes = Array.Empty<byte>();
+            return false;
+        }
     }
 }

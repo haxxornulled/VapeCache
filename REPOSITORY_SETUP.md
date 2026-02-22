@@ -341,7 +341,7 @@ dotnet nuget push nupkg/VapeCache.Reconciliation.1.0.0.nupkg --api-key YOUR_API_
 If you accidentally pushed the HMAC secret to a public repo:
 
 1. **Immediately rotate the secret**:
-   - Change `LicenseSecretKey` in both projects
+   - Set `VAPECACHE_LICENSE_VALIDATION_SECRET` to a new value in generation/validation environments
    - Regenerate all customer license keys
    - Email all customers with new keys
 
