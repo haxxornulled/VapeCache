@@ -162,13 +162,17 @@ To use Enterprise features (reconciliation), set your license key as an environm
 
 ```bash
 # Environment variable
-export VAPECACHE_LICENSE_KEY="VCENT-CUST12345-1735689600-999-A1B2C3D4E5F6G7H8"
+export VAPECACHE_LICENSE_KEY="VC2.<base64url-header>.<base64url-payload>.<base64url-signature>"
 ```
 
 ```csharp
 // Or pass directly to reconciliation
-builder.Services.AddVapeCacheRedisReconciliation("VCENT-...");
+builder.Services.AddVapeCacheRedisReconciliation("VC2....");
 ```
+
+Enterprise tokens are ES256-signed and validated with a public key (`kid` + signature):
+- `VAPECACHE_LICENSE_PUBLIC_KEY_ID`
+- `VAPECACHE_LICENSE_PUBLIC_KEY_PEM`
 
 For trial licenses or questions, open a [GitHub Issue](https://github.com/haxxornulled/VapeCache/issues)
 
@@ -247,7 +251,7 @@ dotnet add package VapeCache.Extensions.Aspire
 ```csharp
 // Pass your Enterprise license key (or set VAPECACHE_LICENSE_KEY environment variable)
 builder.Services.AddVapeCacheRedisReconciliation(
-    licenseKey: "VCENT-CUST12345-...",
+    licenseKey: "VC2....",
     configure: options =>
     {
         options.MaxOperationAge = TimeSpan.FromMinutes(5);

@@ -35,7 +35,7 @@ dotnet add package VapeCache.Persistence
 This package requires a valid VapeCache Enterprise license key. Set the environment variable:
 
 ```bash
-export VAPECACHE_LICENSE_KEY="VCENT-YOUR-CUSTOMER-ID-..."
+export VAPECACHE_LICENSE_KEY="VC2.<base64url-header>.<base64url-payload>.<base64url-signature>"
 ```
 
 Or configure in `appsettings.json`:
@@ -43,7 +43,7 @@ Or configure in `appsettings.json`:
 ```json
 {
   "VapeCache": {
-    "LicenseKey": "VCENT-YOUR-CUSTOMER-ID-..."
+    "LicenseKey": "VC2.<base64url-header>.<base64url-payload>.<base64url-signature>"
   }
 }
 ```

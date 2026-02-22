@@ -7,7 +7,7 @@ using VapeCache.Reconciliation;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Set license key via environment variable: VAPECACHE_LICENSE_KEY=VCENT-...
+// Set license key via environment variable: VAPECACHE_LICENSE_KEY=VC2....
 
 // Add VapeCache reconciliation (reads license from environment)
 builder.Services.AddVapeCacheRedisReconciliation();
@@ -127,7 +127,7 @@ app.Run();
     }
   },
   "VapeCache": {
-    "LicenseKey": "VCENT-acme-1234567890-ABC123..."
+    "LicenseKey": "VC2.<base64url-header>.<base64url-payload>.<base64url-signature>"
   },
   "RedisReconciliation": {
     "Enabled": true,
@@ -327,7 +327,7 @@ public class ReconciliationTests : IClassFixture<WebApplicationFactory<Program>>
             {
                 // Add reconciliation WITHOUT the Reaper
                 services.AddVapeCacheRedisReconciliation(
-                    licenseKey: "VCENT-test-1234567890-ABC123...");
+                    licenseKey: "VC2.<base64url-header>.<base64url-payload>.<base64url-signature>");
 
                 // Use in-memory store for tests (no SQLite)
                 services.UseInMemoryBackingStore();
@@ -367,14 +367,14 @@ public class ReconciliationTests : IClassFixture<WebApplicationFactory<Program>>
 ```json
 {
   "VapeCache": {
-    "LicenseKey": "VCENT-acme-1234567890-ABC123..."
+    "LicenseKey": "VC2.<base64url-header>.<base64url-payload>.<base64url-signature>"
   }
 }
 ```
 
 ### Option 2: Environment Variable (Recommended for Production)
 ```bash
-export VAPECACHE_LICENSE_KEY="VCENT-acme-1234567890-ABC123..."
+export VAPECACHE_LICENSE_KEY="VC2.<base64url-header>.<base64url-payload>.<base64url-signature>"
 ```
 
 ### Option 3: Azure Key Vault

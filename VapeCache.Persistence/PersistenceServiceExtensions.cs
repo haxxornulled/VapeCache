@@ -12,7 +12,7 @@ public static class PersistenceServiceExtensions
     /// REQUIRES ENTERPRISE LICENSE ($499/month).
     /// </summary>
     /// <param name="services">Service collection</param>
-    /// <param name="licenseKey">Enterprise license key (VCENT-...)</param>
+    /// <param name="licenseKey">Enterprise license key (VC2.{header}.{payload}.{signature})</param>
     /// <param name="configure">Optional configuration</param>
     public static IServiceCollection AddVapeCachePersistence(
         this IServiceCollection services,
@@ -20,7 +20,7 @@ public static class PersistenceServiceExtensions
         Action<InMemorySpillOptions>? configure = null)
     {
         // Validate Enterprise license
-        var validator = new LicenseValidator(LicenseValidationOptions.ResolveValidationSecret());
+        var validator = new LicenseValidator();
         var result = validator.Validate(licenseKey);
 
         if (!result.IsValid)
@@ -30,6 +30,11 @@ public static class PersistenceServiceExtensions
             throw new InvalidOperationException(
                 $"VapeCache.Persistence requires Enterprise tier. Current tier: {result.Tier}. " +
                 "Upgrade at https://vapecache.com/pricing");
+
+        if (!result.HasFeature(LicenseFeatures.Persistence))
+            throw new InvalidOperationException(
+                $"VapeCache.Persistence requires '{LicenseFeatures.Persistence}' entitlement in your Enterprise license. " +
+                "Visit https://vapecache.com/account to update features.");
 
         if (result.IsExpired)
             throw new InvalidOperationException(
@@ -57,7 +62,7 @@ public static class PersistenceServiceExtensions
         where TEncryption : class, ISpillEncryptionProvider
     {
         // Validate license (same as above)
-        var validator = new LicenseValidator(LicenseValidationOptions.ResolveValidationSecret());
+        var validator = new LicenseValidator();
         var result = validator.Validate(licenseKey);
 
         if (!result.IsValid)
@@ -66,6 +71,10 @@ public static class PersistenceServiceExtensions
         if (result.Tier != LicenseTier.Enterprise)
             throw new InvalidOperationException(
                 $"VapeCache.Persistence requires Enterprise tier. Current tier: {result.Tier}");
+
+        if (!result.HasFeature(LicenseFeatures.Persistence))
+            throw new InvalidOperationException(
+                $"VapeCache.Persistence requires '{LicenseFeatures.Persistence}' entitlement in your Enterprise license.");
 
         if (result.IsExpired)
             throw new InvalidOperationException($"VapeCache license expired on {result.ExpiresAt:yyyy-MM-dd}");

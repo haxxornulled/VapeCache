@@ -27,7 +27,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add VapeCache reconciliation with license key
 builder.Services.AddVapeCacheRedisReconciliation(
-    licenseKey: "VCENT-acme-1234567890-ABC123...",  // Your Enterprise license key
+    licenseKey: "VC2.<base64url-header>.<base64url-payload>.<base64url-signature>",  // Your Enterprise license key
     configure: options =>
     {
         options.Enabled = true;
@@ -135,13 +135,13 @@ Set the license key as an environment variable:
 
 ```bash
 # Linux/macOS
-export VAPECACHE_LICENSE_KEY="VCENT-acme-1234567890-ABC123..."
+export VAPECACHE_LICENSE_KEY="VC2.<base64url-header>.<base64url-payload>.<base64url-signature>"
 
 # Windows PowerShell
-$env:VAPECACHE_LICENSE_KEY = "VCENT-acme-1234567890-ABC123..."
+$env:VAPECACHE_LICENSE_KEY = "VC2.<base64url-header>.<base64url-payload>.<base64url-signature>"
 
 # Windows CMD
-set VAPECACHE_LICENSE_KEY=VCENT-acme-1234567890-ABC123...
+set VAPECACHE_LICENSE_KEY=VC2.<base64url-header>.<base64url-payload>.<base64url-signature>
 ```
 
 **Program.cs:**
@@ -392,10 +392,10 @@ Set up alerts for:
 ```csharp
 // Option 1: Pass license key directly
 builder.Services.AddVapeCacheRedisReconciliation(
-    licenseKey: "VCENT-acme-1234567890-ABC123...");
+    licenseKey: "VC2.<base64url-header>.<base64url-payload>.<base64url-signature>");
 
 // Option 2: Set environment variable
-Environment.SetEnvironmentVariable("VAPECACHE_LICENSE_KEY", "VCENT-...");
+Environment.SetEnvironmentVariable("VAPECACHE_LICENSE_KEY", "VC2....");
 ```
 
 ### Issue: Operations not syncing to Redis

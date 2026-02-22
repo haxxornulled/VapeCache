@@ -2,7 +2,7 @@
 
 ## 🚨 CRITICAL SECURITY ISSUE DETECTED
 
-**The HMAC secret key has been committed to local git history but NOT pushed to GitHub.**
+**A legacy HMAC signing secret had been committed in local git history but NOT pushed to GitHub.**
 
 Commits containing the secret:
 - `a74de57` - Major: Simplify licensing to application-based model
@@ -236,7 +236,7 @@ Before making the public repository public:
 ```bash
 cd "c:\Visual Studio Projects\VapeCache-Public"
 
-# Search for HMAC key
+# Search for legacy HMAC key
 git log --all -p -S "VapeCache-HMAC-Secret"
 # Should return NOTHING
 
@@ -305,7 +305,7 @@ dotnet nuget push nupkg/VapeCache.Persistence.1.0.0.nupkg --api-key YOUR_API_KEY
 dotnet nuget push nupkg/VapeCache.Reconciliation.1.0.0.nupkg --api-key YOUR_API_KEY --source https://api.nuget.org/v3/index.json
 ```
 
-**Note**: Enterprise packages contain `VapeCache.Licensing.dll` embedded as a dependency. The HMAC secret is compiled into the DLL (binary), not exposed in source.
+**Note**: Enterprise packages contain `VapeCache.Licensing.dll` embedded as a dependency. With ES256 licensing, only the public verification key is in code; private signing keys stay outside source control.
 
 ---
 
@@ -338,11 +338,12 @@ dotnet nuget push nupkg/VapeCache.Reconciliation.1.0.0.nupkg --api-key YOUR_API_
 
 ## Emergency: If Secret Already Leaked
 
-If you accidentally pushed the HMAC secret to a public repo:
+If you accidentally pushed a signing private key to a public repo:
 
 1. **Immediately rotate the secret**:
-   - Set `VAPECACHE_LICENSE_VALIDATION_SECRET` to a new value in generation/validation environments
-   - Regenerate all customer license keys
+   - Rotate signing keys (`VAPECACHE_LICENSE_SIGNING_PRIVATE_KEY_PEM`)
+   - Rotate verification key metadata (`VAPECACHE_LICENSE_PUBLIC_KEY_ID`, `VAPECACHE_LICENSE_PUBLIC_KEY_PEM`)
+   - Reissue all customer license keys
    - Email all customers with new keys
 
 2. **Scrub git history**:

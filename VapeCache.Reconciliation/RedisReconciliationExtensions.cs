@@ -33,7 +33,7 @@ public static class RedisReconciliationExtensions
         Action<RedisReconciliationStoreOptions>? configureStore = null)
     {
         // COMMERCIAL LICENSE VALIDATION - Reconciliation is an ENTERPRISE-ONLY feature
-        var validator = new LicenseValidator(LicenseValidationOptions.ResolveValidationSecret());
+        var validator = new LicenseValidator();
 
         // If no license key provided, try to read from environment variable
         licenseKey ??= Environment.GetEnvironmentVariable("VAPECACHE_LICENSE_KEY");
@@ -55,6 +55,13 @@ public static class RedisReconciliationExtensions
                 "VapeCache Reconciliation is an ENTERPRISE-ONLY feature. " +
                 "This premium capability provides zero-data-loss failover with SQLite-backed persistence of cache writes during Redis outages. " +
                 "Contact sales at https://vapecache.com/enterprise or use the free tier without reconciliation.");
+        }
+
+        if (!validationResult.HasFeature(LicenseFeatures.Reconciliation))
+        {
+            throw new VapeCacheLicenseException(
+                $"VapeCache Reconciliation requires '{LicenseFeatures.Reconciliation}' entitlement in your Enterprise license. " +
+                "Visit https://vapecache.com/account to update your license features.");
         }
 
         var optionsBuilder = services.AddOptions<RedisReconciliationOptions>()

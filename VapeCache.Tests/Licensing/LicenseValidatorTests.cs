@@ -7,7 +7,8 @@ public class LicenseValidatorTests
     [Fact]
     public void Validate_NullOrWhitespace_ReturnsFreeTier()
     {
-        var validator = new LicenseValidator(LicenseValidationOptions.DefaultValidationSecret);
+        var (_, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+        var validator = new LicenseValidator(publicKeyPem, "test-key-2026");
 
         var nullResult = validator.Validate(null);
         var emptyResult = validator.Validate("   ");
@@ -19,26 +20,41 @@ public class LicenseValidatorTests
     }
 
     [Fact]
-    public void GenerateLicenseKey_ThenValidate_ReturnsEnterprise()
+    public void GenerateEnterpriseLicense_ThenValidate_ReturnsEnterpriseWithClaims()
     {
-        var validator = new LicenseValidator(LicenseValidationOptions.DefaultValidationSecret);
+        var (privateKeyPem, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+        var keyId = "test-key-2026";
+        var validator = new LicenseValidator(publicKeyPem, keyId);
+        var issuer = new LicenseTokenIssuer(privateKeyPem, keyId);
         var expiresAt = DateTimeOffset.UtcNow.AddDays(30);
 
-        var key = validator.GenerateLicenseKey("acme", expiresAt);
+        var key = issuer.GenerateEnterpriseLicenseKey("acme", expiresAt);
         var result = validator.Validate(key);
 
         Assert.True(result.IsValid);
         Assert.Equal(LicenseTier.Enterprise, result.Tier);
         Assert.Equal("acme", result.CustomerId);
+        Assert.Equal(keyId, result.KeyId);
+        Assert.False(string.IsNullOrWhiteSpace(result.LicenseId));
         Assert.NotNull(result.ExpiresAt);
         Assert.False(result.IsExpired);
+        Assert.True(result.HasFeature(LicenseFeatures.Persistence));
+        Assert.True(result.HasFeature(LicenseFeatures.Reconciliation));
     }
 
     [Fact]
     public void Validate_ExpiredLicense_ReturnsFailure()
     {
-        var validator = new LicenseValidator(LicenseValidationOptions.DefaultValidationSecret);
-        var key = validator.GenerateLicenseKey("acme", DateTimeOffset.UtcNow.AddDays(-1));
+        var (privateKeyPem, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+        var keyId = "test-key-2026";
+        var validator = new LicenseValidator(publicKeyPem, keyId);
+        var issuer = new LicenseTokenIssuer(privateKeyPem, keyId);
+        var now = DateTimeOffset.UtcNow;
+        var key = issuer.GenerateEnterpriseLicenseKey(
+            "acme",
+            expiresAt: now.AddDays(-1),
+            notBefore: now.AddDays(-2),
+            issuedAt: now.AddDays(-2));
 
         var result = validator.Validate(key);
 
@@ -47,11 +63,37 @@ public class LicenseValidatorTests
     }
 
     [Fact]
+    public void Validate_NotYetValidLicense_ReturnsFailure()
+    {
+        var (privateKeyPem, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+        var keyId = "test-key-2026";
+        var validator = new LicenseValidator(publicKeyPem, keyId);
+        var issuer = new LicenseTokenIssuer(privateKeyPem, keyId);
+        var now = DateTimeOffset.UtcNow;
+        var key = issuer.GenerateEnterpriseLicenseKey(
+            "acme",
+            expiresAt: now.AddDays(2),
+            notBefore: now.AddDays(1),
+            issuedAt: now);
+
+        var result = validator.Validate(key);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("not valid before", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Validate_TamperedSignature_ReturnsFailure()
     {
-        var validator = new LicenseValidator(LicenseValidationOptions.DefaultValidationSecret);
-        var key = validator.GenerateLicenseKey("acme", DateTimeOffset.UtcNow.AddDays(1));
-        var tampered = key[..^1] + (key[^1] == 'A' ? "B" : "A");
+        var (privateKeyPem, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+        var keyId = "test-key-2026";
+        var validator = new LicenseValidator(publicKeyPem, keyId);
+        var issuer = new LicenseTokenIssuer(privateKeyPem, keyId);
+        var key = issuer.GenerateEnterpriseLicenseKey("acme", DateTimeOffset.UtcNow.AddDays(1));
+
+        var parts = key.Split('.');
+        parts[3] = MutateBase64Url(parts[3]);
+        var tampered = string.Join('.', parts);
 
         var result = validator.Validate(tampered);
 
@@ -60,55 +102,55 @@ public class LicenseValidatorTests
     }
 
     [Fact]
-    public void Validate_InvalidSignatureLength_ReturnsFailure()
+    public void Validate_UnknownKeyId_ReturnsFailure()
     {
-        var validator = new LicenseValidator(LicenseValidationOptions.DefaultValidationSecret);
-        var key = validator.GenerateLicenseKey("acme", DateTimeOffset.UtcNow.AddDays(1));
-        var shortened = key[..^2];
-
-        var result = validator.Validate(shortened);
-
-        Assert.False(result.IsValid);
-        Assert.Contains("length", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Validate_InvalidSignatureHex_ReturnsFailure()
-    {
-        var validator = new LicenseValidator(LicenseValidationOptions.DefaultValidationSecret);
-        var key = validator.GenerateLicenseKey("acme", DateTimeOffset.UtcNow.AddDays(1));
-        var parts = key.Split('-');
-        parts[3] = "ZZZZZZZZZZZZZZZZ";
-        var invalidHex = string.Join('-', parts);
-
-        var result = validator.Validate(invalidHex);
-
-        Assert.False(result.IsValid);
-        Assert.Contains("signature", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Validate_InvalidExpiryRange_ReturnsFailure()
-    {
-        var validator = new LicenseValidator(LicenseValidationOptions.DefaultValidationSecret);
-        var key = $"VCENT-acme-{long.MaxValue}-AAAAAAAAAAAAAAAA";
+        var (privateKeyPem, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+        var issuer = new LicenseTokenIssuer(privateKeyPem, "kid-a");
+        var validator = new LicenseValidator(publicKeyPem, "kid-b");
+        var key = issuer.GenerateEnterpriseLicenseKey("acme", DateTimeOffset.UtcNow.AddDays(1));
 
         var result = validator.Validate(key);
 
         Assert.False(result.IsValid);
-        Assert.Contains("range", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Unknown license key id", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Validate_EmptyOrganizationId_ReturnsFailure()
+    public void Validate_InvalidLegacyFormat_ReturnsFailure()
     {
-        var validator = new LicenseValidator(LicenseValidationOptions.DefaultValidationSecret);
-        var expiryUnix = DateTimeOffset.UtcNow.AddDays(7).ToUnixTimeSeconds();
-        var key = $"VCENT--{expiryUnix}-AAAAAAAAAAAAAAAA";
+        var (_, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+        var validator = new LicenseValidator(publicKeyPem, "test-key-2026");
+
+        var result = validator.Validate("VCENT-acme-1735689600-A1B2C3D4");
+
+        Assert.False(result.IsValid);
+        Assert.Contains("Invalid license key format", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GenerateEnterpriseLicense_WithDistinctFeatures_ProducesExpectedEntitlements()
+    {
+        var (privateKeyPem, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+        var keyId = "test-key-2026";
+        var validator = new LicenseValidator(publicKeyPem, keyId);
+        var issuer = new LicenseTokenIssuer(privateKeyPem, keyId);
+        var key = issuer.GenerateEnterpriseLicenseKey(
+            "acme",
+            DateTimeOffset.UtcNow.AddDays(1),
+            features: new[] { "  persistence", "PERSISTENCE", "reconciliation " });
 
         var result = validator.Validate(key);
 
-        Assert.False(result.IsValid);
-        Assert.Contains("organization", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.IsValid);
+        Assert.Equal(2, result.Features.Count);
+        Assert.True(result.HasFeature(LicenseFeatures.Persistence));
+        Assert.True(result.HasFeature(LicenseFeatures.Reconciliation));
+    }
+
+    private static string MutateBase64Url(string input)
+    {
+        var lastIndex = input.Length - 1;
+        var replacement = input[lastIndex] == 'A' ? 'B' : 'A';
+        return input[..lastIndex] + replacement;
     }
 }

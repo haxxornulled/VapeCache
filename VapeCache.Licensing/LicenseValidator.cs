@@ -1,139 +1,257 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace VapeCache.Licensing;
 
 /// <summary>
-/// Validates VapeCache license keys using HMAC-SHA256 signature verification.
+/// Validates VapeCache license keys using ECDSA (ES256) signatures.
 /// </summary>
 public sealed class LicenseValidator
 {
-    private const int SignatureHexLength = 16;
-    private readonly byte[] _secretKey;
+    private static readonly JsonSerializerOptions JsonOptions = new();
+    private readonly string _verificationPublicKeyPem;
+    private readonly string _expectedKeyId;
 
     /// <summary>
-    /// Creates a new license validator.
+    /// Creates a validator from configured verification settings.
     /// </summary>
-    /// <param name="secretKey">Secret key for HMAC signature verification (must match key used during generation).</param>
-    public LicenseValidator(string secretKey)
+    public LicenseValidator()
+        : this(
+            LicenseValidationOptions.ResolveVerificationPublicKeyPem(),
+            LicenseValidationOptions.ResolveVerificationKeyId())
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(secretKey);
-        _secretKey = Encoding.UTF8.GetBytes(secretKey);
+    }
+
+    /// <summary>
+    /// Creates a validator from explicit PEM public key and key id.
+    /// </summary>
+    public LicenseValidator(string verificationPublicKeyPem, string expectedKeyId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(verificationPublicKeyPem);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedKeyId);
+
+        _verificationPublicKeyPem = verificationPublicKeyPem;
+        _expectedKeyId = expectedKeyId.Trim();
+
+        EnsureValidPublicKeyPem(_verificationPublicKeyPem);
     }
 
     /// <summary>
     /// Validates a VapeCache license key.
-    /// Application-based licensing - no per-server/cluster counting.
+    /// Token format: VC2.{header}.{payload}.{signature}
     /// </summary>
-    /// <param name="licenseKey">License key in format: VCENT-{ORG_ID}-{EXPIRY}-{SIGNATURE}</param>
-    /// <returns>Validation result with license details or error message.</returns>
     public LicenseValidationResult Validate(string? licenseKey)
     {
-        // No license = Free tier
         if (string.IsNullOrWhiteSpace(licenseKey))
             return LicenseValidationResult.Free();
 
-        var parts = licenseKey.Split('-');
+        if (!TrySplitToken(licenseKey, out var headerPart, out var payloadPart, out var signaturePart))
+        {
+            return LicenseValidationResult.Failure(
+                "Invalid license key format. Expected: VC2.{header}.{payload}.{signature}");
+        }
+
+        if (!TryDeserializePart(headerPart, out LicenseTokenHeader? header) || header is null)
+            return LicenseValidationResult.Failure("Invalid license header");
+
+        if (!TryDeserializePart(payloadPart, out LicenseTokenPayload? payload) || payload is null)
+            return LicenseValidationResult.Failure("Invalid license payload");
+
+        if (!IsHeaderValid(header))
+            return LicenseValidationResult.Failure("Invalid license header metadata");
+
+        if (!string.Equals(header.KeyId, _expectedKeyId, StringComparison.Ordinal))
+            return LicenseValidationResult.Failure($"Unknown license key id: {header.KeyId}");
+
+        if (!LicenseTokenEncoding.TryFromBase64Url(signaturePart, out var signatureBytes) || signatureBytes.Length == 0)
+            return LicenseValidationResult.Failure("Invalid license signature encoding");
+
+        var signingInput = $"{headerPart}.{payloadPart}";
+        if (!IsSignatureValid(signingInput, signatureBytes))
+            return LicenseValidationResult.Failure("Invalid license signature");
+
+        return ValidateClaims(header, payload);
+    }
+
+    private static bool TrySplitToken(
+        string licenseKey,
+        out string headerPart,
+        out string payloadPart,
+        out string signaturePart)
+    {
+        headerPart = string.Empty;
+        payloadPart = string.Empty;
+        signaturePart = string.Empty;
+
+        var parts = licenseKey.Split('.');
         if (parts.Length != 4)
-            return LicenseValidationResult.Failure("Invalid license key format. Expected: VCENT-ORG_ID-EXPIRY-SIGNATURE");
+            return false;
 
-        var tierPrefix = parts[0];
-        var organizationId = parts[1];
-        var expiryStr = parts[2];
-        var providedSignature = parts[3];
+        if (!string.Equals(parts[0], LicenseTokenFormat.TokenPrefix, StringComparison.Ordinal))
+            return false;
 
-        if (string.IsNullOrWhiteSpace(organizationId))
-            return LicenseValidationResult.Failure("Invalid organization ID");
+        headerPart = parts[1];
+        payloadPart = parts[2];
+        signaturePart = parts[3];
+        return true;
+    }
 
-        // Only Enterprise tier has license keys
-        if (tierPrefix != "VCENT")
-            return LicenseValidationResult.Failure($"Invalid license tier prefix: {tierPrefix}. Expected: VCENT");
+    private static bool TryDeserializePart<T>(string part, out T? model) where T : class
+    {
+        model = null;
 
-        // Parse expiry
-        if (!long.TryParse(expiryStr, out var expiryUnix))
-            return LicenseValidationResult.Failure("Invalid expiry date format");
+        if (!LicenseTokenEncoding.TryFromBase64Url(part, out var bytes) || bytes.Length == 0)
+            return false;
 
-        DateTimeOffset expiresAt;
         try
         {
-            expiresAt = DateTimeOffset.FromUnixTimeSeconds(expiryUnix);
+            model = JsonSerializer.Deserialize<T>(bytes, JsonOptions);
+            return model is not null;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsHeaderValid(LicenseTokenHeader header)
+    {
+        return string.Equals(header.TokenType, LicenseTokenFormat.TokenType, StringComparison.Ordinal) &&
+               string.Equals(header.Algorithm, LicenseTokenFormat.Algorithm, StringComparison.Ordinal) &&
+               !string.IsNullOrWhiteSpace(header.KeyId);
+    }
+
+    private static void EnsureValidPublicKeyPem(string publicKeyPem)
+    {
+        try
+        {
+            using var verificationKey = ECDsa.Create();
+            verificationKey.ImportFromPem(publicKeyPem);
+        }
+        catch (CryptographicException ex)
+        {
+            throw new InvalidOperationException("Invalid verification public key PEM configuration.", ex);
+        }
+    }
+
+    private bool IsSignatureValid(string signingInput, byte[] signatureBytes)
+    {
+        try
+        {
+            using var verificationKey = ECDsa.Create();
+            verificationKey.ImportFromPem(_verificationPublicKeyPem);
+            return verificationKey.VerifyData(
+                Encoding.UTF8.GetBytes(signingInput),
+                signatureBytes,
+                HashAlgorithmName.SHA256);
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+    }
+
+    private static LicenseValidationResult ValidateClaims(LicenseTokenHeader header, LicenseTokenPayload payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload.OrganizationId))
+            return LicenseValidationResult.Failure("Invalid organization ID");
+
+        if (!TryParseTier(payload.Tier, out var tier))
+            return LicenseValidationResult.Failure($"Invalid license tier: {payload.Tier}");
+
+        if (!TryToUtc(payload.IssuedAtUnixSeconds, out var issuedAt))
+            return LicenseValidationResult.Failure("Invalid issued-at timestamp");
+
+        if (!TryToUtc(payload.NotBeforeUnixSeconds, out var notBefore))
+            return LicenseValidationResult.Failure("Invalid not-before timestamp");
+
+        if (!TryToUtc(payload.ExpiresAtUnixSeconds, out var expiresAt))
+            return LicenseValidationResult.Failure("Invalid expiry timestamp");
+
+        if (expiresAt <= notBefore)
+            return LicenseValidationResult.Failure("Invalid license window: exp must be greater than nbf");
+
+        if (issuedAt > expiresAt)
+            return LicenseValidationResult.Failure("Invalid license window: iat cannot be after exp");
+
+        if (string.IsNullOrWhiteSpace(payload.LicenseId))
+            return LicenseValidationResult.Failure("Invalid token id (jti)");
+
+        var normalizedFeatures = NormalizeFeatures(payload.Features);
+        if (normalizedFeatures.Count == 0)
+            return LicenseValidationResult.Failure("License is missing feature claims");
+
+        var now = DateTimeOffset.UtcNow;
+        if (now < notBefore)
+            return LicenseValidationResult.Failure($"License is not valid before {notBefore:yyyy-MM-ddTHH:mm:ssZ}");
+
+        if (now >= expiresAt)
+            return LicenseValidationResult.Failure($"License expired on {expiresAt:yyyy-MM-dd}");
+
+        var maxInstances = tier == LicenseTier.Enterprise ? 999 : 0;
+
+        return LicenseValidationResult.Success(
+            tier,
+            payload.OrganizationId,
+            expiresAt,
+            maxInstances,
+            header.KeyId,
+            payload.LicenseId,
+            normalizedFeatures);
+    }
+
+    private static bool TryParseTier(string value, out LicenseTier tier)
+    {
+        tier = LicenseTier.Free;
+
+        if (string.Equals(value, "enterprise", StringComparison.OrdinalIgnoreCase))
+        {
+            tier = LicenseTier.Enterprise;
+            return true;
+        }
+
+        if (string.Equals(value, "free", StringComparison.OrdinalIgnoreCase))
+        {
+            tier = LicenseTier.Free;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryToUtc(long unixSeconds, out DateTimeOffset dateTimeOffset)
+    {
+        try
+        {
+            dateTimeOffset = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+            return true;
         }
         catch (ArgumentOutOfRangeException)
         {
-            return LicenseValidationResult.Failure("Invalid expiry date range");
+            dateTimeOffset = default;
+            return false;
         }
-
-        if (expiresAt < DateTimeOffset.UtcNow)
-            return LicenseValidationResult.Failure($"License expired on {expiresAt:yyyy-MM-dd}");
-
-        // Verify HMAC signature
-        var payload = $"{tierPrefix}-{organizationId}-{expiryStr}";
-        var expectedSignature = ComputeSignature(payload);
-
-        if (providedSignature.Length != SignatureHexLength)
-            return LicenseValidationResult.Failure("Invalid license signature length");
-
-        if (!IsSignatureMatch(providedSignature, expectedSignature))
-            return LicenseValidationResult.Failure("Invalid license signature");
-
-        // Enterprise tier = unlimited instances/servers/clusters
-        return LicenseValidationResult.Success(LicenseTier.Enterprise, organizationId, expiresAt, maxInstances: 999);
     }
 
-    /// <summary>
-    /// Generates an Enterprise license key for an organization.
-    /// Application-based licensing - unlimited deployments/servers/clusters.
-    /// </summary>
-    public string GenerateLicenseKey(string organizationId, DateTimeOffset expiresAt)
+    private static IReadOnlyList<string> NormalizeFeatures(string[]? features)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(organizationId);
+        if (features is null || features.Length == 0)
+            return Array.Empty<string>();
 
-        var tierPrefix = "VCENT"; // Enterprise only
-        var expiryUnix = expiresAt.ToUnixTimeSeconds();
-        var payload = $"{tierPrefix}-{organizationId}-{expiryUnix}";
-        var signature = ComputeSignature(payload);
+        var result = new List<string>(features.Length);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        return $"{payload}-{signature}";
-    }
-
-    private string ComputeSignature(string payload)
-    {
-        using var hmac = new HMACSHA256(_secretKey);
-        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
-        return Convert.ToHexString(hash).Substring(0, SignatureHexLength); // First 16 chars for brevity
-    }
-
-    private static bool IsSignatureMatch(string providedSignature, string expectedSignature)
-    {
-        if (!TryDecodeHex(providedSignature, out var providedBytes))
-            return false;
-
-        if (!TryDecodeHex(expectedSignature, out var expectedBytes))
-            return false;
-
-        if (providedBytes.Length != expectedBytes.Length)
-            return false;
-
-        return CryptographicOperations.FixedTimeEquals(providedBytes, expectedBytes);
-    }
-
-    private static bool TryDecodeHex(string value, out byte[] bytes)
-    {
-        if (string.IsNullOrWhiteSpace(value) || (value.Length % 2) != 0)
+        foreach (var feature in features)
         {
-            bytes = Array.Empty<byte>();
-            return false;
+            if (string.IsNullOrWhiteSpace(feature))
+                continue;
+
+            var normalized = feature.Trim().ToLowerInvariant();
+            if (seen.Add(normalized))
+                result.Add(normalized);
         }
 
-        try
-        {
-            bytes = Convert.FromHexString(value);
-            return true;
-        }
-        catch (FormatException)
-        {
-            bytes = Array.Empty<byte>();
-            return false;
-        }
+        return result;
     }
 }

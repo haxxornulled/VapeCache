@@ -21,6 +21,21 @@ public sealed class LicenseValidationResult
     public string? CustomerId { get; init; }
 
     /// <summary>
+    /// Key id (kid) used to verify the signature.
+    /// </summary>
+    public string? KeyId { get; init; }
+
+    /// <summary>
+    /// Unique token id (jti) for revocation/auditing.
+    /// </summary>
+    public string? LicenseId { get; init; }
+
+    /// <summary>
+    /// Licensed enterprise features.
+    /// </summary>
+    public IReadOnlyList<string> Features { get; init; } = Array.Empty<string>();
+
+    /// <summary>
     /// License expiration date (UTC).
     /// </summary>
     public DateTimeOffset? ExpiresAt { get; init; }
@@ -41,7 +56,27 @@ public sealed class LicenseValidationResult
     /// </summary>
     public bool IsExpired => ExpiresAt.HasValue && ExpiresAt.Value < DateTimeOffset.UtcNow;
 
-    public static LicenseValidationResult Success(LicenseTier tier, string customerId, DateTimeOffset expiresAt, int maxInstances)
+    public bool HasFeature(string feature)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(feature);
+
+        foreach (var candidate in Features)
+        {
+            if (string.Equals(candidate, feature, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    public static LicenseValidationResult Success(
+        LicenseTier tier,
+        string customerId,
+        DateTimeOffset expiresAt,
+        int maxInstances,
+        string keyId,
+        string licenseId,
+        IReadOnlyList<string> features)
     {
         return new LicenseValidationResult
         {
@@ -49,7 +84,10 @@ public sealed class LicenseValidationResult
             Tier = tier,
             CustomerId = customerId,
             ExpiresAt = expiresAt,
-            MaxInstances = maxInstances
+            MaxInstances = maxInstances,
+            KeyId = keyId,
+            LicenseId = licenseId,
+            Features = features
         };
     }
 
@@ -69,7 +107,8 @@ public sealed class LicenseValidationResult
         {
             IsValid = true,
             Tier = LicenseTier.Free,
-            MaxInstances = 0
+            MaxInstances = 0,
+            Features = Array.Empty<string>()
         };
     }
 }
