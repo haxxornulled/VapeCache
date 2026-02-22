@@ -28,6 +28,14 @@ public static class CacheTelemetry
 
     private static ICurrentCacheService? _currentCacheService;
 
+    internal static int MapBackendName(string current) => current switch
+    {
+        "redis" => 1,
+        "memory" => 0,
+        "in-memory" => 0,
+        _ => -1
+    };
+
     /// <summary>
     /// Initializes the current backend observable gauge. Called during service registration.
     /// </summary>
@@ -48,12 +56,7 @@ public static class CacheTelemetry
                 return new Measurement<int>(0, new TagList { { "backend", "unknown" } });
 
             var current = _currentCacheService.CurrentName;
-            var value = current switch
-            {
-                "redis" => 1,
-                "in-memory" => 0,
-                _ => -1
-            };
+            var value = MapBackendName(current);
 
             return new Measurement<int>(value, new TagList { { "backend", current } });
         },

@@ -33,10 +33,8 @@ A: Run the comparison benchmarks:
 
 ```bash
 $env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
-dotnet run -c Release --filter *RedisClientStackExchangeBenchmarks*
-dotnet run -c Release --filter *RedisClientVapeCacheBenchmarks*
-dotnet run -c Release --filter *RedisEndToEndStackExchangeBenchmarks*
-dotnet run -c Release --filter *RedisEndToEndVapeCacheBenchmarks*
+dotnet run -c Release --filter *RedisClientHeadToHeadBenchmarks*
+dotnet run -c Release --filter *RedisEndToEndHeadToHeadBenchmarks*
 ```
 
 **Q: How do I benchmark Redis modules?**  
@@ -44,8 +42,7 @@ A: Ensure RedisJSON, RediSearch, RedisBloom, and RedisTimeSeries are installed:
 
 ```bash
 $env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
-dotnet run -c Release --filter *RedisModuleStackExchangeBenchmarks*
-dotnet run -c Release --filter *RedisModuleVapeCacheBenchmarks*
+dotnet run -c Release --filter *RedisModuleHeadToHeadBenchmarks*
 ```
 
 ## Configuration & DI

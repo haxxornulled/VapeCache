@@ -33,7 +33,14 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
         var o = options.CurrentValue;
         var maxConnections = Math.Max(1, o.MaxConnections);
-        var maxIdle = Math.Clamp(o.MaxIdle, 0, maxConnections);
+        var maxIdle = Math.Clamp(Math.Max(1, o.MaxIdle), 1, maxConnections);
+        if (o.MaxIdle <= 0)
+        {
+            _logger.LogWarning(
+                "RedisConnectionOptions.MaxIdle was {ConfiguredMaxIdle}. Using {EffectiveMaxIdle} to keep the pool operational.",
+                o.MaxIdle,
+                maxIdle);
+        }
         _connectionSlots = new SemaphoreSlim(maxConnections, maxConnections);
 
         _idle = Channel.CreateBounded<PooledConnection>(new BoundedChannelOptions(maxIdle)

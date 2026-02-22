@@ -8,7 +8,7 @@ internal sealed class HybridStampedeCacheService : ICacheService
 {
     private readonly StampedeProtectedCacheService _inner;
 
-    public HybridStampedeCacheService(HybridCacheService hybrid, IOptions<CacheStampedeOptions> options)
+    public HybridStampedeCacheService(HybridCacheService hybrid, IOptionsMonitor<CacheStampedeOptions> options)
     {
         _inner = new StampedeProtectedCacheService(hybrid, options);
     }

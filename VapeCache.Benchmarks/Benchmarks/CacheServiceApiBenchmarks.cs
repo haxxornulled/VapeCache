@@ -4,7 +4,6 @@ using System.Text.Json;
 using BenchmarkDotNet.Attributes;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
@@ -66,8 +65,8 @@ public class CacheServiceApiBenchmarks
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var currentService = new CurrentCacheService();
         var statsRegistry = new CacheStatsRegistry();
-        var spillOptions = Options.Create(new InMemorySpillOptions { EnableSpillToDisk = false });
-        var spillStore = new FileSpillStore(spillOptions, new NoopSpillEncryptionProvider());
+        var spillOptions = new BenchmarkOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions { EnableSpillToDisk = false });
+        var spillStore = new NoopSpillStore();
         _inMemoryCache = new InMemoryCacheService(memoryCache, currentService, statsRegistry, spillOptions, spillStore);
 
         // Prepare test data

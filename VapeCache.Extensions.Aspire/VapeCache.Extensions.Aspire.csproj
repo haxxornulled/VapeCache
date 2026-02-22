@@ -5,18 +5,25 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <PropertyGroup>
     <!-- NuGet Package Metadata -->
     <PackageId>VapeCache.Extensions.Aspire</PackageId>
-    <Description>.NET Aspire integration for VapeCache - Service discovery, health checks, and telemetry</Description>
+    <Version>1.0.1</Version>
+    <Description>.NET Aspire integration for VapeCache - Service discovery, health checks, and telemetry. Seamless integration with Aspire Dashboard for distributed caching observability.</Description>
     <Authors>VapeCache Contributors</Authors>
-    <PackageTags>cache;redis;aspire;opentelemetry;dotnet;blazor;distributed-cache</PackageTags>
+    <Company>VapeCache</Company>
+    <Product>VapeCache.Extensions.Aspire</Product>
+    <PackageTags>cache;redis;aspire;opentelemetry;dotnet;blazor;distributed-cache;service-discovery;health-checks</PackageTags>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
+    <Copyright>Copyright (c) 2025 VapeCache Contributors</Copyright>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
 
   <ItemGroup>

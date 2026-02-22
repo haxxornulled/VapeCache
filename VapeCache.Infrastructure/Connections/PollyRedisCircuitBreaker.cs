@@ -21,11 +21,11 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
     private string? _forcedReason;
 
     public PollyRedisCircuitBreaker(
-        IOptions<RedisCircuitBreakerOptions> options,
+        IOptionsMonitor<RedisCircuitBreakerOptions> options,
         CacheStatsRegistry statsRegistry,
         ILogger<PollyRedisCircuitBreaker> logger)
     {
-        _options = options.Value;
+        _options = options.CurrentValue;
         _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
         _logger = logger;
 

@@ -35,8 +35,7 @@ public static class CacheRegistration
         services.AddSingleton<InMemoryCommandExecutor>();
         services.TryAddSingleton<IRedisFallbackCommandExecutor, InMemoryCommandExecutor>();
 
-        services.TryAddSingleton<ISpillEncryptionProvider, NoopSpillEncryptionProvider>();
-        services.TryAddSingleton<IInMemorySpillStore, FileSpillStore>();
+        services.TryAddSingleton<IInMemorySpillStore, NoopSpillStore>();
 
         // Cache services
         // IMPORTANT: RedisCacheService gets the RAW RedisCommandExecutor (no hybrid wrapper)

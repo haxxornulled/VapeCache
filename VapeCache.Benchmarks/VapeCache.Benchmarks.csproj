@@ -11,6 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" Version="0.15.8"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1"/>
     <PackageReference Include="StackExchange.Redis" Version="2.10.1"/>
   </ItemGroup>
   <ItemGroup>

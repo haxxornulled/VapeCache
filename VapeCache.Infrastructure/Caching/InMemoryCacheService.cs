@@ -14,19 +14,23 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
     private readonly CacheStats _stats;
     private readonly InMemorySpillOptions _spillOptions;
     private readonly IInMemorySpillStore _spillStore;
+    private readonly bool _spillEnabled;
 
     public InMemoryCacheService(
         IMemoryCache cache,
         ICurrentCacheService current,
         CacheStatsRegistry statsRegistry,
-        IOptions<InMemorySpillOptions> spillOptions,
+        IOptionsMonitor<InMemorySpillOptions> spillOptions,
         IInMemorySpillStore spillStore)
     {
         _cache = cache;
         _current = current;
         _stats = statsRegistry.GetOrCreate(CacheStatsNames.Memory);
-        _spillOptions = spillOptions.Value;
+        _spillOptions = spillOptions.CurrentValue;
         _spillStore = spillStore;
+        // Avoid writing spill references when the no-op store is active.
+        // This prevents large entries from becoming unreadable in free-tier/default wiring.
+        _spillEnabled = _spillOptions.EnableSpillToDisk && spillStore is not NoopSpillStore;
     }
 
     public string Name => "memory";
@@ -162,7 +166,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
     }
 
     private bool ShouldSpill(int length)
-        => _spillOptions.EnableSpillToDisk &&
+        => _spillEnabled &&
            _spillOptions.SpillThresholdBytes > 0 &&
            length > _spillOptions.SpillThresholdBytes;
 

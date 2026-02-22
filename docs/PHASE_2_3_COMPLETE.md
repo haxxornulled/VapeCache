@@ -350,7 +350,7 @@ Time Elapsed 00:00:01.70
 
 ### Revalidation Summary (2026-01-01)
 - ✅ `dotnet test .\VapeCache.Tests\VapeCache.Tests.csproj` (110/110 passed)
-- ✅ Module benchmarks rerun (`RedisModuleVapeCacheBenchmarks`)
+- ✅ Module benchmarks rerun (`RedisModuleHeadToHeadBenchmarks`)
 
 ## Deployment
 
