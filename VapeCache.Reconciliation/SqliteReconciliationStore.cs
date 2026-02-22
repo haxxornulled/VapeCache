@@ -46,17 +46,35 @@ internal sealed class SqliteReconciliationStore : IRedisReconciliationStore
         {
             await using var conn = OpenConnection();
             await conn.OpenAsync(ct).ConfigureAwait(false);
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "INSERT INTO reconciliation_ops(key, type, value, expires_at, tracked_at) " +
-                              "VALUES ($key, $type, $value, $expires, $tracked) " +
-                              "ON CONFLICT(key) DO UPDATE SET type=excluded.type, value=excluded.value, expires_at=excluded.expires_at, tracked_at=excluded.tracked_at";
-            cmd.Parameters.AddWithValue("$key", key);
-            cmd.Parameters.AddWithValue("$type", (int)OperationType.Write);
-            cmd.Parameters.AddWithValue("$value", value.ToArray());
-            cmd.Parameters.AddWithValue("$expires", expiresAt.HasValue ? expiresAt.Value.ToUnixTimeMilliseconds() : DBNull.Value);
-            cmd.Parameters.AddWithValue("$tracked", trackedAt.ToUnixTimeMilliseconds());
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            return true;
+
+            var trackedUnix = trackedAt.ToUnixTimeMilliseconds();
+            var expiresUnix = expiresAt.HasValue ? expiresAt.Value.ToUnixTimeMilliseconds() : (long?)null;
+            var payload = value.ToArray();
+
+            await using var insert = conn.CreateCommand();
+            insert.CommandText = "INSERT OR IGNORE INTO reconciliation_ops(key, type, value, expires_at, tracked_at) " +
+                                 "VALUES ($key, $type, $value, $expires, $tracked)";
+            insert.Parameters.AddWithValue("$key", key);
+            insert.Parameters.AddWithValue("$type", (int)OperationType.Write);
+            insert.Parameters.AddWithValue("$value", payload);
+            insert.Parameters.AddWithValue("$expires", expiresUnix.HasValue ? expiresUnix.Value : DBNull.Value);
+            insert.Parameters.AddWithValue("$tracked", trackedUnix);
+            var inserted = await insert.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+
+            if (!inserted)
+            {
+                await using var update = conn.CreateCommand();
+                update.CommandText = "UPDATE reconciliation_ops " +
+                                     "SET type=$type, value=$value, expires_at=$expires, tracked_at=$tracked " +
+                                     "WHERE key=$key";
+                update.Parameters.AddWithValue("$key", key);
+                update.Parameters.AddWithValue("$type", (int)OperationType.Write);
+                update.Parameters.AddWithValue("$value", payload);
+                update.Parameters.AddWithValue("$expires", expiresUnix.HasValue ? expiresUnix.Value : DBNull.Value);
+                update.Parameters.AddWithValue("$tracked", trackedUnix);
+                await update.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            return inserted;
         }, ct).ConfigureAwait(false);
     }
 
@@ -67,15 +85,29 @@ internal sealed class SqliteReconciliationStore : IRedisReconciliationStore
         {
             await using var conn = OpenConnection();
             await conn.OpenAsync(ct).ConfigureAwait(false);
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "INSERT INTO reconciliation_ops(key, type, value, expires_at, tracked_at) " +
-                              "VALUES ($key, $type, NULL, NULL, $tracked) " +
-                              "ON CONFLICT(key) DO UPDATE SET type=excluded.type, value=NULL, expires_at=NULL, tracked_at=excluded.tracked_at";
-            cmd.Parameters.AddWithValue("$key", key);
-            cmd.Parameters.AddWithValue("$type", (int)OperationType.Delete);
-            cmd.Parameters.AddWithValue("$tracked", trackedAt.ToUnixTimeMilliseconds());
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            return true;
+
+            var trackedUnix = trackedAt.ToUnixTimeMilliseconds();
+
+            await using var insert = conn.CreateCommand();
+            insert.CommandText = "INSERT OR IGNORE INTO reconciliation_ops(key, type, value, expires_at, tracked_at) " +
+                                 "VALUES ($key, $type, NULL, NULL, $tracked)";
+            insert.Parameters.AddWithValue("$key", key);
+            insert.Parameters.AddWithValue("$type", (int)OperationType.Delete);
+            insert.Parameters.AddWithValue("$tracked", trackedUnix);
+            var inserted = await insert.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+
+            if (!inserted)
+            {
+                await using var update = conn.CreateCommand();
+                update.CommandText = "UPDATE reconciliation_ops " +
+                                     "SET type=$type, value=NULL, expires_at=NULL, tracked_at=$tracked " +
+                                     "WHERE key=$key";
+                update.Parameters.AddWithValue("$key", key);
+                update.Parameters.AddWithValue("$type", (int)OperationType.Delete);
+                update.Parameters.AddWithValue("$tracked", trackedUnix);
+                await update.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            return inserted;
         }, ct).ConfigureAwait(false);
     }
 

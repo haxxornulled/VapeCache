@@ -510,8 +510,12 @@ Console host runs the demo workloads and logs cache activity; it does not expose
 ### Run Benchmarks
 ```bash
 $env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
-dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisClientStackExchangeBenchmarks*
-dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisClientVapeCacheBenchmarks*
+dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisClientHeadToHeadBenchmarks*
+dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisEndToEndHeadToHeadBenchmarks*
+dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisModuleHeadToHeadBenchmarks*
+
+# Or run all head-to-head suites and collect comparison.md outputs in one pass:
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short
 ```
 
 ---

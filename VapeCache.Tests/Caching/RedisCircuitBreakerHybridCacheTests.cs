@@ -92,6 +92,38 @@ public sealed class RedisCircuitBreakerHybridCacheTests
     }
 
     [Fact]
+    public async Task User_cancellation_does_not_trip_breaker()
+    {
+        var time = new ManualTimeProvider();
+        var redisExec = new ThrowingExecutor { RespectUserCancellation = true };
+        await using var _ = redisExec.ConfigureAwait(false);
+
+        var current = new CurrentCacheService();
+        var statsRegistry = new CacheStatsRegistry();
+        var redis = new RedisCacheService(redisExec, current, statsRegistry);
+        var memory = CreateMemoryCacheService(current, statsRegistry);
+
+        var breaker = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
+        {
+            Enabled = true,
+            ConsecutiveFailuresToOpen = 1,
+            BreakDuration = TimeSpan.FromSeconds(10),
+            HalfOpenProbeTimeout = TimeSpan.FromMilliseconds(1)
+        });
+
+        var hybrid = new HybridCacheService(redis, memory, current, time, breaker, statsRegistry, NullLogger<HybridCacheService>.Instance);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => hybrid.GetAsync("cancel:key", cts.Token).AsTask());
+
+        Assert.Equal(1, redisExec.GetCalls);
+        Assert.Equal(0, hybrid.ConsecutiveFailures);
+        Assert.False(hybrid.IsOpen);
+    }
+
+    [Fact]
     public async Task Reconciliation_runs_after_breaker_closes_and_replays_pending_writes()
     {
         var time = new ManualTimeProvider();
@@ -151,10 +183,13 @@ public sealed class RedisCircuitBreakerHybridCacheTests
     private sealed class ThrowingExecutor : IRedisCommandExecutor
     {
         public int GetCalls;
+        public bool RespectUserCancellation { get; set; }
 
         public ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
         {
             Interlocked.Increment(ref GetCalls);
+            if (RespectUserCancellation && ct.IsCancellationRequested)
+                throw new OperationCanceledException(ct);
             throw new InvalidOperationException("redis down");
         }
 

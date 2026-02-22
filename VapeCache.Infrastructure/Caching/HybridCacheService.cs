@@ -183,6 +183,10 @@ internal sealed class HybridCacheService(
                     return v;
                 }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 MarkRedisFailure();
@@ -260,6 +264,10 @@ internal sealed class HybridCacheService(
                 MarkRedisSuccess();
                 current.SetCurrent(redis.Name);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 MarkRedisFailure();
@@ -328,6 +336,10 @@ internal sealed class HybridCacheService(
                 MarkRedisSuccess();
                 current.SetCurrent(redis.Name);
                 return ok || rok;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {

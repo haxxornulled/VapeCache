@@ -256,6 +256,10 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             _current.SetCurrent("redis");
             return result;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _breakerController.MarkRedisFailure();
@@ -289,6 +293,10 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
             return result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -324,6 +332,10 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             _current.SetCurrent("redis");
             return result;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _breakerController.MarkRedisFailure();
@@ -357,6 +369,10 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
             return result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -392,6 +408,10 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             _current.SetCurrent("redis");
             return result;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _breakerController.MarkRedisFailure();
@@ -425,6 +445,10 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
             return result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

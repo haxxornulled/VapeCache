@@ -45,8 +45,10 @@ internal sealed class InMemoryReconciliationStore : IRedisReconciliationStore
             TrackedAt = trackedAt
         };
 
-        _pending.AddOrUpdate(key, op, (_, __) => op);
-        return ValueTask.FromResult(true);
+        var inserted = _pending.TryAdd(key, op);
+        if (!inserted)
+            _pending[key] = op;
+        return ValueTask.FromResult(inserted);
     }
 
     public ValueTask<bool> TryUpsertDeleteAsync(string key, DateTimeOffset trackedAt, CancellationToken ct)
@@ -58,8 +60,10 @@ internal sealed class InMemoryReconciliationStore : IRedisReconciliationStore
             TrackedAt = trackedAt
         };
 
-        _pending.AddOrUpdate(key, op, (_, __) => op);
-        return ValueTask.FromResult(true);
+        var inserted = _pending.TryAdd(key, op);
+        if (!inserted)
+            _pending[key] = op;
+        return ValueTask.FromResult(inserted);
     }
 
     public ValueTask<IReadOnlyList<TrackedOperation>> SnapshotAsync(int maxOperations, CancellationToken ct)

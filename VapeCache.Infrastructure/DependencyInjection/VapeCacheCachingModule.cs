@@ -40,7 +40,10 @@ public sealed class VapeCacheCachingModule : Module
         // For Enterprise spill-to-disk, install VapeCache.Persistence package
         builder.RegisterType<NoopSpillStore>().As<IInMemorySpillStore>().SingleInstance();
 
-        builder.RegisterType<RedisCacheService>().AsSelf().SingleInstance();
+        builder.RegisterType<RedisCacheService>()
+            .UsingConstructor(typeof(RedisCommandExecutor), typeof(ICurrentCacheService), typeof(CacheStatsRegistry))
+            .AsSelf()
+            .SingleInstance();
         builder.RegisterType<InMemoryCacheService>().AsSelf().As<ICacheFallbackService>().SingleInstance();
         builder.RegisterType<HybridCacheService>()
             .AsSelf()

@@ -53,13 +53,14 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
 
         try
         {
-            _store.TryUpsertWriteAsync(key, value, now, expiresAt, CancellationToken.None)
+            var inserted = _store.TryUpsertWriteAsync(key, value, now, expiresAt, CancellationToken.None)
                 .GetAwaiter().GetResult();
+            if (inserted)
+                AdjustPendingEstimate(1);
             RedisReconciliationTelemetry.Tracked.Add(1, new KeyValuePair<string, object?>("type", "write"));
         }
         catch (Exception ex)
         {
-            AdjustPendingEstimate(-1);
             _logger.LogWarning(ex, "Failed to persist reconciliation write for key {Key}.", key);
         }
     }
@@ -72,13 +73,14 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         var now = _timeProvider.GetUtcNow();
         try
         {
-            _store.TryUpsertDeleteAsync(key, now, CancellationToken.None)
+            var inserted = _store.TryUpsertDeleteAsync(key, now, CancellationToken.None)
                 .GetAwaiter().GetResult();
+            if (inserted)
+                AdjustPendingEstimate(1);
             RedisReconciliationTelemetry.Tracked.Add(1, new KeyValuePair<string, object?>("type", "delete"));
         }
         catch (Exception ex)
         {
-            AdjustPendingEstimate(-1);
             _logger.LogWarning(ex, "Failed to persist reconciliation delete for key {Key}.", key);
         }
     }
@@ -95,7 +97,6 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
             return false;
         }
 
-        Interlocked.Increment(ref _pendingEstimate);
         return true;
     }
 

@@ -1,13 +1,11 @@
-using System.Text;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Reports;
-using BenchmarkDotNet.Running;
 
 namespace VapeCache.Benchmarks;
 
 /// <summary>
-/// Exports a compact comparison table (SER vs VapeCache) into comparison.md for the same run.
+/// Exports a compact comparison table (StackExchange.Redis vs VapeCache) into comparison.md for the same run.
 /// </summary>
 internal sealed class ComparisonMarkdownExporter : IExporter
 {
@@ -32,54 +30,80 @@ internal sealed class ComparisonMarkdownExporter : IExporter
 
     private static string Build(Summary summary)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("# Redis Client Comparison (SER vs VapeCache)");
-        sb.AppendLine();
-        sb.AppendLine("| Category | Payload | Client | Mean (µs) | Alloc B/op | Gen0/op | Ratio vs Baseline |");
-        sb.AppendLine("|----------|---------|--------|-----------|------------|---------|-------------------|");
+        var samples = ExtractSamples(summary);
+        return ComparisonReport.BuildMarkdown(samples);
+    }
 
+    private static IReadOnlyList<ComparisonSample> ExtractSamples(Summary summary)
+    {
+        var samples = new List<ComparisonSample>(summary.BenchmarksCases.Length);
         foreach (var benchmark in summary.BenchmarksCases)
         {
             var report = summary[benchmark];
-            if (report is null)
+            var stats = report?.ResultStatistics;
+            if (stats is null)
                 continue;
 
-            var stats = report.ResultStatistics;
-            var meanUs = stats is null ? double.NaN : stats.Mean / 1_000.0;
-            var alloc = report.GcStats.GetBytesAllocatedPerOperation(benchmark);
-            var gen0 = report.GcStats.Gen0Collections;
-            var allocText = alloc.ToString();
+            var client = ComparisonReport.DetectClient(benchmark.Descriptor.WorkloadMethod.Name);
+            if (client == ComparisonClient.Unknown)
+                continue;
 
-            var payload = benchmark.Parameters["PayloadBytes"]?.ToString() ?? "";
-            var category = string.Join(",", benchmark.Descriptor.Categories.OrderBy(c => c));
-            var client = benchmark.Descriptor.WorkloadMethodDisplayInfo;
+            var meanUs = stats.Mean / 1_000.0;
+            var alloc = report!.GcStats.GetBytesAllocatedPerOperation(benchmark) ?? 0;
+            var scenario = ResolveScenario(benchmark);
+            var parameters = BuildParameters(benchmark);
 
-            // Find baseline within same category/payload.
-            var baselineCandidate = summary.BenchmarksCases.FirstOrDefault(b =>
-                string.Join(",", b.Descriptor.Categories.OrderBy(c => c)) == category &&
-                Equals(b.Parameters["PayloadBytes"], benchmark.Parameters["PayloadBytes"]) &&
-                (b.Descriptor.WorkloadMethodDisplayInfo.Contains("SER_", StringComparison.OrdinalIgnoreCase) || b.Descriptor.Baseline));
-
-            double? ratio = null;
-            if (baselineCandidate is not null && !ReferenceEquals(baselineCandidate, benchmark))
-            {
-                var baselineReport = summary[baselineCandidate];
-                var baselineMean = baselineReport?.ResultStatistics?.Mean;
-                if (baselineMean is not null && baselineMean > 0)
-                    ratio = (stats?.Mean ?? 0) / baselineMean.Value;
-            }
-
-            sb.Append('|')
-              .Append(category).Append('|')
-              .Append(payload).Append('|')
-              .Append(client).Append('|')
-              .Append(meanUs.ToString("0.00")).Append('|')
-              .Append(allocText).Append('|')
-              .Append(gen0.ToString("0.###")).Append('|')
-              .Append(ratio is null ? "-" : ratio.Value.ToString("0.###")).Append('|')
-              .AppendLine();
+            samples.Add(
+                new ComparisonSample(
+                    Suite: benchmark.Descriptor.Type.Name,
+                    Scenario: scenario,
+                    Parameters: parameters,
+                    Client: client,
+                    MeanMicroseconds: meanUs,
+                    AllocatedBytesPerOperation: alloc));
         }
 
-        return sb.ToString();
+        return samples;
+    }
+
+    private static string ResolveScenario(BenchmarkDotNet.Running.BenchmarkCase benchmark)
+    {
+        var operation = benchmark.Parameters["Operation"]?.ToString();
+        if (!string.IsNullOrWhiteSpace(operation))
+            return operation;
+
+        var firstCategory = benchmark.Descriptor.Categories.FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(firstCategory))
+            return firstCategory;
+
+        var methodName = benchmark.Descriptor.WorkloadMethod.Name;
+        if (methodName.StartsWith("SER_", StringComparison.OrdinalIgnoreCase))
+            return methodName["SER_".Length..];
+        if (methodName.StartsWith("Ours_", StringComparison.OrdinalIgnoreCase))
+            return methodName["Ours_".Length..];
+        if (methodName.StartsWith("StackExchange_", StringComparison.OrdinalIgnoreCase))
+            return methodName["StackExchange_".Length..];
+        if (methodName.StartsWith("VapeCache_", StringComparison.OrdinalIgnoreCase))
+            return methodName["VapeCache_".Length..];
+
+        return methodName;
+    }
+
+    private static string BuildParameters(BenchmarkDotNet.Running.BenchmarkCase benchmark)
+    {
+        if (benchmark.Parameters.Items.Count == 0)
+            return "-";
+
+        var parts = new List<string>(benchmark.Parameters.Items.Count);
+        foreach (var item in benchmark.Parameters.Items)
+        {
+            if (string.Equals(item.Name, "Operation", StringComparison.Ordinal))
+                continue;
+
+            var valueText = item.Value?.ToString() ?? "null";
+            parts.Add($"{item.Name}={valueText}");
+        }
+
+        return parts.Count == 0 ? "-" : string.Join(", ", parts);
     }
 }

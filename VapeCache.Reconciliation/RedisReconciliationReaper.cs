@@ -63,18 +63,20 @@ internal sealed class RedisReconciliationReaper : BackgroundService
             try
             {
                 var pendingBefore = _reconciliationService.PendingOperations;
-
                 if (pendingBefore > 0)
                 {
                     _logger.LogInformation(
                         "RedisReconciliationReaper: Starting reconciliation run. Pending operations: {Pending}",
                         pendingBefore);
+                }
 
-                    await _reconciliationService.ReconcileAsync(stoppingToken).ConfigureAwait(false);
+                // Always attempt reconciliation so persisted operations can be discovered after restart.
+                await _reconciliationService.ReconcileAsync(stoppingToken).ConfigureAwait(false);
 
-                    var pendingAfter = _reconciliationService.PendingOperations;
-                    var processed = pendingBefore - pendingAfter;
-
+                var pendingAfter = _reconciliationService.PendingOperations;
+                if (pendingBefore > 0 || pendingAfter > 0)
+                {
+                    var processed = Math.Max(0, pendingBefore - pendingAfter);
                     _logger.LogInformation(
                         "RedisReconciliationReaper: Reconciliation run completed. Processed: {Processed}, Remaining: {Remaining}",
                         processed,

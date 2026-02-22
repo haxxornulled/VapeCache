@@ -4,8 +4,24 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
-    <InternalsVisibleToAttribute>VapeCache.Reconciliation</InternalsVisibleToAttribute>
+    <IsPackable>true</IsPackable>
+    <PackageId>VapeCache.Licensing</PackageId>
+    <Version>1.0.1</Version>
+    <Authors>VapeCache Contributors</Authors>
+    <Company>VapeCache</Company>
+    <Product>VapeCache.Licensing</Product>
+    <Description>Licensing validation for VapeCache Enterprise features. Internal dependency for VapeCache.Persistence and VapeCache.Reconciliation packages.</Description>
+    <PackageTags>redis;cache;licensing;commercial;enterprise</PackageTags>
+    <PackageLicenseExpression>Proprietary</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://vapecache.com</PackageProjectUrl>
+    <Copyright>Copyright (c) 2025 VapeCache Contributors</Copyright>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="VapeCache.Reconciliation" />
+  </ItemGroup>
 
 </Project>

@@ -13,8 +13,13 @@ dotnet run -c Release
 
 ```bash
 $env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
-dotnet run -c Release --filter *RedisClientStackExchangeBenchmarks*
-dotnet run -c Release --filter *RedisClientVapeCacheBenchmarks*
+dotnet run -c Release --filter *RedisClientHeadToHeadBenchmarks*
+```
+
+Run all head-to-head suites in one command (client/end-to-end/modules) and collect `comparison.md` files:
+
+```bash
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short
 ```
 
 For end-to-end comparisons with fine-grained host options:
@@ -22,8 +27,7 @@ For end-to-end comparisons with fine-grained host options:
 ```bash
 $env:VAPECACHE_REDIS_HOST = "127.0.0.1"
 $env:VAPECACHE_REDIS_PORT = "6379"
-dotnet run -c Release --filter *RedisEndToEndStackExchangeBenchmarks*
-dotnet run -c Release --filter *RedisEndToEndVapeCacheBenchmarks*
+dotnet run -c Release --filter *RedisEndToEndHeadToHeadBenchmarks*
 ```
 
 ### Redis Module Comparisons
@@ -32,8 +36,7 @@ Requires RedisJSON, RediSearch, RedisBloom, and RedisTimeSeries installed on the
 
 ```bash
 $env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
-dotnet run -c Release --filter *RedisModuleStackExchangeBenchmarks*
-dotnet run -c Release --filter *RedisModuleVapeCacheBenchmarks*
+dotnet run -c Release --filter *RedisModuleHeadToHeadBenchmarks*
 ```
 
 ### Recent Comparison Results (net10-wks)
@@ -119,12 +122,9 @@ Validates coalescing behavior and the overhead of stampede protection.
 End-to-end and command-level comparisons against StackExchange.Redis.
 
 **Benchmarks:**
-- `RedisClientStackExchangeBenchmarks` (String/Hash/List/Ping/Module List - SER)
-- `RedisClientVapeCacheBenchmarks` (String/Hash/List/Ping/Module List - VapeCache)
-- `RedisEndToEndStackExchangeBenchmarks` (end-to-end workloads - SER)
-- `RedisEndToEndVapeCacheBenchmarks` (end-to-end workloads - VapeCache)
-- `RedisModuleStackExchangeBenchmarks` (JSON/FT/BF/TS module commands - SER)
-- `RedisModuleVapeCacheBenchmarks` (JSON/FT/BF/TS module commands - VapeCache)
+- `RedisClientHeadToHeadBenchmarks` (String/Hash/List/Ping/Module List with built-in SER baseline)
+- `RedisEndToEndHeadToHeadBenchmarks` (end-to-end workloads with built-in SER baseline)
+- `RedisModuleHeadToHeadBenchmarks` (JSON/FT/BF/TS module commands with built-in SER baseline)
 
 ### 6. Connection Pool + Transport
 
@@ -171,6 +171,8 @@ dotnet run -c Release --exporters html
 # CSV for analysis
 dotnet run -c Release --exporters csv
 ```
+
+Each benchmark run also exports `comparison.md` into the BenchmarkDotNet results folder with per-scenario winners and ratios (`Vape/SER`).
 
 ## Custom Benchmarks
 

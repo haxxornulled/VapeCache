@@ -59,20 +59,27 @@ internal class Program
         var validator = new LicenseValidator(LicenseSecretKey);
         var licenseKey = validator.GenerateLicenseKey(organizationId, expiresAt);
 
-        Console.WriteLine("\n=== ENTERPRISE LICENSE KEY GENERATED ===");
+        Console.WriteLine();
+        Console.WriteLine("=== ENTERPRISE LICENSE KEY GENERATED ===");
         Console.WriteLine($"Tier:         Enterprise");
         Console.WriteLine($"Organization: {organizationId}");
         Console.WriteLine($"Expires:      {expiresAt:yyyy-MM-dd}");
         Console.WriteLine($"Deployments:  Unlimited");
         Console.WriteLine($"Redis Topology: Any (standalone/sentinel/cluster)");
-        Console.WriteLine($"\nLicense Key:\n{licenseKey}");
-        Console.WriteLine("\n=== USAGE ===");
+        Console.WriteLine();
+        Console.WriteLine($"License Key:");
+        Console.WriteLine(licenseKey);
+        Console.WriteLine();
+        Console.WriteLine("=== USAGE ===");
         Console.WriteLine("Add to appsettings.json or set environment variable:");
         Console.WriteLine($"  VAPECACHE_LICENSE_KEY={licenseKey}");
-        Console.WriteLine("\nFor Persistence:");
+        Console.WriteLine();
+        Console.WriteLine("For Persistence:");
         Console.WriteLine($"  services.AddVapeCachePersistence(\"{licenseKey}\");");
-        Console.WriteLine("\nFor Reconciliation:");
+        Console.WriteLine();
+        Console.WriteLine("For Reconciliation:");
         Console.WriteLine($"  services.AddVapeCacheReconciliation(\"{licenseKey}\");");
+        Console.Out.Flush();
     }
 
     private static void ValidateLicenseKey()

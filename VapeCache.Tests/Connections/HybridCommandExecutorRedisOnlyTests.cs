@@ -66,6 +66,29 @@ public sealed class HybridCommandExecutorRedisOnlyTests
         Assert.Equal("PONG", result);
     }
 
+    [Fact]
+    public async Task Get_propagates_user_cancellation()
+    {
+        await using var redis = CreateRedisExecutor();
+        await using var fallback = new InMemoryCommandExecutor();
+        var breaker = new FakeBreaker { Enabled = true, IsOpen = false };
+
+        var hybrid = new HybridCommandExecutor(
+            redis,
+            fallback,
+            breaker,
+            breaker,
+            new CacheStatsRegistry(),
+            new CurrentCacheService(),
+            Options.Create(new RedisCircuitBreakerOptions { Enabled = true }),
+            NullLogger<HybridCommandExecutor>.Instance);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => hybrid.GetAsync("cancel", cts.Token).AsTask());
+    }
+
     private static RedisCommandExecutor CreateRedisExecutor()
     {
         var factory = new NoopConnectionFactory();

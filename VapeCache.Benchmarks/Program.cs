@@ -22,6 +22,15 @@ else if (args.Length > 0 && args[0] == "alloc-profile")
 }
 else
 {
+    var isDiscoveryOrHelpMode = args.Any(static arg =>
+        string.Equals(arg, "--list", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(arg, "-l", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(arg, "--help", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(arg, "-h", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(arg, "--info", StringComparison.OrdinalIgnoreCase));
+
+    var config = new EnterpriseBenchmarkConfig(compactConsole: !isDiscoveryOrHelpMode);
+
     // Normal BenchmarkDotNet mode
-    BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, new EnterpriseBenchmarkConfig());
+    BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
 }

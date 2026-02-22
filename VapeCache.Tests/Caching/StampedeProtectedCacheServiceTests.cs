@@ -70,6 +70,44 @@ public sealed class StampedeProtectedCacheServiceTests
         Assert.Equal(7, ok);
     }
 
+    [Fact]
+    public async Task GetOrSetAsync_releases_lock_when_wait_is_canceled()
+    {
+        var inner = new FakeCache();
+        var svc = new StampedeProtectedCacheService(inner, new TestOptionsMonitor<CacheStampedeOptions>(new CacheStampedeOptions { Enabled = true }));
+
+        static void Serialize(IBufferWriter<byte> w, int v)
+        {
+            var span = w.GetSpan(4);
+            BitConverter.TryWriteBytes(span, v);
+            w.Advance(4);
+        }
+
+        static int Deserialize(ReadOnlySpan<byte> s) => BitConverter.ToInt32(s);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            svc.GetOrSetAsync(
+                "cancel-key",
+                _ => ValueTask.FromResult(42),
+                Serialize,
+                Deserialize,
+                new CacheEntryOptions(TimeSpan.FromMinutes(1)),
+                cts.Token).AsTask());
+
+        var value = await svc.GetOrSetAsync(
+            "cancel-key",
+            _ => ValueTask.FromResult(7),
+            Serialize,
+            Deserialize,
+            new CacheEntryOptions(TimeSpan.FromMinutes(1)),
+            CancellationToken.None);
+
+        Assert.Equal(7, value);
+    }
+
     private sealed class FakeCache : ICacheService
     {
         private readonly Dictionary<string, byte[]> _store = new(StringComparer.Ordinal);
@@ -107,8 +145,17 @@ public sealed class StampedeProtectedCacheServiceTests
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask<T> GetOrSetAsync<T>(string key, Func<CancellationToken, ValueTask<T>> factory, Action<IBufferWriter<byte>, T> serialize,
+        public async ValueTask<T> GetOrSetAsync<T>(string key, Func<CancellationToken, ValueTask<T>> factory, Action<IBufferWriter<byte>, T> serialize,
             SpanDeserializer<T> deserialize, CacheEntryOptions options, CancellationToken ct)
-            => throw new NotSupportedException();
+        {
+            if (_store.TryGetValue(key, out var existing))
+                return deserialize(existing);
+
+            var created = await factory(ct).ConfigureAwait(false);
+            var abw = new ArrayBufferWriter<byte>(64);
+            serialize(abw, created);
+            _store[key] = abw.WrittenSpan.ToArray();
+            return created;
+        }
     }
 }

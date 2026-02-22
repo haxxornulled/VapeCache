@@ -51,4 +51,29 @@ public sealed class InMemoryCacheSpillTests
             try { Directory.Delete(root, recursive: true); } catch { }
         }
     }
+
+    [Fact]
+    public async Task InMemoryCache_DoesNotCreateUnreadableSpillEntries_WithNoopStore()
+    {
+        var options = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions
+        {
+            EnableSpillToDisk = true,
+            SpillThresholdBytes = 16,
+            InlinePrefixBytes = 4
+        });
+
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var current = new CurrentCacheService();
+        var stats = new CacheStatsRegistry();
+        var service = new InMemoryCacheService(cache, current, stats, options, new NoopSpillStore());
+
+        var payload = new byte[64];
+        Random.Shared.NextBytes(payload);
+
+        await service.SetAsync("noop-spill:key", payload, new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None);
+        var fetched = await service.GetAsync("noop-spill:key", CancellationToken.None);
+
+        Assert.NotNull(fetched);
+        Assert.Equal(payload, fetched);
+    }
 }

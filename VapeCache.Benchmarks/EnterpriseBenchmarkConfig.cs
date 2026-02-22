@@ -15,6 +15,11 @@ namespace VapeCache.Benchmarks;
 public sealed class EnterpriseBenchmarkConfig : ManualConfig
 {
     public EnterpriseBenchmarkConfig()
+        : this(compactConsole: true)
+    {
+    }
+
+    public EnterpriseBenchmarkConfig(bool compactConsole)
     {
         WithUnionRule(ConfigUnionRule.AlwaysUseLocal);
         WithOptions(ConfigOptions.DisableLogFile | ConfigOptions.JoinSummary);
@@ -23,7 +28,10 @@ public sealed class EnterpriseBenchmarkConfig : ManualConfig
                 .WithZeroMetricValuesInContent()
                 .WithMaxParameterColumnWidth(48));
 
-        AddLogger(new ResultsOnlyLogger(ConsoleLogger.Default));
+        if (compactConsole)
+            AddLogger(new ResultsOnlyLogger(ConsoleLogger.Default));
+        else
+            AddLogger(ConsoleLogger.Default);
 
         // Do not hard-code a runtime version here.
         // The benchmarks are compiled for the current TargetFramework (net10.0),
@@ -41,7 +49,12 @@ public sealed class EnterpriseBenchmarkConfig : ManualConfig
 
         AddDiagnoser(MemoryDiagnoser.Default);
 
-        AddExporter(CsvExporter.Default, HtmlExporter.Default, MarkdownExporter.GitHub, JsonExporter.FullCompressed);
+        AddExporter(
+            CsvExporter.Default,
+            HtmlExporter.Default,
+            MarkdownExporter.GitHub,
+            JsonExporter.FullCompressed,
+            ComparisonMarkdownExporter.Default);
 
         AddColumnProvider(DefaultColumnProviders.Instance);
         AddLogicalGroupRules(BenchmarkLogicalGroupRule.ByCategory);

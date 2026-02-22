@@ -6,8 +6,8 @@ using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Order;
 using StackExchange.Redis;
-using VapeCache.Abstractions.Connections;
 using VapeCache.Benchmarks;
+using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Benchmarks.Benchmarks;
 
@@ -17,8 +17,18 @@ namespace VapeCache.Benchmarks.Benchmarks;
 [Orderer(SummaryOrderPolicy.FastestToSlowest)]
 [SimpleJob(warmupCount: 3, iterationCount: 12)]
 [BenchmarkCategory("RedisModules")]
-public class RedisModuleStackExchangeBenchmarks
+public class RedisModuleHeadToHeadBenchmarks
 {
+    [Params(
+        RedisModuleOperation.JsonSet,
+        RedisModuleOperation.JsonGet,
+        RedisModuleOperation.FtSearch,
+        RedisModuleOperation.BfAdd,
+        RedisModuleOperation.BfExists,
+        RedisModuleOperation.TsAdd,
+        RedisModuleOperation.TsRange)]
+    public RedisModuleOperation Operation { get; set; }
+
     [Params(128, 1024)]
     public int JsonPayloadChars { get; set; }
 
@@ -26,10 +36,12 @@ public class RedisModuleStackExchangeBenchmarks
 
     private ConnectionMultiplexer? _ser;
     private IDatabase? _db;
+    private RedisCommandExecutor? _executor;
 
     private string _jsonKey = string.Empty;
     private string _searchIndex = string.Empty;
     private string _searchPrefix = string.Empty;
+    private string _docKey = string.Empty;
     private string _bloomKey = string.Empty;
     private string _tsKey = string.Empty;
 
@@ -43,19 +55,20 @@ public class RedisModuleStackExchangeBenchmarks
     public async Task Setup()
     {
         var options = BenchmarkRedisConfig.Load();
+        _ser = await BenchmarkRedisConfig.ConnectStackExchangeAsync(options).ConfigureAwait(false);
+        _db = _ser.GetDatabase(options.Database);
+        _executor = BenchmarkRedisConfig.CreateVapeCacheExecutor(options);
 
         var payload = new string('a', JsonPayloadChars);
         _jsonPayload = Encoding.UTF8.GetBytes($"{{\"name\":\"bench\",\"payload\":\"{payload}\"}}");
 
-        var prefix = "bench:modules:ser:" + Guid.NewGuid().ToString("N");
+        var prefix = "bench:modules:h2h:" + Guid.NewGuid().ToString("N");
         _jsonKey = prefix + ":json";
         _searchIndex = prefix + ":idx";
         _searchPrefix = prefix + ":doc:";
+        _docKey = _searchPrefix + "1";
         _bloomKey = prefix + ":bf";
         _tsKey = prefix + ":ts";
-
-        _ser = await BenchmarkRedisConfig.ConnectStackExchangeAsync(options).ConfigureAwait(false);
-        _db = _ser.GetDatabase(options.Database);
 
         var moduleList = await _db.ExecuteAsync("MODULE", "LIST").ConfigureAwait(false);
         var modules = ParseModuleNames(moduleList);
@@ -77,7 +90,6 @@ public class RedisModuleStackExchangeBenchmarks
         }
 
         await _db.ExecuteAsync("JSON.SET", _jsonKey, ".", _jsonPayload).ConfigureAwait(false);
-
         await _db.ExecuteAsync(
                 "FT.CREATE",
                 _searchIndex,
@@ -85,17 +97,14 @@ public class RedisModuleStackExchangeBenchmarks
                 "PREFIX", 1, _searchPrefix,
                 "SCHEMA", "title", "TEXT", "body", "TEXT")
             .ConfigureAwait(false);
-
-        var docKey = _searchPrefix + "1";
         await _db.HashSetAsync(
-                docKey,
+                _docKey,
                 new[]
                 {
                     new HashEntry("title", "bench"),
                     new HashEntry("body", "bench body text")
                 })
             .ConfigureAwait(false);
-
         await _db.ExecuteAsync("FT.SEARCH", _searchIndex, "*", "LIMIT", 0, 1).ConfigureAwait(false);
 
         Random.Shared.NextBytes(_bloomItem);
@@ -118,66 +127,77 @@ public class RedisModuleStackExchangeBenchmarks
             try { await _db.KeyDeleteAsync(_tsKey).ConfigureAwait(false); } catch { }
         }
 
+        if (_executor is not null)
+            await _executor.DisposeAsync().ConfigureAwait(false);
         _ser?.Dispose();
     }
 
-    [Benchmark]
-    [BenchmarkCategory("JSON.SET")]
-    public async Task SER_JsonSet()
+    [BenchmarkCategory("RedisModuleHeadToHead")]
+    [Benchmark(Baseline = true)]
+    public async Task StackExchange()
     {
-        var result = await _db!.ExecuteAsync("JSON.SET", _jsonKey, ".", _jsonPayload).ConfigureAwait(false);
-        _consumer.Consume(result);
+        switch (Operation)
+        {
+            case RedisModuleOperation.JsonSet:
+                _consumer.Consume(await _db!.ExecuteAsync("JSON.SET", _jsonKey, ".", _jsonPayload).ConfigureAwait(false));
+                break;
+            case RedisModuleOperation.JsonGet:
+                _consumer.Consume(await _db!.ExecuteAsync("JSON.GET", _jsonKey, ".").ConfigureAwait(false));
+                break;
+            case RedisModuleOperation.FtSearch:
+                _consumer.Consume(await _db!.ExecuteAsync("FT.SEARCH", _searchIndex, "*", "LIMIT", 0, 10).ConfigureAwait(false));
+                break;
+            case RedisModuleOperation.BfAdd:
+                NextBloomItem();
+                _consumer.Consume(await _db!.ExecuteAsync("BF.ADD", _bloomKey, _bloomItem).ConfigureAwait(false));
+                break;
+            case RedisModuleOperation.BfExists:
+                _consumer.Consume(await _db!.ExecuteAsync("BF.EXISTS", _bloomKey, _bloomExistsItem).ConfigureAwait(false));
+                break;
+            case RedisModuleOperation.TsAdd:
+                _consumer.Consume(await _db!.ExecuteAsync("TS.ADD", _tsKey, NextTimestamp(), 1).ConfigureAwait(false));
+                break;
+            case RedisModuleOperation.TsRange:
+                var end = Volatile.Read(ref _tsCursor);
+                _consumer.Consume(await _db!.ExecuteAsync("TS.RANGE", _tsKey, end - 1000, end).ConfigureAwait(false));
+                break;
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
     }
 
     [Benchmark]
-    [BenchmarkCategory("JSON.GET")]
-    public async Task SER_JsonGet()
+    [BenchmarkCategory("RedisModuleHeadToHead")]
+    public async Task VapeCache()
     {
-        var result = await _db!.ExecuteAsync("JSON.GET", _jsonKey, ".").ConfigureAwait(false);
-        _consumer.Consume(result);
-    }
-
-    [Benchmark]
-    [BenchmarkCategory("FT.SEARCH")]
-    public async Task SER_FtSearch()
-    {
-        var result = await _db!.ExecuteAsync("FT.SEARCH", _searchIndex, "*", "LIMIT", 0, 10).ConfigureAwait(false);
-        _consumer.Consume(result);
-    }
-
-    [Benchmark]
-    [BenchmarkCategory("BF.ADD")]
-    public async Task SER_BfAdd()
-    {
-        NextBloomItem();
-        var result = await _db!.ExecuteAsync("BF.ADD", _bloomKey, _bloomItem).ConfigureAwait(false);
-        _consumer.Consume(result);
-    }
-
-    [Benchmark]
-    [BenchmarkCategory("BF.EXISTS")]
-    public async Task SER_BfExists()
-    {
-        var result = await _db!.ExecuteAsync("BF.EXISTS", _bloomKey, _bloomExistsItem).ConfigureAwait(false);
-        _consumer.Consume(result);
-    }
-
-    [Benchmark]
-    [BenchmarkCategory("TS.ADD")]
-    public async Task SER_TsAdd()
-    {
-        var ts = NextTimestamp();
-        var result = await _db!.ExecuteAsync("TS.ADD", _tsKey, ts, 1).ConfigureAwait(false);
-        _consumer.Consume(result);
-    }
-
-    [Benchmark]
-    [BenchmarkCategory("TS.RANGE")]
-    public async Task SER_TsRange()
-    {
-        var end = Volatile.Read(ref _tsCursor);
-        var result = await _db!.ExecuteAsync("TS.RANGE", _tsKey, end - 1000, end).ConfigureAwait(false);
-        _consumer.Consume(result);
+        switch (Operation)
+        {
+            case RedisModuleOperation.JsonSet:
+                _consumer.Consume(await _executor!.JsonSetAsync(_jsonKey, ".", _jsonPayload, CancellationToken.None).ConfigureAwait(false));
+                break;
+            case RedisModuleOperation.JsonGet:
+                _consumer.Consume((await _executor!.JsonGetAsync(_jsonKey, ".", CancellationToken.None).ConfigureAwait(false))?.Length ?? 0);
+                break;
+            case RedisModuleOperation.FtSearch:
+                _consumer.Consume((await _executor!.FtSearchAsync(_searchIndex, "*", 0, 10, CancellationToken.None).ConfigureAwait(false)).Length);
+                break;
+            case RedisModuleOperation.BfAdd:
+                NextBloomItem();
+                _consumer.Consume(await _executor!.BfAddAsync(_bloomKey, _bloomItem, CancellationToken.None).ConfigureAwait(false));
+                break;
+            case RedisModuleOperation.BfExists:
+                _consumer.Consume(await _executor!.BfExistsAsync(_bloomKey, _bloomExistsItem, CancellationToken.None).ConfigureAwait(false));
+                break;
+            case RedisModuleOperation.TsAdd:
+                _consumer.Consume(await _executor!.TsAddAsync(_tsKey, NextTimestamp(), 1, CancellationToken.None).ConfigureAwait(false));
+                break;
+            case RedisModuleOperation.TsRange:
+                var end = Volatile.Read(ref _tsCursor);
+                _consumer.Consume((await _executor!.TsRangeAsync(_tsKey, end - 1000, end, CancellationToken.None).ConfigureAwait(false)).Length);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
     }
 
     private void NextBloomItem()
@@ -186,8 +206,7 @@ public class RedisModuleStackExchangeBenchmarks
         BinaryPrimitives.WriteInt64LittleEndian(_bloomItem.AsSpan(0, 8), next);
     }
 
-    private long NextTimestamp()
-        => Interlocked.Increment(ref _tsCursor);
+    private long NextTimestamp() => Interlocked.Increment(ref _tsCursor);
 
     private static bool HasModule(string[] modules, params string[] names)
         => modules.Any(module => names.Any(name => string.Equals(module, name, StringComparison.OrdinalIgnoreCase)));
@@ -240,5 +259,16 @@ public class RedisModuleStackExchangeBenchmarks
         }
 
         return names.ToArray();
+    }
+
+    public enum RedisModuleOperation
+    {
+        JsonSet,
+        JsonGet,
+        FtSearch,
+        BfAdd,
+        BfExists,
+        TsAdd,
+        TsRange
     }
 }
