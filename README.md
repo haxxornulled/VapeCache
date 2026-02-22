@@ -9,6 +9,61 @@
 
 ---
 
+## 🚀 TL;DR Quick Start (For Impatient Humans)
+
+If you just want it running right now:
+
+### 1. Run Redis
+
+```bash
+docker run --name vapecache-redis -p 6379:6379 -d redis:7
+```
+
+### 2. Install Package
+
+```bash
+dotnet add package VapeCache
+```
+
+### 3. Add Minimal Config (`appsettings.json`)
+
+```json
+{
+  "RedisConnection": {
+    "Host": "localhost",
+    "Port": 6379,
+    "Database": 0
+  }
+}
+```
+
+### 4. Register VapeCache (`Program.cs`)
+
+```csharp
+builder.Services.AddVapecacheRedisConnections();
+builder.Services.AddVapecacheCaching();
+```
+
+### 5. Use It
+
+```csharp
+public sealed class PingService(ICacheService cache)
+{
+    public Task<string?> GetAsync(CancellationToken ct) =>
+        cache.GetOrSetAsync(
+            "demo:ping",
+            _ => Task.FromResult("pong"),
+            (writer, value) => JsonSerializer.Serialize(writer, value),
+            bytes => JsonSerializer.Deserialize<string>(bytes),
+            new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(1)),
+            ct);
+}
+```
+
+Need the full setup, enterprise features, and tuning knobs? Jump to [📦 Quick Start](#-quick-start) below.
+
+---
+
 ## ⚡ Why VapeCache Over StackExchange.Redis?
 
 VapeCache is a **from-scratch Redis client** optimized for **caching workloads** with architectural innovations that deliver measurable performance and reliability improvements.
