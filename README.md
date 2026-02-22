@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/vapecache-brand.png" alt="VapeCache logo" width="920" />
+</p>
+
 # VapeCache
 
 **Enterprise-grade Redis caching library for .NET 10** with hybrid fallback, circuit breaker, and production observability.
