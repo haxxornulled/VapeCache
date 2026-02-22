@@ -1,0 +1,22 @@
+VapeCache Enterprise License
+Copyright (c) 2026 HaxxorNulled
+
+This software is licensed, not sold.
+
+The following packages are distributed under this commercial license:
+- VapeCache.Licensing
+- VapeCache.Persistence
+- VapeCache.Reconciliation
+
+Use of these packages requires a valid paid or trial enterprise license
+issued by HaxxorNulled / VapeCache.
+
+You may not:
+- redistribute these packages except as permitted by your subscription terms,
+- remove or bypass licensing or entitlement controls,
+- reverse engineer for the purpose of creating a competing product.
+
+All rights not expressly granted are reserved.
+
+For enterprise terms and support details, contact:
+https://vapecache.com
