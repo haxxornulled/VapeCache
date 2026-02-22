@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 using StackExchange.Redis;
@@ -71,7 +72,28 @@ public static class ComparisonRunner
                 typeof(VapeCache.Abstractions.Connections.RedisConnectionOptions)
                     .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.LogWhoAmIOnConnect))!
                     .SetValue(options, false);
+                typeof(VapeCache.Abstractions.Connections.RedisConnectionOptions)
+                    .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.MaxConnections))!
+                    .SetValue(options, 128);
+                typeof(VapeCache.Abstractions.Connections.RedisConnectionOptions)
+                    .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.MaxIdle))!
+                    .SetValue(options, 128);
+                typeof(VapeCache.Abstractions.Connections.RedisConnectionOptions)
+                    .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.Warm))!
+                    .SetValue(options, 32);
             });
+        services.AddOptions<RedisCircuitBreakerOptions>().Configure(options =>
+        {
+            typeof(RedisCircuitBreakerOptions)
+                .GetProperty(nameof(RedisCircuitBreakerOptions.Enabled))!
+                .SetValue(options, false);
+        });
+        services.AddOptions<CacheStampedeOptions>().Configure(options =>
+        {
+            typeof(CacheStampedeOptions)
+                .GetProperty(nameof(CacheStampedeOptions.Enabled))!
+                .SetValue(options, false);
+        });
 
         services.AddVapecacheRedisConnections();
         services.AddVapecacheCaching();

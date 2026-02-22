@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
@@ -16,10 +17,15 @@ public class GroceryStoreService : IGroceryStoreService
     private readonly IVapeCache _cache;
     private readonly IRedisCommandExecutor _executor;
     private readonly ILogger<GroceryStoreService> _logger;
+    private readonly ICacheHash<UserSession> _sessions;
+    private readonly ConcurrentDictionary<string, ICacheList<CartItem>> _cartLists = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ICacheSet<string>> _flashSaleParticipants = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ICacheList<InventoryUpdate>> _inventoryUpdates = new(StringComparer.Ordinal);
 
     // Pre-defined product catalog
     private static readonly Product[] Products = GenerateProducts();
     private static readonly IReadOnlyDictionary<string, Product> ProductsById = BuildProductMap(Products);
+    private static readonly IReadOnlyDictionary<string, CacheKey<Product>> ProductCacheKeys = BuildProductCacheKeyMap(Products);
 
     public GroceryStoreService(
         ICacheCollectionFactory collections,
@@ -31,6 +37,7 @@ public class GroceryStoreService : IGroceryStoreService
         _cache = cache;
         _executor = executor;
         _logger = logger;
+        _sessions = _collections.Hash<UserSession>("sessions:active");
     }
 
     // ========== Shopping Cart Operations (LIST) ==========
@@ -40,7 +47,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task AddToCartAsync(string userId, CartItem item)
     {
-        var cart = _collections.List<CartItem>($"cart:{userId}");
+        var cart = GetCartList(userId);
         await cart.PushFrontAsync(item);  // Most recent items first
         if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("Added {Product} to cart for user {UserId}", item.ProductName, userId);
@@ -51,7 +58,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task<CartItem?> RemoveFromCartAsync(string userId)
     {
-        var cart = _collections.List<CartItem>($"cart:{userId}");
+        var cart = GetCartList(userId);
         var removed = await cart.PopBackAsync();
         if (removed != null && _logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("Removed {Product} from cart for user {UserId}", removed.ProductName, userId);
@@ -63,7 +70,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task<CartItem[]> GetCartAsync(string userId)
     {
-        var cart = _collections.List<CartItem>($"cart:{userId}");
+        var cart = GetCartList(userId);
         return await cart.RangeAsync(0, -1);  // Get all items
     }
 
@@ -72,7 +79,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task<long> GetCartCountAsync(string userId)
     {
-        var cart = _collections.List<CartItem>($"cart:{userId}");
+        var cart = GetCartList(userId);
         return await cart.LengthAsync();
     }
 
@@ -81,9 +88,14 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task ClearCartAsync(string userId)
     {
-        var cartKey = $"cart:{userId}";
-        var cart = _collections.List<CartItem>(cartKey);
-        var count = await cart.LengthAsync();
+        var cart = GetCartList(userId);
+        var cartKey = cart.Key;
+        long count = 0;
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            count = await cart.LengthAsync();
+        }
+
         await _executor.DeleteAsync(cartKey, CancellationToken.None);
         if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("Cleared {Count} items from cart for user {UserId}", count, userId);
@@ -96,7 +108,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task JoinFlashSaleAsync(string saleId, string userId)
     {
-        var participants = _collections.Set<string>($"sale:{saleId}:participants");
+        var participants = GetFlashSaleParticipantsSet(saleId);
         var added = await participants.AddAsync(userId);
         if (added > 0 && _logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("User {UserId} joined flash sale {SaleId}", userId, saleId);
@@ -107,7 +119,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task<bool> IsInFlashSaleAsync(string saleId, string userId)
     {
-        var participants = _collections.Set<string>($"sale:{saleId}:participants");
+        var participants = GetFlashSaleParticipantsSet(saleId);
         return await participants.ContainsAsync(userId);
     }
 
@@ -116,7 +128,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task<string[]> GetFlashSaleParticipantsAsync(string saleId)
     {
-        var participants = _collections.Set<string>($"sale:{saleId}:participants");
+        var participants = GetFlashSaleParticipantsSet(saleId);
         return await participants.MembersAsync();
     }
 
@@ -125,7 +137,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task<long> GetFlashSaleParticipantCountAsync(string saleId)
     {
-        var participants = _collections.Set<string>($"sale:{saleId}:participants");
+        var participants = GetFlashSaleParticipantsSet(saleId);
         return await participants.CountAsync();
     }
 
@@ -134,7 +146,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task<bool> LeaveFlashSaleAsync(string saleId, string userId)
     {
-        var participants = _collections.Set<string>($"sale:{saleId}:participants");
+        var participants = GetFlashSaleParticipantsSet(saleId);
         var removed = await participants.RemoveAsync(userId);
         if (removed > 0 && _logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("User {UserId} left flash sale {SaleId}", userId, saleId);
@@ -148,8 +160,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task SaveSessionAsync(string sessionId, UserSession session)
     {
-        var sessions = _collections.Hash<UserSession>("sessions:active");
-        await sessions.SetAsync(sessionId, session);
+        await _sessions.SetAsync(sessionId, session);
         if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("Saved session {SessionId} for user {UserId}", sessionId, session.UserId);
     }
@@ -159,8 +170,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task<UserSession?> GetSessionAsync(string sessionId)
     {
-        var sessions = _collections.Hash<UserSession>("sessions:active");
-        return await sessions.GetAsync(sessionId);
+        return await _sessions.GetAsync(sessionId);
     }
 
     /// <summary>
@@ -168,8 +178,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task<UserSession?[]> GetSessionsAsync(params string[] sessionIds)
     {
-        var sessions = _collections.Hash<UserSession>("sessions:active");
-        return await sessions.GetManyAsync(sessionIds);
+        return await _sessions.GetManyAsync(sessionIds);
     }
 
     // ========== Product Inventory (Simple Cache) ==========
@@ -179,7 +188,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task<Product?> GetProductAsync(string productId)
     {
-        var key = new CacheKey<Product>($"product:{productId}");
+        var key = ResolveProductCacheKey(productId);
         var product = await _cache.GetAsync(key);
         if (product != null) return product;
 
@@ -202,7 +211,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task CacheProductAsync(Product product, TimeSpan ttl)
     {
-        var key = new CacheKey<Product>($"product:{product.Id}");
+        var key = ResolveProductCacheKey(product.Id);
         await _cache.SetAsync(key, product, new CacheEntryOptions { Ttl = ttl });
         if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("Cached product {ProductId} with TTL {Ttl}", product.Id, ttl);
@@ -221,7 +230,7 @@ public class GroceryStoreService : IGroceryStoreService
         await _cache.SetAsync(key, updated, new CacheEntryOptions { Ttl = TimeSpan.FromMinutes(10) });
 
         // Track inventory updates
-        var updates = _collections.List<InventoryUpdate>($"inventory:updates:{productId}");
+        var updates = GetInventoryUpdatesList(productId);
         await updates.PushFrontAsync(new InventoryUpdate(
             productId,
             product.StockQuantity,
@@ -238,7 +247,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// </summary>
     public async Task<InventoryUpdate[]> GetInventoryHistoryAsync(string productId, int limit = 10)
     {
-        var updates = _collections.List<InventoryUpdate>($"inventory:updates:{productId}");
+        var updates = GetInventoryUpdatesList(productId);
         return await updates.RangeAsync(0, limit - 1);
     }
 
@@ -337,6 +346,39 @@ public class GroceryStoreService : IGroceryStoreService
         }
 
         return map;
+    }
+
+    private static IReadOnlyDictionary<string, CacheKey<Product>> BuildProductCacheKeyMap(Product[] products)
+    {
+        var map = new Dictionary<string, CacheKey<Product>>(products.Length, StringComparer.Ordinal);
+        foreach (var product in products)
+        {
+            map[product.Id] = new CacheKey<Product>($"product:{product.Id}");
+        }
+
+        return map;
+    }
+
+    private CacheKey<Product> ResolveProductCacheKey(string productId)
+    {
+        return ProductCacheKeys.TryGetValue(productId, out var key)
+            ? key
+            : new CacheKey<Product>($"product:{productId}");
+    }
+
+    private ICacheList<CartItem> GetCartList(string userId)
+    {
+        return _cartLists.GetOrAdd(userId, static (uid, factory) => factory.List<CartItem>($"cart:{uid}"), _collections);
+    }
+
+    private ICacheSet<string> GetFlashSaleParticipantsSet(string saleId)
+    {
+        return _flashSaleParticipants.GetOrAdd(saleId, static (id, factory) => factory.Set<string>($"sale:{id}:participants"), _collections);
+    }
+
+    private ICacheList<InventoryUpdate> GetInventoryUpdatesList(string productId)
+    {
+        return _inventoryUpdates.GetOrAdd(productId, static (id, factory) => factory.List<InventoryUpdate>($"inventory:updates:{id}"), _collections);
     }
 
     public static Product[] GetAllProducts() => Products;
