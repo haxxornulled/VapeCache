@@ -75,21 +75,11 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
         var key = $"cart:{userId}";
         var packedItems = ArrayPool<byte>.Shared.Rent(items.Count * CompactCartItemBytes);
         var payloads = ArrayPool<ReadOnlyMemory<byte>>.Shared.Rent(items.Count);
-        try
+        for (var i = 0; i < items.Count; i++)
         {
-            for (var i = 0; i < items.Count; i++)
-            {
-                var offset = i * CompactCartItemBytes;
-                WriteCompactCartItem(items[i], packedItems.AsSpan(offset, CompactCartItemBytes));
-                payloads[i] = packedItems.AsMemory(offset, CompactCartItemBytes);
-            }
-
-            await _redis.RPushManyAsync(key, payloads, items.Count, CancellationToken.None).ConfigureAwait(false);
-            return;
-        }
-        catch (NotSupportedException)
-        {
-            // Compatibility fallback for executors that haven't implemented multi-value RPUSH.
+            var offset = i * CompactCartItemBytes;
+            WriteCompactCartItem(items[i], packedItems.AsSpan(offset, CompactCartItemBytes));
+            payloads[i] = packedItems.AsMemory(offset, CompactCartItemBytes);
         }
         try
         {
