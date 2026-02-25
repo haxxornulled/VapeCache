@@ -27,6 +27,20 @@ public sealed class GroceryStoreComparisonStressTestTests
         Assert.True(result.P99LatencyMs >= result.P95LatencyMs);
     }
 
+    [Fact]
+    public async Task RunStressTestAsync_prefers_batch_writer_when_available()
+    {
+        var service = new BatchCapableFakeService();
+        var sut = new GroceryStoreComparisonStressTest(service, NullLogger<GroceryStoreComparisonStressTest>.Instance, "VapeCache");
+
+        var result = await sut.RunStressTestAsync(shopperCount: 20, maxCartSize: 15);
+
+        Assert.Equal(20, result.SuccessCount);
+        Assert.Equal(20, service.BatchCalls);
+        Assert.Equal(0, service.SingleItemCalls);
+        Assert.Equal(300, service.BatchedItemCount);
+    }
+
     private sealed class Harness : IAsyncDisposable
     {
         private readonly InMemoryCommandExecutor _executor;
@@ -54,7 +68,7 @@ public sealed class GroceryStoreComparisonStressTestTests
             var cacheService = new InMemoryCacheService(memory, current, stats, spillOptions, new NoopSpillStore());
             var client = new VapeCacheClient(cacheService, codecs);
 
-            var service = new GroceryStoreService(collections, client, NullLogger<GroceryStoreService>.Instance);
+            var service = new GroceryStoreService(collections, client, executor, NullLogger<GroceryStoreService>.Instance);
             return new Harness(service, executor, memory);
         }
 
@@ -62,6 +76,106 @@ public sealed class GroceryStoreComparisonStressTestTests
         {
             _memoryCache.Dispose();
             await _executor.DisposeAsync();
+        }
+    }
+
+    private sealed class BatchCapableFakeService : IGroceryStoreService, ICartBatchWriter
+    {
+        private readonly Dictionary<string, CartItem[]> _carts = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _flashSales = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, UserSession> _sessions = new(StringComparer.Ordinal);
+
+        public int BatchCalls;
+        public int SingleItemCalls;
+        public int BatchedItemCount;
+
+        public ValueTask<Product?> GetProductAsync(string productId)
+            => ValueTask.FromResult<Product?>(new Product(productId, "name", "cat", 1m, 1, "/"));
+
+        public ValueTask CacheProductAsync(Product product, TimeSpan ttl) => ValueTask.CompletedTask;
+
+        public ValueTask AddToCartAsync(string userId, CartItem item)
+        {
+            Interlocked.Increment(ref SingleItemCalls);
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items)
+        {
+            Interlocked.Increment(ref BatchCalls);
+            Interlocked.Add(ref BatchedItemCount, items.Count);
+            lock (_carts)
+            {
+                _carts[userId] = items.ToArray();
+            }
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<CartItem[]> GetCartAsync(string userId)
+        {
+            lock (_carts)
+            {
+                return ValueTask.FromResult(_carts.TryGetValue(userId, out var items) ? items : Array.Empty<CartItem>());
+            }
+        }
+
+        public ValueTask<long> GetCartCountAsync(string userId)
+        {
+            lock (_carts)
+            {
+                return ValueTask.FromResult(_carts.TryGetValue(userId, out var items) ? (long)items.Length : 0L);
+            }
+        }
+
+        public ValueTask ClearCartAsync(string userId)
+        {
+            lock (_carts)
+            {
+                _carts.Remove(userId);
+            }
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask JoinFlashSaleAsync(string saleId, string userId)
+        {
+            lock (_flashSales)
+            {
+                _flashSales.Add($"{saleId}:{userId}");
+            }
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId)
+        {
+            lock (_flashSales)
+            {
+                return ValueTask.FromResult(_flashSales.Contains($"{saleId}:{userId}"));
+            }
+        }
+
+        public ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId)
+        {
+            lock (_flashSales)
+            {
+                return ValueTask.FromResult((long)_flashSales.Count(entry => entry.StartsWith($"{saleId}:", StringComparison.Ordinal)));
+            }
+        }
+
+        public ValueTask SaveSessionAsync(string sessionId, UserSession session)
+        {
+            lock (_sessions)
+            {
+                _sessions[sessionId] = session;
+            }
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<UserSession?> GetSessionAsync(string sessionId)
+        {
+            lock (_sessions)
+            {
+                return ValueTask.FromResult(_sessions.TryGetValue(sessionId, out var session) ? session : null);
+            }
         }
     }
 }

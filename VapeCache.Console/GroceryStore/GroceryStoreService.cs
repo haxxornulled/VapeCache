@@ -33,7 +33,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// <summary>
     /// Add item to user's shopping cart (LPUSH)
     /// </summary>
-    public async Task AddToCartAsync(string userId, CartItem item)
+    public async ValueTask AddToCartAsync(string userId, CartItem item)
     {
         var cart = _collections.List<CartItem>($"cart:{userId}");
         await cart.PushFrontAsync(item);  // Most recent items first
@@ -55,7 +55,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// <summary>
     /// Get current cart items (LRANGE)
     /// </summary>
-    public async Task<CartItem[]> GetCartAsync(string userId)
+    public async ValueTask<CartItem[]> GetCartAsync(string userId)
     {
         var cart = _collections.List<CartItem>($"cart:{userId}");
         return await cart.RangeAsync(0, -1);  // Get all items
@@ -64,7 +64,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// <summary>
     /// Get cart item count (LLEN)
     /// </summary>
-    public async Task<long> GetCartCountAsync(string userId)
+    public async ValueTask<long> GetCartCountAsync(string userId)
     {
         var cart = _collections.List<CartItem>($"cart:{userId}");
         return await cart.LengthAsync();
@@ -73,7 +73,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// <summary>
     /// Clear cart (pop all items)
     /// </summary>
-    public async Task ClearCartAsync(string userId)
+    public async ValueTask ClearCartAsync(string userId)
     {
         var cart = _collections.List<CartItem>($"cart:{userId}");
         var count = 0;
@@ -87,7 +87,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// <summary>
     /// User joins flash sale (SADD - idempotent)
     /// </summary>
-    public async Task JoinFlashSaleAsync(string saleId, string userId)
+    public async ValueTask JoinFlashSaleAsync(string saleId, string userId)
     {
         var participants = _collections.Set<string>($"sale:{saleId}:participants");
         var added = await participants.AddAsync(userId);
@@ -98,7 +98,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// <summary>
     /// Check if user is in flash sale (SISMEMBER - O(1))
     /// </summary>
-    public async Task<bool> IsInFlashSaleAsync(string saleId, string userId)
+    public async ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId)
     {
         var participants = _collections.Set<string>($"sale:{saleId}:participants");
         return await participants.ContainsAsync(userId);
@@ -116,7 +116,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// <summary>
     /// Get participant count (SCARD)
     /// </summary>
-    public async Task<long> GetFlashSaleParticipantCountAsync(string saleId)
+    public async ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId)
     {
         var participants = _collections.Set<string>($"sale:{saleId}:participants");
         return await participants.CountAsync();
@@ -139,7 +139,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// <summary>
     /// Save user session (HSET)
     /// </summary>
-    public async Task SaveSessionAsync(string sessionId, UserSession session)
+    public async ValueTask SaveSessionAsync(string sessionId, UserSession session)
     {
         var sessions = _collections.Hash<UserSession>("sessions:active");
         await sessions.SetAsync(sessionId, session);
@@ -149,7 +149,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// <summary>
     /// Get user session (HGET)
     /// </summary>
-    public async Task<UserSession?> GetSessionAsync(string sessionId)
+    public async ValueTask<UserSession?> GetSessionAsync(string sessionId)
     {
         var sessions = _collections.Hash<UserSession>("sessions:active");
         return await sessions.GetAsync(sessionId);
@@ -169,7 +169,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// <summary>
     /// Get product by ID (with cache-aside pattern)
     /// </summary>
-    public async Task<Product?> GetProductAsync(string productId)
+    public async ValueTask<Product?> GetProductAsync(string productId)
     {
         var key = new CacheKey<Product>($"product:{productId}");
         var product = await _cache.GetAsync(key);
@@ -189,7 +189,7 @@ public class GroceryStoreService : IGroceryStoreService
     /// <summary>
     /// Cache a product with TTL (IGroceryStoreService interface)
     /// </summary>
-    public async Task CacheProductAsync(Product product, TimeSpan ttl)
+    public async ValueTask CacheProductAsync(Product product, TimeSpan ttl)
     {
         var key = new CacheKey<Product>($"product:{product.Id}");
         await _cache.SetAsync(key, product, new CacheEntryOptions { Ttl = ttl });

@@ -17,12 +17,17 @@ public sealed class ComparisonRunnerFormattingTests
             TotalDuration: TimeSpan.FromSeconds(10),
             ShopperDuration: TimeSpan.FromSeconds(8),
             PreCacheDuration: TimeSpan.FromMilliseconds(50),
-            AverageCartSize: 20,
-            AverageLatencyMs: 1.2,
-            P50LatencyMs: 1.0,
-            P95LatencyMs: 2.2,
-            P99LatencyMs: 3.1,
-            ThroughputShoppersPerSec: 1_250);
+            AverageCartSize: 20m,
+            AverageLatencyMs: 1.2m,
+            P50LatencyMs: 1.0m,
+            P95LatencyMs: 2.2m,
+            P99LatencyMs: 3.1m,
+            P999LatencyMs: 4.1m,
+            ThroughputShoppersPerSec: 1_250m,
+            AllocatedBytes: 1_000_000,
+            Gen0Collections: 1,
+            Gen1Collections: 0,
+            Gen2Collections: 0);
 
         var ser = new StressTestResult(
             ProviderName: "StackExchange.Redis",
@@ -32,12 +37,17 @@ public sealed class ComparisonRunnerFormattingTests
             TotalDuration: TimeSpan.FromSeconds(12),
             ShopperDuration: TimeSpan.FromSeconds(10),
             PreCacheDuration: TimeSpan.FromMilliseconds(80),
-            AverageCartSize: 20,
-            AverageLatencyMs: 2.0,
-            P50LatencyMs: 1.8,
-            P95LatencyMs: 3.0,
-            P99LatencyMs: 4.5,
-            ThroughputShoppersPerSec: 1_000);
+            AverageCartSize: 20m,
+            AverageLatencyMs: 2.0m,
+            P50LatencyMs: 1.8m,
+            P95LatencyMs: 3.0m,
+            P99LatencyMs: 4.5m,
+            P999LatencyMs: 6.4m,
+            ThroughputShoppersPerSec: 1_000m,
+            AllocatedBytes: 2_000_000,
+            Gen0Collections: 2,
+            Gen1Collections: 1,
+            Gen2Collections: 0);
 
         var previousOut = System.Console.Out;
         try
@@ -69,7 +79,7 @@ public sealed class ComparisonRunnerFormattingTests
             using var output = new StringWriter();
             System.Console.SetOut(output);
 
-            InvokePrivate(nameof(ComparisonRunner), "PrintMetric", "Metric", 100d, 90d, higher);
+            InvokePrivate(nameof(ComparisonRunner), "PrintMetric", "Metric", 100m, 90m, higher);
 
             var text = output.ToString();
             Assert.Contains("Metric", text);
