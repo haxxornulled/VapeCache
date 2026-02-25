@@ -7,75 +7,105 @@ namespace VapeCache.Console.GroceryStore;
 /// StackExchange.Redis implementation of grocery store operations.
 /// Used for head-to-head comparison with VapeCache.
 /// </summary>
-public class StackExchangeRedisGroceryStoreService : IGroceryStoreService
+public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICartBatchWriter
 {
     private readonly IDatabase _db;
-    private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly GroceryStoreJsonContext JsonContext = new(new());
 
     public StackExchangeRedisGroceryStoreService(IConnectionMultiplexer redis)
     {
         _db = redis.GetDatabase();
     }
 
-    public async Task<Product?> GetProductAsync(string productId)
+    public async ValueTask<Product?> GetProductAsync(string productId)
     {
-        var json = await _db.StringGetAsync($"product:{productId}");
-        return json.HasValue ? JsonSerializer.Deserialize<Product>((string)json!) : null;
+        var value = await _db.StringGetAsync($"product:{productId}");
+        if (!value.HasValue)
+            return null;
+        return JsonSerializer.Deserialize((byte[])value!, JsonContext.Product);
     }
 
-    public async Task CacheProductAsync(Product product, TimeSpan ttl)
+    public ValueTask CacheProductAsync(Product product, TimeSpan ttl)
     {
-        var json = JsonSerializer.Serialize(product, _jsonOptions);
-        await _db.StringSetAsync($"product:{product.Id}", json, ttl);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(product, JsonContext.Product);
+        return new ValueTask(_db.StringSetAsync($"product:{product.Id}", payload, ttl));
     }
 
-    public async Task AddToCartAsync(string userId, CartItem item)
+    public ValueTask AddToCartAsync(string userId, CartItem item)
     {
-        var json = JsonSerializer.Serialize(item, _jsonOptions);
-        await _db.ListRightPushAsync($"cart:{userId}", json);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(item, JsonContext.CartItem);
+        return new ValueTask(_db.ListRightPushAsync($"cart:{userId}", payload));
     }
 
-    public async Task<CartItem[]> GetCartAsync(string userId)
+    public async ValueTask AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items)
+    {
+        if (items.Count == 0)
+            return;
+
+        var batch = _db.CreateBatch();
+        var key = $"cart:{userId}";
+        var tasks = new Task<long>[items.Count];
+        for (var i = 0; i < items.Count; i++)
+        {
+            var payload = JsonSerializer.SerializeToUtf8Bytes(items[i], JsonContext.CartItem);
+            tasks[i] = batch.ListRightPushAsync(key, payload);
+        }
+
+        batch.Execute();
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+    }
+
+    public async ValueTask<CartItem[]> GetCartAsync(string userId)
     {
         var values = await _db.ListRangeAsync($"cart:{userId}");
-        return values.Select(v => JsonSerializer.Deserialize<CartItem>((string)v!)!).ToArray();
+        if (values.Length == 0)
+            return Array.Empty<CartItem>();
+
+        var items = new CartItem[values.Length];
+        for (var i = 0; i < values.Length; i++)
+        {
+            items[i] = JsonSerializer.Deserialize((byte[])values[i]!, JsonContext.CartItem)!;
+        }
+        return items;
     }
 
-    public async Task<long> GetCartCountAsync(string userId)
+    public ValueTask<long> GetCartCountAsync(string userId)
     {
-        return await _db.ListLengthAsync($"cart:{userId}");
+        return new ValueTask<long>(_db.ListLengthAsync($"cart:{userId}"));
     }
 
-    public async Task ClearCartAsync(string userId)
+    public ValueTask ClearCartAsync(string userId)
     {
-        await _db.KeyDeleteAsync($"cart:{userId}");
+        return new ValueTask(_db.KeyDeleteAsync($"cart:{userId}"));
     }
 
-    public async Task JoinFlashSaleAsync(string saleId, string userId)
+    public ValueTask JoinFlashSaleAsync(string saleId, string userId)
     {
-        await _db.SetAddAsync($"sale:{saleId}:participants", userId);
+        return new ValueTask(_db.SetAddAsync($"sale:{saleId}:participants", userId));
     }
 
-    public async Task<bool> IsInFlashSaleAsync(string saleId, string userId)
+    public ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId)
     {
-        return await _db.SetContainsAsync($"sale:{saleId}:participants", userId);
+        return new ValueTask<bool>(_db.SetContainsAsync($"sale:{saleId}:participants", userId));
     }
 
-    public async Task<long> GetFlashSaleParticipantCountAsync(string saleId)
+    public ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId)
     {
-        return await _db.SetLengthAsync($"sale:{saleId}:participants");
+        return new ValueTask<long>(_db.SetLengthAsync($"sale:{saleId}:participants"));
     }
 
-    public async Task SaveSessionAsync(string sessionId, UserSession session)
+    public ValueTask SaveSessionAsync(string sessionId, UserSession session)
     {
-        var json = JsonSerializer.Serialize(session, _jsonOptions);
-        await _db.StringSetAsync($"session:{sessionId}", json, TimeSpan.FromHours(1));
+        var payload = JsonSerializer.SerializeToUtf8Bytes(session, JsonContext.UserSession);
+        return new ValueTask(_db.StringSetAsync($"session:{sessionId}", payload, TimeSpan.FromHours(1)));
     }
 
-    public async Task<UserSession?> GetSessionAsync(string sessionId)
+    public async ValueTask<UserSession?> GetSessionAsync(string sessionId)
     {
-        var json = await _db.StringGetAsync($"session:{sessionId}");
-        return json.HasValue ? JsonSerializer.Deserialize<UserSession>((string)json!) : null;
+        var value = await _db.StringGetAsync($"session:{sessionId}");
+        if (!value.HasValue)
+            return null;
+        return JsonSerializer.Deserialize((byte[])value!, JsonContext.UserSession);
     }
 }
 
@@ -84,17 +114,17 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService
 /// </summary>
 public interface IGroceryStoreService
 {
-    Task<Product?> GetProductAsync(string productId);
-    Task CacheProductAsync(Product product, TimeSpan ttl);
-    Task AddToCartAsync(string userId, CartItem item);
-    Task<CartItem[]> GetCartAsync(string userId);
-    Task<long> GetCartCountAsync(string userId);
-    Task ClearCartAsync(string userId);
-    Task JoinFlashSaleAsync(string saleId, string userId);
-    Task<bool> IsInFlashSaleAsync(string saleId, string userId);
-    Task<long> GetFlashSaleParticipantCountAsync(string saleId);
-    Task SaveSessionAsync(string sessionId, UserSession session);
-    Task<UserSession?> GetSessionAsync(string sessionId);
+    ValueTask<Product?> GetProductAsync(string productId);
+    ValueTask CacheProductAsync(Product product, TimeSpan ttl);
+    ValueTask AddToCartAsync(string userId, CartItem item);
+    ValueTask<CartItem[]> GetCartAsync(string userId);
+    ValueTask<long> GetCartCountAsync(string userId);
+    ValueTask ClearCartAsync(string userId);
+    ValueTask JoinFlashSaleAsync(string saleId, string userId);
+    ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId);
+    ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId);
+    ValueTask SaveSessionAsync(string sessionId, UserSession session);
+    ValueTask<UserSession?> GetSessionAsync(string sessionId);
 }
 
 /// <summary>
@@ -102,5 +132,5 @@ public interface IGroceryStoreService
 /// </summary>
 public interface ICartBatchWriter
 {
-    Task AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items);
+    ValueTask AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items);
 }

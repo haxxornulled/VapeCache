@@ -2,6 +2,10 @@ param(
     [int]$Trials = 5,
     [int]$ShopperCount = 50000,
     [int]$MaxCartSize = 40,
+    [ValidateSet("optimized", "apples")]
+    [string]$Track = "optimized",
+    [ValidateSet("FullTilt", "Balanced", "LowLatency", "Custom")]
+    [string]$MuxProfile = "LowLatency",
     [int]$MuxConnections = 4,
     [int]$MuxInFlight = 8192,
     [ValidateSet("true", "false")]
@@ -36,6 +40,8 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $projectPath = Join-Path $repoRoot "VapeCache.Console\VapeCache.Console.csproj"
 
 $env:VAPECACHE_MAX_CART_SIZE = "$MaxCartSize"
+$env:VAPECACHE_BENCH_TRACK = $Track
+$env:VAPECACHE_BENCH_MUX_PROFILE = $MuxProfile
 $env:VAPECACHE_BENCH_MUX_CONNECTIONS = "$MuxConnections"
 $env:VAPECACHE_BENCH_MUX_INFLIGHT = "$MuxInFlight"
 $env:VAPECACHE_BENCH_MUX_COALESCE = $MuxCoalesce.ToLowerInvariant()
@@ -45,7 +51,8 @@ Write-Host "Grocery head-to-head benchmark"
 Write-Host "Trials: $Trials"
 Write-Host "Shoppers: $ShopperCount"
 Write-Host "Max cart size: $MaxCartSize"
-Write-Host "Mux: Connections=$MuxConnections InFlight=$MuxInFlight Coalesce=$($env:VAPECACHE_BENCH_MUX_COALESCE) TimeoutMs=$MuxResponseTimeoutMs"
+Write-Host "Track: $Track"
+Write-Host "Mux: Profile=$MuxProfile Connections=$MuxConnections InFlight=$MuxInFlight Coalesce=$($env:VAPECACHE_BENCH_MUX_COALESCE) TimeoutMs=$MuxResponseTimeoutMs"
 Write-Host ""
 
 function Get-Median([double[]]$values) {
@@ -63,12 +70,8 @@ function Get-Median([double[]]$values) {
 }
 
 function Get-InputLines([int]$shopperCount) {
-    switch ($shopperCount) {
-        10000 { return @("1") }
-        50000 { return @("2") }
-        100000 { return @("3") }
-        default { return @("4", "$shopperCount") }
-    }
+    # Menu now accepts a direct shopper count (no preset selector).
+    return @("$shopperCount")
 }
 
 $results = New-Object System.Collections.Generic.List[object]

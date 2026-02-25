@@ -32,27 +32,14 @@ public static class MenuRunner
 
         if (!autoRun)
         {
-            System.Console.WriteLine("Select test to run:");
+            System.Console.WriteLine("Enter shopper count to run comparison:");
             System.Console.WriteLine();
-            System.Console.WriteLine("  [1] VapeCache vs StackExchange.Redis Comparison (10,000 shoppers)");
-            System.Console.WriteLine("  [2] VapeCache vs StackExchange.Redis Comparison (50,000 shoppers)");
-            System.Console.WriteLine("  [3] VapeCache vs StackExchange.Redis Comparison (100,000 shoppers)");
-            System.Console.WriteLine("  [4] Custom shopper count");
-            System.Console.WriteLine("  [0] Exit");
+            System.Console.WriteLine("  Presets: 10000, 50000, 100000");
+            System.Console.WriteLine("  Enter 0 to exit");
             System.Console.WriteLine();
-            System.Console.Write("Enter selection: ");
+            System.Console.Write("Shopper count: ");
 
-            var choice = System.Console.ReadLine()?.Trim();
-
-            shopperCount = choice switch
-            {
-                "1" => 10_000,
-                "2" => 50_000,
-                "3" => 100_000,
-                "4" => GetCustomShopperCount(),
-                "0" => 0,
-                _ => 0
-            };
+            shopperCount = GetCustomShopperCount();
         }
 
         if (shopperCount > 0)
@@ -64,7 +51,7 @@ public static class MenuRunner
 
             try
             {
-                await ComparisonRunner.RunComparisonAsync(redisHost, redisPassword, shopperCount, maxCartSize);
+                await ComparisonRunner.RunComparisonAsync(configuration, redisHost, redisPassword, shopperCount, maxCartSize);
             }
             catch (Exception ex)
             {
@@ -90,12 +77,16 @@ public static class MenuRunner
 
     private static int GetCustomShopperCount()
     {
-        System.Console.Write("Enter number of shoppers: ");
         var input = System.Console.ReadLine()?.Trim();
 
         if (int.TryParse(input, out var count) && count > 0)
         {
             return count;
+        }
+
+        if (int.TryParse(input, out count) && count == 0)
+        {
+            return 0;
         }
 
         System.Console.WriteLine("Invalid input. Using default: 10,000");

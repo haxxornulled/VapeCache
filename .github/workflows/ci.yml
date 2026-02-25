@@ -26,3 +26,52 @@ jobs:
         run: |
           dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj
           pwsh -File tools/perf-gate.ps1
+
+  perf-contention-gate:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      VAPECACHE_REDIS_CONNECTIONSTRING: 127.0.0.1:6379,abortConnect=false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Contention Perf Gate
+        run: |
+          pwsh -File tools/run-contention-perf-gate.ps1 -Job Short -Mode fair -ContentionProcessorCounts "4,16" -ClientMaxRatio 1.00
+
+      - name: Grocery Tail Perf Gate
+        run: |
+          pwsh -File tools/run-grocery-perf-gate.ps1 \
+            -Profiles LowLatency FullTilt \
+            -Trials 2 \
+            -ShopperCount 15000 \
+            -MaxCartSize 35 \
+            -MuxConnections 12 \
+            -MuxInFlight 4096 \
+            -MinThroughputRatio 1.00 \
+            -LowLatencyMaxP99Ratio 1.15 \
+            -LowLatencyMaxP999Ratio 1.20 \
+            -FullTiltMaxP99Ratio 1.30 \
+            -FullTiltMaxP999Ratio 1.35 \
+            -RedisHost 127.0.0.1 \
+            -RedisPort 6379 \
+            -RedisUsername "" \
+            -RedisPassword ""

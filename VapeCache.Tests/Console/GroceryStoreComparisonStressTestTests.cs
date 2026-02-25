@@ -89,18 +89,18 @@ public sealed class GroceryStoreComparisonStressTestTests
         public int SingleItemCalls;
         public int BatchedItemCount;
 
-        public Task<Product?> GetProductAsync(string productId)
-            => Task.FromResult<Product?>(new Product(productId, "name", "cat", 1m, 1, "/"));
+        public ValueTask<Product?> GetProductAsync(string productId)
+            => ValueTask.FromResult<Product?>(new Product(productId, "name", "cat", 1m, 1, "/"));
 
-        public Task CacheProductAsync(Product product, TimeSpan ttl) => Task.CompletedTask;
+        public ValueTask CacheProductAsync(Product product, TimeSpan ttl) => ValueTask.CompletedTask;
 
-        public Task AddToCartAsync(string userId, CartItem item)
+        public ValueTask AddToCartAsync(string userId, CartItem item)
         {
             Interlocked.Increment(ref SingleItemCalls);
-            return Task.CompletedTask;
+            return ValueTask.CompletedTask;
         }
 
-        public Task AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items)
+        public ValueTask AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items)
         {
             Interlocked.Increment(ref BatchCalls);
             Interlocked.Add(ref BatchedItemCount, items.Count);
@@ -108,73 +108,73 @@ public sealed class GroceryStoreComparisonStressTestTests
             {
                 _carts[userId] = items.ToArray();
             }
-            return Task.CompletedTask;
+            return ValueTask.CompletedTask;
         }
 
-        public Task<CartItem[]> GetCartAsync(string userId)
+        public ValueTask<CartItem[]> GetCartAsync(string userId)
         {
             lock (_carts)
             {
-                return Task.FromResult(_carts.TryGetValue(userId, out var items) ? items : Array.Empty<CartItem>());
+                return ValueTask.FromResult(_carts.TryGetValue(userId, out var items) ? items : Array.Empty<CartItem>());
             }
         }
 
-        public Task<long> GetCartCountAsync(string userId)
+        public ValueTask<long> GetCartCountAsync(string userId)
         {
             lock (_carts)
             {
-                return Task.FromResult(_carts.TryGetValue(userId, out var items) ? (long)items.Length : 0L);
+                return ValueTask.FromResult(_carts.TryGetValue(userId, out var items) ? (long)items.Length : 0L);
             }
         }
 
-        public Task ClearCartAsync(string userId)
+        public ValueTask ClearCartAsync(string userId)
         {
             lock (_carts)
             {
                 _carts.Remove(userId);
             }
-            return Task.CompletedTask;
+            return ValueTask.CompletedTask;
         }
 
-        public Task JoinFlashSaleAsync(string saleId, string userId)
+        public ValueTask JoinFlashSaleAsync(string saleId, string userId)
         {
             lock (_flashSales)
             {
                 _flashSales.Add($"{saleId}:{userId}");
             }
-            return Task.CompletedTask;
+            return ValueTask.CompletedTask;
         }
 
-        public Task<bool> IsInFlashSaleAsync(string saleId, string userId)
+        public ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId)
         {
             lock (_flashSales)
             {
-                return Task.FromResult(_flashSales.Contains($"{saleId}:{userId}"));
+                return ValueTask.FromResult(_flashSales.Contains($"{saleId}:{userId}"));
             }
         }
 
-        public Task<long> GetFlashSaleParticipantCountAsync(string saleId)
+        public ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId)
         {
             lock (_flashSales)
             {
-                return Task.FromResult((long)_flashSales.Count(entry => entry.StartsWith($"{saleId}:", StringComparison.Ordinal)));
+                return ValueTask.FromResult((long)_flashSales.Count(entry => entry.StartsWith($"{saleId}:", StringComparison.Ordinal)));
             }
         }
 
-        public Task SaveSessionAsync(string sessionId, UserSession session)
+        public ValueTask SaveSessionAsync(string sessionId, UserSession session)
         {
             lock (_sessions)
             {
                 _sessions[sessionId] = session;
             }
-            return Task.CompletedTask;
+            return ValueTask.CompletedTask;
         }
 
-        public Task<UserSession?> GetSessionAsync(string sessionId)
+        public ValueTask<UserSession?> GetSessionAsync(string sessionId)
         {
             lock (_sessions)
             {
-                return Task.FromResult(_sessions.TryGetValue(sessionId, out var session) ? session : null);
+                return ValueTask.FromResult(_sessions.TryGetValue(sessionId, out var session) ? session : null);
             }
         }
     }

@@ -32,7 +32,7 @@ public sealed class MenuRunnerTests
             await MenuRunner.RunAsync(config);
 
             var text = output.ToString();
-            Assert.Contains("Select test to run:", text);
+            Assert.Contains("Enter shopper count to run comparison:", text);
         }
         finally
         {

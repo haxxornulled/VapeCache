@@ -36,6 +36,28 @@ public sealed record RedisConnectionOptions
     public TimeSpan MaxConnectionLifetime { get; init; } = TimeSpan.FromHours(1);
     public TimeSpan ReaperPeriod { get; init; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// Named transport profile. Set to Custom to use explicitly configured transport values.
+    /// </summary>
+    public RedisTransportProfile TransportProfile { get; init; } = RedisTransportProfile.FullTilt;
+
+    /// <summary>
+    /// Controls Nagle's algorithm. True favors lower latency for request/response workloads.
+    /// </summary>
+    public bool EnableTcpNoDelay { get; init; } = true;
+
+    /// <summary>
+    /// Socket send buffer size in bytes. Defaults to a full-tilt profile (4MB) and can be tuned down.
+    /// Set to 0 to use OS defaults/autotuning.
+    /// </summary>
+    public int TcpSendBufferBytes { get; init; } = 4 * 1024 * 1024;
+
+    /// <summary>
+    /// Socket receive buffer size in bytes. Defaults to a full-tilt profile (4MB) and can be tuned down.
+    /// Set to 0 to use OS defaults/autotuning.
+    /// </summary>
+    public int TcpReceiveBufferBytes { get; init; } = 4 * 1024 * 1024;
+
     public bool EnableTcpKeepAlive { get; init; } = true;
     public TimeSpan TcpKeepAliveTime { get; init; } = TimeSpan.FromSeconds(30);
     public TimeSpan TcpKeepAliveInterval { get; init; } = TimeSpan.FromSeconds(10);
