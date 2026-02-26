@@ -12,6 +12,9 @@ public sealed class RedisHealthCheck : IHealthCheck
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)

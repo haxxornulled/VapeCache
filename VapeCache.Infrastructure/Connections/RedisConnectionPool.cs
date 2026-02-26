@@ -53,6 +53,9 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
         _ = WarmAsync();
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<Result<IRedisConnectionLease>> RentAsync(CancellationToken ct)
     {
         RedisTelemetry.PoolAcquires.Add(1);
@@ -364,6 +367,9 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
         Interlocked.Increment(ref _disposedConnections);
     }
 
+    /// <summary>
+    /// Asynchronously releases resources used by the current instance.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
@@ -380,6 +386,9 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
         _logger.LogInformation("Redis pool disposed: Created={Created} Returned={Returned} Idle={Idle} Disposed={Disposed}", _created, _returned, _idleCount, _disposedConnections);
     }
 
+    /// <summary>
+    /// Runs value.
+    /// </summary>
     public async Task RunReaperAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested && Volatile.Read(ref _disposed) == 0)
@@ -494,6 +503,9 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
         public IRedisConnection Connection => _conn ?? throw new ObjectDisposedException(nameof(Lease));
 
+        /// <summary>
+        /// Asynchronously releases resources used by the current instance.
+        /// </summary>
         public async ValueTask DisposeAsync()
         {
             var pool = Interlocked.Exchange(ref _pool, null);
@@ -529,8 +541,14 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
         public TimeSpan IdleFor => StopwatchTicksToTimeSpan(StopwatchTicksNow() - Volatile.Read(ref _lastUsedTicks));
         public TimeSpan Age => StopwatchTicksToTimeSpan(StopwatchTicksNow() - _createdTicks);
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public void MarkUsedNow() => Volatile.Write(ref _lastUsedTicks, StopwatchTicksNow());
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public async ValueTask<Result<LanguageExt.Unit>> SendAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct)
         {
             var r = await Inner.SendAsync(buffer, ct).ConfigureAwait(false);
@@ -539,6 +557,9 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
             return r;
         }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public async ValueTask<Result<int>> ReceiveAsync(Memory<byte> buffer, CancellationToken ct)
         {
             var r = await Inner.ReceiveAsync(buffer, ct).ConfigureAwait(false);
@@ -547,6 +568,9 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
             return r;
         }
 
+        /// <summary>
+        /// Asynchronously releases resources used by the current instance.
+        /// </summary>
         public ValueTask DisposeAsync() => Inner.DisposeAsync();
 
         private void StoreFault(Exception ex)

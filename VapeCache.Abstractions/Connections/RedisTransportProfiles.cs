@@ -5,6 +5,9 @@ namespace VapeCache.Abstractions.Connections;
 /// </summary>
 public static class RedisTransportProfiles
 {
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static RedisConnectionOptions Apply(RedisConnectionOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -28,6 +31,9 @@ public static class RedisTransportProfiles
         };
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static RedisMultiplexerOptions Apply(RedisMultiplexerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

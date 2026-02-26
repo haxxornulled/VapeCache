@@ -27,14 +27,44 @@ public sealed class CacheStats : ICacheStats
         StampedeLockWaitTimeout: Volatile.Read(ref _stampedeLockWaitTimeout),
         StampedeFailureBackoffRejected: Volatile.Read(ref _stampedeFailureBackoffRejected));
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void IncGet() => Interlocked.Increment(ref _get);
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void IncHit() => Interlocked.Increment(ref _hit);
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void IncMiss() => Interlocked.Increment(ref _miss);
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void IncSet() => Interlocked.Increment(ref _set);
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void IncRemove() => Interlocked.Increment(ref _remove);
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void IncFallbackToMemory() => Interlocked.Increment(ref _fallbackToMemory);
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void IncBreakerOpened() => Interlocked.Increment(ref _breakerOpened);
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void IncStampedeKeyRejected() => Interlocked.Increment(ref _stampedeKeyRejected);
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void IncStampedeLockWaitTimeout() => Interlocked.Increment(ref _stampedeLockWaitTimeout);
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void IncStampedeFailureBackoffRejected() => Interlocked.Increment(ref _stampedeFailureBackoffRejected);
 }

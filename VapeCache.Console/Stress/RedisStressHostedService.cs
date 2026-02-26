@@ -20,8 +20,14 @@ internal sealed class RedisStressHostedService(
     private CancellationTokenSource? _cts;
     private Task? _runTask;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -31,10 +37,19 @@ internal sealed class RedisStressHostedService(
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         if (_cts is not null)
@@ -49,6 +64,9 @@ internal sealed class RedisStressHostedService(
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     private async Task RunAsync(CancellationToken ct)

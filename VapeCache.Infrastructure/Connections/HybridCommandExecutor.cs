@@ -43,9 +43,15 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         _breakerOptions = breakerOptions;
     }
 
+    /// <summary>
+    /// Creates value.
+    /// </summary>
     public IRedisBatch CreateBatch()
         => new RedisBatch(this);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public RedisAutoscalerSnapshot GetAutoscalerSnapshot()
         => _redis.GetAutoscalerSnapshot();
 
@@ -69,6 +75,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _owner = owner;
         }
 
+        /// <summary>
+        /// Releases resources used by the current instance.
+        /// </summary>
         public void Dispose()
         {
             _cts?.Dispose();
@@ -236,6 +245,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
 
     // ========== Simple Key-Value Operations ==========
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -274,6 +286,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<byte[]?> GetExAsync(string key, TimeSpan? ttl, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -312,6 +327,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?[]> MGetAsync(string[] keys, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -350,6 +368,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Sets value.
+    /// </summary>
     public async ValueTask<bool> SetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -388,6 +409,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> MSetAsync((string Key, ReadOnlyMemory<byte> Value)[] items, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -426,6 +450,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> DeleteAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -464,6 +491,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> TtlSecondsAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -498,6 +528,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> PTtlMillisecondsAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -524,6 +557,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> UnlinkAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -552,6 +588,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
 
     // ========== Lease-Based Reads ==========
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<RedisValueLease> GetLeaseAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -578,6 +617,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -600,6 +642,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         return true;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<RedisValueLease> GetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -628,6 +673,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
 
     // ========== Hash Operations ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> HSetAsync(string key, string field, ReadOnlyMemory<byte> value, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -654,6 +702,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?> HGetAsync(string key, string field, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -680,6 +731,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?[]> HMGetAsync(string key, string[] fields, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -706,6 +760,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<RedisValueLease> HGetLeaseAsync(string key, string field, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -734,6 +791,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
 
     // ========== List Operations ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> LPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -761,6 +821,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -787,6 +850,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> RPushManyAsync(string key, ReadOnlyMemory<byte>[] values, int count, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -813,6 +879,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -839,6 +908,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryHGetAsync(string key, string field, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -861,6 +933,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         return true;
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -883,6 +958,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         return true;
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TrySetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct, out ValueTask<bool> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -905,6 +983,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         return true;
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetExAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -927,6 +1008,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         return true;
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -949,6 +1033,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         return true;
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryLPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -971,6 +1058,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -997,6 +1087,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryRPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1019,6 +1112,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?[]> LRangeAsync(string key, long start, long stop, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1045,6 +1141,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> LLenAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1071,6 +1170,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<RedisValueLease> LPopLeaseAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1097,6 +1199,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryLPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1119,6 +1224,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<RedisValueLease> RPopLeaseAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1145,6 +1253,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryRPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1169,6 +1280,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
 
     // ========== Set Operations ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> SAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1195,6 +1309,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> SRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1221,6 +1338,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> SIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1247,6 +1367,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TrySIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct, out ValueTask<bool> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1269,6 +1392,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?[]> SMembersAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1295,6 +1421,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> SCardAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1323,6 +1452,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
 
     // ========== Sorted Set Operations ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> ZAddAsync(string key, double score, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1349,6 +1481,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> ZRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1375,6 +1510,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> ZCardAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1401,6 +1539,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<double?> ZScoreAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1427,6 +1568,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long?> ZRankAsync(string key, ReadOnlyMemory<byte> member, bool descending, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1453,6 +1597,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<double> ZIncrByAsync(string key, double increment, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1540,6 +1687,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
 
     // ========== JSON Operations ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?> JsonGetAsync(string key, string? path, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1566,6 +1716,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<RedisValueLease> JsonGetLeaseAsync(string key, string? path, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1592,6 +1745,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryJsonGetLeaseAsync(string key, string? path, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1614,6 +1770,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> JsonSetAsync(string key, string? path, ReadOnlyMemory<byte> json, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1640,6 +1799,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> JsonSetLeaseAsync(string key, string? path, RedisValueLease json, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(json);
@@ -1668,6 +1830,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> JsonDelAsync(string key, string? path, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1696,6 +1861,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
 
     // ========== RediSearch / RedisBloom / RedisTimeSeries ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> FtCreateAsync(string index, string prefix, string[] fields, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1722,6 +1890,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<string[]> FtSearchAsync(string index, string query, int? offset, int? count, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1748,6 +1919,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> BfAddAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1774,6 +1948,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> BfExistsAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1800,6 +1977,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> TsCreateAsync(string key, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1826,6 +2006,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> TsAddAsync(string key, long timestamp, double value, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1880,9 +2063,15 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
 
     // ========== Scan Operations ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public IAsyncEnumerable<string> ScanAsync(string? pattern = null, int pageSize = 128, CancellationToken ct = default)
         => StreamWithFallback("SCAN", () => _redis.ScanAsync(pattern, pageSize, ct), () => _fallback.ScanAsync(pattern, pageSize, ct), ct);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public IAsyncEnumerable<byte[]> SScanAsync(string key, string? pattern = null, int pageSize = 128, CancellationToken ct = default)
         => StreamWithFallback("SSCAN", () => _redis.SScanAsync(key, pattern, pageSize, ct), () => _fallback.SScanAsync(key, pattern, pageSize, ct), ct);
 
@@ -1894,6 +2083,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
 
     // ========== Server Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<string> PingAsync(CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1920,6 +2112,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<string[]> ModuleListAsync(CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1946,6 +2141,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> ExpireAsync(string key, TimeSpan ttl, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -1973,6 +2171,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?> LIndexAsync(string key, long index, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -2000,6 +2201,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<byte[]?> GetRangeAsync(string key, long start, long end, CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
@@ -2027,6 +2231,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
     }
 
+    /// <summary>
+    /// Asynchronously releases resources used by the current instance.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         await _redis.DisposeAsync().ConfigureAwait(false);

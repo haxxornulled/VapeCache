@@ -1,4 +1,4 @@
-﻿// ========================= File: Vapecache.Infrastructure/Connections/RedisConnection.cs =========================
+// ========================= File: Vapecache.Infrastructure/Connections/RedisConnection.cs =========================
 using System.Net.Sockets;
 using LanguageExt;
 using LanguageExt.Common;
@@ -15,6 +15,9 @@ internal sealed class RedisConnection(long id, Socket socket, Stream stream) : I
     public Socket Socket => socket;
     public Stream Stream => stream;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<Result<Unit>> SendAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct)
     {
         if (Volatile.Read(ref _disposed) == 1)
@@ -46,6 +49,9 @@ internal sealed class RedisConnection(long id, Socket socket, Stream stream) : I
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<Result<int>> ReceiveAsync(Memory<byte> buffer, CancellationToken ct)
     {
         if (Volatile.Read(ref _disposed) == 1)
@@ -65,6 +71,9 @@ internal sealed class RedisConnection(long id, Socket socket, Stream stream) : I
         }
     }
 
+    /// <summary>
+    /// Asynchronously releases resources used by the current instance.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;

@@ -7,6 +7,9 @@ namespace VapeCache.Console.GroceryStore;
 /// </summary>
 public static class MenuRunner
 {
+    /// <summary>
+    /// Runs value.
+    /// </summary>
     public static async Task RunAsync(IConfiguration configuration)
     {
         try { System.Console.Clear(); } catch { /* Ignore - may not have console */ }

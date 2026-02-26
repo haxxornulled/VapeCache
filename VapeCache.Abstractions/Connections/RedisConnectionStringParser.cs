@@ -4,6 +4,9 @@ namespace VapeCache.Abstractions.Connections;
 
 public static class RedisConnectionStringParser
 {
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public static bool TryParse(string? connectionString, out RedisConnectionOptions parsed, out string? error)
     {
         parsed = new RedisConnectionOptions();

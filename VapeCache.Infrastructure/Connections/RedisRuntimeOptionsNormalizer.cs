@@ -44,6 +44,9 @@ internal static class RedisRuntimeOptionsNormalizer
     private static readonly TimeSpan DefaultScaleDownDrainTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan DefaultAutoscaleFreezeDuration = TimeSpan.FromMinutes(2);
 
+    /// <summary>
+    /// Normalizes value.
+    /// </summary>
     public static RedisConnectionOptions NormalizeConnection(RedisConnectionOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -93,6 +96,9 @@ internal static class RedisRuntimeOptionsNormalizer
         };
     }
 
+    /// <summary>
+    /// Normalizes value.
+    /// </summary>
     public static RedisMultiplexerOptions NormalizeMultiplexer(RedisMultiplexerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

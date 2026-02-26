@@ -39,6 +39,9 @@ public static class AspireEndpointAutoMapExtensions
     private sealed class VapeCacheEndpointStartupFilter(IOptions<VapeCacheEndpointOptions> options)
         : IStartupFilter
     {
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
         {
             return app =>

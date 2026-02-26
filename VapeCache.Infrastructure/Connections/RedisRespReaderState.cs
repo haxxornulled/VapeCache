@@ -27,8 +27,14 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
         _currentArrayDepth = 0;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<RedisRespReader.RespValue> ReadAsync(CancellationToken ct) => ReadAsync(poolBulk: false, ct);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<RedisRespReader.RespValue> ReadAsync(bool poolBulk, CancellationToken ct)
     {
         var prefix = await ReadByteAsync(ct).ConfigureAwait(false);
@@ -240,6 +246,9 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Asynchronously releases resources used by the current instance.
+    /// </summary>
     public ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return ValueTask.CompletedTask;

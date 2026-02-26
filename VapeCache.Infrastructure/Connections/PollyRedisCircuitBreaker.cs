@@ -98,16 +98,25 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
             ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void MarkRedisSuccess()
     {
         // Polly handles success tracking automatically
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void MarkRedisFailure()
     {
         // Polly handles failure tracking automatically when exceptions are thrown
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void ForceOpen(string reason)
     {
         if (!_options.Enabled) return;
@@ -116,6 +125,9 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
         _logger.LogWarning("Circuit breaker manually forced open: {Reason}", reason);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void ClearForcedOpen()
     {
         if (!_options.Enabled) return;

@@ -8,6 +8,9 @@ internal static class SessionBinaryCodec
     private const uint Magic = 0x56435331; // "VCS1"
     private static readonly Encoding Utf8 = Encoding.UTF8;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static byte[] Serialize(in UserSession session)
     {
         var recentlyViewed = session.RecentlyViewedProductIds ?? Array.Empty<string>();
@@ -50,6 +53,9 @@ internal static class SessionBinaryCodec
         return buffer;
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public static bool TryDeserialize(ReadOnlySpan<byte> payload, out UserSession session)
     {
         session = default!;

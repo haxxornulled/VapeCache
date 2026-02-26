@@ -11,6 +11,9 @@ namespace VapeCache.Reconciliation;
 
 public static class RedisReconciliationExtensions
 {
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public static IServiceCollection AddVapeCacheRedisReconciliation(
         this IServiceCollection services,
         IConfiguration configuration,
@@ -26,6 +29,9 @@ public static class RedisReconciliationExtensions
         return services.AddVapeCacheRedisReconciliation(licenseKey, configure, configureStore);
     }
 
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public static IServiceCollection AddVapeCacheRedisReconciliation(
         this IServiceCollection services,
         string? licenseKey = null,
@@ -138,6 +144,9 @@ public static class RedisReconciliationExtensions
         return services.AddReconciliationReaper(configure);
     }
 
+    /// <summary>
+    /// Configures value.
+    /// </summary>
     public static IServiceCollection UseSqliteBackingStore(
         this IServiceCollection services,
         Action<RedisReconciliationStoreOptions>? configure = null)
@@ -148,6 +157,9 @@ public static class RedisReconciliationExtensions
         return services;
     }
 
+    /// <summary>
+    /// Configures value.
+    /// </summary>
     public static IServiceCollection UseInMemoryBackingStore(
         this IServiceCollection services,
         Action<RedisReconciliationStoreOptions>? configure = null)

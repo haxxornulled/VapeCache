@@ -56,6 +56,9 @@ public sealed class LicenseValidationResult
     /// </summary>
     public bool IsExpired => ExpiresAt.HasValue && ExpiresAt.Value < DateTimeOffset.UtcNow;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public bool HasFeature(string feature)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(feature);
@@ -69,6 +72,9 @@ public sealed class LicenseValidationResult
         return false;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static LicenseValidationResult Success(
         LicenseTier tier,
         string customerId,
@@ -91,6 +97,9 @@ public sealed class LicenseValidationResult
         };
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static LicenseValidationResult Failure(string errorMessage)
     {
         return new LicenseValidationResult
@@ -101,6 +110,9 @@ public sealed class LicenseValidationResult
         };
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static LicenseValidationResult Free()
     {
         return new LicenseValidationResult

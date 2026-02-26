@@ -28,6 +28,9 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         _redis = redis;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<Product?> GetProductAsync(string productId)
     {
         var key = $"product:{productId}";
@@ -47,6 +50,9 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         return product;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask CacheProductAsync(Product product, TimeSpan ttl)
     {
         var key = $"product:{product.Id}";
@@ -54,6 +60,9 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         await _redis.SetAsync(key, serialized, ttl, CancellationToken.None);
     }
 
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public async ValueTask AddToCartAsync(string userId, CartItem item)
     {
         var key = $"cart:{userId}";
@@ -61,6 +70,9 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         await _redis.RPushAsync(key, serialized, CancellationToken.None);
     }
 
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public async ValueTask AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items)
     {
         if (items.Count == 0)
@@ -93,6 +105,9 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         }
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<CartItem[]> GetCartAsync(string userId)
     {
         using var optimized = await _redis.GetLeaseAsync(GetOptimizedCartKey(userId), CancellationToken.None);
@@ -116,6 +131,9 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         return cart;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<long> GetCartCountAsync(string userId)
     {
         using var optimizedCount = await _redis.GetLeaseAsync(GetOptimizedCartCountKey(userId), CancellationToken.None);
@@ -135,6 +153,9 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         return await _redis.LLenAsync($"cart:{userId}", CancellationToken.None);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask ClearCartAsync(string userId)
     {
         var deleteList = _redis.DeleteAsync($"cart:{userId}", CancellationToken.None);
@@ -169,29 +190,44 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask JoinFlashSaleAsync(string saleId, string userId)
     {
         await ExecuteWithRentedUtf8Async(userId, payload =>
             _redis.SAddAsync($"sale:{saleId}:participants", payload, CancellationToken.None)).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId)
     {
         return await ExecuteWithRentedUtf8Async(userId, payload =>
             _redis.SIsMemberAsync($"sale:{saleId}:participants", payload, CancellationToken.None)).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId)
     {
         return await _redis.SCardAsync($"sale:{saleId}:participants", CancellationToken.None);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask SaveSessionAsync(string sessionId, UserSession session)
     {
         var serialized = SessionBinaryCodec.Serialize(session);
         await _redis.SetAsync($"session:{sessionId}", serialized, TimeSpan.FromHours(1), CancellationToken.None);
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<UserSession?> GetSessionAsync(string sessionId)
     {
         using var lease = await _redis.GetLeaseAsync($"session:{sessionId}", CancellationToken.None);

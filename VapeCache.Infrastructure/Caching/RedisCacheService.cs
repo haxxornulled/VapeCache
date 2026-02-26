@@ -31,6 +31,9 @@ internal sealed class RedisCacheService : ICacheService
 
     public string Name => "redis";
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
@@ -60,6 +63,9 @@ internal sealed class RedisCacheService : ICacheService
         }
     }
 
+    /// <summary>
+    /// Sets value.
+    /// </summary>
     public async ValueTask SetAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions options, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
@@ -80,6 +86,9 @@ internal sealed class RedisCacheService : ICacheService
         _intentRegistry.RecordSet(key, Name, options, value.Length);
     }
 
+    /// <summary>
+    /// Removes value.
+    /// </summary>
     public async ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
@@ -154,9 +163,21 @@ internal sealed class RedisCacheService : ICacheService
 
     private sealed class NoopCacheIntentRegistry : ICacheIntentRegistry
     {
+        /// <summary>
+        /// Gets value.
+        /// </summary>
         public IReadOnlyList<CacheIntentEntry> GetRecent(int maxCount) => Array.Empty<CacheIntentEntry>();
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public void RecordRemove(string key) { }
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public void RecordSet(string key, string backend, in CacheEntryOptions options, int payloadBytes) { }
+        /// <summary>
+        /// Attempts to value.
+        /// </summary>
         public bool TryGet(string key, out CacheIntentEntry? entry)
         {
             entry = null;

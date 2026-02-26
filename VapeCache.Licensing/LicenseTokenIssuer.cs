@@ -25,6 +25,9 @@ public sealed class LicenseTokenIssuer
         EnsureValidSigningKeyPem(_signingPrivateKeyPem);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public string GenerateEnterpriseLicenseKey(
         string organizationId,
         DateTimeOffset expiresAt,

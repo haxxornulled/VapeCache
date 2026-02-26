@@ -20,8 +20,14 @@ internal sealed class StartupPreflightHostedService(
     // RESP: *1\r\n$4\r\nPING\r\n
     private static readonly byte[] Ping = "*1\r\n$4\r\nPING\r\n"u8.ToArray();
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         var o = options.Value;
@@ -109,12 +115,24 @@ internal sealed class StartupPreflightHostedService(
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     private async ValueTask<Result<Unit>> CreateAndValidateAsync(StartupPreflightOptions o, CancellationToken ct)

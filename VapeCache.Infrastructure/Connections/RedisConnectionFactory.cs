@@ -1,4 +1,4 @@
-﻿// ========================= File: Vapecache.Infrastructure/Connections/RedisConnectionFactory.cs =========================
+// ========================= File: Vapecache.Infrastructure/Connections/RedisConnectionFactory.cs =========================
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
@@ -23,6 +23,9 @@ internal sealed class RedisConnectionFactory(
     private int _loggedConnectionStringResolution;
     private readonly IRedisConnectionObserver[] _observers = observers as IRedisConnectionObserver[] ?? observers.ToArray();
 
+    /// <summary>
+    /// Creates value.
+    /// </summary>
     public async ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
     {
         if (Volatile.Read(ref _disposed) == 1)
@@ -590,6 +593,9 @@ internal sealed class RedisConnectionFactory(
                !string.Equals(env, "Staging", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Asynchronously releases resources used by the current instance.
+    /// </summary>
     public ValueTask DisposeAsync()
     {
         Interlocked.Exchange(ref _disposed, 1);

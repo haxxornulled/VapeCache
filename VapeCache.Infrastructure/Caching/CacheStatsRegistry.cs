@@ -6,6 +6,9 @@ internal sealed class CacheStatsRegistry
 {
     private readonly ConcurrentDictionary<string, CacheStats> _stats = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public CacheStats GetOrCreate(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -14,6 +17,9 @@ internal sealed class CacheStatsRegistry
         return _stats.GetOrAdd(name, _ => new CacheStats());
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGet(string name, out CacheStats stats)
         => _stats.TryGetValue(name, out stats!);
 }

@@ -21,6 +21,9 @@ internal sealed class RedisBloomService : IRedisBloomService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> IsAvailableAsync(CancellationToken ct = default)
     {
         if (_available.HasValue)
@@ -42,6 +45,9 @@ internal sealed class RedisBloomService : IRedisBloomService
         }
     }
 
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public async ValueTask<bool> AddAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct = default)
     {
         if (await IsAvailableAsync(ct).ConfigureAwait(false))
@@ -52,6 +58,9 @@ internal sealed class RedisBloomService : IRedisBloomService
         return set.TryAdd(item.ToArray(), 0);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> ExistsAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct = default)
     {
         if (await IsAvailableAsync(ct).ConfigureAwait(false))
@@ -65,12 +74,18 @@ internal sealed class RedisBloomService : IRedisBloomService
     {
         public static readonly ByteArrayComparer Instance = new();
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public bool Equals(byte[]? x, byte[]? y)
         {
             if (x == null || y == null) return x == y;
             return x.AsSpan().SequenceEqual(y.AsSpan());
         }
 
+        /// <summary>
+        /// Gets value.
+        /// </summary>
         public int GetHashCode(byte[] obj)
         {
             var hash = new HashCode();

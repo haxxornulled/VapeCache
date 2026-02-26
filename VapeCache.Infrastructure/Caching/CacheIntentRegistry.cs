@@ -7,6 +7,9 @@ internal sealed class CacheIntentRegistry : ICacheIntentRegistry
 {
     private readonly ConcurrentDictionary<string, CacheIntentEntry> _entries = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void RecordSet(string key, string backend, in CacheEntryOptions options, int payloadBytes)
     {
         if (string.IsNullOrWhiteSpace(key))
@@ -25,6 +28,9 @@ internal sealed class CacheIntentRegistry : ICacheIntentRegistry
             PayloadBytes: payloadBytes);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void RecordRemove(string key)
     {
         if (string.IsNullOrWhiteSpace(key))
@@ -32,6 +38,9 @@ internal sealed class CacheIntentRegistry : ICacheIntentRegistry
         _entries.TryRemove(key, out _);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGet(string key, out CacheIntentEntry? entry)
     {
         if (_entries.TryGetValue(key, out var found))
@@ -51,6 +60,9 @@ internal sealed class CacheIntentRegistry : ICacheIntentRegistry
         return false;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public IReadOnlyList<CacheIntentEntry> GetRecent(int maxCount)
     {
         var count = Math.Max(1, maxCount);

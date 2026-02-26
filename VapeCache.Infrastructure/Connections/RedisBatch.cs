@@ -12,6 +12,9 @@ internal sealed class RedisBatch : IRedisBatch
         _executor = executor;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask QueueAsync(Func<IRedisCommandExecutor, CancellationToken, ValueTask> operation, CancellationToken ct = default)
     {
         var task = operation(_executor, ct);
@@ -28,6 +31,9 @@ internal sealed class RedisBatch : IRedisBatch
         return task;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask ExecuteAsync(CancellationToken ct = default)
     {
         if (_pending.Count == 0)
@@ -38,6 +44,9 @@ internal sealed class RedisBatch : IRedisBatch
         await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Asynchronously releases resources used by the current instance.
+    /// </summary>
     public ValueTask DisposeAsync()
     {
         _pending.Clear();

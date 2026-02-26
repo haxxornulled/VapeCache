@@ -12,6 +12,9 @@ public sealed class VapeCacheHealthCheck : IHealthCheck
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)

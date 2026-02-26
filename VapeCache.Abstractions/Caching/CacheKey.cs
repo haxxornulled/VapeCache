@@ -14,7 +14,7 @@ public readonly record struct CacheKey(string Value);
 public readonly record struct CacheKey<T>(string Value)
 {
     /// <summary>
-    /// Creates a typed cache key from a string value.
+    /// Executes value.
     /// </summary>
     public static CacheKey<T> From(string value) => new(value);
 

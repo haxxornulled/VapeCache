@@ -31,6 +31,9 @@ public sealed class RedisValueLease : IDisposable
     public ReadOnlyMemory<byte> Memory => _buffer is null ? ReadOnlyMemory<byte>.Empty : _buffer.AsMemory(0, _length);
     public ReadOnlySpan<byte> Span => _buffer is null ? ReadOnlySpan<byte>.Empty : _buffer.AsSpan(0, _length);
 
+    /// <summary>
+    /// Releases resources used by the current instance.
+    /// </summary>
     public void Dispose()
     {
         if (_pooled && _buffer is not null)

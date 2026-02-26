@@ -24,6 +24,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
     public string Name => "memory";
 
+    /// <summary>
+    /// Creates value.
+    /// </summary>
     public IRedisBatch CreateBatch()
         => new RedisBatch(this);
 
@@ -61,6 +64,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
     // ========== String Commands ==========
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.String)
@@ -68,12 +74,18 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<byte[]?>(null);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         task = GetAsync(key, ct);
         return true;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public ValueTask<byte[]?> GetExAsync(string key, TimeSpan? ttl, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.String)
@@ -86,6 +98,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<byte[]?>(null);
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public ValueTask<byte[]?> GetRangeAsync(string key, long start, long end, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.String && entry.StringValue is not null)
@@ -112,39 +127,60 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<byte[]?>(null);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]?> JsonGetAsync(string key, string? path, CancellationToken ct)
     {
         return GetAsync(key, ct);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<RedisValueLease> JsonGetLeaseAsync(string key, string? path, CancellationToken ct)
     {
         return GetLeaseAsync(key, ct);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryJsonGetLeaseAsync(string key, string? path, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         task = GetLeaseAsync(key, ct);
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> JsonSetAsync(string key, string? path, ReadOnlyMemory<byte> json, CancellationToken ct)
     {
         return SetAsync(key, json, null, ct);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> JsonSetLeaseAsync(string key, string? path, RedisValueLease json, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(json);
         return SetAsync(key, json.Memory, null, ct);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> JsonDelAsync(string key, string? path, CancellationToken ct)
     {
         var removed = await DeleteAsync(key, ct).ConfigureAwait(false);
         return removed ? 1L : 0L;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]?[]> MGetAsync(string[] keys, CancellationToken ct)
     {
         var result = new byte[]?[keys.Length];
@@ -156,6 +192,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(result);
     }
 
+    /// <summary>
+    /// Sets value.
+    /// </summary>
     public ValueTask<bool> SetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct)
     {
         var entry = new CacheEntry
@@ -168,12 +207,18 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(true);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TrySetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct, out ValueTask<bool> task)
     {
         task = SetAsync(key, value, ttl, ct);
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> MSetAsync((string Key, ReadOnlyMemory<byte> Value)[] items, CancellationToken ct)
     {
         foreach (var (key, value) in items)
@@ -189,11 +234,17 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(true);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> DeleteAsync(string key, CancellationToken ct)
     {
         return ValueTask.FromResult(_store.TryRemove(key, out _));
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> ExpireAsync(string key, TimeSpan ttl, CancellationToken ct)
     {
         if (!_store.TryGetValue(key, out var entry))
@@ -215,6 +266,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(true);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> TtlSecondsAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -229,6 +283,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(-2L); // -2 = key doesn't exist
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> PTtlMillisecondsAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -243,11 +300,17 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(-2L);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> UnlinkAsync(string key, CancellationToken ct)
     {
         return ValueTask.FromResult(_store.TryRemove(key, out _) ? 1L : 0L);
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public ValueTask<RedisValueLease> GetLeaseAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.String && entry.StringValue != null)
@@ -258,12 +321,18 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(RedisValueLease.Null);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         task = GetLeaseAsync(key, ct);
         return true;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public ValueTask<RedisValueLease> GetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.String && entry.StringValue != null)
@@ -276,6 +345,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(RedisValueLease.Null);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         task = GetExLeaseAsync(key, ttl, ct);
@@ -284,6 +356,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
     // ========== Hash Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> HSetAsync(string key, string field, ReadOnlyMemory<byte> value, CancellationToken ct)
     {
         var entry = _store.GetOrAdd(key, _ => new CacheEntry { Type = EntryType.Hash, HashValue = new() });
@@ -307,6 +382,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]?> HGetAsync(string key, string field, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.Hash)
@@ -317,12 +395,18 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<byte[]?>(null);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryHGetAsync(string key, string field, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         task = HGetAsync(key, field, ct);
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]?[]> HMGetAsync(string key, string[] fields, CancellationToken ct)
     {
         var result = new byte[]?[fields.Length];
@@ -336,6 +420,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(result);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<RedisValueLease> HGetLeaseAsync(string key, string field, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.Hash)
@@ -350,6 +437,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
     // ========== List Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> LPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)
     {
         var entry = _store.GetOrAdd(key, _ => new CacheEntry { Type = EntryType.List, ListValue = new() });
@@ -369,6 +459,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)
     {
         var entry = _store.GetOrAdd(key, _ => new CacheEntry { Type = EntryType.List, ListValue = new() });
@@ -388,6 +481,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> RPushManyAsync(string key, ReadOnlyMemory<byte>[] values, int count, CancellationToken ct)
     {
         if (count <= 0 || values.Length == 0)
@@ -414,6 +510,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -439,6 +538,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<byte[]?>(null);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]?> LIndexAsync(string key, long index, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -479,18 +581,27 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<byte[]?>(null);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetExAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         task = GetExAsync(key, ttl, ct);
         return true;
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryLPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         task = LPopAsync(key, ct);
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -516,12 +627,18 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<byte[]?>(null);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryRPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         task = RPopAsync(key, ct);
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]?[]> LRangeAsync(string key, long start, long stop, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -568,6 +685,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(Array.Empty<byte[]?>());
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> LLenAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -587,6 +707,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(0L);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<RedisValueLease> LPopLeaseAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -610,6 +733,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(RedisValueLease.Null);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<RedisValueLease> RPopLeaseAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -635,12 +761,18 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(RedisValueLease.Null);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryLPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         task = LPopLeaseAsync(key, ct);
         return true;
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryRPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         task = RPopLeaseAsync(key, ct);
@@ -649,6 +781,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
     // ========== Set Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> SAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         var entry = _store.GetOrAdd(key, _ => new CacheEntry { Type = EntryType.Set, SetValue = new(ByteArrayComparer.Instance) });
@@ -668,6 +803,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> SRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -692,6 +830,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(0L);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> SIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -713,12 +854,18 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(false);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TrySIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct, out ValueTask<bool> task)
     {
         task = SIsMemberAsync(key, member, ct);
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]?[]> SMembersAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -740,6 +887,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(Array.Empty<byte[]?>());
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> SCardAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -763,6 +913,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
     // ========== Sorted Set Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> ZAddAsync(string key, double score, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         var entry = _store.GetOrAdd(key, _ => new CacheEntry
@@ -798,6 +951,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> ZRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (!_store.TryGetValue(key, out var entry))
@@ -828,6 +984,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> ZCardAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -848,6 +1007,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult(0L);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<double?> ZScoreAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry))
@@ -873,6 +1035,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<double?>(null);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long?> ZRankAsync(string key, ReadOnlyMemory<byte> member, bool descending, CancellationToken ct)
     {
         if (!_store.TryGetValue(key, out var entry))
@@ -918,6 +1083,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<long?>(null);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<double> ZIncrByAsync(string key, double increment, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         var entry = _store.GetOrAdd(key, _ => new CacheEntry
@@ -1048,12 +1216,21 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
     // ========== RediSearch / RedisBloom / RedisTimeSeries ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> FtCreateAsync(string index, string prefix, string[] fields, CancellationToken ct)
         => ValueTask.FromResult(true);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<string[]> FtSearchAsync(string index, string query, int? offset, int? count, CancellationToken ct)
         => ValueTask.FromResult(Array.Empty<string>());
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> BfAddAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct)
     {
         var entry = _store.GetOrAdd(key, _ => new CacheEntry
@@ -1078,6 +1255,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> BfExistsAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct)
     {
         if (!_store.TryGetValue(key, out var entry))
@@ -1098,6 +1278,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> TsCreateAsync(string key, CancellationToken ct)
     {
         var entry = _store.GetOrAdd(key, _ => new CacheEntry
@@ -1121,6 +1304,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> TsAddAsync(string key, long timestamp, double value, CancellationToken ct)
     {
         var entry = _store.GetOrAdd(key, _ => new CacheEntry
@@ -1175,6 +1361,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
     // ========== Scan Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async IAsyncEnumerable<string> ScanAsync(
         string? pattern = null,
         int pageSize = 128,
@@ -1198,6 +1387,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async IAsyncEnumerable<byte[]> SScanAsync(
         string key,
         string? pattern = null,
@@ -1287,17 +1479,26 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
     // ========== Server Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<string> PingAsync(CancellationToken ct)
     {
         return ValueTask.FromResult("PONG");
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<string[]> ModuleListAsync(CancellationToken ct)
     {
         // In-memory executor doesn't support modules
         return ValueTask.FromResult(Array.Empty<string>());
     }
 
+    /// <summary>
+    /// Asynchronously releases resources used by the current instance.
+    /// </summary>
     public ValueTask DisposeAsync()
     {
         _expirationTimer.Dispose();
@@ -1339,6 +1540,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
     {
         public static readonly SortedSetEntryComparer Instance = new();
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public int Compare(SortedSetEntry? x, SortedSetEntry? y)
         {
             if (ReferenceEquals(x, y)) return 0;
@@ -1409,12 +1613,18 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
     {
         public static readonly ByteArrayComparer Instance = new();
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public bool Equals(byte[]? x, byte[]? y)
         {
             if (x == null || y == null) return x == y;
             return x.AsSpan().SequenceEqual(y.AsSpan());
         }
 
+        /// <summary>
+        /// Gets value.
+        /// </summary>
         public int GetHashCode(byte[] obj)
         {
             var hash = new HashCode();

@@ -28,6 +28,9 @@ public sealed class FileSpillStore : IInMemorySpillStore
         _lastCleanupTicks = 0;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask WriteAsync(Guid spillRef, ReadOnlyMemory<byte> data, CancellationToken ct)
     {
         var path = GetPath(spillRef);
@@ -57,6 +60,9 @@ public sealed class FileSpillStore : IInMemorySpillStore
         TryScheduleOrphanCleanup();
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public async ValueTask<byte[]?> TryReadAsync(Guid spillRef, CancellationToken ct)
     {
         var path = GetPath(spillRef);
@@ -92,6 +98,9 @@ public sealed class FileSpillStore : IInMemorySpillStore
         return result;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask DeleteAsync(Guid spillRef, CancellationToken ct)
     {
         try
@@ -242,9 +251,15 @@ public sealed class FileSpillStore : IInMemorySpillStore
 /// </summary>
 public sealed class NoopSpillEncryptionProvider : ISpillEncryptionProvider
 {
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]> EncryptAsync(ReadOnlyMemory<byte> plaintext, CancellationToken ct)
         => ValueTask.FromResult(ToArray(plaintext));
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]> DecryptAsync(ReadOnlyMemory<byte> ciphertext, CancellationToken ct)
         => ValueTask.FromResult(ToArray(ciphertext));
 

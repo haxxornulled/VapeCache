@@ -26,6 +26,9 @@ internal static class RespParserLite
         public int ArrayLength { get; }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public static bool TryParse(ReadOnlyMemory<byte> buffer, out int consumed, out RespValueLite value)
     {
         var span = buffer.Span;

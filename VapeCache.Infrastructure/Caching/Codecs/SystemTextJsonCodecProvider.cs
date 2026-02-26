@@ -59,6 +59,9 @@ public sealed class SystemTextJsonCodecProvider : ICacheCodecProvider
             _options = options;
         }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public void Serialize(IBufferWriter<byte> buffer, T value)
         {
             // JsonSerializer.Serialize with IBufferWriter is zero-allocation
@@ -67,6 +70,9 @@ public sealed class SystemTextJsonCodecProvider : ICacheCodecProvider
             JsonSerializer.Serialize(writer, value, _options);
         }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public T Deserialize(ReadOnlySpan<byte> data)
         {
             // Span-based deserialization avoids byte[] allocation

@@ -130,9 +130,15 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         _reader = Task.Run(ReaderLoopAsync);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<RedisRespReader.RespValue> ExecuteAsync(ReadOnlyMemory<byte> command, CancellationToken ct) =>
         ExecuteAsync(command, poolBulk: false, ct);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<RedisRespReader.RespValue> ExecuteAsync(ReadOnlyMemory<byte> command, bool poolBulk, CancellationToken ct)
     {
         if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisMultiplexedConnection));
@@ -143,6 +149,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         return EnqueueAfterSlotAsync(command, poolBulk, ct);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryExecuteAsync(ReadOnlyMemory<byte> command, bool poolBulk, CancellationToken ct, out ValueTask<RedisRespReader.RespValue> task)
     {
         if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisMultiplexedConnection));
@@ -156,6 +165,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         return TryEnqueueAfterSlot(command, poolBulk, ct, out task);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<RedisRespReader.RespValue> ExecuteAsync(
         ReadOnlyMemory<byte> header,
         ReadOnlyMemory<byte> payload,
@@ -178,6 +190,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             payloadCount,
             payloadArrayBuffer);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<RedisRespReader.RespValue> ExecuteAsync(
         ReadOnlyMemory<byte> header,
         ReadOnlyMemory<byte> payload,
@@ -198,6 +213,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         return EnqueueAfterSlotAsync(header, payload, payloads, payloadCount, payloadArrayBuffer, appendCrlf, appendCrlfPerPayload, poolBulk, headerBuffer, ct);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryExecuteAsync(
         ReadOnlyMemory<byte> header,
         ReadOnlyMemory<byte> payload,
@@ -222,6 +240,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             payloadCount,
             payloadArrayBuffer);
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryExecuteAsync(
         ReadOnlyMemory<byte> header,
         ReadOnlyMemory<byte> payload,
@@ -569,6 +590,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         error == SocketError.TimedOut ||
         error == SocketError.NotConnected;
 
+    /// <summary>
+    /// Asynchronously releases resources used by the current instance.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
@@ -687,6 +711,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         public bool IsEmpty => Count == 0;
         public bool IsFull => Count == Capacity;
 
+        /// <summary>
+        /// Attempts to value.
+        /// </summary>
         public bool TryEnqueue(T item)
         {
             if (!_slots.Wait(0))
@@ -702,6 +729,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             return false;
         }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public ValueTask EnqueueAsync(T item, CancellationToken ct)
         {
             var spinner = new SpinWait();
@@ -788,6 +818,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             }
         }
 
+        /// <summary>
+        /// Attempts to value.
+        /// </summary>
         public bool TryDequeue(out T? item)
         {
             if (!_items.Wait(0))
@@ -807,6 +840,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             return false;
         }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public ValueTask<T> DequeueAsync(CancellationToken ct)
         {
             var spinner = new SpinWait();
@@ -894,6 +930,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             }
         }
 
+        /// <summary>
+        /// Attempts to value.
+        /// </summary>
         public bool TryPeek(out T? item)
         {
             if (!_items.Wait(0))
@@ -918,11 +957,17 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             return false;
         }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public void Clear()
         {
             while (TryDequeue(out _)) ;
         }
 
+        /// <summary>
+        /// Releases resources used by the current instance.
+        /// </summary>
         public void Dispose()
         {
             _slots?.Dispose();
@@ -968,6 +1013,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             }
         }
 
+        /// <summary>
+        /// Attempts to value.
+        /// </summary>
         public bool TryEnqueue(T item)
         {
             if (!_slots.Wait(0))
@@ -980,6 +1028,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             return true;
         }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public ValueTask EnqueueAsync(T item, CancellationToken ct)
         {
             var spinner = new SpinWait();
@@ -1043,6 +1094,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             return EnqueueAsyncSlow(item, wait);
         }
 
+        /// <summary>
+        /// Attempts to value.
+        /// </summary>
         public bool TryDequeue(out T? item)
         {
             if (!_items.Wait(0))
@@ -1059,6 +1113,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             return true;
         }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public ValueTask<T> DequeueAsync(CancellationToken ct)
         {
             var spinner = new SpinWait();
@@ -1092,11 +1149,17 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             return item!;
         }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public void Clear()
         {
             while (TryDequeue(out _)) ;
         }
 
+        /// <summary>
+        /// Releases resources used by the current instance.
+        /// </summary>
         public void Dispose()
         {
             _slots?.Dispose();

@@ -22,6 +22,9 @@ internal sealed class CacheSortedSet<T> : ICacheSortedSet<T>
         _codec = codec;
     }
 
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public async ValueTask<long> AddAsync(T member, double score, CancellationToken ct = default)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -29,6 +32,9 @@ internal sealed class CacheSortedSet<T> : ICacheSortedSet<T>
         return await _executor.ZAddAsync(Key, score, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Removes value.
+    /// </summary>
     public async ValueTask<long> RemoveAsync(T member, CancellationToken ct = default)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -36,6 +42,9 @@ internal sealed class CacheSortedSet<T> : ICacheSortedSet<T>
         return await _executor.ZRemAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<double?> ScoreAsync(T member, CancellationToken ct = default)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -43,6 +52,9 @@ internal sealed class CacheSortedSet<T> : ICacheSortedSet<T>
         return await _executor.ZScoreAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long?> RankAsync(T member, bool descending = false, CancellationToken ct = default)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -50,6 +62,9 @@ internal sealed class CacheSortedSet<T> : ICacheSortedSet<T>
         return await _executor.ZRankAsync(Key, buffer.WrittenMemory, descending, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<double> IncrementAsync(T member, double increment, CancellationToken ct = default)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -57,6 +72,9 @@ internal sealed class CacheSortedSet<T> : ICacheSortedSet<T>
         return await _executor.ZIncrByAsync(Key, increment, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> CountAsync(CancellationToken ct = default)
         => _executor.ZCardAsync(Key, ct);
 

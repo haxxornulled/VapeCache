@@ -1,4 +1,4 @@
-﻿// ========================= File: Vapecache.Infrastructure/Connections/RedisConnectionRegistration.cs =========================
+// ========================= File: Vapecache.Infrastructure/Connections/RedisConnectionRegistration.cs =========================
 using Microsoft.Extensions.DependencyInjection;
 using VapeCache.Abstractions.Connections;
 
@@ -6,6 +6,9 @@ namespace VapeCache.Infrastructure.Connections;
 
 public static class RedisConnectionRegistration
 {
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public static IServiceCollection AddVapecacheRedisConnections(this IServiceCollection services)
     {
         // Register the raw factory first (without circuit breaker)

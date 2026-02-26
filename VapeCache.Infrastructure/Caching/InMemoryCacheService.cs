@@ -40,6 +40,9 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
 
     public string Name => "memory";
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
@@ -85,6 +88,9 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         }
     }
 
+    /// <summary>
+    /// Sets value.
+    /// </summary>
     public async ValueTask SetAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions options, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
@@ -135,6 +141,9 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         }
     }
 
+    /// <summary>
+    /// Removes value.
+    /// </summary>
     public ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
@@ -297,9 +306,21 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
 
     private sealed class NoopCacheIntentRegistry : ICacheIntentRegistry
     {
+        /// <summary>
+        /// Gets value.
+        /// </summary>
         public IReadOnlyList<CacheIntentEntry> GetRecent(int maxCount) => Array.Empty<CacheIntentEntry>();
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public void RecordRemove(string key) { }
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public void RecordSet(string key, string backend, in CacheEntryOptions options, int payloadBytes) { }
+        /// <summary>
+        /// Attempts to value.
+        /// </summary>
         public bool TryGet(string key, out CacheIntentEntry? entry)
         {
             entry = null;

@@ -23,6 +23,9 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> IsAvailableAsync(CancellationToken ct = default)
     {
         if (_available.HasValue)
@@ -44,6 +47,9 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
         }
     }
 
+    /// <summary>
+    /// Creates value.
+    /// </summary>
     public async ValueTask<bool> CreateSeriesAsync(string key, CancellationToken ct = default)
     {
         if (await IsAvailableAsync(ct).ConfigureAwait(false))
@@ -55,6 +61,9 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
         return true;
     }
 
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public async ValueTask<long> AddAsync(string key, long timestamp, double value, CancellationToken ct = default)
     {
         if (await IsAvailableAsync(ct).ConfigureAwait(false))

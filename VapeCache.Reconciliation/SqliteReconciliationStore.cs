@@ -28,6 +28,9 @@ internal sealed class SqliteReconciliationStore : IRedisReconciliationStore
         _connectionString = builder.ToString();
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<int> CountAsync(CancellationToken ct)
     {
         await EnsureInitializedAsync(ct).ConfigureAwait(false);
@@ -39,6 +42,9 @@ internal sealed class SqliteReconciliationStore : IRedisReconciliationStore
         return Convert.ToInt32(result);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public async ValueTask<bool> TryUpsertWriteAsync(string key, ReadOnlyMemory<byte> value, DateTimeOffset trackedAt, DateTimeOffset? expiresAt, CancellationToken ct)
     {
         await EnsureInitializedAsync(ct).ConfigureAwait(false);
@@ -78,6 +84,9 @@ internal sealed class SqliteReconciliationStore : IRedisReconciliationStore
         }, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public async ValueTask<bool> TryUpsertDeleteAsync(string key, DateTimeOffset trackedAt, CancellationToken ct)
     {
         await EnsureInitializedAsync(ct).ConfigureAwait(false);
@@ -111,6 +120,9 @@ internal sealed class SqliteReconciliationStore : IRedisReconciliationStore
         }, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<IReadOnlyList<TrackedOperation>> SnapshotAsync(int maxOperations, CancellationToken ct)
     {
         await EnsureInitializedAsync(ct).ConfigureAwait(false);
@@ -143,6 +155,9 @@ internal sealed class SqliteReconciliationStore : IRedisReconciliationStore
         return list;
     }
 
+    /// <summary>
+    /// Removes value.
+    /// </summary>
     public async ValueTask RemoveAsync(IReadOnlyList<string> keys, CancellationToken ct)
     {
         if (keys.Count == 0) return;
@@ -174,6 +189,9 @@ internal sealed class SqliteReconciliationStore : IRedisReconciliationStore
         await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask ClearAsync(CancellationToken ct)
     {
         await EnsureInitializedAsync(ct).ConfigureAwait(false);

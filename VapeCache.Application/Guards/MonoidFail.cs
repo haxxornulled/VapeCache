@@ -1,4 +1,4 @@
-﻿using LanguageExt.TypeClasses;
+using LanguageExt.TypeClasses;
 using LanguageExt;
 using static LanguageExt.Prelude;
 namespace VapeCache.Application.Guards;
@@ -16,7 +16,13 @@ public sealed class MonoidFail : Monoid<MonoidFail>
 
     MonoidFail Semigroup<MonoidFail>.Append(MonoidFail x, MonoidFail y) => new(x.Errors.Concat(y.Errors));
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static MonoidFail FromError(Seq<string> errors) => new(errors);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static MonoidFail FromError(string error) => new(Seq1(error)); // ✅ Using LanguageExt.Prelude.Seq1
 }

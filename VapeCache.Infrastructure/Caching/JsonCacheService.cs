@@ -32,6 +32,9 @@ internal sealed class JsonCacheService : IJsonCache
         _options = options ?? DefaultOptions;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> IsAvailableAsync(CancellationToken ct = default)
     {
         if (_redisJsonAvailable.HasValue)
@@ -72,6 +75,9 @@ internal sealed class JsonCacheService : IJsonCache
         return JsonSerializer.Deserialize<T>(bytes, _options);
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<RedisValueLease> GetLeaseAsync(string key, string? path = null, CancellationToken ct = default)
     {
         if (await IsAvailableAsync(ct).ConfigureAwait(false))
@@ -102,6 +108,9 @@ internal sealed class JsonCacheService : IJsonCache
         await _cache.SetAsync(key, json, default, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Sets value.
+    /// </summary>
     public async ValueTask SetLeaseAsync(string key, RedisValueLease json, string? path = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(json);
@@ -118,6 +127,9 @@ internal sealed class JsonCacheService : IJsonCache
         await _cache.SetAsync(key, json.Memory, default, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> DeleteAsync(string key, string? path = null, CancellationToken ct = default)
     {
         if (await IsAvailableAsync(ct).ConfigureAwait(false))

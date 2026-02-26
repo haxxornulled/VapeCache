@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 
 namespace VapeCache.Application.Guards;
 
@@ -9,6 +9,9 @@ public static class Guard
 {
     public static class Against
     {
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public static string NotNullOrEmpty(string? value, [CallerArgumentExpression(nameof(value))] string argumentName = "")
         {
             if (string.IsNullOrEmpty(value))
@@ -17,6 +20,9 @@ public static class Guard
             return value;
         }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public static string NotNullOrWhiteSpace(string? value, [CallerArgumentExpression(nameof(value))] string argumentName = "")
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -34,6 +40,9 @@ public static class Guard
             return value.Value;
         }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public static int NotOutOfRange(int value, int min, int max, [CallerArgumentExpression(nameof(value))] string argumentName = "")
         {
             if (value < min || value > max)

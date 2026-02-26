@@ -20,6 +20,9 @@ internal sealed class RedisSearchService : IRedisSearchService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> IsAvailableAsync(CancellationToken ct = default)
     {
         if (_available.HasValue)
@@ -44,6 +47,9 @@ internal sealed class RedisSearchService : IRedisSearchService
         }
     }
 
+    /// <summary>
+    /// Creates value.
+    /// </summary>
     public async ValueTask<bool> CreateIndexAsync(string index, string prefix, string[] fields, CancellationToken ct = default)
     {
         if (!await IsAvailableAsync(ct).ConfigureAwait(false))
@@ -55,6 +61,9 @@ internal sealed class RedisSearchService : IRedisSearchService
         return await _redis.FtCreateAsync(index, prefix, fields, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<string[]> SearchAsync(string index, string query, int? offset = null, int? count = null, CancellationToken ct = default)
     {
         if (!await IsAvailableAsync(ct).ConfigureAwait(false))

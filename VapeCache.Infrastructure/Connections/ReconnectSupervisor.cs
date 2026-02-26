@@ -17,6 +17,9 @@ internal sealed class ReconnectSupervisor
     private long _nextAllowedConnectTicks;
     private long _circuitOpenUntilTicks;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void OnConnected()
     {
         Volatile.Write(ref _consecutiveFaults, 0);
@@ -24,6 +27,9 @@ internal sealed class ReconnectSupervisor
         Volatile.Write(ref _circuitOpenUntilTicks, 0);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void OnFault(Exception _)
     {
         var faults = Math.Min(30, Interlocked.Increment(ref _consecutiveFaults));
@@ -46,6 +52,9 @@ internal sealed class ReconnectSupervisor
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask WaitBeforeConnectAsync(CancellationToken ct)
     {
         var now = DateTime.UtcNow.Ticks;

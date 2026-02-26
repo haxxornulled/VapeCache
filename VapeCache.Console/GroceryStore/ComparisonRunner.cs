@@ -23,6 +23,9 @@ public static class ComparisonRunner
         Both
     }
 
+    /// <summary>
+    /// Runs value.
+    /// </summary>
     public static async Task RunComparisonAsync(
         IConfiguration configuration,
         string redisHost,

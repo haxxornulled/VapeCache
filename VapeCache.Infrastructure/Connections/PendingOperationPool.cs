@@ -15,6 +15,9 @@ internal sealed class PendingOperationPool
         _inFlight = inFlight;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public PendingOperation Rent()
     {
         if (_pool.TryTake(out var op))
@@ -28,6 +31,9 @@ internal sealed class PendingOperationPool
 
     private void Return(PendingOperation operation) => _pool.Add(operation);
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryTake(out PendingOperation? operation) => _pool.TryTake(out operation);
 }
 
@@ -60,6 +66,9 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     public bool IsCompleted => Volatile.Read(ref _completed) != 0;
     public ValueTask<RedisRespReader.RespValue> ValueTask { get; private set; }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void Reset()
     {
         PoolBulk = false;
@@ -73,6 +82,9 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         Volatile.Write(ref _awaiterObserved, 0);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void Start(bool poolBulk, CancellationToken ct, bool holdsSlot)
     {
         PoolBulk = poolBulk;
@@ -101,6 +113,9 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public void TrySetResult(RedisRespReader.RespValue value)
     {
         if (Interlocked.CompareExchange(ref _completed, 1, 0) != 0)
@@ -111,6 +126,9 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         _core.SetResult(value);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public void TrySetException(Exception ex)
     {
         if (Interlocked.CompareExchange(ref _completed, 1, 0) != 0)
@@ -121,6 +139,9 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         _core.SetException(ex);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void MarkResponseProcessed()
     {
         Volatile.Write(ref _responseProcessed, 1);
@@ -131,6 +152,9 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void AbortUnqueued(Exception ex)
     {
         TrySetException(ex);
@@ -138,6 +162,9 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         MarkResponseProcessed();
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void AbortEnqueueFailure()
     {
         TrySetException(new InvalidOperationException("Enqueue failed"));
@@ -177,6 +204,9 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     void IValueTaskSource<RedisRespReader.RespValue>.OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags)
         => _core.OnCompleted(continuation, state, token, flags);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void DisposeResources()
     {
         try { _ctr.Dispose(); } catch { }

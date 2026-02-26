@@ -27,6 +27,9 @@ internal sealed class TokenBucketPacer : IAsyncDisposable
         });
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask WaitAsync(CancellationToken ct)
     {
         using var lease = await _limiter.AcquireAsync(1, ct).ConfigureAwait(false);
@@ -34,6 +37,9 @@ internal sealed class TokenBucketPacer : IAsyncDisposable
             throw new TimeoutException("Rate limiter queue full.");
     }
 
+    /// <summary>
+    /// Asynchronously releases resources used by the current instance.
+    /// </summary>
     public ValueTask DisposeAsync()
     {
         _limiter.Dispose();

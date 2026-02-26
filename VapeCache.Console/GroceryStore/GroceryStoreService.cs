@@ -381,5 +381,8 @@ public class GroceryStoreService : IGroceryStoreService
         return _inventoryUpdates.GetOrAdd(productId, static (id, factory) => factory.List<InventoryUpdate>($"inventory:updates:{id}"), _collections);
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static Product[] GetAllProducts() => Products;
 }

@@ -22,6 +22,9 @@ internal sealed class CacheSet<T> : ICacheSet<T>
         _codec = codec;
     }
 
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public async ValueTask<long> AddAsync(T item, CancellationToken ct = default)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -29,6 +32,9 @@ internal sealed class CacheSet<T> : ICacheSet<T>
         return await _executor.SAddAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Removes value.
+    /// </summary>
     public async ValueTask<long> RemoveAsync(T item, CancellationToken ct = default)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -36,6 +42,9 @@ internal sealed class CacheSet<T> : ICacheSet<T>
         return await _executor.SRemAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> ContainsAsync(T item, CancellationToken ct = default)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -43,6 +52,9 @@ internal sealed class CacheSet<T> : ICacheSet<T>
         return await _executor.SIsMemberAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<T[]> MembersAsync(CancellationToken ct = default)
     {
         var items = await _executor.SMembersAsync(Key, ct).ConfigureAwait(false);
@@ -55,11 +67,17 @@ internal sealed class CacheSet<T> : ICacheSet<T>
         return result;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> CountAsync(CancellationToken ct = default)
     {
         return _executor.SCardAsync(Key, ct);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async IAsyncEnumerable<T> StreamAsync(
         string? pattern = null,
         int pageSize = 128,

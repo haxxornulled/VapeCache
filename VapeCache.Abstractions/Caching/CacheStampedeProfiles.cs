@@ -5,6 +5,9 @@ namespace VapeCache.Abstractions.Caching;
 /// </summary>
 public static class CacheStampedeProfiles
 {
+    /// <summary>
+    /// Creates value.
+    /// </summary>
     public static CacheStampedeOptions Create(CacheStampedeProfile profile)
     {
         var options = new CacheStampedeOptions();
@@ -12,6 +15,9 @@ public static class CacheStampedeProfiles
         return options;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static void Apply(CacheStampedeOptions options, CacheStampedeProfile profile)
     {
         ArgumentNullException.ThrowIfNull(options);

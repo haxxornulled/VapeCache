@@ -15,6 +15,9 @@ namespace VapeCache.Infrastructure.Caching;
 
 public static class CacheRegistration
 {
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public static IServiceCollection AddVapecacheCaching(this IServiceCollection services)
     {
         services.AddMemoryCache();
