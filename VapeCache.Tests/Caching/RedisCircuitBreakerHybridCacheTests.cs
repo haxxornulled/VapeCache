@@ -9,6 +9,7 @@ using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 using VapeCache.Reconciliation;
+using VapeCache.Tests.Infrastructure;
 using Xunit;
 
 namespace VapeCache.Tests.Caching;
@@ -29,7 +30,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
 
         await memory.SetAsync("k", "v"u8.ToArray(), new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None);
 
-        var breaker = Options.Create(new RedisCircuitBreakerOptions
+        var breaker = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
         {
             Enabled = true,
             ConsecutiveFailuresToOpen = 2,
@@ -68,7 +69,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         var memory = CreateMemoryCacheService(current, statsRegistry);
         await memory.SetAsync("k", "v"u8.ToArray(), new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None);
 
-        var breaker = Options.Create(new RedisCircuitBreakerOptions
+        var breaker = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
         {
             Enabled = true,
             ConsecutiveFailuresToOpen = 2,
@@ -102,7 +103,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         var redis = new RedisCacheService(flakyRedis, current, statsRegistry);
         var memory = CreateMemoryCacheService(current, statsRegistry);
 
-        var breaker = Options.Create(new RedisCircuitBreakerOptions
+        var breaker = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
         {
             Enabled = true,
             ConsecutiveFailuresToOpen = 1,
@@ -396,8 +397,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
     private static InMemoryCacheService CreateMemoryCacheService(ICurrentCacheService current, CacheStatsRegistry statsRegistry)
     {
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        var spillOptions = Options.Create(new InMemorySpillOptions { EnableSpillToDisk = false });
-        var spillStore = new FileSpillStore(spillOptions, new NoopSpillEncryptionProvider());
-        return new InMemoryCacheService(memoryCache, current, statsRegistry, spillOptions, spillStore);
+        var spillOptions = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions { EnableSpillToDisk = false });
+        return new InMemoryCacheService(memoryCache, current, statsRegistry, spillOptions, new NoopSpillStore());
     }
 }

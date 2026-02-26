@@ -42,11 +42,11 @@ public static class RedisTransportProfiles
         {
             RedisTransportProfile.FullTilt => options with
             {
-                EnableCoalescedSocketWrites = true,
+                EnableCoalescedSocketWrites = options.EnableCoalescedSocketWrites,
                 CoalescedWriteMaxBytes = 512 * 1024,
                 CoalescedWriteMaxSegments = 192,
                 CoalescedWriteSmallCopyThresholdBytes = 1536,
-                EnableAdaptiveCoalescing = true,
+                EnableAdaptiveCoalescing = options.EnableAdaptiveCoalescing,
                 AdaptiveCoalescingLowDepth = 6,
                 AdaptiveCoalescingHighDepth = 56,
                 AdaptiveCoalescingMinWriteBytes = 64 * 1024,
@@ -55,11 +55,11 @@ public static class RedisTransportProfiles
             },
             RedisTransportProfile.Balanced => options with
             {
-                EnableCoalescedSocketWrites = true,
+                EnableCoalescedSocketWrites = options.EnableCoalescedSocketWrites,
                 CoalescedWriteMaxBytes = 256 * 1024,
                 CoalescedWriteMaxSegments = 128,
                 CoalescedWriteSmallCopyThresholdBytes = 1024,
-                EnableAdaptiveCoalescing = true,
+                EnableAdaptiveCoalescing = options.EnableAdaptiveCoalescing,
                 AdaptiveCoalescingLowDepth = 4,
                 AdaptiveCoalescingHighDepth = 48,
                 AdaptiveCoalescingMinWriteBytes = 32 * 1024,
@@ -68,11 +68,11 @@ public static class RedisTransportProfiles
             },
             RedisTransportProfile.LowLatency => options with
             {
-                EnableCoalescedSocketWrites = true,
+                EnableCoalescedSocketWrites = options.EnableCoalescedSocketWrites,
                 CoalescedWriteMaxBytes = 64 * 1024,
                 CoalescedWriteMaxSegments = 64,
                 CoalescedWriteSmallCopyThresholdBytes = 512,
-                EnableAdaptiveCoalescing = true,
+                EnableAdaptiveCoalescing = options.EnableAdaptiveCoalescing,
                 AdaptiveCoalescingLowDepth = 2,
                 AdaptiveCoalescingHighDepth = 24,
                 AdaptiveCoalescingMinWriteBytes = 16 * 1024,

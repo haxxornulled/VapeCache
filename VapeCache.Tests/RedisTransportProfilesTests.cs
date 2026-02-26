@@ -77,6 +77,24 @@ public sealed class RedisTransportProfilesTests
     }
 
     [Fact]
+    public void ApplyMultiplexerProfile_FullTilt_PreservesExplicitFeatureToggles()
+    {
+        var options = new RedisMultiplexerOptions
+        {
+            TransportProfile = RedisTransportProfile.FullTilt,
+            EnableCoalescedSocketWrites = false,
+            EnableAdaptiveCoalescing = false
+        };
+
+        var effective = RedisTransportProfiles.Apply(options);
+
+        Assert.False(effective.EnableCoalescedSocketWrites);
+        Assert.False(effective.EnableAdaptiveCoalescing);
+        Assert.Equal(512 * 1024, effective.CoalescedWriteMaxBytes);
+        Assert.Equal(192, effective.CoalescedWriteMaxSegments);
+    }
+
+    [Fact]
     public void ApplyMultiplexerProfile_Balanced_UsesMidrangeBatching()
     {
         var options = new RedisMultiplexerOptions { TransportProfile = RedisTransportProfile.Balanced };

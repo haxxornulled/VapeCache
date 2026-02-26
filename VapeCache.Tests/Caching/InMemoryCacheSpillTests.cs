@@ -1,10 +1,7 @@
-using System;
-using System.IO;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
+using VapeCache.Tests.Infrastructure;
 using Xunit;
 
 namespace VapeCache.Tests.Caching;
@@ -12,42 +9,27 @@ namespace VapeCache.Tests.Caching;
 public sealed class InMemoryCacheSpillTests
 {
     [Fact]
-    public async Task InMemoryCache_SpillsLargeValuesToDisk()
+    public async Task InMemoryCache_LargeValues_RoundTripWithNoopSpillStore()
     {
-        var root = Path.Combine(Path.GetTempPath(), "vapecache-spill", Guid.NewGuid().ToString("n"));
-        Directory.CreateDirectory(root);
-
-        var options = Options.Create(new InMemorySpillOptions
+        var options = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions
         {
-            EnableSpillToDisk = true,
+            EnableSpillToDisk = false,
             SpillThresholdBytes = 16,
-            InlinePrefixBytes = 4,
-            SpillDirectory = root
+            InlinePrefixBytes = 4
         });
 
-        var spillStore = new FileSpillStore(options, new NoopSpillEncryptionProvider());
         var cache = new MemoryCache(new MemoryCacheOptions());
         var current = new CurrentCacheService();
         var stats = new CacheStatsRegistry();
-        var service = new InMemoryCacheService(cache, current, stats, options, spillStore);
+        var service = new InMemoryCacheService(cache, current, stats, options, new NoopSpillStore());
 
         var payload = new byte[64];
         Random.Shared.NextBytes(payload);
 
-        try
-        {
-            await service.SetAsync("spill:key", payload, default, CancellationToken.None);
-            var fetched = await service.GetAsync("spill:key", CancellationToken.None);
+        await service.SetAsync("spill:key", payload, default, CancellationToken.None);
+        var fetched = await service.GetAsync("spill:key", CancellationToken.None);
 
-            Assert.NotNull(fetched);
-            Assert.Equal(payload, fetched);
-
-            var files = Directory.GetFiles(root, "*.bin", SearchOption.AllDirectories);
-            Assert.NotEmpty(files);
-        }
-        finally
-        {
-            try { Directory.Delete(root, recursive: true); } catch { }
-        }
+        Assert.NotNull(fetched);
+        Assert.Equal(payload, fetched);
     }
 }

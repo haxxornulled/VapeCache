@@ -1,24 +1,18 @@
-using System.Security.Cryptography;
 using VapeCache.Licensing;
 
 namespace VapeCache.LicenseGenerator;
 
 /// <summary>
-/// Internal utility for generating VapeCache license keys.
-/// NOT FOR DISTRIBUTION - For VapeCache team use only.
+/// Internal utility for generating and validating HMAC-based VapeCache license keys.
 /// </summary>
 internal class Program
 {
+    private const string LicenseSecretEnvironmentVariable = "VAPECACHE_LICENSE_SECRET";
+
     static void Main(string[] args)
     {
         Console.Out.WriteLine("=== VapeCache License Key Generator ===");
-        Console.Out.WriteLine("FOR INTERNAL USE ONLY - DO NOT DISTRIBUTE\n");
-
-        if (args.Length > 0 && args[0] == "--create-keypair")
-        {
-            CreateKeyPair();
-            return;
-        }
+        Console.Out.WriteLine("HMAC generator utility for OSS licensing flows.\n");
 
         if (args.Length > 0 && args[0] == "--validate")
         {
@@ -31,24 +25,12 @@ internal class Program
 
     private static void GenerateLicenseKey()
     {
-        Console.Out.WriteLine("=== VapeCache Enterprise License Generator ===");
-        Console.Out.WriteLine("Application-based licensing: $499/month per organization");
-        Console.Out.WriteLine("Unlimited deployments, unlimited Redis topology\n");
+        Console.Out.WriteLine("=== VapeCache License Generator ===");
+        Console.Out.WriteLine("Usage: generates VCPRO/VCENT keys using shared secret signing.\n");
 
-        string signingPrivateKeyPem;
-        try
-        {
-            signingPrivateKeyPem = LicenseValidationOptions.ResolveSigningPrivateKeyPem();
-        }
-        catch (InvalidOperationException ex)
-        {
-            Console.Out.WriteLine(ex.Message);
-            Console.Out.WriteLine($"Set {LicenseValidationOptions.SigningPrivateKeyEnvironmentVariable} before generating licenses.");
-            Console.Out.WriteLine("Use --create-keypair to generate an ES256 key pair.");
+        var secret = ResolveSecret();
+        if (string.IsNullOrWhiteSpace(secret))
             return;
-        }
-
-        var keyId = LicenseValidationOptions.ResolveVerificationKeyId();
 
         Console.Write("Enter Organization ID (e.g., acme, contoso): ");
         var organizationId = Console.ReadLine()?.Trim();
@@ -72,25 +54,21 @@ internal class Program
             return;
         }
 
-        var issuer = new LicenseTokenIssuer(signingPrivateKeyPem, keyId);
-        var licenseKey = issuer.GenerateEnterpriseLicenseKey(
-            organizationId,
-            expiresAt,
-            features: new[]
-            {
-                LicenseFeatures.Persistence,
-                LicenseFeatures.Reconciliation
-            });
+        Console.Write("Choose tier (pro|enterprise) [enterprise]: ");
+        var tierInput = Console.ReadLine()?.Trim();
+        var tier = string.Equals(tierInput, "pro", StringComparison.OrdinalIgnoreCase)
+            ? LicenseTier.Pro
+            : LicenseTier.Enterprise;
+
+        var issuer = new LicenseValidator(secret);
+        var licenseKey = issuer.GenerateLicenseKey(tier, organizationId, expiresAt);
 
         Console.Out.WriteLine();
-        Console.Out.WriteLine("=== ENTERPRISE LICENSE KEY GENERATED ===");
-        Console.Out.WriteLine("Tier:             Enterprise");
+        Console.Out.WriteLine("=== LICENSE KEY GENERATED ===");
+        Console.Out.WriteLine($"Tier:             {tier}");
         Console.Out.WriteLine($"Organization:     {organizationId}");
-        Console.Out.WriteLine($"Key ID (kid):     {keyId}");
         Console.Out.WriteLine($"Expires:          {expiresAt:yyyy-MM-dd}");
-        Console.Out.WriteLine("Deployments:      Unlimited");
-        Console.Out.WriteLine("Redis Topology:   Any (standalone/sentinel/cluster)");
-        Console.Out.WriteLine("Features:         persistence, reconciliation");
+        Console.Out.WriteLine($"Deployments:      {(tier == LicenseTier.Enterprise ? "Unlimited" : "Max 5")}");
         Console.Out.WriteLine();
         Console.Out.WriteLine("License Key:");
         Console.Out.WriteLine(licenseKey);
@@ -98,18 +76,15 @@ internal class Program
         Console.Out.WriteLine("=== USAGE ===");
         Console.Out.WriteLine("Add to appsettings.json or set environment variable:");
         Console.Out.WriteLine($"  VAPECACHE_LICENSE_KEY={licenseKey}");
-        Console.Out.WriteLine();
-        Console.Out.WriteLine("For Persistence:");
-        Console.Out.WriteLine($"  services.AddVapeCachePersistence(\"{licenseKey}\");");
-        Console.Out.WriteLine();
-        Console.Out.WriteLine("For Reconciliation:");
-        Console.Out.WriteLine($"  services.AddVapeCacheRedisReconciliation(\"{licenseKey}\");");
         Console.Out.Flush();
     }
 
     private static void ValidateLicenseKey()
     {
-        Console.Out.WriteLine($"Verifier key id: {LicenseValidationOptions.ResolveVerificationKeyId()}");
+        var secret = ResolveSecret();
+        if (string.IsNullOrWhiteSpace(secret))
+            return;
+
         Console.Write("Enter license key to validate: ");
         var licenseKey = Console.ReadLine()?.Trim();
 
@@ -119,7 +94,7 @@ internal class Program
             return;
         }
 
-        var validator = new LicenseValidator();
+        var validator = new LicenseValidator(secret);
         var result = validator.Validate(licenseKey);
 
         Console.Out.WriteLine("\n=== VALIDATION RESULT ===");
@@ -129,10 +104,8 @@ internal class Program
         {
             Console.Out.WriteLine($"Tier:       {result.Tier}");
             Console.Out.WriteLine($"Customer:   {result.CustomerId}");
-            Console.Out.WriteLine($"Key ID:     {result.KeyId}");
-            Console.Out.WriteLine($"License ID: {result.LicenseId}");
             Console.Out.WriteLine($"Expires:    {result.ExpiresAt:yyyy-MM-dd}");
-            Console.Out.WriteLine($"Features:   {string.Join(", ", result.Features)}");
+            Console.Out.WriteLine($"Instances:  {result.MaxInstances}");
             Console.Out.WriteLine($"Expired:    {result.IsExpired}");
         }
         else
@@ -141,26 +114,21 @@ internal class Program
         }
     }
 
-    private static void CreateKeyPair()
+    private static string? ResolveSecret()
     {
-        using var ecdsa = ECDsa.Create();
-        ecdsa.GenerateKey(ECCurve.NamedCurves.nistP256);
+        var secret = Environment.GetEnvironmentVariable(LicenseSecretEnvironmentVariable);
+        if (!string.IsNullOrWhiteSpace(secret))
+            return secret;
 
-        var privateKeyPem = ecdsa.ExportPkcs8PrivateKeyPem();
-        var publicKeyPem = ecdsa.ExportSubjectPublicKeyInfoPem();
+        Console.Write($"Enter signing secret ({LicenseSecretEnvironmentVariable}): ");
+        secret = Console.ReadLine()?.Trim();
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            Console.Out.WriteLine($"Secret is required. Set {LicenseSecretEnvironmentVariable} or provide input.");
+            return null;
+        }
 
-        Console.Out.WriteLine("=== NEW ES256 KEYPAIR ===");
-        Console.Out.WriteLine();
-        Console.Out.WriteLine("Private key (store in secure signing environment only):");
-        Console.Out.WriteLine(privateKeyPem);
-        Console.Out.WriteLine();
-        Console.Out.WriteLine("Public key (safe to distribute for validation):");
-        Console.Out.WriteLine(publicKeyPem);
-        Console.Out.WriteLine();
-        Console.Out.WriteLine("Set environment variables:");
-        Console.Out.WriteLine($"  {LicenseValidationOptions.SigningPrivateKeyEnvironmentVariable}=<PRIVATE PEM>");
-        Console.Out.WriteLine($"  {LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable}=<PUBLIC PEM>");
-        Console.Out.WriteLine($"  {LicenseValidationOptions.VerificationKeyIdEnvironmentVariable}=vc-main-2026");
+        return secret;
     }
 }
 
