@@ -260,8 +260,8 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
     {
         warmTarget = Math.Min(warmTarget, Math.Max(0, o.MaxIdle));
         const int MaxWarmupRetries = 10;
-        const int MaxTotalAttempts = 20;
         var retryCount = 0;
+        var maxTotalAttempts = Math.Max(warmTarget * 4, MaxWarmupRetries * 2);
         var totalAttempts = 0;
 
         while (Volatile.Read(ref _disposed) == 0 &&
@@ -269,9 +269,13 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
                _connectionSlots.Wait(0))
         {
             totalAttempts++;
-            if (totalAttempts >= MaxTotalAttempts)
+            if (totalAttempts > maxTotalAttempts)
             {
-                _logger.LogWarning("Failed to warm connection pool after {Attempts} total attempts. Stopping warmup to prevent infinite loop.", MaxTotalAttempts);
+                _logger.LogWarning(
+                    "Failed to warm connection pool after {Attempts} attempts (WarmTarget={WarmTarget}, Idle={Idle}). Stopping warmup to prevent infinite loop.",
+                    maxTotalAttempts,
+                    warmTarget,
+                    Volatile.Read(ref _idleCount));
                 _connectionSlots.Release();
                 return;
             }

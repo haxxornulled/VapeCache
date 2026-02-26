@@ -27,7 +27,7 @@ public sealed class HybridCommandExecutorOpenCircuitTests
             breaker,
             stats,
             current,
-            Options.Create(new RedisCircuitBreakerOptions { Enabled = true }),
+            new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions { Enabled = true }),
             NullLogger<HybridCommandExecutor>.Instance);
 
         // Key/value

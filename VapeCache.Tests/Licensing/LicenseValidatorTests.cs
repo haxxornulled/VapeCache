@@ -149,8 +149,43 @@ public class LicenseValidatorTests
 
     private static string MutateBase64Url(string input)
     {
-        var lastIndex = input.Length - 1;
-        var replacement = input[lastIndex] == 'A' ? 'B' : 'A';
-        return input[..lastIndex] + replacement;
+        if (!TryFromBase64Url(input, out var bytes) || bytes.Length == 0)
+            throw new InvalidOperationException("Unable to decode base64url segment for mutation.");
+
+        bytes[0] ^= 0x01;
+        return ToBase64Url(bytes);
+    }
+
+    private static string ToBase64Url(ReadOnlySpan<byte> bytes)
+    {
+        return Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
+
+    private static bool TryFromBase64Url(string value, out byte[] bytes)
+    {
+        bytes = Array.Empty<byte>();
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var normalized = value.Replace('-', '+').Replace('_', '/');
+        var remainder = normalized.Length % 4;
+        if (remainder == 1)
+            return false;
+
+        if (remainder > 0)
+            normalized = normalized.PadRight(normalized.Length + (4 - remainder), '=');
+
+        try
+        {
+            bytes = Convert.FromBase64String(normalized);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 }

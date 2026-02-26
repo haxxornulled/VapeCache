@@ -1,4 +1,6 @@
 using Autofac;
+using Microsoft.Extensions.Options;
+using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Connections;
 
@@ -8,6 +10,9 @@ public sealed class VapeCacheConnectionsModule : Module
 {
     protected override void Load(ContainerBuilder builder)
     {
+        RegisterStaticOptions(builder, new RedisConnectionOptions());
+        RegisterStaticOptions(builder, new RedisCircuitBreakerOptions());
+
         builder.RegisterType<RedisConnectionFactory>().AsSelf().SingleInstance();
         builder.RegisterType<CircuitBreakerRedisConnectionFactory>().As<IRedisConnectionFactory>().SingleInstance();
 
@@ -16,5 +21,15 @@ public sealed class VapeCacheConnectionsModule : Module
             .As<IRedisConnectionPool>()
             .As<IRedisConnectionPoolReaper>()
             .SingleInstance();
+    }
+
+    private static void RegisterStaticOptions<T>(ContainerBuilder builder, T value)
+        where T : class
+    {
+        builder.RegisterInstance(new StaticOptionsMonitor<T>(value))
+            .As<IOptions<T>>()
+            .As<IOptionsMonitor<T>>()
+            .SingleInstance()
+            .PreserveExistingDefaults();
     }
 }

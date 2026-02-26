@@ -148,6 +148,22 @@ public class RingQueueTests
         Assert.True(ex is ObjectDisposedException || ex is OperationCanceledException, $"Unexpected exception type: {ex.GetType()}");
     }
 
+    [Fact]
+    public async Task EnableSocketRespReader_UsesConfiguredFlag()
+    {
+        await using var mux = new RedisMultiplexedConnection(
+            new NoopFactory(),
+            maxInFlight: 4,
+            coalesceWrites: false,
+            enableSocketRespReader: true);
+
+        var field = typeof(RedisMultiplexedConnection).GetField("_useSocketReader", BindingFlags.Instance | BindingFlags.NonPublic)
+                    ?? throw new InvalidOperationException("Socket reader flag field not found.");
+        var enabled = (bool)field.GetValue(mux)!;
+
+        Assert.True(enabled);
+    }
+
     private static object CreateQueue(string name, int capacity)
     {
         var type = typeof(RedisMultiplexedConnection).GetNestedType(name, BindingFlags.NonPublic);

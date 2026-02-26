@@ -27,6 +27,12 @@ public sealed class RedisConnectionOptionsBindingTests
             "MaxConnections": 7,
             "MaxIdle": 6,
             "Warm": 2,
+            "TransportProfile": "Balanced",
+            "EnableTcpNoDelay": false,
+            "TcpSendBufferBytes": 262144,
+            "TcpReceiveBufferBytes": 524288,
+            "MaxBulkStringBytes": 8388608,
+            "MaxArrayDepth": 32,
             "ConnectTimeout": "00:00:05",
             "AcquireTimeout": "00:00:06"
           }
@@ -56,7 +62,13 @@ public sealed class RedisConnectionOptionsBindingTests
         Assert.Equal(7, o.MaxConnections);
         Assert.Equal(6, o.MaxIdle);
         Assert.Equal(2, o.Warm);
+        Assert.Equal(RedisTransportProfile.Balanced, o.TransportProfile);
         Assert.Equal(TimeSpan.FromSeconds(5), o.ConnectTimeout);
         Assert.Equal(TimeSpan.FromSeconds(6), o.AcquireTimeout);
+        Assert.False(o.EnableTcpNoDelay);
+        Assert.Equal(262144, o.TcpSendBufferBytes);
+        Assert.Equal(524288, o.TcpReceiveBufferBytes);
+        Assert.Equal(8 * 1024 * 1024, o.MaxBulkStringBytes);
+        Assert.Equal(32, o.MaxArrayDepth);
     }
 }

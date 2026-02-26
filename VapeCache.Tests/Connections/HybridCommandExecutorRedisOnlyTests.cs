@@ -8,6 +8,7 @@ using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
+using VapeCache.Tests.Infrastructure;
 using Xunit;
 
 namespace VapeCache.Tests.Connections;
@@ -33,7 +34,7 @@ public sealed class HybridCommandExecutorRedisOnlyTests
             breaker,
             new CacheStatsRegistry(),
             new CurrentCacheService(),
-            Options.Create(new RedisCircuitBreakerOptions { Enabled = true }),
+            new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions { Enabled = true }),
             NullLogger<HybridCommandExecutor>.Instance);
 
         var modules = await hybrid.ModuleListAsync(CancellationToken.None);
@@ -59,7 +60,7 @@ public sealed class HybridCommandExecutorRedisOnlyTests
             breaker,
             new CacheStatsRegistry(),
             new CurrentCacheService(),
-            Options.Create(new RedisCircuitBreakerOptions { Enabled = true }),
+            new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions { Enabled = true }),
             NullLogger<HybridCommandExecutor>.Instance);
 
         var result = await hybrid.PingAsync(CancellationToken.None);
@@ -80,7 +81,7 @@ public sealed class HybridCommandExecutorRedisOnlyTests
             breaker,
             new CacheStatsRegistry(),
             new CurrentCacheService(),
-            Options.Create(new RedisCircuitBreakerOptions { Enabled = true }),
+            new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions { Enabled = true }),
             NullLogger<HybridCommandExecutor>.Instance);
 
         using var cts = new CancellationTokenSource();

@@ -38,18 +38,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- .NET Aspire Service Discovery -->
     <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="9.0.0" />
-
-    <!-- Health Checks -->
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.1" />
 
     <!-- OpenTelemetry (for Aspire Dashboard integration) - Updated to 1.11.2+ to fix CVE-2025-27513 / GHSA-8785-wc3w-h8q6 -->
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.11.2" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.11.2" />
 
-    <!-- Hosting Abstractions -->
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.1" />
   </ItemGroup>
 
   <ItemGroup>

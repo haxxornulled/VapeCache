@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 
@@ -7,6 +8,11 @@ namespace VapeCache.Infrastructure.Caching;
 
 internal sealed class StampedeProtectedCacheService : ICacheService
 {
+    private sealed class FailureEntry
+    {
+        public long RetryAfterUtcTicks;
+    }
+
     private sealed class LockEntry
     {
         public readonly SemaphoreSlim Semaphore = new(1, 1);
@@ -15,13 +21,18 @@ internal sealed class StampedeProtectedCacheService : ICacheService
     }
 
     private readonly ICacheService _inner;
-    private readonly CacheStampedeOptions _options;
+    private readonly IOptionsMonitor<CacheStampedeOptions> _optionsMonitor;
+    private readonly CacheStats? _stats;
+    private CacheStampedeOptions _options => _optionsMonitor.CurrentValue;
     private readonly ConcurrentDictionary<string, LockEntry> _locks = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, FailureEntry> _failures = new(StringComparer.Ordinal);
+    private int _lockKeyCount;
 
-    public StampedeProtectedCacheService(ICacheService inner, IOptionsMonitor<CacheStampedeOptions> options)
+    public StampedeProtectedCacheService(ICacheService inner, IOptionsMonitor<CacheStampedeOptions> options, CacheStats? stats = null)
     {
         _inner = inner;
-        _options = options.CurrentValue;
+        _optionsMonitor = options;
+        _stats = stats;
     }
 
     public string Name => _inner.Name;
@@ -47,14 +58,21 @@ internal sealed class StampedeProtectedCacheService : ICacheService
         CacheEntryOptions options,
         CancellationToken ct)
     {
-        if (!_options.Enabled)
+        var stampedeOptions = _options;
+        if (!stampedeOptions.Enabled)
             return await _inner.GetOrSetAsync(key, factory, serialize, deserialize, options, ct).ConfigureAwait(false);
+
+        ValidateKey(key, stampedeOptions);
+        ThrowIfInFailureBackoff(key, stampedeOptions);
 
         var bytes = await _inner.GetAsync(key, ct).ConfigureAwait(false);
         if (bytes is not null)
+        {
+            _failures.TryRemove(key, out _);
             return deserialize(bytes);
+        }
 
-        if (_locks.Count > _options.MaxKeys)
+        if (Volatile.Read(ref _lockKeyCount) > stampedeOptions.MaxKeys)
         {
             // Fail open: don't deadlock the app due to lock map growth.
             return await _inner.GetOrSetAsync(key, factory, serialize, deserialize, options, ct).ConfigureAwait(false);
@@ -63,7 +81,15 @@ internal sealed class StampedeProtectedCacheService : ICacheService
         LockEntry entry;
         while (true)
         {
-            entry = _locks.GetOrAdd(key, static _ => new LockEntry());
+            if (!_locks.TryGetValue(key, out entry!))
+            {
+                var created = new LockEntry();
+                if (!_locks.TryAdd(key, created))
+                    continue;
+
+                Interlocked.Increment(ref _lockKeyCount);
+                entry = created;
+            }
 
             // CRITICAL: Check if this entry is already marked for disposal before incrementing refcount
             // This prevents the race where we get a stale entry that's being disposed
@@ -88,20 +114,41 @@ internal sealed class StampedeProtectedCacheService : ICacheService
 
         try
         {
-            await entry.Semaphore.WaitAsync(ct).ConfigureAwait(false);
+            var lockTaken = false;
+            using var waitCts = CreateWaitTokenSource(stampedeOptions, ct);
             try
             {
+                await entry.Semaphore.WaitAsync(waitCts?.Token ?? ct).ConfigureAwait(false);
+                lockTaken = true;
+
                 bytes = await _inner.GetAsync(key, ct).ConfigureAwait(false);
                 if (bytes is not null)
+                {
+                    _failures.TryRemove(key, out _);
                     return deserialize(bytes);
+                }
 
                 var created = await factory(ct).ConfigureAwait(false);
                 await _inner.SetAsync(key, created, serialize, options, ct).ConfigureAwait(false);
+                _failures.TryRemove(key, out _);
                 return created;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                CacheTelemetry.StampedeLockWaitTimeout.Add(1);
+                _stats?.IncStampedeLockWaitTimeout();
+                throw new TimeoutException($"Stampede lock wait timed out for key '{key}'.");
+            }
+            catch
+            {
+                if (lockTaken)
+                    RegisterFailure(key, stampedeOptions);
+                throw;
             }
             finally
             {
-                entry.Semaphore.Release();
+                if (lockTaken)
+                    entry.Semaphore.Release();
             }
         }
         finally
@@ -117,10 +164,79 @@ internal sealed class StampedeProtectedCacheService : ICacheService
                     // Even if TryRemove fails (rare race), the disposed flag prevents reuse
                     if (_locks.TryRemove(new KeyValuePair<string, LockEntry>(key, entry)))
                     {
+                        Interlocked.Decrement(ref _lockKeyCount);
                         entry.Semaphore.Dispose();
                     }
                 }
             }
         }
+    }
+
+    private void ValidateKey(string key, CacheStampedeOptions options)
+    {
+        if (!options.RejectSuspiciousKeys)
+            return;
+
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            CacheTelemetry.StampedeKeyRejected.Add(1, new TagList { { "reason", "empty" } });
+            _stats?.IncStampedeKeyRejected();
+            throw new ArgumentException("Cache key must not be null or empty.", nameof(key));
+        }
+
+        if (key.Length > options.MaxKeyLength)
+        {
+            CacheTelemetry.StampedeKeyRejected.Add(1, new TagList { { "reason", "max_length" } });
+            _stats?.IncStampedeKeyRejected();
+            throw new ArgumentException($"Cache key length ({key.Length}) exceeds configured max ({options.MaxKeyLength}).", nameof(key));
+        }
+
+        for (var i = 0; i < key.Length; i++)
+        {
+            if (char.IsControl(key[i]))
+            {
+                CacheTelemetry.StampedeKeyRejected.Add(1, new TagList { { "reason", "control_char" } });
+                _stats?.IncStampedeKeyRejected();
+                throw new ArgumentException("Cache key contains control characters.", nameof(key));
+            }
+        }
+    }
+
+    private static CancellationTokenSource? CreateWaitTokenSource(CacheStampedeOptions options, CancellationToken ct)
+    {
+        if (options.LockWaitTimeout <= TimeSpan.Zero)
+            return null;
+
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(options.LockWaitTimeout);
+        return cts;
+    }
+
+    private void ThrowIfInFailureBackoff(string key, CacheStampedeOptions options)
+    {
+        if (!options.EnableFailureBackoff || options.FailureBackoff <= TimeSpan.Zero)
+            return;
+
+        if (!_failures.TryGetValue(key, out var state))
+            return;
+
+        if (DateTime.UtcNow.Ticks < Volatile.Read(ref state.RetryAfterUtcTicks))
+        {
+            CacheTelemetry.StampedeFailureBackoffRejected.Add(1);
+            _stats?.IncStampedeFailureBackoffRejected();
+            throw new InvalidOperationException($"Factory for key '{key}' is in failure backoff window.");
+        }
+
+        _failures.TryRemove(key, out _);
+    }
+
+    private void RegisterFailure(string key, CacheStampedeOptions options)
+    {
+        if (!options.EnableFailureBackoff || options.FailureBackoff <= TimeSpan.Zero)
+            return;
+
+        var retryAfterTicks = DateTime.UtcNow.Add(options.FailureBackoff).Ticks;
+        var entry = _failures.GetOrAdd(key, static _ => new FailureEntry());
+        Volatile.Write(ref entry.RetryAfterUtcTicks, retryAfterTicks);
     }
 }

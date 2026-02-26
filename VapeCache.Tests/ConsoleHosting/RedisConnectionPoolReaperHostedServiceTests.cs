@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Connections;
@@ -13,14 +12,11 @@ public sealed class RedisConnectionPoolReaperHostedServiceTests
     public async Task ExecuteAsync_runs_reaper_in_pool_mode()
     {
         var reaper = new TestReaper();
-        using var services = new ServiceCollection()
-            .AddSingleton<IRedisConnectionPoolReaper>(reaper)
-            .BuildServiceProvider();
 
         var options = Options.Create(new RedisStressOptions { Mode = "pool" });
         var sut = new RedisConnectionPoolReaperHostedService(
             options,
-            services,
+            reaper,
             NullLogger<RedisConnectionPoolReaperHostedService>.Instance);
 
         await sut.StartAsync(CancellationToken.None);
@@ -34,14 +30,11 @@ public sealed class RedisConnectionPoolReaperHostedServiceTests
     public async Task ExecuteAsync_skips_reaper_for_non_pool_mode()
     {
         var reaper = new TestReaper();
-        using var services = new ServiceCollection()
-            .AddSingleton<IRedisConnectionPoolReaper>(reaper)
-            .BuildServiceProvider();
 
         var options = Options.Create(new RedisStressOptions { Mode = "mux" });
         var sut = new RedisConnectionPoolReaperHostedService(
             options,
-            services,
+            reaper,
             NullLogger<RedisConnectionPoolReaperHostedService>.Instance);
 
         await sut.StartAsync(CancellationToken.None);

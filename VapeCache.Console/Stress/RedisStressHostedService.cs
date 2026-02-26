@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -12,7 +11,9 @@ namespace VapeCache.Console.Stress;
 internal sealed class RedisStressHostedService(
     IOptions<RedisStressOptions> stressOptions,
     IOptionsMonitor<RedisConnectionOptions> redisOptions,
-    IServiceProvider services,
+    IRedisConnectionFactory factory,
+    IRedisConnectionPool pool,
+    IRedisCommandExecutor executor,
     IHostApplicationLifetime lifetime,
     ILogger<RedisStressHostedService> logger) : IHostedLifecycleService
 {
@@ -64,9 +65,8 @@ internal sealed class RedisStressHostedService(
         if (stress.Duration > TimeSpan.Zero && !(mode == "burn" && stress.BurnConnectionsTarget > 0))
             deadline = DateTimeOffset.UtcNow.Add(stress.Duration);
 
-        var factory = services.GetRequiredService<IRedisConnectionFactory>();
-        var pool = mode == "pool" ? services.GetRequiredService<IRedisConnectionPool>() : null;
-        var executor = mode == "mux" ? services.GetRequiredService<IRedisCommandExecutor>() : null;
+        var modePool = mode == "pool" ? pool : null;
+        var modeExecutor = mode == "mux" ? executor : null;
 
         string[]? muxKeys = null;
         if (mode == "mux" && workload == "payload")
@@ -79,7 +79,7 @@ internal sealed class RedisStressHostedService(
             if (stress.PreloadKeys)
             {
                 logger.LogInformation("Preloading mux keys: Count={Count} PayloadBytes={PayloadBytes} Ttl={Ttl}", muxKeys.Length, stress.PayloadBytes, stress.PayloadTtl);
-                await PreloadMuxKeysAsync(executor!, muxKeys, stress.PayloadBytes, stress.PayloadTtl, Math.Max(1, stress.Workers), ct).ConfigureAwait(false);
+                await PreloadMuxKeysAsync(modeExecutor!, muxKeys, stress.PayloadBytes, stress.PayloadTtl, Math.Max(1, stress.Workers), ct).ConfigureAwait(false);
                 logger.LogInformation("Preload complete.");
             }
         }
@@ -103,7 +103,7 @@ internal sealed class RedisStressHostedService(
         var logTask = LogLoopAsync(stats, started, stress.LogEvery, tickerCts.Token);
 
         var workers = Enumerable.Range(0, Math.Max(1, stress.Workers))
-            .Select(i => WorkerLoopAsync(i, mode, workload, Math.Max(1, stress.OperationsPerLease), deadline, operationTimeout, limiter, muxKeys, factory, pool, executor, stats, ct))
+            .Select(i => WorkerLoopAsync(i, mode, workload, Math.Max(1, stress.OperationsPerLease), deadline, operationTimeout, limiter, muxKeys, factory, modePool, modeExecutor, stats, ct))
             .ToArray();
 
         try

@@ -80,6 +80,7 @@ dotnet run
 
 ```powershell
 $env:VAPECACHE_MAX_CART_SIZE = "40"
+$env:VAPECACHE_BENCH_TRACK = "optimized" # optimized | apples | both
 $env:VAPECACHE_BENCH_MUX_CONNECTIONS = "4"
 $env:VAPECACHE_BENCH_MUX_INFLIGHT = "8192"
 $env:VAPECACHE_BENCH_MUX_COALESCE = "true"
@@ -96,6 +97,7 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -Trials 5 `
   -ShopperCount 50000 `
   -MaxCartSize 40 `
+  -Track optimized `
   -FailBelowRatio 1.0
 ```
 

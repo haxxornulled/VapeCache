@@ -934,6 +934,71 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetRPushManyCommandLength(string key, ReadOnlyMemory<byte>[] values, int count)
+    {
+        if (count < 0 || count > values.Length)
+            throw new ArgumentOutOfRangeException(nameof(count));
+
+        // RPUSH key v1 v2 ... vN
+        var len = GetHeaderLen(2 + count)
+                  + GetBulkLen(5) + 5 + 2 // RPUSH
+                  + GetBulkStringLen(key) + 2;
+
+        for (var i = 0; i < count; i++)
+        {
+            var valueLen = values[i].Length;
+            len += GetBulkLen(valueLen) + valueLen + 2;
+        }
+
+        return len;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteRPushManyCommand(Span<byte> destination, string key, ReadOnlyMemory<byte>[] values, int count)
+    {
+        if (count < 0 || count > values.Length)
+            throw new ArgumentOutOfRangeException(nameof(count));
+
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 2 + count);
+        idx += WriteBulkString(destination.Slice(idx), "RPUSH");
+        idx += WriteBulkString(destination.Slice(idx), key);
+
+        for (var i = 0; i < count; i++)
+            idx += WriteBulkBytes(destination.Slice(idx), values[i].Span);
+
+        return idx;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetRPushManyPrefixLength(string key, int count)
+    {
+        if (count <= 0)
+            throw new ArgumentOutOfRangeException(nameof(count));
+
+        return GetHeaderLen(2 + count)
+               + GetBulkLen(5) + 5 + 2 // RPUSH
+               + GetBulkStringLen(key) + 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteRPushManyPrefix(Span<byte> destination, string key, int count)
+    {
+        if (count <= 0)
+            throw new ArgumentOutOfRangeException(nameof(count));
+
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 2 + count);
+        idx += WriteBulkString(destination.Slice(idx), "RPUSH");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        return idx;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetBulkLengthPrefixLength(int payloadLength)
+        => GetBulkLen(payloadLength);
+
     // RPOP (pop from tail of list)
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetRPopCommandLength(string key) => GetCommandLength(2, "RPOP", key);

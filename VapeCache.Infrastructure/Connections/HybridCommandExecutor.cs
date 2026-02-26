@@ -10,7 +10,7 @@ namespace VapeCache.Infrastructure.Connections;
 /// Hybrid Redis command executor that automatically falls back to a configured executor
 /// when Redis is unavailable. Applies circuit breaker pattern to all Redis data structure operations.
 /// </summary>
-internal sealed class HybridCommandExecutor : IRedisCommandExecutor
+internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMultiplexerDiagnostics
 {
     private readonly RedisCommandExecutor _redis;
     private readonly IRedisFallbackCommandExecutor _fallback;
@@ -19,7 +19,8 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
     private readonly CacheStats _stats;
     private readonly ICurrentCacheService _current;
     private readonly ILogger<HybridCommandExecutor> _logger;
-    private readonly RedisCircuitBreakerOptions _breaker;
+    private readonly IOptionsMonitor<RedisCircuitBreakerOptions> _breakerOptions;
+    private RedisCircuitBreakerOptions _breaker => _breakerOptions.CurrentValue;
     private int _halfOpenProbes;
 
     public HybridCommandExecutor(
@@ -29,7 +30,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
         IRedisFailoverController breakerController,
         CacheStatsRegistry statsRegistry,
         ICurrentCacheService current,
-        IOptions<RedisCircuitBreakerOptions> breakerOptions,
+        IOptionsMonitor<RedisCircuitBreakerOptions> breakerOptions,
         ILogger<HybridCommandExecutor> logger)
     {
         _redis = redis;
@@ -39,11 +40,14 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
         _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
         _current = current;
         _logger = logger;
-        _breaker = breakerOptions.Value;
+        _breakerOptions = breakerOptions;
     }
 
     public IRedisBatch CreateBatch()
         => new RedisBatch(this);
+
+    public RedisAutoscalerSnapshot GetAutoscalerSnapshot()
+        => _redis.GetAutoscalerSnapshot();
 
     private readonly struct ProbeScope : IDisposable
     {
@@ -736,7 +740,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
         {
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogInformation("🔓 Circuit breaker is OPEN - using fallback for LPUSH on key {Key}", key);
+            _logger.LogDebug("Circuit breaker open. Using fallback for LPUSH on key {Key}", key);
             return await _fallback.LPushAsync(key, value, ct).ConfigureAwait(false);
         }
 
@@ -780,6 +784,32 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
             _current.SetCurrent(_fallback.Name);
             _logger.LogWarning(ex, "Redis RPUSH failed for key {Key}; falling back to fallback", key);
             return await _fallback.RPushAsync(key, value, ct).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask<long> RPushManyAsync(string key, ReadOnlyMemory<byte>[] values, int count, CancellationToken ct)
+    {
+        if (_breaker.Enabled && _breakerState.IsOpen)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent(_fallback.Name);
+            return await _fallback.RPushManyAsync(key, values, count, ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            var result = await _redis.RPushManyAsync(key, values, count, ct).ConfigureAwait(false);
+            _breakerController.MarkRedisSuccess();
+            _current.SetCurrent("redis");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _breakerController.MarkRedisFailure();
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent(_fallback.Name);
+            _logger.LogWarning(ex, "Redis RPUSH (many) failed for key {Key}; falling back to fallback", key);
+            return await _fallback.RPushManyAsync(key, values, count, ct).ConfigureAwait(false);
         }
     }
 
@@ -1612,6 +1642,8 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
 
     public async ValueTask<bool> JsonSetLeaseAsync(string key, string? path, RedisValueLease json, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(json);
+
         if (_breaker.Enabled && _breakerState.IsOpen)
         {
             _stats.IncFallbackToMemory();
@@ -1920,7 +1952,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
         {
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning("Redis breaker open: executing {Command} against fallback backend", "EXPIRE");
+            _logger.LogDebug("Circuit breaker open. Executing {Command} against fallback backend", "EXPIRE");
             return await _fallback.ExpireAsync(key, ttl, ct).ConfigureAwait(false);
         }
 
@@ -1947,7 +1979,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
         {
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning("Redis breaker open: executing {Command} against fallback backend", "LINDEX");
+            _logger.LogDebug("Circuit breaker open. Executing {Command} against fallback backend", "LINDEX");
             return await _fallback.LIndexAsync(key, index, ct).ConfigureAwait(false);
         }
 
@@ -1974,7 +2006,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor
         {
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning("Redis breaker open: executing {Command} against fallback backend", "GETRANGE");
+            _logger.LogDebug("Circuit breaker open. Executing {Command} against fallback backend", "GETRANGE");
             return await _fallback.GetRangeAsync(key, start, end, ct).ConfigureAwait(false);
         }
 

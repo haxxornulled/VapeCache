@@ -17,7 +17,7 @@ internal static class AllocationProfileRunner
         var warmup = args.Length > 3 && int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var warm) ? warm : 1000;
         var top = args.Length > 4 && int.TryParse(args[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var t) ? t : 15;
 
-        Console.WriteLine($"Allocation profiling: {opName} (warmup {warmup}, iterations {iterations})");
+        Console.Out.WriteLine($"Allocation profiling: {opName} (warmup {warmup}, iterations {iterations})");
 
         var options = BenchmarkRedisConfig.Load();
         var executor = BenchmarkRedisConfig.CreateVapeCacheExecutor(options, enableInstrumentation: false);
@@ -50,19 +50,19 @@ internal static class AllocationProfileRunner
             var totalAllocated = afterTotal - beforeTotal;
             var perOp = iterations > 0 ? (double)totalAllocated / iterations : 0;
 
-            Console.WriteLine($"Total allocated bytes (process): {totalAllocated:N0} ({perOp:N1} bytes/op)");
+            Console.Out.WriteLine($"Total allocated bytes (process): {totalAllocated:N0} ({perOp:N1} bytes/op)");
 
             var topAllocations = profiler.GetTopAllocations(top);
             if (topAllocations.Count == 0)
             {
-                Console.WriteLine("No GCAllocationTick samples were captured; consider increasing iterations.");
+                Console.Out.WriteLine("No GCAllocationTick samples were captured; consider increasing iterations.");
             }
             else
             {
-                Console.WriteLine("Top allocations (sampled):");
+                Console.Out.WriteLine("Top allocations (sampled):");
                 foreach (var entry in topAllocations)
                 {
-                    Console.WriteLine($"  {entry.TypeName} - {entry.Bytes:N0} bytes");
+                    Console.Out.WriteLine($"  {entry.TypeName} - {entry.Bytes:N0} bytes");
                 }
             }
         }
@@ -190,7 +190,7 @@ internal static class AllocationProfileRunner
         public string BloomKey { get; private set; } = string.Empty;
         public string TimeSeriesKey { get; private set; } = string.Empty;
         public ReadOnlyMemory<byte> JsonPayload { get; private set; }
-        public RedisValueLease JsonPayloadLease { get; private set; }
+        public RedisValueLease JsonPayloadLease { get; private set; } = RedisValueLease.Null;
         public ReadOnlyMemory<byte> BloomItem => _bloomItem;
         public ReadOnlyMemory<byte> BloomExistsItem => _bloomExistsItem;
         public long CurrentTimestamp => Volatile.Read(ref _tsCursor);
@@ -259,3 +259,4 @@ internal static class AllocationProfileRunner
             => modules.Any(module => names.Any(name => string.Equals(module, name, StringComparison.OrdinalIgnoreCase)));
     }
 }
+

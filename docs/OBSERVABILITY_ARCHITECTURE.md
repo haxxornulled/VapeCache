@@ -38,6 +38,7 @@ VapeCache has **production-grade observability built-in**, but with **zero lock-
   - `redis.cmd.calls`, `redis.cmd.failures`, `redis.cmd.ms`
   - `redis.queue.depth`, `redis.queue.wait.ms`
   - `redis.bytes.sent`, `redis.bytes.received`
+  - `redis.coalesced.batches`, `redis.coalesced.batch.bytes`, `redis.coalesced.batch.segments`
 - `VapeCache.Cache` meter:
   - `cache.get.calls`, `cache.set.calls`, `cache.remove.calls`
   - `cache.hits`, `cache.misses`
@@ -268,6 +269,9 @@ builder.Services.AddVapecacheCaching();
 | `redis.queue.wait.ms` | Histogram | milliseconds | Time waiting to enqueue when write queue is full |
 | `redis.bytes.sent` | Counter | bytes | Bytes sent to Redis |
 | `redis.bytes.received` | Counter | bytes | Bytes received from Redis |
+| `redis.coalesced.batches` | Counter | count | Number of coalesced socket write batches |
+| `redis.coalesced.batch.bytes` | Histogram | bytes | Size of each coalesced socket write batch |
+| `redis.coalesced.batch.segments` | Histogram | segments | Segment count per coalesced socket write batch |
 
 ### Cache Metrics (VapeCache.Cache)
 

@@ -9,9 +9,11 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Serilog;
+using Serilog.Events;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Console.Hosting;
+using VapeCache.Console.Plugins;
 using VapeCache.Infrastructure.Connections;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.DependencyInjection;
@@ -57,6 +59,8 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .ReadFrom.Configuration(context.Configuration)
             .ReadFrom.Services(services)
             .Enrich.FromLogContext();
+
+        ConfigureGroceryStoreLogging(context.Configuration, loggerConfig);
     })
     .ConfigureServices(static (context, services) =>
     {
@@ -99,6 +103,32 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => !string.IsNullOrWhiteSpace(o.Key), "LiveDemo:Key is required.")
             .Validate(static o => o.Ttl > TimeSpan.Zero, "LiveDemo:Ttl must be > 0.")
             .ValidateOnStart();
+        services.AddOptions<PluginDemoOptions>()
+            .Bind(context.Configuration.GetSection("PluginDemo"))
+            .Validate(static o => !o.Enabled || !string.IsNullOrWhiteSpace(o.KeyPrefix), "PluginDemo:KeyPrefix is required when enabled.")
+            .Validate(static o => !o.Enabled || o.Ttl > TimeSpan.Zero, "PluginDemo:Ttl must be > 0 when enabled.")
+            .ValidateOnStart();
+        services.AddOptions<VapeCache.Console.GroceryStore.GroceryStoreStressOptions>()
+            .Bind(context.Configuration.GetSection("GroceryStoreStress"))
+            .Validate(static o => o.ConcurrentShoppers > 0, "GroceryStoreStress:ConcurrentShoppers must be > 0.")
+            .Validate(static o => o.TotalShoppers > 0, "GroceryStoreStress:TotalShoppers must be > 0.")
+            .Validate(static o => o.TargetDurationSeconds > 0, "GroceryStoreStress:TargetDurationSeconds must be > 0.")
+            .Validate(static o => o.StartupDelaySeconds >= 0, "GroceryStoreStress:StartupDelaySeconds must be >= 0.")
+            .Validate(static o => o.CountdownSeconds >= 0, "GroceryStoreStress:CountdownSeconds must be >= 0.")
+            .Validate(static o => o.BrowseChancePercent is >= 0 and <= 100, "GroceryStoreStress:BrowseChancePercent must be 0..100.")
+            .Validate(static o => o.BrowseMinProducts >= 0, "GroceryStoreStress:BrowseMinProducts must be >= 0.")
+            .Validate(static o => o.BrowseMaxProducts >= o.BrowseMinProducts, "GroceryStoreStress:BrowseMaxProducts must be >= BrowseMinProducts.")
+            .Validate(static o => o.FlashSaleJoinChancePercent is >= 0 and <= 100, "GroceryStoreStress:FlashSaleJoinChancePercent must be 0..100.")
+            .Validate(static o => o.AddToCartChancePercent is >= 0 and <= 100, "GroceryStoreStress:AddToCartChancePercent must be 0..100.")
+            .Validate(static o => o.CartItemsMin >= 0, "GroceryStoreStress:CartItemsMin must be >= 0.")
+            .Validate(static o => o.CartItemsMax >= o.CartItemsMin, "GroceryStoreStress:CartItemsMax must be >= CartItemsMin.")
+            .Validate(static o => o.CartItemQuantityMin >= 1, "GroceryStoreStress:CartItemQuantityMin must be >= 1.")
+            .Validate(static o => o.CartItemQuantityMax >= o.CartItemQuantityMin, "GroceryStoreStress:CartItemQuantityMax must be >= CartItemQuantityMin.")
+            .Validate(static o => o.ViewCartChancePercent is >= 0 and <= 100, "GroceryStoreStress:ViewCartChancePercent must be 0..100.")
+            .Validate(static o => o.CheckoutChancePercent is >= 0 and <= 100, "GroceryStoreStress:CheckoutChancePercent must be 0..100.")
+            .Validate(static o => o.RemoveFromCartChancePercent is >= 0 and <= 100, "GroceryStoreStress:RemoveFromCartChancePercent must be 0..100.")
+            .Validate(static o => o.StatsIntervalSeconds > 0, "GroceryStoreStress:StatsIntervalSeconds must be > 0.")
+            .ValidateOnStart();
 
         services
             .AddOptions<StartupPreflightOptions>()
@@ -121,6 +151,8 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.IdleTimeout >= TimeSpan.Zero, "RedisConnection:IdleTimeout must be >= 0.")
             .Validate(static o => o.MaxConnectionLifetime >= TimeSpan.Zero, "RedisConnection:MaxConnectionLifetime must be >= 0.")
             .Validate(static o => o.ReaperPeriod >= TimeSpan.Zero, "RedisConnection:ReaperPeriod must be >= 0.")
+            .Validate(static o => o.TcpSendBufferBytes >= 0, "RedisConnection:TcpSendBufferBytes must be >= 0.")
+            .Validate(static o => o.TcpReceiveBufferBytes >= 0, "RedisConnection:TcpReceiveBufferBytes must be >= 0.")
             .ValidateOnStart();
 
         services
@@ -142,12 +174,50 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Bind(context.Configuration.GetSection("RedisMultiplexer"))
             .Validate(static o => o.Connections > 0, "RedisMultiplexer:Connections must be > 0.")
             .Validate(static o => o.MaxInFlightPerConnection > 0, "RedisMultiplexer:MaxInFlightPerConnection must be > 0.")
+            .Validate(static o => o.CoalescedWriteMaxBytes > 0, "RedisMultiplexer:CoalescedWriteMaxBytes must be > 0.")
+            .Validate(static o => o.CoalescedWriteMaxSegments > 0, "RedisMultiplexer:CoalescedWriteMaxSegments must be > 0.")
+            .Validate(static o => o.CoalescedWriteSmallCopyThresholdBytes > 0, "RedisMultiplexer:CoalescedWriteSmallCopyThresholdBytes must be > 0.")
+            .Validate(static o => o.AdaptiveCoalescingLowDepth > 0, "RedisMultiplexer:AdaptiveCoalescingLowDepth must be > 0.")
+            .Validate(static o => o.AdaptiveCoalescingHighDepth > 0, "RedisMultiplexer:AdaptiveCoalescingHighDepth must be > 0.")
+            .Validate(static o => o.AdaptiveCoalescingHighDepth >= o.AdaptiveCoalescingLowDepth, "RedisMultiplexer:AdaptiveCoalescingHighDepth must be >= AdaptiveCoalescingLowDepth.")
+            .Validate(static o => o.AdaptiveCoalescingMinWriteBytes > 0, "RedisMultiplexer:AdaptiveCoalescingMinWriteBytes must be > 0.")
+            .Validate(static o => o.AdaptiveCoalescingMinSegments > 0, "RedisMultiplexer:AdaptiveCoalescingMinSegments must be > 0.")
+            .Validate(static o => o.AdaptiveCoalescingMinSmallCopyThresholdBytes > 0, "RedisMultiplexer:AdaptiveCoalescingMinSmallCopyThresholdBytes must be > 0.")
+            .Validate(static o => o.MinConnections > 0, "RedisMultiplexer:MinConnections must be > 0.")
+            .Validate(static o => o.MaxConnections > 0, "RedisMultiplexer:MaxConnections must be > 0.")
+            .Validate(static o => o.MaxConnections >= o.MinConnections, "RedisMultiplexer:MaxConnections must be >= MinConnections.")
+            .Validate(static o => o.AutoscaleSampleInterval > TimeSpan.Zero, "RedisMultiplexer:AutoscaleSampleInterval must be > 0.")
+            .Validate(static o => o.ScaleUpWindow > TimeSpan.Zero, "RedisMultiplexer:ScaleUpWindow must be > 0.")
+            .Validate(static o => o.ScaleDownWindow > TimeSpan.Zero, "RedisMultiplexer:ScaleDownWindow must be > 0.")
+            .Validate(static o => o.ScaleUpCooldown > TimeSpan.Zero, "RedisMultiplexer:ScaleUpCooldown must be > 0.")
+            .Validate(static o => o.ScaleDownCooldown > TimeSpan.Zero, "RedisMultiplexer:ScaleDownCooldown must be > 0.")
+            .Validate(static o => o.ScaleUpInflightUtilization > 0 && o.ScaleUpInflightUtilization <= 1, "RedisMultiplexer:ScaleUpInflightUtilization must be in (0,1].")
+            .Validate(static o => o.ScaleDownInflightUtilization >= 0 && o.ScaleDownInflightUtilization < 1, "RedisMultiplexer:ScaleDownInflightUtilization must be in [0,1).")
+            .Validate(static o => o.ScaleUpQueueDepthThreshold > 0, "RedisMultiplexer:ScaleUpQueueDepthThreshold must be > 0.")
+            .Validate(static o => o.ScaleUpTimeoutRatePerSecThreshold > 0, "RedisMultiplexer:ScaleUpTimeoutRatePerSecThreshold must be > 0.")
+            .Validate(static o => o.ScaleUpP99LatencyMsThreshold > 0, "RedisMultiplexer:ScaleUpP99LatencyMsThreshold must be > 0.")
+            .Validate(static o => o.ScaleDownP95LatencyMsThreshold > 0, "RedisMultiplexer:ScaleDownP95LatencyMsThreshold must be > 0.")
+            .Validate(static o => o.EmergencyScaleUpTimeoutRatePerSecThreshold > 0, "RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold must be > 0.")
+            .Validate(static o => o.ScaleDownDrainTimeout > TimeSpan.Zero, "RedisMultiplexer:ScaleDownDrainTimeout must be > 0.")
+            .Validate(static o => o.MaxScaleEventsPerMinute > 0, "RedisMultiplexer:MaxScaleEventsPerMinute must be > 0.")
+            .Validate(static o => o.FlapToggleThreshold >= 2, "RedisMultiplexer:FlapToggleThreshold must be >= 2.")
+            .Validate(static o => o.AutoscaleFreezeDuration > TimeSpan.Zero, "RedisMultiplexer:AutoscaleFreezeDuration must be > 0.")
+            .Validate(static o => o.ReconnectStormFailureRatePerSecThreshold > 0, "RedisMultiplexer:ReconnectStormFailureRatePerSecThreshold must be > 0.")
             .ValidateOnStart();
 
         services
             .AddOptions<CacheStampedeOptions>()
+            .ConfigureCacheStampede(static options => ApplyCacheStampedeFluentDefaults(options))
+            .ConfigureCacheStampede(options => options.UseProfile(ResolveCacheStampedeProfile(context.Configuration)))
             .Bind(context.Configuration.GetSection("CacheStampede"))
             .Validate(static o => o.MaxKeys > 0, "CacheStampede:MaxKeys must be > 0.")
+            .Validate(static o => o.MaxKeys <= 500_000, "CacheStampede:MaxKeys must be <= 500000.")
+            .Validate(static o => o.MaxKeyLength > 0, "CacheStampede:MaxKeyLength must be > 0.")
+            .Validate(static o => o.MaxKeyLength <= 4096, "CacheStampede:MaxKeyLength must be <= 4096.")
+            .Validate(static o => o.LockWaitTimeout >= TimeSpan.Zero, "CacheStampede:LockWaitTimeout must be >= 0.")
+            .Validate(static o => o.LockWaitTimeout <= TimeSpan.FromSeconds(30), "CacheStampede:LockWaitTimeout must be <= 30 seconds.")
+            .Validate(static o => o.FailureBackoff >= TimeSpan.Zero, "CacheStampede:FailureBackoff must be >= 0.")
+            .Validate(static o => o.FailureBackoff <= TimeSpan.FromSeconds(30), "CacheStampede:FailureBackoff must be <= 30 seconds.")
             .ValidateOnStart();
 
         services
@@ -167,10 +237,12 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
         // Grocery Store Demo Services
         services.AddSingleton<VapeCache.Console.GroceryStore.GroceryStoreService>();
         services.AddHostedService<VapeCache.Console.GroceryStore.GroceryStoreStressTest>();
+        services.AddSingleton<IVapeCachePlugin, SampleCatalogPlugin>();
 
         services.AddHostedService<StartupPreflightHostedService>();
         services.AddHostedService<RedisSanityCheckHostedService>();
         services.AddHostedService<RedisConnectionPoolReaperHostedService>();
+        services.AddHostedService<PluginDemoHostedService>();
         // services.AddHostedService<RedisStressHostedService>();  // Disabled in favor of grocery store test
         // services.AddHostedService<LiveDemoHostedService>();     // Disabled in favor of grocery store test
     })
@@ -255,6 +327,27 @@ static void ConfigureOtlpForSignal(IConfiguration configuration, OtlpExporterOpt
     otlp.Endpoint = endpointUri;
 }
 
+static void ConfigureGroceryStoreLogging(IConfiguration configuration, LoggerConfiguration loggerConfig)
+{
+    var groceryStoreEnabled = configuration.GetValue<bool?>("GroceryStoreStress:Enabled") ?? false;
+    if (!groceryStoreEnabled)
+    {
+        return;
+    }
+
+    var verbose = string.Equals(
+        Environment.GetEnvironmentVariable("VAPECACHE_GROCERYSTORE_VERBOSE"),
+        "true",
+        StringComparison.OrdinalIgnoreCase);
+
+    loggerConfig
+        .MinimumLevel.Information()
+        .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+        .MinimumLevel.Override("System", LogEventLevel.Warning)
+        .MinimumLevel.Override("VapeCache.Console.GroceryStore", verbose ? LogEventLevel.Debug : LogEventLevel.Information)
+        .MinimumLevel.Override("VapeCache.Infrastructure", verbose ? LogEventLevel.Information : LogEventLevel.Warning);
+}
+
 static Uri ResolveSignalEndpoint(Uri endpoint, string signal)
 {
     var endpointText = endpoint.ToString().TrimEnd('/');
@@ -273,4 +366,28 @@ static Uri ResolveSignalEndpoint(Uri endpoint, string signal)
         return endpoint;
 
     return new Uri($"{endpointText}{signalSuffix}", UriKind.Absolute);
+}
+
+static CacheStampedeProfile ResolveCacheStampedeProfile(IConfiguration configuration)
+{
+    var configured = configuration["CacheStampede:Profile"];
+    if (string.IsNullOrWhiteSpace(configured))
+        return CacheStampedeProfile.Balanced;
+
+    return Enum.TryParse(configured, ignoreCase: true, out CacheStampedeProfile parsed) &&
+           Enum.IsDefined(parsed)
+        ? parsed
+        : CacheStampedeProfile.Balanced;
+}
+
+static void ApplyCacheStampedeFluentDefaults(CacheStampedeOptionsBuilder options)
+{
+    options.UseProfile(CacheStampedeProfile.Balanced)
+        .Enabled()
+        .RejectSuspiciousKeys()
+        .EnableFailureBackoff()
+        .WithMaxKeys(50_000)
+        .WithMaxKeyLength(512)
+        .WithLockWaitTimeout(TimeSpan.FromMilliseconds(750))
+        .WithFailureBackoff(TimeSpan.FromMilliseconds(500));
 }

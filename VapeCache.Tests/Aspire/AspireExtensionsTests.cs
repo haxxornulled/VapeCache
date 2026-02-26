@@ -86,4 +86,24 @@ public sealed class AspireExtensionsTests
         Assert.Throws<ArgumentException>(() =>
             builder.WithAspireTelemetry(options => options.OtlpEndpoint = "not-a-uri"));
     }
+
+    [Fact]
+    public void WithAspireTelemetry_AllowsFluentSeqConfiguration()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        var builder = hostBuilder.AddVapeCache();
+        var metricsConfigured = false;
+        var tracingConfigured = false;
+
+        var result = builder.WithAspireTelemetry(options =>
+        {
+            options.UseSeq("http://localhost:5341", "dev-key")
+                .AddMetricsConfiguration(_ => metricsConfigured = true)
+                .AddTracingConfiguration(_ => tracingConfigured = true);
+        });
+
+        Assert.Same(builder, result);
+        Assert.True(metricsConfigured);
+        Assert.True(tracingConfigured);
+    }
 }

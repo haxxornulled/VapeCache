@@ -1,6 +1,7 @@
 using VapeCache.Console.Hosting;
 using VapeCache.Console.GroceryStore;
 using VapeCache.Console.Plugins;
+using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Tests.ConsoleHosting;
 
@@ -64,5 +65,19 @@ public sealed class OptionsDefaultsTests
         Assert.InRange(o.CheckoutChancePercent, 0, 100);
         Assert.InRange(o.RemoveFromCartChancePercent, 0, 100);
         Assert.True(o.StatsIntervalSeconds > 0);
+    }
+
+    [Fact]
+    public void CacheStampedeOptions_has_expected_defaults()
+    {
+        var o = new CacheStampedeOptions();
+
+        Assert.True(o.Enabled);
+        Assert.Equal(50_000, o.MaxKeys);
+        Assert.True(o.RejectSuspiciousKeys);
+        Assert.Equal(512, o.MaxKeyLength);
+        Assert.Equal(TimeSpan.FromMilliseconds(750), o.LockWaitTimeout);
+        Assert.True(o.EnableFailureBackoff);
+        Assert.Equal(TimeSpan.FromMilliseconds(500), o.FailureBackoff);
     }
 }

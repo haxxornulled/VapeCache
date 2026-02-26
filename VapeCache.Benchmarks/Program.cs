@@ -9,9 +9,9 @@ if (args.Length > 0 && args[0] == "standalone")
     var username = args.Length > 3 ? args[3] : null;
     var password = args.Length > 4 ? args[4] : null;
 
-    Console.WriteLine($"Running standalone performance test against {host}:{port}");
+    Console.Out.WriteLine($"Running standalone performance test against {host}:{port}");
     if (!string.IsNullOrWhiteSpace(username))
-        Console.WriteLine($"Username: {username}");
+        Console.Out.WriteLine($"Username: {username}");
 
     var test = new StandalonePerformanceTest(host, port, username, password);
     await test.RunAsync();
@@ -34,3 +34,4 @@ else
     // Normal BenchmarkDotNet mode
     BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
 }
+

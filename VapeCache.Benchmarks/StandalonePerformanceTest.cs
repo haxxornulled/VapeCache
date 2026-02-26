@@ -28,9 +28,9 @@ public class StandalonePerformanceTest
 
     public async Task RunAsync()
     {
-        Console.WriteLine("═══════════════════════════════════════════════════════════════");
-        Console.WriteLine("VapeCache vs StackExchange.Redis - Standalone Performance Test");
-        Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
+        Console.Out.WriteLine("═══════════════════════════════════════════════════════════════");
+        Console.Out.WriteLine("VapeCache vs StackExchange.Redis - Standalone Performance Test");
+        Console.Out.WriteLine("═══════════════════════════════════════════════════════════════\n");
 
         // Test configurations
         var payloadSizes = new[] { 32, 256, 1024, 4096 };
@@ -38,13 +38,13 @@ public class StandalonePerformanceTest
 
         foreach (var payloadSize in payloadSizes)
         {
-            Console.WriteLine($"\n━━━ Payload Size: {payloadSize} bytes ━━━\n");
+            Console.Out.WriteLine($"\n━━━ Payload Size: {payloadSize} bytes ━━━\n");
             await RunComparisonAsync(payloadSize, iterations);
         }
 
-        Console.WriteLine("\n═══════════════════════════════════════════════════════════════");
-        Console.WriteLine("Test Complete!");
-        Console.WriteLine("═══════════════════════════════════════════════════════════════");
+        Console.Out.WriteLine("\n═══════════════════════════════════════════════════════════════");
+        Console.Out.WriteLine("Test Complete!");
+        Console.Out.WriteLine("═══════════════════════════════════════════════════════════════");
     }
 
     private async Task RunComparisonAsync(int payloadSize, int iterations)
@@ -54,14 +54,14 @@ public class StandalonePerformanceTest
         var key = $"perf:test:{Guid.NewGuid():N}";
 
         // Connect both clients
-        Console.WriteLine("Connecting clients...");
+        Console.Out.WriteLine("Connecting clients...");
         var (serMux, serDb) = await ConnectStackExchangeAsync();
         var vapeCache = await ConnectVapeCacheAsync();
 
         try
         {
             // Warmup
-            Console.WriteLine("Warming up...");
+            Console.Out.WriteLine("Warming up...");
             await serDb.StringSetAsync(key, payload);
             await serDb.StringGetAsync(key);
             await vapeCache.SetAsync(key, payload, ttl: null, CancellationToken.None);
@@ -69,22 +69,22 @@ public class StandalonePerformanceTest
             await Task.Delay(100);
 
             // Benchmark SET operations
-            Console.WriteLine($"\nSET operations ({iterations:N0} iterations):");
+            Console.Out.WriteLine($"\nSET operations ({iterations:N0} iterations):");
             var seSetMs = await BenchmarkStackExchangeSetAsync(serDb, key, payload, iterations);
             var vcSetMs = await BenchmarkVapeCacheSetAsync(vapeCache, key, payload, iterations);
 
-            Console.WriteLine($"  StackExchange.Redis: {seSetMs:N2} ms ({iterations / seSetMs * 1000:N0} ops/sec)");
-            Console.WriteLine($"  VapeCache:           {vcSetMs:N2} ms ({iterations / vcSetMs * 1000:N0} ops/sec)");
-            Console.WriteLine($"  Speedup:             {seSetMs / vcSetMs:F2}x faster ({(1 - vcSetMs / seSetMs) * 100:F1}% improvement)");
+            Console.Out.WriteLine($"  StackExchange.Redis: {seSetMs:N2} ms ({iterations / seSetMs * 1000:N0} ops/sec)");
+            Console.Out.WriteLine($"  VapeCache:           {vcSetMs:N2} ms ({iterations / vcSetMs * 1000:N0} ops/sec)");
+            Console.Out.WriteLine($"  Speedup:             {seSetMs / vcSetMs:F2}x faster ({(1 - vcSetMs / seSetMs) * 100:F1}% improvement)");
 
             // Benchmark GET operations
-            Console.WriteLine($"\nGET operations ({iterations:N0} iterations):");
+            Console.Out.WriteLine($"\nGET operations ({iterations:N0} iterations):");
             var seGetMs = await BenchmarkStackExchangeGetAsync(serDb, key, iterations);
             var vcGetMs = await BenchmarkVapeCacheGetAsync(vapeCache, key, iterations);
 
-            Console.WriteLine($"  StackExchange.Redis: {seGetMs:N2} ms ({iterations / seGetMs * 1000:N0} ops/sec)");
-            Console.WriteLine($"  VapeCache:           {vcGetMs:N2} ms ({iterations / vcGetMs * 1000:N0} ops/sec)");
-            Console.WriteLine($"  Speedup:             {seGetMs / vcGetMs:F2}x faster ({(1 - vcGetMs / seGetMs) * 100:F1}% improvement)");
+            Console.Out.WriteLine($"  StackExchange.Redis: {seGetMs:N2} ms ({iterations / seGetMs * 1000:N0} ops/sec)");
+            Console.Out.WriteLine($"  VapeCache:           {vcGetMs:N2} ms ({iterations / vcGetMs * 1000:N0} ops/sec)");
+            Console.Out.WriteLine($"  Speedup:             {seGetMs / vcGetMs:F2}x faster ({(1 - vcGetMs / seGetMs) * 100:F1}% improvement)");
 
             // Cleanup
             await serDb.KeyDeleteAsync(key);
@@ -206,3 +206,4 @@ file class OptionsMonitorStub<T> : IOptionsMonitor<T>
     public T Get(string? name) => _value;
     public IDisposable? OnChange(Action<T, string?> listener) => null;
 }
+

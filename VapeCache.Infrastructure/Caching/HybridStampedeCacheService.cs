@@ -8,9 +8,9 @@ internal sealed class HybridStampedeCacheService : ICacheService
 {
     private readonly StampedeProtectedCacheService _inner;
 
-    public HybridStampedeCacheService(HybridCacheService hybrid, IOptionsMonitor<CacheStampedeOptions> options)
+    public HybridStampedeCacheService(HybridCacheService hybrid, IOptionsMonitor<CacheStampedeOptions> options, CacheStatsRegistry statsRegistry)
     {
-        _inner = new StampedeProtectedCacheService(hybrid, options);
+        _inner = new StampedeProtectedCacheService(hybrid, options, statsRegistry.GetOrCreate(CacheStatsNames.Hybrid));
     }
 
     public string Name => _inner.Name;

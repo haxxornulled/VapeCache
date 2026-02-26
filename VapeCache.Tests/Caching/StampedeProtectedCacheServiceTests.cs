@@ -41,7 +41,11 @@ public sealed class StampedeProtectedCacheServiceTests
     public async Task GetOrSetAsync_releases_lock_on_factory_failure()
     {
         var inner = new FakeCache();
-        var svc = new StampedeProtectedCacheService(inner, new TestOptionsMonitor<CacheStampedeOptions>(new CacheStampedeOptions { Enabled = true }));
+        var svc = new StampedeProtectedCacheService(inner, new TestOptionsMonitor<CacheStampedeOptions>(new CacheStampedeOptions
+        {
+            Enabled = true,
+            EnableFailureBackoff = false
+        }));
 
         var first = true;
         async ValueTask<int> Factory(CancellationToken ct)
@@ -106,6 +110,123 @@ public sealed class StampedeProtectedCacheServiceTests
             CancellationToken.None);
 
         Assert.Equal(7, value);
+    }
+
+    [Fact]
+    public async Task GetOrSetAsync_rejects_suspicious_key_when_enabled()
+    {
+        var inner = new FakeCache();
+        var svc = new StampedeProtectedCacheService(inner, new TestOptionsMonitor<CacheStampedeOptions>(new CacheStampedeOptions
+        {
+            Enabled = true,
+            RejectSuspiciousKeys = true
+        }));
+
+        static void Serialize(IBufferWriter<byte> w, int v)
+        {
+            var span = w.GetSpan(4);
+            BitConverter.TryWriteBytes(span, v);
+            w.Advance(4);
+        }
+
+        static int Deserialize(ReadOnlySpan<byte> s) => BitConverter.ToInt32(s);
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            svc.GetOrSetAsync(
+                "bad\u0000key",
+                _ => ValueTask.FromResult(1),
+                Serialize,
+                Deserialize,
+                new CacheEntryOptions(TimeSpan.FromMinutes(1)),
+                CancellationToken.None).AsTask());
+    }
+
+    [Fact]
+    public async Task GetOrSetAsync_applies_failure_backoff_after_factory_error()
+    {
+        var inner = new FakeCache();
+        var svc = new StampedeProtectedCacheService(inner, new TestOptionsMonitor<CacheStampedeOptions>(new CacheStampedeOptions
+        {
+            Enabled = true,
+            EnableFailureBackoff = true,
+            FailureBackoff = TimeSpan.FromMilliseconds(200)
+        }));
+
+        static void Serialize(IBufferWriter<byte> w, int v)
+        {
+            var span = w.GetSpan(4);
+            BitConverter.TryWriteBytes(span, v);
+            w.Advance(4);
+        }
+
+        static int Deserialize(ReadOnlySpan<byte> s) => BitConverter.ToInt32(s);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            svc.GetOrSetAsync("bk", _ => ValueTask.FromException<int>(new InvalidOperationException("boom")), Serialize, Deserialize, new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None).AsTask());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            svc.GetOrSetAsync("bk", _ => ValueTask.FromResult(2), Serialize, Deserialize, new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None).AsTask());
+
+        await Task.Delay(250);
+        var ok = await svc.GetOrSetAsync("bk", _ => ValueTask.FromResult(3), Serialize, Deserialize, new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None);
+        Assert.Equal(3, ok);
+    }
+
+    [Fact]
+    public async Task GetOrSetAsync_lock_wait_timeout_throws_timeout_and_increments_stat()
+    {
+        var inner = new FakeCache();
+        var stats = new CacheStats();
+        var svc = new StampedeProtectedCacheService(
+            inner,
+            new TestOptionsMonitor<CacheStampedeOptions>(new CacheStampedeOptions
+            {
+                Enabled = true,
+                LockWaitTimeout = TimeSpan.FromMilliseconds(75)
+            }),
+            stats);
+
+        static void Serialize(IBufferWriter<byte> w, int v)
+        {
+            var span = w.GetSpan(4);
+            BitConverter.TryWriteBytes(span, v);
+            w.Advance(4);
+        }
+
+        static int Deserialize(ReadOnlySpan<byte> s) => BitConverter.ToInt32(s);
+
+        var firstEnteredFactory = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var first = svc.GetOrSetAsync(
+            "timeout-key",
+            async _ =>
+            {
+                firstEnteredFactory.TrySetResult();
+                await releaseFirst.Task;
+                return 1;
+            },
+            Serialize,
+            Deserialize,
+            new CacheEntryOptions(TimeSpan.FromMinutes(1)),
+            CancellationToken.None).AsTask();
+
+        await firstEnteredFactory.Task;
+
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            svc.GetOrSetAsync(
+                "timeout-key",
+                _ => ValueTask.FromResult(2),
+                Serialize,
+                Deserialize,
+                new CacheEntryOptions(TimeSpan.FromMinutes(1)),
+                CancellationToken.None).AsTask());
+
+        Assert.Equal(1, stats.Snapshot.StampedeLockWaitTimeout);
+
+        releaseFirst.TrySetResult();
+        var firstValue = await first;
+        Assert.Equal(1, firstValue);
     }
 
     private sealed class FakeCache : ICacheService

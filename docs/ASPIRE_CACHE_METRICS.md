@@ -358,6 +358,12 @@ You'll see VapeCache metrics grouped by meter:
 - `cache.remove.calls` (Counter) - Total REMOVE calls
 - `cache.fallback.to_memory` (Counter) - Circuit breaker activations
 - `cache.redis.breaker.opened` (Counter) - Circuit breaker opens
+- `cache.set.payload.bytes` (Histogram) - Payload size for cache writes
+- `cache.set.large_key` (Counter) - Large payload writes (>64 KB)
+- `cache.evictions` (Counter) - In-memory evictions (tagged by reason)
+- `cache.stampede.key_rejected` (Counter) - Suspicious/invalid key rejections
+- `cache.stampede.lock_wait_timeout` (Counter) - Stampede lock wait timeouts
+- `cache.stampede.failure_backoff_rejected` (Counter) - Backoff window rejections
 - `cache.spill.write.count` (Counter) - Spill writes
 - `cache.spill.write.bytes` (Counter) - Spill write bytes
 - `cache.spill.read.count` (Counter) - Spill reads
@@ -396,6 +402,15 @@ While Aspire Dashboard doesn't support custom dashboards yet (as of .NET 9), you
 1. **Export to Prometheus:** Add Prometheus exporter to view in Grafana
 2. **Export to Azure Monitor:** Send to Application Insights for Azure dashboards
 3. **Custom Blazor Dashboard:** Build your own using the metrics API
+
+## Endpoint Payloads
+
+`GET /vapecache/status` and `GET /vapecache/stats` include:
+- `stampedeKeyRejected`
+- `stampedeLockWaitTimeout`
+- `stampedeFailureBackoffRejected`
+
+`GET /vapecache/stream` exposes realtime SSE frames (`event: vapecache-stats`) for Blazor charting.
 
 ## Benefits for Blazor Developers
 

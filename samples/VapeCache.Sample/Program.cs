@@ -24,7 +24,7 @@ var provider = services.BuildServiceProvider();
 
 if (!string.Equals(Environment.GetEnvironmentVariable("VAPECACHE_SAMPLE_RUN"), "true", StringComparison.OrdinalIgnoreCase))
 {
-    Console.WriteLine("Set VAPECACHE_SAMPLE_RUN=true to execute sample operations.");
+    Console.Out.WriteLine("Set VAPECACHE_SAMPLE_RUN=true to execute sample operations.");
     return;
 }
 
@@ -36,10 +36,11 @@ await cache.SetAsync(
     CancellationToken.None);
 
 var bytes = await cache.GetAsync("sample:raw", CancellationToken.None);
-Console.WriteLine(bytes is null ? "cache miss" : $"cache hit: {System.Text.Encoding.UTF8.GetString(bytes)}");
+Console.Out.WriteLine(bytes is null ? "cache miss" : $"cache hit: {System.Text.Encoding.UTF8.GetString(bytes)}");
 
 var collections = provider.GetRequiredService<ICacheCollectionFactory>();
 var queue = collections.List<string>("sample:queue");
 await queue.PushBackAsync("job-1");
 var job = await queue.PopFrontAsync();
-Console.WriteLine(job is null ? "queue empty" : $"queue item: {job}");
+Console.Out.WriteLine(job is null ? "queue empty" : $"queue item: {job}");
+

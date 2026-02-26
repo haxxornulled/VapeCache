@@ -204,12 +204,15 @@ public interface ICacheRegion
 ### Stampede Protection
 
 ```csharp
-// Enable stampede protection globally
-services.Configure<CacheStampedeOptions>(options =>
-{
-    options.Enabled = true;
-    options.MaxKeys = 100000;
-});
+// Enable stampede protection globally with fluent, profile-first options
+services.AddOptions<CacheStampedeOptions>()
+    .ConfigureCacheStampede(options =>
+    {
+        options.UseProfile(CacheStampedeProfile.Balanced)
+            .WithMaxKeys(50_000)
+            .WithLockWaitTimeout(TimeSpan.FromMilliseconds(750))
+            .WithFailureBackoff(TimeSpan.FromMilliseconds(500));
+    });
 
 // Multiple concurrent requests will be coalesced to a single DB query
 var user = await _cache.GetOrCreateAsync(key, LoadFromDb, new CacheEntryOptions(TimeSpan.FromMinutes(10)), ct);

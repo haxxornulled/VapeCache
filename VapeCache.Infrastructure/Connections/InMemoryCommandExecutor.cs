@@ -135,6 +135,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
     public ValueTask<bool> JsonSetLeaseAsync(string key, string? path, RedisValueLease json, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(json);
         return SetAsync(key, json.Memory, null, ct);
     }
 
@@ -254,7 +255,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
             // Return non-pooled lease (data is already in memory, no need for ArrayPool)
             return ValueTask.FromResult(new RedisValueLease(entry.StringValue, entry.StringValue.Length, pooled: false));
         }
-        return ValueTask.FromResult(default(RedisValueLease));
+        return ValueTask.FromResult(RedisValueLease.Null);
     }
 
     public bool TryGetLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
@@ -272,7 +273,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
             return ValueTask.FromResult(new RedisValueLease(entry.StringValue, entry.StringValue.Length, pooled: false));
         }
-        return ValueTask.FromResult(default(RedisValueLease));
+        return ValueTask.FromResult(RedisValueLease.Null);
     }
 
     public bool TryGetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<RedisValueLease> task)
@@ -344,7 +345,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                 return ValueTask.FromResult(new RedisValueLease(value, value.Length, pooled: false));
             }
         }
-        return ValueTask.FromResult(default(RedisValueLease));
+        return ValueTask.FromResult(RedisValueLease.Null);
     }
 
     // ========== List Commands ==========
@@ -384,6 +385,32 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
             entry.ListValue!.AddLast(value.ToArray());
             return ValueTask.FromResult((long)entry.ListValue.Count);
+        }
+    }
+
+    public ValueTask<long> RPushManyAsync(string key, ReadOnlyMemory<byte>[] values, int count, CancellationToken ct)
+    {
+        if (count <= 0 || values.Length == 0)
+            throw new ArgumentOutOfRangeException(nameof(count));
+        if (count > values.Length)
+            throw new ArgumentOutOfRangeException(nameof(count));
+
+        var entry = _store.GetOrAdd(key, _ => new CacheEntry { Type = EntryType.List, ListValue = new() });
+        lock (entry.Sync)
+        {
+            if (IsExpired(entry))
+            {
+                _store.TryRemove(key, out _);
+                return ValueTask.FromResult(0L);
+            }
+
+            if (entry.Type != EntryType.List)
+                throw new InvalidOperationException($"Key '{key}' is not a list");
+
+            for (var i = 0; i < count; i++)
+                entry.ListValue!.AddLast(values[i].ToArray());
+
+            return ValueTask.FromResult((long)entry.ListValue!.Count);
         }
     }
 
@@ -569,7 +596,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                 if (IsExpired(entry))
                 {
                     _store.TryRemove(key, out _);
-                    return ValueTask.FromResult(default(RedisValueLease));
+                    return ValueTask.FromResult(RedisValueLease.Null);
                 }
 
                 if (entry.Type == EntryType.List && entry.ListValue!.Count > 0)
@@ -580,7 +607,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                 }
             }
         }
-        return ValueTask.FromResult(default(RedisValueLease));
+        return ValueTask.FromResult(RedisValueLease.Null);
     }
 
     public ValueTask<RedisValueLease> RPopLeaseAsync(string key, CancellationToken ct)
@@ -592,7 +619,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                 if (IsExpired(entry))
                 {
                     _store.TryRemove(key, out _);
-                    return ValueTask.FromResult(default(RedisValueLease));
+                    return ValueTask.FromResult(RedisValueLease.Null);
                 }
 
                 if (entry.Type == EntryType.List && entry.ListValue!.Count > 0)
@@ -605,7 +632,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                 }
             }
         }
-        return ValueTask.FromResult(default(RedisValueLease));
+        return ValueTask.FromResult(RedisValueLease.Null);
     }
 
     public bool TryLPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)

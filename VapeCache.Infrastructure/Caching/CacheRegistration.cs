@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
@@ -28,10 +29,14 @@ public static class CacheRegistration
         });
         services.AddSingleton<CacheStatsRegistry>();
         services.AddSingleton<ICacheStats, CurrentCacheStats>();
+        services.AddSingleton<ICacheIntentRegistry, CacheIntentRegistry>();
         services.AddSingleton<TimeProvider>(_ => TimeProvider.System);
 
         // Core executors (registered as non-interface for internal use)
-        services.AddSingleton<RedisCommandExecutor>();
+        services.AddSingleton(sp => new RedisCommandExecutor(
+            sp.GetRequiredService<IRedisConnectionFactory>(),
+            sp.GetRequiredService<IOptionsMonitor<RedisMultiplexerOptions>>(),
+            sp.GetService<IOptionsMonitor<RedisConnectionOptions>>()));
         services.AddSingleton<InMemoryCommandExecutor>();
         services.TryAddSingleton<IRedisFallbackCommandExecutor, InMemoryCommandExecutor>();
 
@@ -40,7 +45,11 @@ public static class CacheRegistration
         // Cache services
         // IMPORTANT: RedisCacheService gets the RAW RedisCommandExecutor (no hybrid wrapper)
         // to avoid circular dependency with HybridCacheService
-        services.AddSingleton<RedisCacheService>();
+        services.AddSingleton(sp => new RedisCacheService(
+            sp.GetRequiredService<RedisCommandExecutor>(),
+            sp.GetRequiredService<ICurrentCacheService>(),
+            sp.GetRequiredService<CacheStatsRegistry>(),
+            sp.GetRequiredService<ICacheIntentRegistry>()));
         services.AddSingleton<InMemoryCacheService>();
         services.TryAddSingleton<ICacheFallbackService, InMemoryCacheService>();
         services.AddSingleton<HybridCacheService>();
@@ -57,6 +66,17 @@ public static class CacheRegistration
             .Validate(o => o.ConsecutiveFailuresToOpen >= 1, "ConsecutiveFailuresToOpen must be at least 1")
             .Validate(o => o.BreakDuration > TimeSpan.Zero, "BreakDuration must be greater than zero")
             .Validate(o => o.HalfOpenProbeTimeout > TimeSpan.Zero, "HalfOpenProbeTimeout must be greater than zero to prevent indefinite hangs")
+            .ValidateOnStart();
+        services.AddOptions<CacheStampedeOptions>()
+            .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
+            .Validate(o => o.MaxKeys > 0, "MaxKeys must be greater than zero.")
+            .Validate(o => o.MaxKeys <= 500_000, "MaxKeys must be less than or equal to 500000.")
+            .Validate(o => o.MaxKeyLength > 0, "MaxKeyLength must be greater than zero.")
+            .Validate(o => o.MaxKeyLength <= 4096, "MaxKeyLength must be less than or equal to 4096.")
+            .Validate(o => o.LockWaitTimeout >= TimeSpan.Zero, "LockWaitTimeout must be greater than or equal to zero.")
+            .Validate(o => o.LockWaitTimeout <= TimeSpan.FromSeconds(30), "LockWaitTimeout must be less than or equal to 30 seconds.")
+            .Validate(o => o.FailureBackoff >= TimeSpan.Zero, "FailureBackoff must be greater than or equal to zero.")
+            .Validate(o => o.FailureBackoff <= TimeSpan.FromSeconds(30), "FailureBackoff must be less than or equal to 30 seconds.")
             .ValidateOnStart();
         // Default cache service is the hybrid implementation, wrapped with stampede protection.
         services.AddSingleton<ICacheService, HybridStampedeCacheService>();

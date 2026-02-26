@@ -57,10 +57,10 @@ internal sealed class JsonCacheService : IJsonCache
     {
         if (await IsAvailableAsync(ct).ConfigureAwait(false))
         {
-            var json = await _redis.JsonGetAsync(key, path, ct).ConfigureAwait(false);
-            if (json is null)
+            using var lease = await _redis.JsonGetLeaseAsync(key, path, ct).ConfigureAwait(false);
+            if (lease.IsNull)
                 return default;
-            return JsonSerializer.Deserialize<T>(json, _options);
+            return JsonSerializer.Deserialize<T>(lease.Span, _options);
         }
 
         if (!IsRootPath(path))
@@ -104,6 +104,8 @@ internal sealed class JsonCacheService : IJsonCache
 
     public async ValueTask SetLeaseAsync(string key, RedisValueLease json, string? path = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(json);
+
         if (await IsAvailableAsync(ct).ConfigureAwait(false))
         {
             await _redis.JsonSetLeaseAsync(key, path ?? ".", json, ct).ConfigureAwait(false);

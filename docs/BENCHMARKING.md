@@ -1,563 +1,137 @@
 # VapeCache Benchmarking Guide
 
-This guide provides comprehensive instructions for benchmarking VapeCache performance in your environment.
+This guide defines how to run and interpret VapeCache benchmarks with an enterprise-grade workflow.
+
+## Scope
+
+Use this guide for:
+- Head-to-head Redis client comparisons (VapeCache vs StackExchange.Redis)
+- End-to-end workload comparisons
+- Module command comparisons (JSON/FT/BF/TS)
+- Sustained-load and tail-latency verification
+
+Use `docs/ENGINEERING_PLAYBOOK.md` for profiler/Wireshark workflow.
+
+## Ground Rules (Enterprise)
+
+- Run in `Release` only.
+- Use dedicated benchmark hosts when possible (no IDE/debugger attached).
+- Keep Redis target, host CPU governor, and network path fixed across A/B runs.
+- Never claim a win from a single run; use repeated runs and median reporting.
+- Evaluate throughput + allocations + tail latency together.
 
 ## Quick Start
 
-```bash
-cd VapeCache.Benchmarks
-dotnet run -c Release
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode fair
 ```
 
-### Grocery Store Head-to-Head (50k Shoppers, 40 Items)
-
-Use the console comparison runner with explicit transport tuning:
+High-pressure workstation profile (longer/more stable runs):
 
 ```powershell
-$env:VAPECACHE_MAX_CART_SIZE = "40"
-$env:VAPECACHE_BENCH_MUX_CONNECTIONS = "4"
-$env:VAPECACHE_BENCH_MUX_INFLIGHT = "8192"
-$env:VAPECACHE_BENCH_MUX_COALESCE = "true"
-$env:VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS = "0"
-"2" | dotnet run --project VapeCache.Console/VapeCache.Console.csproj -c Release -- --compare
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Medium -Mode fair -Profile aggressive
 ```
 
-`VAPECACHE_BENCH_MUX_*` knobs are optional and affect only the comparison runner's VapeCache path.
+`fair` mode disables instrumentation overhead for apples-to-apples client benchmarking.
 
-For repeatable median gating across multiple runs:
+## Modes
+
+- `fair`: instrumentation off, minimal observer noise.
+- `realworld`: instrumentation on, closer to production telemetry overhead.
+
+Run both for a complete story.
+
+## Recommended Run Matrix
+
+1. Payload scaling: `256`, `1024`, `4096`, `16384`.
+2. Data types: String, Hash, List, module commands.
+3. Modes: `fair` and `realworld`.
+4. Repetitions: at least 3 full runs, compare medians.
+5. Sustained pass: 5-15 minute load using console/store scripts.
+
+## Standard Commands
+
+### Head-to-head suites
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
-  -Trials 5 `
-  -ShopperCount 50000 `
-  -MaxCartSize 40 `
-  -MuxConnections 4 `
-  -MuxInFlight 8192 `
-  -MuxCoalesce true `
-  -MuxResponseTimeoutMs 0 `
-  -FailBelowRatio 1.0
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode fair
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode realworld
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Medium -Mode fair -Profile aggressive
 ```
 
-Recent sample runs on February 22, 2026 (same host/Redis target) showed:
+### Focus one suite
 
-- Run 1: Vape `23,021` shoppers/sec vs SER `9,295` shoppers/sec (`2.48x` faster)
-- Run 2: Vape `20,052` shoppers/sec vs SER `12,257` shoppers/sec (`1.64x` faster)
-- Run 3: Vape `20,293` shoppers/sec vs SER `10,129` shoppers/sec (`2.00x` faster)
-
-### Redis Comparisons (StackExchange.Redis vs VapeCache)
-
-```bash
-$env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
-dotnet run -c Release --filter *RedisClientHeadToHeadBenchmarks*
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite client -Job Short -Mode fair
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite endtoend -Job Short -Mode fair
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite modules -Job Short -Mode fair
 ```
 
-Run all head-to-head suites in one command (client/end-to-end/modules) and collect `comparison.md` files:
+### Bigger payload pass (example)
 
-```bash
-powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short
+```powershell
+$env:VAPECACHE_BENCH_CLIENT_OPERATIONS = "StringSetGet"
+$env:VAPECACHE_BENCH_CLIENT_PAYLOADS = "1024,4096,16384"
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite client -Job Short -Mode fair
 ```
 
-Run the same suites with optional packet capture + Wireshark summaries:
+## Output Artifacts
 
-```bash
-powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-with-capture.ps1 `
-  -Job Short `
-  -ConnectionString "redis://localhost:6379/0" `
-  -Interface 1 `
-  -RedisPort 6379
-```
+- BenchmarkDotNet summary tables (console and exports)
+- `comparison.md` (winner/ratio summary)
+- CSV/JSON/HTML/OpenMetrics exports via `EnterpriseBenchmarkConfig`
 
-If capture is not needed:
-
-```bash
-powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-with-capture.ps1 `
-  -Job Short `
-  -ConnectionString "redis://localhost:6379/0" `
-  -SkipCapture
-```
-
-For end-to-end comparisons with fine-grained host options:
-
-```bash
-$env:VAPECACHE_REDIS_HOST = "127.0.0.1"
-$env:VAPECACHE_REDIS_PORT = "6379"
-dotnet run -c Release --filter *RedisEndToEndHeadToHeadBenchmarks*
-```
-
-### Redis Module Comparisons
-
-Requires RedisJSON, RediSearch, RedisBloom, and RedisTimeSeries installed on the target Redis instance.
-
-```bash
-$env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
-dotnet run -c Release --filter *RedisModuleHeadToHeadBenchmarks*
-```
-
-### Recent Comparison Results (net10-wks)
-
-**Environment:** Windows 11, i7-14700K, .NET 10.0.1, Redis 192.168.100.50  
-**Payloads:** Client `PayloadBytes=256`, End-to-End `PayloadBytes=32`, Modules `JsonPayloadChars=128`
-
-#### Redis Client (Command-Level)
-| Operation | VapeCache Mean | VapeCache Alloc | StackExchange.Redis Mean | StackExchange.Redis Alloc |
-|---|---:|---:|---:|---:|
-| StringSetGet | 309.3 us | 4.55 KB | 241.9 us | 1024 B |
-| HashSetGet | 214.2 us | 4.52 KB | 234.5 us | 1088 B |
-| ListPushPop | 217.5 us | 4.51 KB | 222.5 us | 1024 B |
-| Ping | 143.8 us | 2.32 KB | 108.3 us | 522 B |
-| ModuleList | 132.7 us | 5.36 KB | 122.0 us | 4198 B |
-
-#### End-to-End (Lease-Based Gets/Pops)
-| Operation | VapeCache Mean | VapeCache Alloc | StackExchange.Redis Mean | StackExchange.Redis Alloc |
-|---|---:|---:|---:|---:|
-| StringGet (lease) | 135.7 us | 2.34 KB | 163.4 us | 512 B |
-| StringSet | 138.6 us | 2.36 KB | 168.2 us | 440 B |
-| HashGet (lease) | 143.5 us | 2.35 KB | 191.2 us | 544 B |
-| HashSet | 134.8 us | 2.32 KB | 187.8 us | 472 B |
-| ListPop (lease) | 216.8 us | 2.34 KB | 291.4 us | 512 B |
-| ListPush | 136.6 us | 2.31 KB | 161.0 us | 440 B |
-
-#### Redis Modules
-| Operation | VapeCache Mean | VapeCache Alloc | StackExchange.Redis Mean | StackExchange.Redis Alloc |
-|---|---:|---:|---:|---:|
-| JSON.GET | 141.3 us | 2.48 KB | 168.0 us | 715 B |
-| JSON.SET | 145.7 us | 2.34 KB | 169.9 us | 571 B |
-| FT.SEARCH | 194.4 us | 3.14 KB | 218.4 us | 1270 B |
-| BF.ADD | 134.6 us | 2.3 KB | 163.1 us | 531 B |
-| BF.EXISTS | 139.1 us | 2.3 KB | 164.8 us | 531 B |
-| TS.ADD | 139.7 us | 2.34 KB | 163.7 us | 587 B |
-| TS.RANGE | 150.4 us | 2.56 KB | 162.0 us | 811 B |
-
-## Benchmark Categories
-
-### 1. Cache Service API Performance
-
-Measures throughput and latency for core cache operations.
-
-**What's Measured:**
-- GET operations (hits and misses)
-- SET operations (various payload sizes)
-- REMOVE operations
-- Typed overloads (JSON serialization)
-- Cache-aside (GetOrSet) hit/miss paths
-
-**Benchmark:** `CacheServiceApiBenchmarks`
-
-**Example Results:**
-```
-| Method          | Mean      | P95       | P99       | Allocated |
-|---------------- |----------:| ---------:| ---------:| ---------:|
-| GetHit          |  0.234 ms |  0.512 ms |  0.891 ms |     384 B |
-| GetMiss         |  0.156 ms |  0.287 ms |  0.445 ms |     256 B |
-| SetSmall_1KB    |  0.312 ms |  0.678 ms |  1.123 ms |     1.2 KB|
-| SetLarge_100KB  |  2.145 ms |  4.567 ms |  7.234 ms |   100.8 KB|
-```
-
-### 2. Typed Collections
-
-Validates typed list/set/hash APIs and hybrid behavior.
-
-**Benchmark:** `TypedCollectionsBenchmarks`
-
-### 3. Circuit Breaker + Failover
-
-Measures the failover path and breaker behavior without requiring Redis.
-
-**Benchmark:** `CircuitBreakerPerformanceBenchmarks`
-
-### 4. Stampede Protection
-
-Validates coalescing behavior and the overhead of stampede protection.
-
-**Benchmark:** `StampedeProtectedCacheServiceBenchmarks`
-
-### 5. Redis Client Comparisons (StackExchange.Redis)
-
-End-to-end and command-level comparisons against StackExchange.Redis.
-
-**Benchmarks:**
-- `RedisClientHeadToHeadBenchmarks` (String/Hash/List/Ping/Module List with built-in SER baseline)
-- `RedisEndToEndHeadToHeadBenchmarks` (end-to-end workloads with built-in SER baseline)
-- `RedisModuleHeadToHeadBenchmarks` (JSON/FT/BF/TS module commands with built-in SER baseline)
-
-### 6. Connection Pool + Transport
-
-Low-level pool and transport behavior.
-
-**Benchmarks:**
-- `RedisConnectionPoolBenchmarks`
-- `RedisMultiplexedConnectionBenchmarks`
-- `RedisRespReaderBenchmarks`
-- `RedisRespProtocolBenchmarks`
-- `RedisRespProtocolWriteBenchmarks`
-- `RespParserLiteBenchmarks`
-- `SocketAwaitableBenchmarks`
-
-### 7. Sanity Checks
-
-Sanity benchmarks for allocations and baseline overhead.
-
-**Benchmark:** `SanityBenchmarks`
-
-## Running Specific Benchmarks
-
-### Run Single Benchmark Class
-
-```bash
-dotnet run -c Release --filter "*SerializationBenchmarks*"
-```
-
-### Run Single Method
-
-```bash
-dotnet run -c Release --filter "*MessagePack_Serialize*"
-```
-
-### Export Results
-
-```bash
-# JSON format
-dotnet run -c Release --exporters json
-
-# HTML report
-dotnet run -c Release --exporters html
-
-# CSV for analysis
-dotnet run -c Release --exporters csv
-```
-
-Each benchmark run also exports `comparison.md` into the BenchmarkDotNet results folder with per-scenario winners and ratios (`Vape/SER`).
-
-## Custom Benchmarks
-
-### Create Your Own Benchmark
-
-```csharp
-using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Running;
-
-[MemoryDiagnoser]
-[SimpleJob(warmupCount: 3, iterationCount: 5)]
-public class MyCustomBenchmark
-{
-    private ICacheService _cache;
-
-    [GlobalSetup]
-    public void Setup()
-    {
-        // Configure VapeCache
-        var services = new ServiceCollection();
-        services.AddVapecacheRedisConnections();
-        services.AddVapecacheCaching();
-
-        var provider = services.BuildServiceProvider();
-        _cache = provider.GetRequiredService<ICacheService>();
-    }
-
-    [Benchmark]
-    public async Task<string?> GetUserProfile()
-    {
-        return await _cache.GetAsync("user:12345");
-    }
-
-    [GlobalCleanup]
-    public async Task Cleanup()
-    {
-        if (_cache is IAsyncDisposable disposable)
-            await disposable.DisposeAsync();
-    }
-}
-
-class Program
-{
-    static void Main(string[] args)
-    {
-        BenchmarkRunner.Run<MyCustomBenchmark>();
-    }
-}
-```
-
-### Benchmark Configuration Options
-
-```csharp
-[MemoryDiagnoser]  // Track allocations
-[ThreadingDiagnoser]  // Track thread pool usage
-[SimpleJob(warmupCount: 5, iterationCount: 10)]
-[MinColumn, MaxColumn, MeanColumn, MedianColumn]
-[Percentiles(0.5, 0.95, 0.99)]
-public class MyBenchmark
-{
-    // Your benchmarks here
-}
-```
-
-## Performance Baselines
-
-### Expected Performance (AWS EC2 t3.medium + ElastiCache)
-
-**Cache Operations:**
-- GET (hit): P50 = 0.2ms, P95 = 0.5ms, P99 = 1.0ms
-- GET (miss): P50 = 0.15ms, P95 = 0.3ms, P99 = 0.6ms
-- SET (1KB): P50 = 0.3ms, P95 = 0.7ms, P99 = 1.2ms
-- SET (100KB): P50 = 2.0ms, P95 = 4.5ms, P99 = 8.0ms
-
-**Throughput:**
-- Read-heavy (90% GET): ~15,000 ops/sec per core
-- Write-heavy (50% SET): ~8,000 ops/sec per core
-- Mixed workload (70% GET): ~12,000 ops/sec per core
-
-**Connection Pool:**
-- Acquire time: P50 = 0.05ms, P95 = 0.2ms, P99 = 0.5ms
-- Pool saturation (64 connections): Graceful degradation with acquire timeout
-
-### Expected Performance (Azure AKS + Azure Cache for Redis)
-
-**Cache Operations:**
-- GET (hit): P50 = 0.25ms, P95 = 0.6ms, P99 = 1.2ms
-- SET (1KB): P50 = 0.35ms, P95 = 0.8ms, P99 = 1.5ms
-
-**Network Latency Impact:**
-- Same region: +0.1ms baseline
-- Cross-region: +50-100ms baseline
+Primary artifact path:
+- `BenchmarkDotNet.Artifacts/`
 
 ## Interpreting Results
 
-### What "Good" Looks Like
+- `Ratio (Vape/SER) < 1.00` means VapeCache is faster.
+- Allocation deltas matter even when mean latency wins.
+- Confirm p95/p99/p999 behavior under sustained load before publishing claims.
 
-1. **Low P99 Latency**
-   - GET operations < 2ms at P99
-   - SET operations < 5ms at P99 (1KB payload)
-   - Pool acquire < 1ms at P99
+## CI Gate Recommendation
 
-2. **Minimal Allocations**
-   - GET/SET operations < 2KB allocated per operation
-   - No LOH (Large Object Heap) allocations
-   - Minimal Gen2 collections
+Use median-of-N gating, not single-run gating:
 
-3. **Stampede Protection**
-   - Cache regenerations = 1 (regardless of concurrent requests)
-   - Wait time < 2x single-request latency
+1. Run scenario N=3 (or 5).
+2. Compute median throughput and median ratio.
+3. Fail if median ratio exceeds threshold (for example `> 1.00`).
+4. Track allocation and GC trends separately.
 
-4. **Circuit Breaker**
-   - Fallback activation < 100ms after Redis failure
-   - In-memory cache hit rate > 80% during outage
-   - Full recovery within 30 seconds of Redis restoration
+## BenchmarkDotNet Usage Notes
 
-### Red Flags
+The repo uses:
+- `BenchmarkDotNet` package in `VapeCache.Benchmarks/VapeCache.Benchmarks.csproj`
+- `EnterpriseBenchmarkConfig` in `VapeCache.Benchmarks/EnterpriseBenchmarkConfig.cs`
 
-⚠️ **High P99 Latency** (> 10ms for GET operations)
-- Check network latency to Redis
-- Verify connection pool isn't saturated
-- Review Redis server metrics (CPU, memory)
+`EnterpriseBenchmarkConfig` currently includes:
+- net10 jobs
+- memory diagnoser
+- p50/p90/p95 percentile columns
+- markdown/html/csv/json/openmetrics exporters
+- compact results logger
+- configurable launch/warmup/iteration counts via env:
+  - `VAPECACHE_BENCH_LAUNCH_COUNT`
+  - `VAPECACHE_BENCH_WARMUP_COUNT`
+  - `VAPECACHE_BENCH_ITERATION_COUNT`
 
-⚠️ **Excessive Allocations** (> 10KB per operation)
-- Check payload sizes
-- Verify serialization efficiency
-- Look for unnecessary object creation
+## Official BenchmarkDotNet References
 
-⚠️ **Multiple Stampede Regenerations**
-- Cache key not using SemaphoreSlim correctly
-- Verify `GetOrCreateAsync` is being used
-- Check for distributed cache stampedes (multiple app instances)
+Read these before changing benchmark methodology:
 
-⚠️ **Circuit Breaker Not Triggering**
-- Verify failure threshold configuration
-- Check that Redis errors are being caught
-- Review RedisConnectionOptions.ConnectTimeout
+- Overview: https://benchmarkdotnet.org/
+- Getting started: https://benchmarkdotnet.org/articles/guides/getting-started.html
+- Configuration: https://benchmarkdotnet.org/articles/configs/configs.html
+- Jobs: https://benchmarkdotnet.org/articles/configs/jobs.html
+- Toolchains: https://benchmarkdotnet.org/articles/configs/toolchains.html
+- Diagnosers: https://benchmarkdotnet.org/articles/configs/diagnosers.html
+- Console args: https://benchmarkdotnet.org/articles/guides/console-args.html
+- Project releases: https://github.com/dotnet/BenchmarkDotNet/releases
 
-## Comparing with Other Libraries
+## Do Not Do This
 
-### Benchmark Against StackExchange.Redis Directly
-
-```csharp
-[MemoryDiagnoser]
-public class ClientComparisonBenchmark
-{
-    private ICacheService _vapeCache;
-    private IConnectionMultiplexer _stackExchangeRedis;
-
-    [GlobalSetup]
-    public void Setup()
-    {
-        // Setup VapeCache
-        var services = new ServiceCollection();
-        services.AddVapecacheRedisConnections();
-        services.AddVapecacheCaching();
-        _vapeCache = services.BuildServiceProvider()
-            .GetRequiredService<ICacheService>();
-
-        // Setup StackExchange.Redis
-        _stackExchangeRedis = ConnectionMultiplexer.Connect("localhost:6379");
-    }
-
-    [Benchmark(Baseline = true)]
-    public async Task<string?> StackExchangeRedis_Get()
-    {
-        var db = _stackExchangeRedis.GetDatabase();
-        return await db.StringGetAsync("test-key");
-    }
-
-    [Benchmark]
-    public async Task<string?> VapeCache_Get()
-    {
-        return await _vapeCache.GetAsync("test-key");
-    }
-}
-```
-
-**Expected Results:**
-- VapeCache adds ~0.05-0.1ms overhead (connection pooling + telemetry)
-- VapeCache provides automatic fallback (StackExchange.Redis throws on failure)
-- VapeCache prevents stampede (StackExchange.Redis requires manual semaphore)
-
-### Benchmark Against Microsoft.Extensions.Caching.StackExchangeRedis
-
-VapeCache provides:
-- ✅ 10-15% better throughput (custom pooling vs StackExchange.Redis multiplexer)
-- ✅ Automatic circuit breaker (Microsoft library throws on Redis failure)
-- ✅ Cache stampede protection (Microsoft library doesn't prevent thundering herd)
-- ✅ Built-in telemetry (Microsoft library requires manual instrumentation)
-
-## Production Monitoring
-
-### Key Metrics to Track
-
-**OpenTelemetry Metrics (via Aspire Dashboard or Prometheus):**
-- `cache.get.hits{backend="redis"}` - Redis hit rate
-- `cache.get.misses{backend="redis"}` - Redis miss rate
-- `cache.fallback.to_memory` - Circuit breaker activations
-- `redis.pool.wait.ms` - Connection pool contention
-- `redis.cmd.ms` - Redis command latency
-
-**Health Checks:**
-- Register health checks in your host and map endpoints as needed (readiness can fail when the breaker is forced open).
-
-**Calculate Hit Rate:**
-```csharp
-hit_rate = cache.get.hits / (cache.get.hits + cache.get.misses)
-```
-
-**Target:** > 85% hit rate for production workloads
-
-**Alert Thresholds:**
-- Hit rate < 70% (investigate cache key design)
-- P99 latency > 10ms (investigate Redis performance)
-- Circuit breaker activations > 5/hour (investigate Redis stability)
-- Pool wait time P95 > 5ms (increase MaxConnections)
-
-## Continuous Benchmarking
-
-### GitHub Actions Integration
-
-```yaml
-name: Performance Regression Tests
-
-on:
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  benchmark:
-    runs-on: ubuntu-latest
-
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Run Benchmarks
-        run: |
-          cd VapeCache.Benchmarks
-          dotnet run -c Release --exporters json
-
-      - name: Store Benchmark Results
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          tool: 'benchmarkdotnet'
-          output-file-path: BenchmarkDotNet.Artifacts/results/results.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
-```
-
-### Detect Performance Regressions
-
-**BenchmarkDotNet Threshold Analyzer:**
-```csharp
-[MemoryDiagnoser]
-[RankColumn]
-[Orderer(SummaryOrderPolicy.FastestToSlowest)]
-public class RegressionBenchmark
-{
-    [Benchmark(Baseline = true)]
-    public async Task Baseline_V1_0_0()
-    {
-        // Previous version performance
-    }
-
-    [Benchmark]
-    public async Task Current_Version()
-    {
-        // Current implementation
-    }
-}
-```
-
-**Fail PR if performance degrades > 10%:**
-```bash
-dotnet run -c Release --filter "*RegressionBenchmark*" | \
-  grep -E "Current_Version.*Slower.*1\.[1-9]" && exit 1
-```
-
-## Resources
-
-- **BenchmarkDotNet Documentation**: https://benchmarkdotnet.org/
-- **VapeCache Example Benchmarks**: [VapeCache.Benchmarks](../VapeCache.Benchmarks/)
-- **OpenTelemetry Metrics**: https://opentelemetry.io/docs/specs/otel/metrics/
-- **.NET Aspire Dashboard**: https://aspire.dev/docs/fundamentals/dashboard/
-- **Analyzer + Profiling Playbook**: [ENGINEERING_PLAYBOOK.md](ENGINEERING_PLAYBOOK.md)
-
-## Getting Help
-
-If your benchmarks show unexpected results:
-
-1. **Check Redis Server Metrics**
-   - CPU usage (should be < 50%)
-   - Memory usage (should have headroom)
-   - Network throughput (check saturation)
-
-2. **Verify VapeCache Configuration**
-   - Connection pool size (`MaxConnections` default: 64)
-   - Timeouts (`ConnectTimeout`, `AcquireTimeout`)
-   - Circuit breaker settings
-
-3. **Compare with Baselines**
-   - Run on similar hardware/network
-   - Use same Redis version
-   - Match concurrency levels
-
-4. **Profile Allocations**
-   - Use dotMemory or PerfView
-   - Look for unexpected Gen2 collections
-   - Check for LOH allocations
-
-5. **Open GitHub Issue**
-   - Include benchmark code
-   - Share full results (JSON export)
-   - Describe environment (cloud provider, VM size, Redis config)
-
----
-
-**Next Steps:**
-- Run baseline benchmarks in your environment
-- Set up continuous performance monitoring
-- Configure alerts for critical metrics
-- Review [CONTRIBUTING.md](../CONTRIBUTING.md) to submit performance improvements
+- Do not compare Debug vs Release.
+- Do not compare different Redis hosts between A/B variants.
+- Do not publish means without allocation and percentile context.
+- Do not present single-run outliers as enterprise conclusions.

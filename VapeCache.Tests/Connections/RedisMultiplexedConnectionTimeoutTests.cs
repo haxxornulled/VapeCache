@@ -14,6 +14,35 @@ namespace VapeCache.Tests.Connections;
 public class RedisMultiplexedConnectionTimeoutTests
 {
     [Fact]
+    public async Task ExecuteAsync_CoalescedSendFailure_CompletesAllDrainedOperations()
+    {
+        var mux = new RedisMultiplexedConnection(
+            new DisposedSocketFactory(),
+            maxInFlight: 8,
+            coalesceWrites: true,
+            responseTimeout: TimeSpan.FromSeconds(1));
+
+        try
+        {
+            var first = mux.ExecuteAsync(RedisRespProtocol.PingCommand, CancellationToken.None).AsTask();
+            var second = mux.ExecuteAsync(RedisRespProtocol.PingCommand, CancellationToken.None).AsTask();
+
+            var all = Task.WhenAll(
+                first.ContinueWith(static _ => { }, TaskScheduler.Default),
+                second.ContinueWith(static _ => { }, TaskScheduler.Default));
+            var completed = await Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(2)));
+            Assert.Same(all, completed);
+
+            await Assert.ThrowsAnyAsync<Exception>(async () => await first);
+            await Assert.ThrowsAnyAsync<Exception>(async () => await second);
+        }
+        finally
+        {
+            await mux.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ResponseTimeout_FailsCommand()
     {
         var mux = new RedisMultiplexedConnection(
@@ -73,6 +102,14 @@ public class RedisMultiplexedConnectionTimeoutTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
+    private sealed class DisposedSocketFactory : IRedisConnectionFactory
+    {
+        public ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
+            => ValueTask.FromResult(new Result<IRedisConnection>(new DisposedSocketConn()));
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class FakeConn : IRedisConnection
     {
         private readonly Stream _stream;
@@ -92,6 +129,34 @@ public class RedisMultiplexedConnectionTimeoutTests
             => ValueTask.FromResult<Result<int>>(0);
 
         public ValueTask DisposeAsync() => _stream.DisposeAsync();
+    }
+
+    private sealed class DisposedSocketConn : IRedisConnection
+    {
+        private readonly Socket _socket;
+        private readonly Stream _stream;
+
+        public DisposedSocketConn()
+        {
+            _socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+            _socket.Dispose();
+            _stream = new MemoryStream();
+        }
+
+        public Socket Socket => _socket;
+        public Stream Stream => _stream;
+
+        public ValueTask<Result<Unit>> SendAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct)
+            => ValueTask.FromResult<Result<Unit>>(Prelude.unit);
+
+        public ValueTask<Result<int>> ReceiveAsync(Memory<byte> buffer, CancellationToken ct)
+            => ValueTask.FromResult<Result<int>>(0);
+
+        public ValueTask DisposeAsync()
+        {
+            _stream.Dispose();
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class NeverRespondingStream : Stream
