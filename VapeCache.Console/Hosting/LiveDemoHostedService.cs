@@ -12,8 +12,16 @@ internal sealed class LiveDemoHostedService(
     ICacheService cache,
     ICurrentCacheService current,
     IRedisCircuitBreakerState? circuitBreaker,
-    ILogger<LiveDemoHostedService> logger) : BackgroundService
+    ILogger<LiveDemoHostedService> logger) : BackgroundService, IHostedLifecycleService
 {
+    public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var demo = demoOptions.Value;

@@ -14,6 +14,7 @@ namespace VapeCache.Console.GroceryStore;
 public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService, ICartBatchWriter
 {
     private readonly IRedisCommandExecutor _redis;
+    private readonly string _keyPrefix;
     private static readonly Product[] Products = GroceryStoreService.GetAllProducts();
     private static readonly IReadOnlyDictionary<string, Product> ProductsById = BuildProductMap(Products);
     private static readonly IReadOnlyDictionary<string, int> ProductIndexById = BuildProductIndexMap(Products);
@@ -21,9 +22,10 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     private static readonly Encoding Utf8 = Encoding.UTF8;
     private const int CompactCartItemBytes = 12;
 
-    public VapeCacheRawParityGroceryStoreService(IRedisCommandExecutor redis)
+    public VapeCacheRawParityGroceryStoreService(IRedisCommandExecutor redis, string? keyPrefix = null)
     {
         _redis = redis;
+        _keyPrefix = NormalizeKeyPrefix(keyPrefix);
     }
 
     /// <summary>
@@ -31,7 +33,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     /// </summary>
     public async ValueTask<Product?> GetProductAsync(string productId)
     {
-        var key = $"product:{productId}";
+        var key = Key($"product:{productId}");
         using var lease = await _redis.GetLeaseAsync(key, CancellationToken.None);
         if (!lease.IsNull)
         {
@@ -53,7 +55,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     /// </summary>
     public async ValueTask CacheProductAsync(Product product, TimeSpan ttl)
     {
-        var key = $"product:{product.Id}";
+        var key = Key($"product:{product.Id}");
         var serialized = Serialize(product);
         await _redis.SetAsync(key, serialized, ttl, CancellationToken.None);
     }
@@ -63,7 +65,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     /// </summary>
     public async ValueTask AddToCartAsync(string userId, CartItem item)
     {
-        var key = $"cart:{userId}";
+        var key = Key($"cart:{userId}");
         var packed = ArrayPool<byte>.Shared.Rent(CompactCartItemBytes);
         try
         {
@@ -84,7 +86,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
         if (items.Count == 0)
             return;
 
-        var key = $"cart:{userId}";
+        var key = Key($"cart:{userId}");
         var packedItems = ArrayPool<byte>.Shared.Rent(items.Count * CompactCartItemBytes);
         var payloads = ArrayPool<ReadOnlyMemory<byte>>.Shared.Rent(items.Count);
         try
@@ -146,7 +148,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     /// </summary>
     public async ValueTask<CartItem[]> GetCartAsync(string userId)
     {
-        var key = $"cart:{userId}";
+        var key = Key($"cart:{userId}");
         var values = await _redis.LRangeAsync(key, 0, -1, CancellationToken.None);
         if (values.Length == 0)
         {
@@ -182,7 +184,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     /// </summary>
     public async ValueTask<long> GetCartCountAsync(string userId)
     {
-        return await _redis.LLenAsync($"cart:{userId}", CancellationToken.None);
+        return await _redis.LLenAsync(Key($"cart:{userId}"), CancellationToken.None);
     }
 
     /// <summary>
@@ -190,7 +192,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     /// </summary>
     public async ValueTask ClearCartAsync(string userId)
     {
-        await _redis.DeleteAsync($"cart:{userId}", CancellationToken.None);
+        await _redis.DeleteAsync(Key($"cart:{userId}"), CancellationToken.None);
     }
 
     /// <summary>
@@ -199,7 +201,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     public async ValueTask JoinFlashSaleAsync(string saleId, string userId)
     {
         await ExecuteWithRentedUtf8Async(userId, payload =>
-            _redis.SAddAsync($"sale:{saleId}:participants", payload, CancellationToken.None)).ConfigureAwait(false);
+            _redis.SAddAsync(Key($"sale:{saleId}:participants"), payload, CancellationToken.None)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -208,7 +210,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     public async ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId)
     {
         return await ExecuteWithRentedUtf8Async(userId, payload =>
-            _redis.SIsMemberAsync($"sale:{saleId}:participants", payload, CancellationToken.None)).ConfigureAwait(false);
+            _redis.SIsMemberAsync(Key($"sale:{saleId}:participants"), payload, CancellationToken.None)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -216,7 +218,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     /// </summary>
     public async ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId)
     {
-        return await _redis.SCardAsync($"sale:{saleId}:participants", CancellationToken.None);
+        return await _redis.SCardAsync(Key($"sale:{saleId}:participants"), CancellationToken.None);
     }
 
     /// <summary>
@@ -225,7 +227,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     public async ValueTask SaveSessionAsync(string sessionId, UserSession session)
     {
         var serialized = SessionBinaryCodec.Serialize(session);
-        await _redis.SetAsync($"session:{sessionId}", serialized, TimeSpan.FromHours(1), CancellationToken.None);
+        await _redis.SetAsync(Key($"session:{sessionId}"), serialized, TimeSpan.FromHours(1), CancellationToken.None);
     }
 
     /// <summary>
@@ -233,7 +235,7 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     /// </summary>
     public async ValueTask<UserSession?> GetSessionAsync(string sessionId)
     {
-        using var lease = await _redis.GetLeaseAsync($"session:{sessionId}", CancellationToken.None);
+        using var lease = await _redis.GetLeaseAsync(Key($"session:{sessionId}"), CancellationToken.None);
         if (lease.IsNull)
             return null;
 
@@ -346,5 +348,17 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
         {
             ArrayPool<byte>.Shared.Return(rented);
         }
+    }
+
+    private string Key(string suffix)
+        => _keyPrefix.Length == 0 ? suffix : string.Concat(_keyPrefix, suffix);
+
+    private static string NormalizeKeyPrefix(string? prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix))
+            return string.Empty;
+
+        var trimmed = prefix.Trim();
+        return trimmed.EndsWith(':') ? trimmed : string.Concat(trimmed, ":");
     }
 }

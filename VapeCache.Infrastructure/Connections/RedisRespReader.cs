@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Globalization;
+using System.Text;
 
 namespace VapeCache.Infrastructure.Connections;
 
@@ -20,7 +21,7 @@ internal static class RedisRespReader
             return;
         }
 
-        if (value.Kind == RespKind.Array &&
+        if ((value.Kind == RespKind.Array || value.Kind == RespKind.Push) &&
             value.ArrayIsPooled &&
             value.ArrayItems is not null)
         {
@@ -92,6 +93,16 @@ internal static class RedisRespReader
             (byte)':' => RespValue.Integer(ReadInt64(await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false))),
             (byte)'$' => await ReadBulkStringAsync(stream, ct, maxBulkStringBytes).ConfigureAwait(false),
             (byte)'*' => await ReadArrayAsync(stream, ct, maxBulkStringBytes, maxArrayDepth, currentArrayDepth).ConfigureAwait(false),
+            (byte)'_' => await ReadNullAsync(stream, ct).ConfigureAwait(false),
+            (byte)',' => RespValue.SimpleString(await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false)),
+            (byte)'#' => await ReadBooleanAsync(stream, ct).ConfigureAwait(false),
+            (byte)'(' => RespValue.SimpleString(await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false)),
+            (byte)'=' => await ReadVerbatimStringAsync(stream, ct, maxBulkStringBytes).ConfigureAwait(false),
+            (byte)'!' => await ReadBlobErrorAsync(stream, ct, maxBulkStringBytes).ConfigureAwait(false),
+            (byte)'~' => await ReadArrayLikeAsync(stream, ct, maxBulkStringBytes, maxArrayDepth, currentArrayDepth, isPush: false).ConfigureAwait(false),
+            (byte)'>' => await ReadArrayLikeAsync(stream, ct, maxBulkStringBytes, maxArrayDepth, currentArrayDepth, isPush: true).ConfigureAwait(false),
+            (byte)'%' => await ReadMapAsArrayAsync(stream, ct, maxBulkStringBytes, maxArrayDepth, currentArrayDepth).ConfigureAwait(false),
+            (byte)'|' => await ReadAttributeWrappedAsync(stream, ct, maxBulkStringBytes, maxArrayDepth, currentArrayDepth).ConfigureAwait(false),
             _ => throw new InvalidOperationException($"Unsupported RESP type: {(char)prefix}")
         };
     }
@@ -172,6 +183,15 @@ internal static class RedisRespReader
         int maxBulkStringBytes,
         int maxArrayDepth,
         int currentArrayDepth)
+        => await ReadArrayLikeAsync(stream, ct, maxBulkStringBytes, maxArrayDepth, currentArrayDepth, isPush: false).ConfigureAwait(false);
+
+    private static async ValueTask<RespValue> ReadArrayLikeAsync(
+        Stream stream,
+        CancellationToken ct,
+        int maxBulkStringBytes,
+        int maxArrayDepth,
+        int currentArrayDepth,
+        bool isPush)
     {
         var header = await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false);
         if (!int.TryParse(header, out var len))
@@ -197,7 +217,9 @@ internal static class RedisRespReader
                 filled++;
             }
 
-            return RespValue.Array(items, len, pooled: true);
+            return isPush
+                ? RespValue.Push(items, len, pooled: true)
+                : RespValue.Array(items, len, pooled: true);
         }
         catch
         {
@@ -206,6 +228,144 @@ internal static class RedisRespReader
             ReturnArray(items, len);
             throw;
         }
+    }
+
+    private static async ValueTask<RespValue> ReadMapAsArrayAsync(
+        Stream stream,
+        CancellationToken ct,
+        int maxBulkStringBytes,
+        int maxArrayDepth,
+        int currentArrayDepth)
+    {
+        var header = await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false);
+        if (!int.TryParse(header, out var pairCount))
+            throw new InvalidOperationException($"Invalid map length: {header}");
+
+        if (pairCount == -1)
+            return RespValue.NullArray();
+
+        if (pairCount < 0)
+            throw new InvalidOperationException($"Invalid map length: {header}");
+
+        return await ReadAggregateItemsAsync(
+            stream,
+            ct,
+            elementCount: checked(pairCount * 2),
+            maxBulkStringBytes,
+            maxArrayDepth,
+            currentArrayDepth,
+            asPush: false).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<RespValue> ReadAttributeWrappedAsync(
+        Stream stream,
+        CancellationToken ct,
+        int maxBulkStringBytes,
+        int maxArrayDepth,
+        int currentArrayDepth)
+    {
+        var header = await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false);
+        if (!int.TryParse(header, out var pairCount))
+            throw new InvalidOperationException($"Invalid attribute length: {header}");
+
+        if (pairCount < 0)
+            return await ReadAsyncInternal(stream, ct, maxBulkStringBytes, maxArrayDepth, currentArrayDepth).ConfigureAwait(false);
+
+        var nextDepth = currentArrayDepth + 1;
+        if (maxArrayDepth >= 0 && nextDepth > maxArrayDepth)
+            throw new InvalidOperationException($"Array nesting depth {nextDepth} exceeds maximum allowed depth of {maxArrayDepth}. Possible stack overflow attack.");
+
+        for (var i = 0; i < pairCount * 2; i++)
+        {
+            var attr = await ReadAsyncInternal(stream, ct, maxBulkStringBytes, maxArrayDepth, nextDepth).ConfigureAwait(false);
+            ReturnBuffers(attr);
+        }
+
+        return await ReadAsyncInternal(stream, ct, maxBulkStringBytes, maxArrayDepth, currentArrayDepth).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<RespValue> ReadAggregateItemsAsync(
+        Stream stream,
+        CancellationToken ct,
+        int elementCount,
+        int maxBulkStringBytes,
+        int maxArrayDepth,
+        int currentArrayDepth,
+        bool asPush)
+    {
+        if (elementCount < 0)
+            throw new InvalidOperationException($"Invalid aggregate length: {elementCount}");
+
+        var nextDepth = currentArrayDepth + 1;
+        if (maxArrayDepth >= 0 && nextDepth > maxArrayDepth)
+            throw new InvalidOperationException($"Array nesting depth {nextDepth} exceeds maximum allowed depth of {maxArrayDepth}. Possible stack overflow attack.");
+
+        var items = RentArray(elementCount);
+        var filled = 0;
+        try
+        {
+            for (var i = 0; i < elementCount; i++)
+            {
+                items[i] = await ReadAsyncInternal(stream, ct, maxBulkStringBytes, maxArrayDepth, nextDepth).ConfigureAwait(false);
+                filled++;
+            }
+
+            return asPush
+                ? RespValue.Push(items, elementCount, pooled: true)
+                : RespValue.Array(items, elementCount, pooled: true);
+        }
+        catch
+        {
+            for (var i = 0; i < filled; i++)
+                ReturnBuffers(items[i]);
+            ReturnArray(items, elementCount);
+            throw;
+        }
+    }
+
+    private static async ValueTask<RespValue> ReadNullAsync(Stream stream, CancellationToken ct)
+    {
+        var line = await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false);
+        if (line.Length != 0)
+            throw new InvalidOperationException($"Invalid null response payload: {line}");
+        return RespValue.NullBulkString();
+    }
+
+    private static async ValueTask<RespValue> ReadBooleanAsync(Stream stream, CancellationToken ct)
+    {
+        var line = await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false);
+        if (line.Length == 1 && (line[0] == 't' || line[0] == 'T'))
+            return RespValue.Integer(1);
+        if (line.Length == 1 && (line[0] == 'f' || line[0] == 'F'))
+            return RespValue.Integer(0);
+
+        throw new InvalidOperationException($"Invalid boolean response: {line}");
+    }
+
+    private static async ValueTask<RespValue> ReadVerbatimStringAsync(Stream stream, CancellationToken ct, int maxBulkStringBytes)
+    {
+        var value = await ReadBulkStringAsync(stream, ct, maxBulkStringBytes).ConfigureAwait(false);
+        if (value.Kind != RespKind.BulkString || value.Bulk is null)
+            return value;
+
+        if (value.BulkLength <= 4 || value.Bulk[3] != (byte)':')
+            return value;
+
+        var payloadLen = value.BulkLength - 4;
+        var payload = GC.AllocateUninitializedArray<byte>(payloadLen);
+        Buffer.BlockCopy(value.Bulk, 4, payload, 0, payloadLen);
+        return RespValue.BulkString(payload, payloadLen, pooled: false);
+    }
+
+    private static async ValueTask<RespValue> ReadBlobErrorAsync(Stream stream, CancellationToken ct, int maxBulkStringBytes)
+    {
+        var bulk = await ReadBulkStringAsync(stream, ct, maxBulkStringBytes).ConfigureAwait(false);
+        return bulk.Kind switch
+        {
+            RespKind.NullBulkString => RespValue.Error(string.Empty),
+            RespKind.BulkString when bulk.Bulk is not null => RespValue.Error(Encoding.UTF8.GetString(bulk.Bulk, 0, bulk.BulkLength)),
+            _ => throw new InvalidOperationException("Invalid blob error payload.")
+        };
     }
 
     internal sealed class RespValue
@@ -261,6 +421,10 @@ internal static class RedisRespReader
         /// Executes value.
         /// </summary>
         public static RespValue NullArray() => new(RespKind.NullArray, null, null, 0, false, 0, null, 0, false);
+        /// <summary>
+        /// Executes value.
+        /// </summary>
+        public static RespValue Push(RespValue[] items, int length, bool pooled = false) => new(RespKind.Push, null, null, 0, false, 0, items, length, pooled);
     }
 
     internal enum RespKind
@@ -271,6 +435,7 @@ internal static class RedisRespReader
         BulkString,
         NullBulkString,
         Array,
-        NullArray
+        NullArray,
+        Push
     }
 }

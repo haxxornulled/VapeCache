@@ -29,6 +29,8 @@ public static class MenuRunner
         // Auto-run with default settings when running in non-interactive mode
         var autoRun = Environment.GetEnvironmentVariable("VAPECACHE_RUN_COMPARISON")?.ToLowerInvariant() == "true";
         int shopperCount = 10_000;
+        if (int.TryParse(Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SHOPPERS"), out var envShoppers) && envShoppers > 0)
+            shopperCount = envShoppers;
         var maxCartSize = 35;
         if (int.TryParse(Environment.GetEnvironmentVariable("VAPECACHE_MAX_CART_SIZE"), out var envMaxCartSize) && envMaxCartSize > 0)
             maxCartSize = envMaxCartSize;

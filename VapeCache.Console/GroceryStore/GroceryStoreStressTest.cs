@@ -16,7 +16,7 @@ namespace VapeCache.Console.GroceryStore;
 /// - Product inventory queries
 /// - Real-time metrics
 /// </summary>
-public class GroceryStoreStressTest : BackgroundService
+public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
 {
     private readonly GroceryStoreService _store;
     private readonly ICacheStats _stats;
@@ -39,6 +39,14 @@ public class GroceryStoreStressTest : BackgroundService
         _optionsMonitor = optionsMonitor;
         _logger = logger;
     }
+
+    public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

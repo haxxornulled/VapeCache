@@ -72,10 +72,19 @@ internal sealed class ResponseReaderLoop
     {
         try
         {
-            var response = await read().ConfigureAwait(false);
-            if (response.Kind == RedisRespReader.RespKind.Error)
-                return (response, new InvalidOperationException(response.Text ?? "Redis error"));
-            return (response, null);
+            while (true)
+            {
+                var response = await read().ConfigureAwait(false);
+                if (response.Kind == RedisRespReader.RespKind.Push)
+                {
+                    RedisRespReader.ReturnBuffers(response);
+                    continue;
+                }
+
+                if (response.Kind == RedisRespReader.RespKind.Error)
+                    return (response, new InvalidOperationException(response.Text ?? "Redis error"));
+                return (response, null);
+            }
         }
         catch (OperationCanceledException) when (_shutdownToken.IsCancellationRequested)
         {

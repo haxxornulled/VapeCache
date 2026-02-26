@@ -153,6 +153,8 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.ReaperPeriod >= TimeSpan.Zero, "RedisConnection:ReaperPeriod must be >= 0.")
             .Validate(static o => o.TcpSendBufferBytes >= 0, "RedisConnection:TcpSendBufferBytes must be >= 0.")
             .Validate(static o => o.TcpReceiveBufferBytes >= 0, "RedisConnection:TcpReceiveBufferBytes must be >= 0.")
+            .Validate(static o => o.RespProtocolVersion is 2 or 3, "RedisConnection:RespProtocolVersion must be 2 or 3.")
+            .Validate(static o => o.MaxClusterRedirects >= 0 && o.MaxClusterRedirects <= 16, "RedisConnection:MaxClusterRedirects must be in range 0..16.")
             .ValidateOnStart();
 
         services
@@ -226,6 +228,14 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.ConsecutiveFailuresToOpen > 0, "RedisCircuitBreaker:ConsecutiveFailuresToOpen must be > 0.")
             .Validate(static o => o.BreakDuration >= TimeSpan.Zero, "RedisCircuitBreaker:BreakDuration must be >= 0.")
             .Validate(static o => o.HalfOpenProbeTimeout >= TimeSpan.Zero, "RedisCircuitBreaker:HalfOpenProbeTimeout must be >= 0.")
+            .ValidateOnStart();
+
+        services
+            .AddOptions<HybridFailoverOptions>()
+            .Bind(context.Configuration.GetSection("HybridFailover"))
+            .Validate(static o => o.FallbackWarmReadTtl > TimeSpan.Zero, "HybridFailover:FallbackWarmReadTtl must be > 0.")
+            .Validate(static o => o.FallbackMirrorWriteTtlWhenMissing > TimeSpan.Zero, "HybridFailover:FallbackMirrorWriteTtlWhenMissing must be > 0.")
+            .Validate(static o => o.MaxMirrorPayloadBytes >= 0, "HybridFailover:MaxMirrorPayloadBytes must be >= 0.")
             .ValidateOnStart();
 
         if (context.HostingEnvironment.IsDevelopment())

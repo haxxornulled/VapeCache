@@ -12,15 +12,21 @@ public class GroceryStoreComparisonStressTest
     private readonly IGroceryStoreService _service;
     private readonly ILogger<GroceryStoreComparisonStressTest> _logger;
     private readonly string _providerName;
+    private readonly int? _deterministicSeed;
+    private readonly int? _maxDegreeOfParallelism;
 
     public GroceryStoreComparisonStressTest(
         IGroceryStoreService service,
         ILogger<GroceryStoreComparisonStressTest> logger,
-        string providerName)
+        string providerName,
+        int? deterministicSeed = null,
+        int? maxDegreeOfParallelism = null)
     {
         _service = service;
         _logger = logger;
         _providerName = providerName;
+        _deterministicSeed = deterministicSeed;
+        _maxDegreeOfParallelism = maxDegreeOfParallelism;
     }
 
     /// <summary>
@@ -28,17 +34,9 @@ public class GroceryStoreComparisonStressTest
     /// </summary>
     public async Task<StressTestResult> RunStressTestAsync(int shopperCount = 10_000, int maxCartSize = 35)
     {
+        maxCartSize = Math.Max(15, maxCartSize);
         _logger.LogInformation("===== {Provider} Grocery Store Stress Test =====", _providerName);
         _logger.LogInformation("Shoppers: {Count:N0}, Max Cart Size: {MaxCart}", shopperCount, maxCartSize);
-
-        // Normalize GC baseline so per-provider deltas are comparable.
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        GC.Collect();
-        var allocatedBytesStart = GC.GetTotalAllocatedBytes(precise: false);
-        var gen0Start = GC.CollectionCount(0);
-        var gen1Start = GC.CollectionCount(1);
-        var gen2Start = GC.CollectionCount(2);
 
         var sw = Stopwatch.StartNew();
         var products = GroceryStoreService.GetAllProducts();
@@ -66,8 +64,15 @@ public class GroceryStoreComparisonStressTest
         var errorCount = 0;
         Exception? firstError = null;
 
+        // Start allocation and GC baselines after harness arrays and pre-cache,
+        // so bytes/op tracks shopper operations rather than harness setup.
+        var allocatedBytesStart = GC.GetTotalAllocatedBytes(precise: false);
+        var gen0Start = GC.CollectionCount(0);
+        var gen1Start = GC.CollectionCount(1);
+        var gen2Start = GC.CollectionCount(2);
+
         var shopperStart = Stopwatch.StartNew();
-        var maxDegree = GetMaxDegreeOfParallelism();
+        var maxDegree = GetMaxDegreeOfParallelism(_maxDegreeOfParallelism);
         var batchWriter = _service as ICartBatchWriter;
 
         await Parallel.ForEachAsync(
@@ -75,14 +80,18 @@ public class GroceryStoreComparisonStressTest
             new ParallelOptions { MaxDegreeOfParallelism = maxDegree },
             async (shopperIndex, ct) =>
             {
-                var random = Random.Shared;
-
                 try
                 {
+                    var deterministic = _deterministicSeed.HasValue;
+                    var seed = _deterministicSeed.GetValueOrDefault();
                     var shopperSw = Stopwatch.StartNew();
                     var userId = $"user-{shopperIndex:D6}";
-                    var saleId = $"sale-{random.Next(1, 6)}";
-                    var now = DateTime.UtcNow;
+                    var saleId = deterministic
+                        ? $"sale-{DeterministicRange(seed, shopperIndex, salt: 1, minInclusive: 1, maxInclusive: 5)}"
+                        : $"sale-{Random.Shared.Next(1, 6)}";
+                    var now = deterministic
+                        ? DeterministicTimestampUtc(shopperIndex)
+                        : DateTime.UtcNow;
                     double joinFlashSaleStep = 0;
                     double isInFlashSaleStep = 0;
                     double buildCartItemsStep = 0;
@@ -103,16 +112,24 @@ public class GroceryStoreComparisonStressTest
 
                     // 3. Add random items to cart (15-35 items)
                     stepStart = Stopwatch.GetTimestamp();
-                    var cartSize = random.Next(15, maxCartSize + 1);
+                    var cartSize = deterministic
+                        ? DeterministicRange(seed, shopperIndex, salt: 2, minInclusive: 15, maxInclusive: maxCartSize)
+                        : Random.Shared.Next(15, maxCartSize + 1);
                     var items = new CartItem[cartSize];
                     for (int i = 0; i < cartSize; i++)
                     {
-                        var product = products[random.Next(products.Length)];
+                        var productIndex = deterministic
+                            ? DeterministicRange(seed, shopperIndex, salt: 1000 + (i * 2), minInclusive: 0, maxInclusive: products.Length - 1)
+                            : Random.Shared.Next(products.Length);
+                        var quantity = deterministic
+                            ? DeterministicRange(seed, shopperIndex, salt: 1001 + (i * 2), minInclusive: 1, maxInclusive: 3)
+                            : Random.Shared.Next(1, 4);
+                        var product = products[productIndex];
                         items[i] = new CartItem(
                             product.Id,
                             product.Name,
                             product.Price,
-                            random.Next(1, 4),
+                            quantity,
                             now);
                     }
                     buildCartItemsStep = ElapsedMs(stepStart);
@@ -364,17 +381,49 @@ public class GroceryStoreComparisonStressTest
         return sum / count;
     }
 
-    private static int GetMaxDegreeOfParallelism()
+    private static int GetMaxDegreeOfParallelism(int? configuredMaxDegree)
     {
+        if (configuredMaxDegree is > 0)
+            return configuredMaxDegree.Value;
+
         var env = Environment.GetEnvironmentVariable("VAPECACHE_BENCH_MAX_DEGREE");
         if (int.TryParse(env, out var configured) && configured > 0)
             return configured;
 
-        return Math.Max(32, Environment.ProcessorCount * 8);
+        return Math.Max(32, Environment.ProcessorCount * 4);
     }
 
     private static double ElapsedMs(long startTicks)
         => (Stopwatch.GetTimestamp() - startTicks) * 1000d / Stopwatch.Frequency;
+
+    private static DateTime DeterministicTimestampUtc(int shopperIndex)
+    {
+        var baseTicks = DateTime.UnixEpoch.Ticks;
+        return new DateTime(baseTicks + (shopperIndex * TimeSpan.TicksPerSecond), DateTimeKind.Utc);
+    }
+
+    private static int DeterministicRange(int seed, int shopperIndex, int salt, int minInclusive, int maxInclusive)
+    {
+        if (maxInclusive <= minInclusive)
+            return minInclusive;
+
+        var span = maxInclusive - minInclusive + 1;
+        var hash = DeterministicHash((uint)seed, (uint)shopperIndex, (uint)salt);
+        return minInclusive + (int)(hash % (uint)span);
+    }
+
+    private static uint DeterministicHash(uint seed, uint shopperIndex, uint salt)
+    {
+        var x = seed;
+        x ^= shopperIndex * 0x9E3779B9u;
+        x ^= salt * 0x85EBCA6Bu;
+        x ^= x >> 16;
+        x *= 0x7FEB352Du;
+        x ^= x >> 15;
+        x *= 0x846CA68Bu;
+        x ^= x >> 16;
+        return x;
+    }
 
     private static StepLatencySummary[] BuildStepBreakdown(
         int count,

@@ -10,8 +10,28 @@ internal sealed class PluginDemoHostedService(
     IOptionsMonitor<PluginDemoOptions> optionsMonitor,
     ICacheService cache,
     ICurrentCacheService current,
-    ILogger<PluginDemoHostedService> logger) : BackgroundService
+    ILogger<PluginDemoHostedService> logger) : BackgroundService, IHostedLifecycleService
 {
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var options = optionsMonitor.CurrentValue;

@@ -2,6 +2,9 @@ using System.Buffers;
 using System.Buffers.Text;
 using System.Diagnostics;
 using System.Globalization;
+using System.Net.Security;
+using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Text;
 using VapeCache.Abstractions.Connections;
 using Microsoft.Extensions.DependencyInjection;
@@ -25,6 +28,8 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private readonly bool _coalesce;
     private readonly IRedisConnectionFactory _factory;
     private readonly RedisConnectionOptions _connectionOptions;
+    private readonly bool _clusterRedirectsEnabled;
+    private readonly int _maxClusterRedirects;
     private RedisMultiplexerOptions _muxOptions;
     private bool _autoscaleEnabled;
     private int _minConnections;
@@ -87,6 +92,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private JsonSetHeaderCacheEntry? _jsonSetHeaderCache;
     private HGetHeaderCacheEntry? _hgetHeaderCache;
     private HSetHeaderCacheEntry? _hsetHeaderCache;
+    private static readonly ReadOnlyMemory<byte> AskingCommand = "*1\r\n$6\r\nASKING\r\n"u8.ToArray();
 
     // Backwards compatibility constructor - delegates to IOptions<T> monitor
     public RedisCommandExecutor(
@@ -111,6 +117,8 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         var connOpts = RedisRuntimeOptionsNormalizer.NormalizeConnection(configuredConnectionOptions);
         _factory = factory;
         _connectionOptions = connOpts;
+        _clusterRedirectsEnabled = connOpts.EnableClusterRedirection;
+        _maxClusterRedirects = Math.Max(0, connOpts.MaxClusterRedirects);
         _muxOptions = o;
         var count = Math.Max(1, o.Connections);
         _conns = new RedisMultiplexedConnection[count];
@@ -148,9 +156,42 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 
-    private void LogNormalizationIfChanged<T>(string optionsName, T configured, T effective)
+    private static RedisTransportProfile NormalizeTransportProfile(RedisTransportProfile profile)
+        => Enum.IsDefined(typeof(RedisTransportProfile), profile)
+            ? profile
+            : RedisTransportProfile.FullTilt;
+
+    private void LogNormalizationIfChanged(
+        string optionsName,
+        RedisMultiplexerOptions configured,
+        RedisMultiplexerOptions effective)
     {
-        if (EqualityComparer<T>.Default.Equals(configured, effective))
+        if (configured == effective)
+            return;
+
+        // Transport profile application is intentional and not a guardrail correction.
+        var profiled = RedisTransportProfiles.Apply(
+            configured with { TransportProfile = NormalizeTransportProfile(configured.TransportProfile) });
+        if (profiled == effective)
+            return;
+
+        _logger.LogWarning(
+            "{OptionsName} options were normalized at runtime to enforce safe performance guardrails. Review configured values for invalid or out-of-range settings.",
+            optionsName);
+    }
+
+    private void LogNormalizationIfChanged(
+        string optionsName,
+        RedisConnectionOptions configured,
+        RedisConnectionOptions effective)
+    {
+        if (configured == effective)
+            return;
+
+        // Transport profile application is intentional and not a guardrail correction.
+        var profiled = RedisTransportProfiles.Apply(
+            configured with { TransportProfile = NormalizeTransportProfile(configured.TransportProfile) });
+        if (profiled == effective)
             return;
 
         _logger.LogWarning(
@@ -244,6 +285,224 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         return parsed;
     }
 
+    private readonly record struct RedisClusterRedirectTarget(bool IsAsk, int Slot, string Host, int Port)
+    {
+        public string Kind => IsAsk ? "ASK" : "MOVED";
+    }
+
+    private static bool TryParseClusterRedirect(Exception ex, out RedisClusterRedirectTarget redirect)
+        => TryParseClusterRedirectMessage(ex.Message, out redirect);
+
+    private static bool TryParseClusterRedirectMessage(string? message, out RedisClusterRedirectTarget redirect)
+    {
+        redirect = default;
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        var text = message.Trim();
+        const string prefix = "Redis error:";
+        if (text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            text = text[prefix.Length..].Trim();
+
+        if (!(text.StartsWith("MOVED ", StringComparison.OrdinalIgnoreCase) ||
+              text.StartsWith("ASK ", StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length < 3)
+            return false;
+
+        if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var slot))
+            return false;
+
+        if (!TryParseHostPort(parts[2], out var host, out var port))
+            return false;
+
+        var isAsk = parts[0].Equals("ASK", StringComparison.OrdinalIgnoreCase);
+        redirect = new RedisClusterRedirectTarget(isAsk, slot, host, port);
+        return true;
+    }
+
+    private static bool TryParseHostPort(string endpoint, out string host, out int port)
+    {
+        host = string.Empty;
+        port = 0;
+        if (string.IsNullOrWhiteSpace(endpoint))
+            return false;
+
+        var text = endpoint.Trim();
+        if (text[0] == '[')
+        {
+            var closeBracket = text.IndexOf(']');
+            if (closeBracket <= 1 || closeBracket + 2 >= text.Length || text[closeBracket + 1] != ':')
+                return false;
+
+            host = text[1..closeBracket];
+            return int.TryParse(text[(closeBracket + 2)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out port)
+                && port is >= 1 and <= 65535;
+        }
+
+        var lastColon = text.LastIndexOf(':');
+        if (lastColon <= 0 || lastColon == text.Length - 1)
+            return false;
+
+        host = text[..lastColon];
+        return int.TryParse(text[(lastColon + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out port)
+            && port is >= 1 and <= 65535;
+    }
+
+    private async ValueTask<RedisRespReader.RespValue> ExecuteWithClusterRedirectsAsync(
+        Func<CancellationToken, ValueTask<RedisRespReader.RespValue>> primary,
+        ReadOnlyMemory<byte> command,
+        bool poolBulk,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await primary(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (_clusterRedirectsEnabled && _maxClusterRedirects > 0 && TryParseClusterRedirect(ex, out var redirect))
+        {
+            return await ExecuteClusterRedirectLoopAsync(command, poolBulk, redirect, ct).ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask<RedisRespReader.RespValue> ExecuteClusterRedirectLoopAsync(
+        ReadOnlyMemory<byte> command,
+        bool poolBulk,
+        RedisClusterRedirectTarget redirect,
+        CancellationToken ct)
+    {
+        var current = redirect;
+        for (var attempt = 1; attempt <= _maxClusterRedirects; attempt++)
+        {
+            var response = await ExecuteCommandAgainstRedirectTargetAsync(command, poolBulk, current, ct).ConfigureAwait(false);
+            if (response.Kind != RedisRespReader.RespKind.Error)
+                return response;
+
+            if (!TryParseClusterRedirectMessage(response.Text, out var next))
+                return response;
+
+            current = next;
+        }
+
+        throw new InvalidOperationException(
+            $"Redis cluster redirect limit exceeded after {_maxClusterRedirects} hops. Last target={current.Host}:{current.Port} slot={current.Slot}.");
+    }
+
+    private async ValueTask<RedisRespReader.RespValue> ExecuteCommandAgainstRedirectTargetAsync(
+        ReadOnlyMemory<byte> command,
+        bool poolBulk,
+        RedisClusterRedirectTarget redirect,
+        CancellationToken ct)
+    {
+        var connectTimeout = _connectionOptions.ConnectTimeout <= TimeSpan.Zero
+            ? TimeSpan.FromSeconds(2)
+            : _connectionOptions.ConnectTimeout;
+
+        using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        connectCts.CancelAfter(connectTimeout);
+        var token = connectCts.Token;
+
+        using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        TryConfigureSocket(socket);
+        await socket.ConnectAsync(redirect.Host, redirect.Port, token).ConfigureAwait(false);
+
+        await using Stream stream = new NetworkStream(socket, ownsSocket: false);
+        var activeStream = stream;
+
+        if (_connectionOptions.UseTls)
+        {
+            var ssl = new SslStream(
+                stream,
+                leaveInnerStreamOpen: false,
+                _connectionOptions.AllowInvalidCert ? static (_, _, _, _) => true : null);
+
+            await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+            {
+                TargetHost = _connectionOptions.TlsHost ?? redirect.Host,
+                EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
+            }, token).ConfigureAwait(false);
+
+            activeStream = ssl;
+        }
+
+        await SendHelloAuthAndAskingIfNeededAsync(activeStream, redirect.IsAsk, token).ConfigureAwait(false);
+
+        await activeStream.WriteAsync(command, token).ConfigureAwait(false);
+        await activeStream.FlushAsync(token).ConfigureAwait(false);
+
+        return await RedisRespReader.ReadAsync(
+            activeStream,
+            token,
+            maxBulkStringBytes: _connectionOptions.MaxBulkStringBytes,
+            maxArrayDepth: _connectionOptions.MaxArrayDepth).ConfigureAwait(false);
+    }
+
+    private void TryConfigureSocket(Socket socket)
+    {
+        try { socket.NoDelay = _connectionOptions.EnableTcpNoDelay; } catch { }
+        try
+        {
+            if (_connectionOptions.TcpSendBufferBytes > 0)
+                socket.SendBufferSize = Math.Clamp(_connectionOptions.TcpSendBufferBytes, 4 * 1024, 4 * 1024 * 1024);
+        }
+        catch { }
+        try
+        {
+            if (_connectionOptions.TcpReceiveBufferBytes > 0)
+                socket.ReceiveBufferSize = Math.Clamp(_connectionOptions.TcpReceiveBufferBytes, 4 * 1024, 4 * 1024 * 1024);
+        }
+        catch { }
+    }
+
+    private async ValueTask SendHelloAuthAndAskingIfNeededAsync(Stream stream, bool askRedirect, CancellationToken ct)
+    {
+        var protocolVersion = _connectionOptions.RespProtocolVersion is 2 or 3
+            ? _connectionOptions.RespProtocolVersion
+            : 2;
+
+        var helloLen = RedisRespProtocol.GetHelloCommandLength(protocolVersion);
+        var helloBuffer = ArrayPool<byte>.Shared.Rent(helloLen);
+        try
+        {
+            var written = RedisRespProtocol.WriteHelloCommand(helloBuffer.AsSpan(0, helloLen), protocolVersion);
+            await stream.WriteAsync(helloBuffer.AsMemory(0, written), ct).ConfigureAwait(false);
+            await stream.FlushAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(helloBuffer);
+        }
+
+        await RedisRespProtocol.SkipHelloResponseAsync(stream, ct).ConfigureAwait(false);
+
+        if (!string.IsNullOrEmpty(_connectionOptions.Password))
+        {
+            var authLen = RedisRespProtocol.GetAuthCommandLength(_connectionOptions.Username, _connectionOptions.Password);
+            var authBuffer = ArrayPool<byte>.Shared.Rent(authLen);
+            try
+            {
+                var written = RedisRespProtocol.WriteAuthCommand(authBuffer.AsSpan(0, authLen), _connectionOptions.Username, _connectionOptions.Password);
+                await stream.WriteAsync(authBuffer.AsMemory(0, written), ct).ConfigureAwait(false);
+                await stream.FlushAsync(ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(authBuffer);
+            }
+
+            await RedisRespProtocol.ExpectOkAsync(stream, ct).ConfigureAwait(false);
+        }
+
+        if (askRedirect)
+        {
+            await stream.WriteAsync(AskingCommand, ct).ConfigureAwait(false);
+            await stream.FlushAsync(ct).ConfigureAwait(false);
+            await RedisRespProtocol.ExpectOkAsync(stream, ct).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>
     /// Gets value.
     /// </summary>
@@ -260,13 +519,22 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             conn = NextRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
-            var resp = await conn.ExecuteAsync(
-                rented.AsMemory(0, written),
-                payload: ReadOnlyMemory<byte>.Empty,
-                appendCrlf: false,
+            var command = rented.AsMemory(0, written);
+            var redirectCommand = _clusterRedirectsEnabled
+                ? command.ToArray()
+                : null;
+
+            var resp = await ExecuteWithClusterRedirectsAsync(
+                token => conn.ExecuteAsync(
+                    command,
+                    payload: ReadOnlyMemory<byte>.Empty,
+                    appendCrlf: false,
+                    poolBulk: false,
+                    token,
+                    headerBuffer: rented),
+                redirectCommand ?? command,
                 poolBulk: false,
-                ct,
-                headerBuffer: rented).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
             rented = null; // returned by writer
             return resp.Kind switch
             {
@@ -349,13 +617,22 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             conn = NextRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
-            var resp = await conn.ExecuteAsync(
-                rented.AsMemory(0, written),
-                payload: ReadOnlyMemory<byte>.Empty,
-                appendCrlf: false,
+            var command = rented.AsMemory(0, written);
+            var redirectCommand = _clusterRedirectsEnabled
+                ? command.ToArray()
+                : null;
+
+            var resp = await ExecuteWithClusterRedirectsAsync(
+                token => conn.ExecuteAsync(
+                    command,
+                    payload: ReadOnlyMemory<byte>.Empty,
+                    appendCrlf: false,
+                    poolBulk: true,
+                    token,
+                    headerBuffer: rented),
+                redirectCommand ?? command,
                 poolBulk: true,
-                ct,
-                headerBuffer: rented).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
             rented = null; // returned by writer
             if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
                 return RedisValueLease.Null;
@@ -726,13 +1003,26 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 var headerLen = len - value.Length - 2; // exclude value bytes + CRLF
                 rented = conn.RentHeaderBuffer(headerLen);
                 var written = RedisRespProtocol.WriteSetCommandHeader(rented.AsSpan(0, headerLen), key, value.Length, null);
-                var resp = await conn.ExecuteAsync(
-                    rented.AsMemory(0, written),
-                    payload: value,
-                    appendCrlf: true,
+
+                byte[]? redirectCommand = null;
+                if (_clusterRedirectsEnabled)
+                {
+                    var fullLen = RedisRespProtocol.GetSetCommandLength(key, value.Length, null);
+                    redirectCommand = GC.AllocateUninitializedArray<byte>(fullLen);
+                    RedisRespProtocol.WriteSetCommand(redirectCommand.AsSpan(0, fullLen), key, value.Span, null);
+                }
+
+                var resp = await ExecuteWithClusterRedirectsAsync(
+                    token => conn.ExecuteAsync(
+                        rented.AsMemory(0, written),
+                        payload: value,
+                        appendCrlf: true,
+                        poolBulk: false,
+                        token,
+                        headerBuffer: rented),
+                    redirectCommand ?? rented.AsMemory(0, written),
                     poolBulk: false,
-                    ct,
-                    headerBuffer: rented).ConfigureAwait(false);
+                    ct).ConfigureAwait(false);
                 rented = null; // returned by writer
 
                 if (resp.Kind == RedisRespReader.RespKind.Error)
@@ -750,8 +1040,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 var len = RedisRespProtocol.GetSetCommandLength(key, value.Length, ttlMs);
                 rented = ArrayPool<byte>.Shared.Rent(len);
                 var written = RedisRespProtocol.WriteSetCommand(rented.AsSpan(0, len), key, value.Span, ttlMs);
-                var resp = await conn.ExecuteAsync(
-                    rented.AsMemory(0, written),
+                var command = rented.AsMemory(0, written);
+                var resp = await ExecuteWithClusterRedirectsAsync(
+                    token => conn.ExecuteAsync(
+                        command,
+                        poolBulk: false,
+                        token),
+                    command,
                     poolBulk: false,
                     ct).ConfigureAwait(false);
 
@@ -840,13 +1135,22 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteDelCommand(rented.AsSpan(0, len), key);
-            var resp = await conn.ExecuteAsync(
-                rented.AsMemory(0, written),
-                payload: ReadOnlyMemory<byte>.Empty,
-                appendCrlf: false,
+            var command = rented.AsMemory(0, written);
+            var redirectCommand = _clusterRedirectsEnabled
+                ? command.ToArray()
+                : null;
+
+            var resp = await ExecuteWithClusterRedirectsAsync(
+                token => conn.ExecuteAsync(
+                    command,
+                    payload: ReadOnlyMemory<byte>.Empty,
+                    appendCrlf: false,
+                    poolBulk: false,
+                    token,
+                    headerBuffer: rented),
+                redirectCommand ?? command,
                 poolBulk: false,
-                ct,
-                headerBuffer: rented).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
             rented = null; // returned by writer
             return resp.Kind == RedisRespReader.RespKind.Integer && resp.IntegerValue > 0;
         }
@@ -1828,23 +2132,11 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     private void RebuildLanesUnsafe()
     {
-        var count = _conns.Length;
-        if (count <= 1)
-        {
-            var single = count == 0 ? Array.Empty<RedisMultiplexedConnection>() : new[] { _conns[0] };
-            _readConns = single;
-            _writeConns = single;
-            return;
-        }
-
-        var readCount = Math.Max(1, count / 2);
-        var writeCount = Math.Max(1, count - readCount);
-        var read = new RedisMultiplexedConnection[readCount];
-        var write = new RedisMultiplexedConnection[writeCount];
-        Array.Copy(_conns, 0, read, 0, readCount);
-        Array.Copy(_conns, readCount, write, 0, writeCount);
-        _readConns = read;
-        _writeConns = write;
+        // Use a shared lane pool for reads and writes.
+        // Static read/write partitioning amplified tail latency on write-heavy workloads because
+        // half the lanes could sit underutilized while write lanes queued.
+        _readConns = _conns;
+        _writeConns = _conns;
     }
 
     private async Task AutoscaleLoopAsync()
@@ -3792,7 +4084,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             return resp.Kind switch
             {
                 RedisRespReader.RespKind.NullBulkString => null,
-                RedisRespReader.RespKind.BulkString => ParseDouble(resp),
+                RedisRespReader.RespKind.BulkString or RedisRespReader.RespKind.SimpleString => ParseDouble(resp),
                 _ => throw new InvalidOperationException($"Unexpected ZSCORE response: {resp.Kind}")
             };
         }
@@ -3886,7 +4178,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 headerBuffer: rented).ConfigureAwait(false);
             rented = null;
 
-            return resp.Kind == RedisRespReader.RespKind.BulkString
+            return resp.Kind is RedisRespReader.RespKind.BulkString or RedisRespReader.RespKind.SimpleString
                 ? ParseDouble(resp)
                 : throw new InvalidOperationException($"Unexpected ZINCRBY response: {resp.Kind}");
         }

@@ -28,7 +28,9 @@ public sealed class RedisTransportRuntimeGuardrailsTests
             TcpKeepAliveTime = TimeSpan.Zero,
             TcpKeepAliveInterval = TimeSpan.Zero,
             MaxBulkStringBytes = 0,
-            MaxArrayDepth = 0
+            MaxArrayDepth = 0,
+            RespProtocolVersion = 0,
+            MaxClusterRedirects = -5
         };
 
         var effective = RedisRuntimeOptionsNormalizer.NormalizeConnection(options);
@@ -51,6 +53,24 @@ public sealed class RedisTransportRuntimeGuardrailsTests
         Assert.Equal(TimeSpan.FromSeconds(10), effective.TcpKeepAliveInterval);
         Assert.Equal(16 * 1024 * 1024, effective.MaxBulkStringBytes);
         Assert.Equal(64, effective.MaxArrayDepth);
+        Assert.Equal(2, effective.RespProtocolVersion);
+        Assert.Equal(0, effective.MaxClusterRedirects);
+    }
+
+    [Fact]
+    public void ApplyRuntimeConnection_ClampsUpperBoundsForRespAndRedirects()
+    {
+        var options = new RedisConnectionOptions
+        {
+            TransportProfile = RedisTransportProfile.Custom,
+            RespProtocolVersion = 99,
+            MaxClusterRedirects = 999
+        };
+
+        var effective = RedisRuntimeOptionsNormalizer.NormalizeConnection(options);
+
+        Assert.Equal(3, effective.RespProtocolVersion);
+        Assert.Equal(16, effective.MaxClusterRedirects);
     }
 
     [Fact]

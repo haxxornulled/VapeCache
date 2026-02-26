@@ -250,12 +250,7 @@ internal sealed class RedisConnectionFactory(
 
     private async Task AuthenticateAndSelectAsync(long id, Stream stream, RedisConnectionOptions o, CancellationToken ct)
     {
-        // TODO: HELLO command causes issues with Redis 8.4 - investigate wire protocol
-        // For now, skip HELLO - Redis should default to RESP2 anyway
-        // await WriteHandshakeAsync(stream, ct,
-        //     write => RedisRespProtocol.WriteHelloCommand(write, 2),
-        //     () => RedisRespProtocol.GetHelloCommandLength(2)).ConfigureAwait(false);
-        // await RedisRespProtocol.SkipHelloResponseAsync(stream, ct).ConfigureAwait(false);
+        await TryNegotiateHelloAsync(stream, o.RespProtocolVersion, ct).ConfigureAwait(false);
 
         var usedFallback = false;
         if (!string.IsNullOrEmpty(o.Password))
@@ -413,6 +408,34 @@ internal sealed class RedisConnectionFactory(
                     var user = await RedisRespProtocol.ReadBulkStringAsync(stream, ct).ConfigureAwait(false);
                     logger.LogInformation("Redis ACL WHOAMI={User}", user);
                 }
+            }
+        }
+    }
+
+    private async ValueTask TryNegotiateHelloAsync(Stream stream, int protocolVersion, CancellationToken ct)
+    {
+        try
+        {
+            await WriteHandshakeAsync(
+                stream,
+                ct,
+                write => RedisRespProtocol.WriteHelloCommand(write, protocolVersion),
+                () => RedisRespProtocol.GetHelloCommandLength(protocolVersion)).ConfigureAwait(false);
+
+            await RedisRespProtocol.SkipHelloResponseAsync(stream, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or FormatException)
+        {
+            try
+            {
+                logger.LogDebug(ex, "Redis HELLO negotiation failed; falling back to legacy AUTH/SELECT handshake.");
+            }
+            catch
+            {
             }
         }
     }
