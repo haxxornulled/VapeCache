@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using System.Text;
 
 namespace VapeCache.Extensions.Aspire;
 
@@ -50,9 +51,9 @@ public static class AspireTelemetryExtensions
     /// builder.AddVapeCache()
     ///     .WithAspireTelemetry(options =>
     ///     {
-    ///         options.UseSeqAsDefaultExporter = false;
-    ///         options.ConfigureMetrics = m => { /* add custom metric exporters */ };
-    ///         options.ConfigureTracing = t => { /* add custom trace exporters */ };
+    ///         options.UseSeq(apiKey: "dev-seq-api-key")
+    ///                .AddMetricsConfiguration(m => { /* add custom metric exporters */ })
+    ///                .AddTracingConfiguration(t => { /* add custom trace exporters */ });
     ///     });
     /// </code>
     /// </example>
@@ -108,6 +109,8 @@ public static class AspireTelemetryExtensions
                     {
                         otlp.Protocol = exporter.Protocol;
                         otlp.Endpoint = exporter.MetricsEndpoint;
+                        if (!string.IsNullOrWhiteSpace(exporter.Headers))
+                            otlp.Headers = exporter.Headers;
                     });
                 }
 
@@ -125,6 +128,8 @@ public static class AspireTelemetryExtensions
                     {
                         otlp.Protocol = exporter.Protocol;
                         otlp.Endpoint = exporter.TracesEndpoint;
+                        if (!string.IsNullOrWhiteSpace(exporter.Headers))
+                            otlp.Headers = exporter.Headers;
                     });
                 }
 
@@ -164,9 +169,46 @@ public static class AspireTelemetryExtensions
         var protocol = options.OtlpProtocol ?? InferProtocol(endpointUri);
         var metricsEndpoint = ResolveSignalEndpoint(endpointUri, protocol, signal: "metrics");
         var tracesEndpoint = ResolveSignalEndpoint(endpointUri, protocol, signal: "traces");
+        var headers = ResolveOtlpHeaders(configuration, options);
 
-        return new ExporterConfiguration(protocol, metricsEndpoint, tracesEndpoint);
+        return new ExporterConfiguration(protocol, metricsEndpoint, tracesEndpoint, headers);
     }
+
+    private static string? ResolveOtlpHeaders(IConfiguration configuration, VapeCacheTelemetryOptions options)
+    {
+        if (options.OtlpHeaders.Count > 0)
+            return BuildOtlpHeaders(options.OtlpHeaders);
+
+        var headerText = configuration["OpenTelemetry:Otlp:Headers"];
+        if (string.IsNullOrWhiteSpace(headerText))
+            headerText = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_HEADERS");
+
+        return string.IsNullOrWhiteSpace(headerText) ? null : headerText;
+    }
+
+    private static string BuildOtlpHeaders(IDictionary<string, string> headers)
+    {
+        var sb = new StringBuilder(headers.Count * 16);
+        var first = true;
+
+        foreach (var kvp in headers)
+        {
+            if (!first)
+                sb.Append(',');
+            first = false;
+
+            sb.Append(kvp.Key.Trim());
+            sb.Append('=');
+            sb.Append(EscapeHeaderValue(kvp.Value.Trim()));
+        }
+
+        return sb.ToString();
+    }
+
+    private static string EscapeHeaderValue(string value)
+        => value.Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace(",", "\\,", StringComparison.Ordinal)
+                .Replace("=", "\\=", StringComparison.Ordinal);
 
     private static OtlpExportProtocol InferProtocol(Uri endpoint)
     {
@@ -211,5 +253,6 @@ public static class AspireTelemetryExtensions
     private sealed record ExporterConfiguration(
         OtlpExportProtocol Protocol,
         Uri MetricsEndpoint,
-        Uri TracesEndpoint);
+        Uri TracesEndpoint,
+        string? Headers);
 }

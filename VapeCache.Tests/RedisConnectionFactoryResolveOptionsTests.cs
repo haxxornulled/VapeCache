@@ -153,4 +153,22 @@ public sealed class RedisConnectionFactoryResolveOptionsTests
 
         Assert.Equal(interval, effective.TcpKeepAliveInterval);
     }
+
+    [Fact]
+    public void ResolveOptions_PreservesTcpTransportTuningValues()
+    {
+        var o = new RedisConnectionOptions
+        {
+            Host = "redis.example.com",
+            EnableTcpNoDelay = false,
+            TcpSendBufferBytes = 256 * 1024,
+            TcpReceiveBufferBytes = 512 * 1024
+        };
+
+        var effective = RedisConnectionFactory.ResolveOptions(o);
+
+        Assert.False(effective.EnableTcpNoDelay);
+        Assert.Equal(256 * 1024, effective.TcpSendBufferBytes);
+        Assert.Equal(512 * 1024, effective.TcpReceiveBufferBytes);
+    }
 }

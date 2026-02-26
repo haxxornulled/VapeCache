@@ -1,7 +1,6 @@
 using System.Net.Sockets;
 using LanguageExt;
 using LanguageExt.Common;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -17,10 +16,9 @@ public sealed class RedisStressHostedServiceTests
     [Fact]
     public async Task StartAsync_noop_when_disabled()
     {
-        using var services = new ServiceCollection()
-            .AddSingleton<IRedisConnectionFactory>(new DummyFactory())
-            .AddSingleton<IRedisCommandExecutor>(new InMemoryCommandExecutor())
-            .BuildServiceProvider();
+        var factory = new DummyFactory();
+        var pool = new PingPool();
+        var executor = new InMemoryCommandExecutor();
 
         var stress = Options.Create(new RedisStressOptions { Enabled = false });
         var redisOptions = new TestOptionsMonitor<RedisConnectionOptions>(new RedisConnectionOptions { Host = "localhost" });
@@ -29,7 +27,9 @@ public sealed class RedisStressHostedServiceTests
         var sut = new RedisStressHostedService(
             stress,
             redisOptions,
-            services,
+            factory,
+            pool,
+            executor,
             lifetime,
             NullLogger<RedisStressHostedService>.Instance);
 
@@ -43,10 +43,9 @@ public sealed class RedisStressHostedServiceTests
     [Fact]
     public async Task RunAsync_mux_mode_completes_and_requests_host_stop()
     {
-        using var services = new ServiceCollection()
-            .AddSingleton<IRedisConnectionFactory>(new DummyFactory())
-            .AddSingleton<IRedisCommandExecutor>(new InMemoryCommandExecutor())
-            .BuildServiceProvider();
+        var factory = new DummyFactory();
+        var pool = new PingPool();
+        var executor = new InMemoryCommandExecutor();
 
         var stress = Options.Create(new RedisStressOptions
         {
@@ -72,7 +71,9 @@ public sealed class RedisStressHostedServiceTests
         var sut = new RedisStressHostedService(
             stress,
             redisOptions,
-            services,
+            factory,
+            pool,
+            executor,
             lifetime,
             NullLogger<RedisStressHostedService>.Instance);
 
@@ -91,10 +92,7 @@ public sealed class RedisStressHostedServiceTests
     {
         var pool = new PingPool();
         var factory = new PingFactory();
-        using var services = new ServiceCollection()
-            .AddSingleton<IRedisConnectionFactory>(factory)
-            .AddSingleton<IRedisConnectionPool>(pool)
-            .BuildServiceProvider();
+        var executor = new InMemoryCommandExecutor();
 
         var stress = Options.Create(new RedisStressOptions
         {
@@ -112,7 +110,9 @@ public sealed class RedisStressHostedServiceTests
         var sut = new RedisStressHostedService(
             stress,
             redisOptions,
-            services,
+            factory,
+            pool,
+            executor,
             lifetime,
             NullLogger<RedisStressHostedService>.Instance);
 
@@ -129,9 +129,8 @@ public sealed class RedisStressHostedServiceTests
     public async Task RunAsync_burn_mode_honors_burn_target()
     {
         var factory = new PingFactory();
-        using var services = new ServiceCollection()
-            .AddSingleton<IRedisConnectionFactory>(factory)
-            .BuildServiceProvider();
+        var pool = new PingPool();
+        var executor = new InMemoryCommandExecutor();
 
         var stress = Options.Create(new RedisStressOptions
         {
@@ -149,7 +148,9 @@ public sealed class RedisStressHostedServiceTests
         var sut = new RedisStressHostedService(
             stress,
             redisOptions,
-            services,
+            factory,
+            pool,
+            executor,
             lifetime,
             NullLogger<RedisStressHostedService>.Instance);
 

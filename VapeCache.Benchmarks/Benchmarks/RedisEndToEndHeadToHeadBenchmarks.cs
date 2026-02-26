@@ -13,17 +13,44 @@ public class RedisEndToEndHeadToHeadBenchmarks
 {
     private const string Field = "f";
 
-    [Params(
+    private static readonly RedisEndToEndOperation[] FullOperations =
+    [
         RedisEndToEndOperation.StringSet,
         RedisEndToEndOperation.StringGet,
         RedisEndToEndOperation.HashSet,
         RedisEndToEndOperation.HashGet,
         RedisEndToEndOperation.ListPush,
-        RedisEndToEndOperation.ListPop)]
+        RedisEndToEndOperation.ListPop
+    ];
+
+    private static readonly RedisEndToEndOperation[] QuickOperations =
+    [
+        RedisEndToEndOperation.StringSet,
+        RedisEndToEndOperation.StringGet,
+        RedisEndToEndOperation.HashSet,
+        RedisEndToEndOperation.HashGet
+    ];
+
+    private static readonly int[] FullPayloadSizes = [32, 256, 4096];
+    private static readonly int[] QuickPayloadSizes = [256];
+
+    [ParamsSource(nameof(Operations))]
     public RedisEndToEndOperation Operation { get; set; }
 
-    [Params(32, 256, 4096)]
+    [ParamsSource(nameof(PayloadSizes))]
     public int PayloadBytes { get; set; }
+
+    [Params(false, true)]
+    public bool EnableInstrumentation { get; set; }
+
+    [Params(VapeReadPath.Lease, VapeReadPath.Materialized)]
+    public VapeReadPath ReadPath { get; set; }
+
+    public IEnumerable<RedisEndToEndOperation> Operations =>
+        BenchmarkRedisConfig.ResolveEnumParams("VAPECACHE_BENCH_E2E_OPERATIONS", FullOperations, QuickOperations);
+
+    public IEnumerable<int> PayloadSizes =>
+        BenchmarkRedisConfig.ResolveIntParams("VAPECACHE_BENCH_E2E_PAYLOADS", FullPayloadSizes, QuickPayloadSizes);
 
     private readonly Consumer _consumer = new();
 
@@ -48,7 +75,7 @@ public class RedisEndToEndHeadToHeadBenchmarks
         _listKey = $"{prefix}:list";
 
         _payload = GC.AllocateUninitializedArray<byte>(PayloadBytes);
-        new Random(42).NextBytes(_payload);
+        BenchmarkRedisConfig.FillPayload(_payload, seed: 2000 + PayloadBytes);
 
         _serMux = await BenchmarkRedisConfig.ConnectStackExchangeAsync(options).ConfigureAwait(false);
         _serDb = _serMux.GetDatabase(options.Database);
@@ -56,7 +83,7 @@ public class RedisEndToEndHeadToHeadBenchmarks
             options,
             connections: 1,
             maxInFlight: 4096,
-            enableInstrumentation: false,
+            enableInstrumentation: EnableInstrumentation,
             enableCoalescedWrites: true);
 
         await _serDb.KeyDeleteAsync(new RedisKey[] { _key, _hashKey, _listKey }).ConfigureAwait(false);
@@ -137,15 +164,31 @@ public class RedisEndToEndHeadToHeadBenchmarks
                 _consumer.Consume(await _executor.SetAsync(_key, _payload, ttl: null, CancellationToken.None).ConfigureAwait(false));
                 break;
             case RedisEndToEndOperation.StringGet:
-                using (var lease = await _executor.GetLeaseAsync(_key, CancellationToken.None).ConfigureAwait(false))
+                if (ReadPath == VapeReadPath.Lease)
+                {
+                    using var lease = await _executor.GetLeaseAsync(_key, CancellationToken.None).ConfigureAwait(false);
                     _consumer.Consume(lease.Length);
+                }
+                else
+                {
+                    var bytes = await _executor.GetAsync(_key, CancellationToken.None).ConfigureAwait(false);
+                    _consumer.Consume(bytes?.Length ?? -1);
+                }
                 break;
             case RedisEndToEndOperation.HashSet:
                 _consumer.Consume(await _executor.HSetAsync(_hashKey, Field, _payload, CancellationToken.None).ConfigureAwait(false));
                 break;
             case RedisEndToEndOperation.HashGet:
-                using (var lease = await _executor.HGetLeaseAsync(_hashKey, Field, CancellationToken.None).ConfigureAwait(false))
+                if (ReadPath == VapeReadPath.Lease)
+                {
+                    using var lease = await _executor.HGetLeaseAsync(_hashKey, Field, CancellationToken.None).ConfigureAwait(false);
                     _consumer.Consume(lease.Length);
+                }
+                else
+                {
+                    var bytes = await _executor.HGetAsync(_hashKey, Field, CancellationToken.None).ConfigureAwait(false);
+                    _consumer.Consume(bytes?.Length ?? -1);
+                }
                 break;
             case RedisEndToEndOperation.ListPush:
                 _consumer.Consume(await _executor.LPushAsync(_listKey, _payload, CancellationToken.None).ConfigureAwait(false));
@@ -153,8 +196,16 @@ public class RedisEndToEndHeadToHeadBenchmarks
             case RedisEndToEndOperation.ListPop:
                 await _executor.DeleteAsync(_listKey, CancellationToken.None).ConfigureAwait(false);
                 _consumer.Consume(await _executor.LPushAsync(_listKey, _payload, CancellationToken.None).ConfigureAwait(false));
-                using (var lease = await _executor.LPopLeaseAsync(_listKey, CancellationToken.None).ConfigureAwait(false))
+                if (ReadPath == VapeReadPath.Lease)
+                {
+                    using var lease = await _executor.LPopLeaseAsync(_listKey, CancellationToken.None).ConfigureAwait(false);
                     _consumer.Consume(lease.Length);
+                }
+                else
+                {
+                    var bytes = await _executor.LPopAsync(_listKey, CancellationToken.None).ConfigureAwait(false);
+                    _consumer.Consume(bytes?.Length ?? -1);
+                }
                 break;
             default:
                 throw new ArgumentOutOfRangeException();
@@ -169,5 +220,11 @@ public class RedisEndToEndHeadToHeadBenchmarks
         HashGet,
         ListPush,
         ListPop
+    }
+
+    public enum VapeReadPath
+    {
+        Lease,
+        Materialized
     }
 }

@@ -22,7 +22,7 @@ VapeCache has **strong fundamentals** in transport, performance, reliability, an
 - ✅ **Serilog correlation**: Span enrichment for trace correlation
 
 ### Ergonomics
-- ✅ **Console host**: CLI verification/logging (no HTTP endpoints)
+- ✅ **Console host**: CLI verification/logging, with optional wrapper endpoint mapping available via extensions
 - ✅ **Secret handling**: Environment variable indirection (CI-friendly)
 
 ## Critical Gaps (Must Fix Before v1.0)

@@ -15,6 +15,9 @@ public static class CacheTelemetry
     public static readonly Counter<long> RemoveCalls = Meter.CreateCounter<long>("cache.remove.calls", description: "Total REMOVE operations");
     public static readonly Counter<long> FallbackToMemory = Meter.CreateCounter<long>("cache.fallback.to_memory", description: "Circuit breaker fallback events");
     public static readonly Counter<long> RedisBreakerOpened = Meter.CreateCounter<long>("cache.redis.breaker.opened", description: "Circuit breaker opened events");
+    public static readonly Counter<long> StampedeKeyRejected = Meter.CreateCounter<long>("cache.stampede.key_rejected", description: "Stampede-protected requests rejected due to suspicious/invalid key");
+    public static readonly Counter<long> StampedeLockWaitTimeout = Meter.CreateCounter<long>("cache.stampede.lock_wait_timeout", description: "Stampede lock wait timed out");
+    public static readonly Counter<long> StampedeFailureBackoffRejected = Meter.CreateCounter<long>("cache.stampede.failure_backoff_rejected", description: "Requests rejected due to per-key failure backoff window");
 
     public static readonly Histogram<double> OpMs = Meter.CreateHistogram<double>("cache.op.ms", unit: "ms", description: "Cache operation latency");
 
@@ -25,6 +28,9 @@ public static class CacheTelemetry
     public static readonly Counter<long> SpillOrphanScanned = Meter.CreateCounter<long>("cache.spill.orphan.scanned", description: "Spill files scanned for orphan cleanup");
     public static readonly Counter<long> SpillOrphanCleanupCount = Meter.CreateCounter<long>("cache.spill.orphan.cleanup.count", description: "Spill files deleted during orphan cleanup");
     public static readonly Counter<long> SpillOrphanCleanupBytes = Meter.CreateCounter<long>("cache.spill.orphan.cleanup.bytes", unit: "bytes", description: "Spill bytes deleted during orphan cleanup");
+    public static readonly Histogram<long> SetPayloadBytes = Meter.CreateHistogram<long>("cache.set.payload.bytes", unit: "bytes", description: "Payload size for cache SET operations");
+    public static readonly Counter<long> LargeKeyWrites = Meter.CreateCounter<long>("cache.set.large_key", description: "Large payload cache writes");
+    public static readonly Counter<long> Evictions = Meter.CreateCounter<long>("cache.evictions", description: "In-memory cache evictions");
 
     private static ICurrentCacheService? _currentCacheService;
 
@@ -43,6 +49,16 @@ public static class CacheTelemetry
     {
         _currentCacheService = currentCacheService;
     }
+
+    internal static string GetPayloadBucket(int bytes) => bytes switch
+    {
+        <= 1024 => "lte_1kb",
+        <= 4096 => "lte_4kb",
+        <= 16384 => "lte_16kb",
+        <= 65536 => "lte_64kb",
+        <= 262144 => "lte_256kb",
+        _ => "gt_256kb"
+    };
 
     /// <summary>
     /// Observable gauge that reports the current active backend (1=redis, 0=in-memory).

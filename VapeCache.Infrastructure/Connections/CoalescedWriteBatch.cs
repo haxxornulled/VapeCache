@@ -68,18 +68,52 @@ internal sealed class CoalescedWriteBatch : IDisposable
 
 internal sealed class Coalescer
 {
-    private const int MaxWriteBytes = 32 * 1024;
-    private const int MaxSegments = 32;
-    private const int SmallCopyThreshold = 512;
+    private readonly int _maxWriteBytes;
+    private readonly int _maxSegments;
+    private readonly int _smallCopyThreshold;
+    private readonly bool _adaptiveEnabled;
+    private readonly int _adaptiveLowDepth;
+    private readonly int _adaptiveHighDepth;
+    private readonly int _adaptiveMinWriteBytes;
+    private readonly int _adaptiveMinSegments;
+    private readonly int _adaptiveMinSmallCopyThreshold;
 
     private readonly Queue<CoalescedPendingRequest> _queue;
+    private readonly Func<int>? _queueDepthProvider;
 
-    public Coalescer(Queue<CoalescedPendingRequest> queue) => _queue = queue;
+    public Coalescer(
+        Queue<CoalescedPendingRequest> queue,
+        int maxWriteBytes = 1024 * 1024,
+        int maxSegments = 256,
+        int smallCopyThresholdBytes = 2048,
+        bool adaptiveEnabled = true,
+        int adaptiveLowDepth = 4,
+        int adaptiveHighDepth = 64,
+        int adaptiveMinWriteBytes = 64 * 1024,
+        int adaptiveMinSegments = 64,
+        int adaptiveMinSmallCopyThresholdBytes = 512,
+        Func<int>? queueDepthProvider = null)
+    {
+        ArgumentNullException.ThrowIfNull(queue);
+
+        _queue = queue;
+        _maxWriteBytes = Math.Clamp(maxWriteBytes, 4 * 1024, 1024 * 1024);
+        _maxSegments = Math.Clamp(maxSegments, 4, 256);
+        _smallCopyThreshold = Math.Clamp(smallCopyThresholdBytes, 64, 8 * 1024);
+        _adaptiveEnabled = adaptiveEnabled;
+        _adaptiveLowDepth = Math.Max(1, adaptiveLowDepth);
+        _adaptiveHighDepth = Math.Max(_adaptiveLowDepth + 1, adaptiveHighDepth);
+        _adaptiveMinWriteBytes = Math.Clamp(adaptiveMinWriteBytes, 4 * 1024, _maxWriteBytes);
+        _adaptiveMinSegments = Math.Clamp(adaptiveMinSegments, 4, _maxSegments);
+        _adaptiveMinSmallCopyThreshold = Math.Clamp(adaptiveMinSmallCopyThresholdBytes, 64, _smallCopyThreshold);
+        _queueDepthProvider = queueDepthProvider;
+    }
 
     public bool TryBuildBatch(CoalescedWriteBatch batch)
     {
         batch.Reset();
         var totalBytes = 0;
+        var (maxWriteBytes, maxSegments, smallCopyThreshold) = GetEffectiveLimits();
 
         while (_queue.Count > 0)
         {
@@ -101,10 +135,10 @@ internal sealed class Coalescer
             // If adding this request would exceed limits and we have data, commit current batch
             if (batch.SegmentsToWrite.Count > 0 || batch.ScratchUsed > 0)
             {
-                if ((totalBytes + reqTotalBytes > MaxWriteBytes) ||
-                    (batch.SegmentsToWrite.Count + reqSegmentCount > MaxSegments))
+                if ((totalBytes + reqTotalBytes > maxWriteBytes) ||
+                    (batch.SegmentsToWrite.Count + reqSegmentCount > maxSegments))
                 {
-                    CommitScratch(batch);
+                    CommitScratch(batch, smallCopyThreshold);
                     return true;
                 }
             }
@@ -116,13 +150,13 @@ internal sealed class Coalescer
 
                 if (segLen == 0) continue;
 
-                if (segLen <= SmallCopyThreshold)
+                if (segLen <= smallCopyThreshold)
                 {
                     batch.EnsureScratch();
                     var requiredSpace = batch.ScratchBaseOffset + batch.ScratchUsed + segLen;
                     if (requiredSpace > batch.Scratch!.Length)
                     {
-                        CommitScratch(batch);
+                        CommitScratch(batch, smallCopyThreshold);
                         batch.EnsureScratch();
                     }
 
@@ -132,7 +166,7 @@ internal sealed class Coalescer
                     continue;
                 }
 
-                CommitScratch(batch);
+                CommitScratch(batch, smallCopyThreshold);
                 batch.SegmentsToWrite.Add(seg);
                 totalBytes += segLen;
             }
@@ -143,11 +177,54 @@ internal sealed class Coalescer
             _queue.Dequeue();
         }
 
-        CommitScratch(batch);
+        CommitScratch(batch, smallCopyThreshold);
         return batch.SegmentsToWrite.Count > 0;
     }
 
-    private static void CommitScratch(CoalescedWriteBatch batch)
+    private (int MaxWriteBytes, int MaxSegments, int SmallCopyThreshold) GetEffectiveLimits()
+    {
+        if (!_adaptiveEnabled)
+            return (_maxWriteBytes, _maxSegments, _smallCopyThreshold);
+
+        var depth = Math.Max(_queue.Count, _queueDepthProvider?.Invoke() ?? 0);
+        if (depth <= _adaptiveLowDepth)
+            return (_adaptiveMinWriteBytes, _adaptiveMinSegments, _adaptiveMinSmallCopyThreshold);
+        
+        // Tail-latency protection: when queue depth is high, avoid "max-sized" coalesced writes
+        // that can create head-of-line blocking for commands behind the current batch.
+        if (depth >= _adaptiveHighDepth * 2)
+        {
+            var cappedBytes = Math.Min(_adaptiveMinWriteBytes, 96 * 1024);
+            var cappedSegments = Math.Min(_adaptiveMinSegments, 24);
+            var cappedCopyThreshold = Math.Min(_adaptiveMinSmallCopyThreshold, 384);
+            return (cappedBytes, cappedSegments, cappedCopyThreshold);
+        }
+
+        if (depth >= _adaptiveHighDepth)
+        {
+            var cappedBytes = Math.Min(_maxWriteBytes, Math.Max(_adaptiveMinWriteBytes, 256 * 1024));
+            var cappedSegments = Math.Min(_maxSegments, Math.Max(_adaptiveMinSegments, 64));
+            var cappedCopyThreshold = Math.Min(_smallCopyThreshold, Math.Max(_adaptiveMinSmallCopyThreshold, 1024));
+            return (cappedBytes, cappedSegments, cappedCopyThreshold);
+        }
+
+        var span = _adaptiveHighDepth - _adaptiveLowDepth;
+        var numerator = depth - _adaptiveLowDepth;
+        var ratio = (double)numerator / span;
+
+        return (
+            Lerp(_adaptiveMinWriteBytes, _maxWriteBytes, ratio),
+            Lerp(_adaptiveMinSegments, _maxSegments, ratio),
+            Lerp(_adaptiveMinSmallCopyThreshold, _smallCopyThreshold, ratio));
+    }
+
+    private static int Lerp(int min, int max, double ratio)
+    {
+        var value = min + ((max - min) * ratio);
+        return (int)Math.Round(value, MidpointRounding.AwayFromZero);
+    }
+
+    private static void CommitScratch(CoalescedWriteBatch batch, int smallCopyThreshold)
     {
         if (batch.Scratch is not null && batch.ScratchUsed > 0)
         {
@@ -156,7 +233,7 @@ internal sealed class Coalescer
             var nextOffset = batch.ScratchBaseOffset + batch.ScratchUsed;
             var remainingSpace = batch.Scratch.Length - nextOffset;
 
-            if (remainingSpace < SmallCopyThreshold + 1024)
+            if (remainingSpace < smallCopyThreshold + 1024)
             {
                 // Keep the current scratch alive until the batch is sent.
                 batch.Owners.Add(new ArrayPoolLease(batch.Scratch));

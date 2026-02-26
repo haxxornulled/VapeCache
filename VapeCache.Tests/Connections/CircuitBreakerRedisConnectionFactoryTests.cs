@@ -19,7 +19,7 @@ public sealed class CircuitBreakerRedisConnectionFactoryTests
         var registry = new CacheStatsRegistry();
         await using var sut = new CircuitBreakerRedisConnectionFactory(
             inner,
-            Options.Create(new RedisCircuitBreakerOptions
+            new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
             {
                 Enabled = false,
                 ConsecutiveFailuresToOpen = 2,
@@ -41,7 +41,7 @@ public sealed class CircuitBreakerRedisConnectionFactoryTests
         var registry = new CacheStatsRegistry();
         await using var sut = new CircuitBreakerRedisConnectionFactory(
             inner,
-            Options.Create(new RedisCircuitBreakerOptions
+            new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
             {
                 Enabled = true,
                 ConsecutiveFailuresToOpen = 2,

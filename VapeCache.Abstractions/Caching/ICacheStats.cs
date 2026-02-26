@@ -12,4 +12,7 @@ public readonly record struct CacheStatsSnapshot(
     long SetCalls,
     long RemoveCalls,
     long FallbackToMemory,
-    long RedisBreakerOpened);
+    long RedisBreakerOpened,
+    long StampedeKeyRejected,
+    long StampedeLockWaitTimeout,
+    long StampedeFailureBackoffRejected);

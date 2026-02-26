@@ -3,7 +3,7 @@
 ## General
 
 **Q: Does VapeCache expose HTTP endpoints?**  
-A: No. VapeCache is a library; endpoint mapping is handled by your host (ASP.NET Core, Aspire, etc.).
+A: Core VapeCache stays transport-agnostic. Wrapper hosts can opt into extension-mapped routes via `WithAutoMappedEndpoints(...)` (or map manually with `MapVapeCacheEndpoints(...)`).
 
 **Q: What happens when Redis is down?**  
 A: The hybrid cache trips the circuit breaker and falls back to the in-memory executor. Core cache operations keep working, and reconciliation can sync writes back when Redis recovers.

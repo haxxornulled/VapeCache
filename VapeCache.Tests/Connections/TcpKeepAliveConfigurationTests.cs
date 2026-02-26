@@ -132,9 +132,33 @@ public sealed class TcpKeepAliveConfigurationTests
         };
 
         // Verify defaults from RedisConnectionOptions
+        Assert.True(options.EnableTcpNoDelay, "TCP no-delay should be enabled by default");
+        Assert.Equal(4 * 1024 * 1024, options.TcpSendBufferBytes);
+        Assert.Equal(4 * 1024 * 1024, options.TcpReceiveBufferBytes);
         Assert.True(options.EnableTcpKeepAlive, "TCP keep-alive should be enabled by default");
         Assert.Equal(TimeSpan.FromSeconds(30), options.TcpKeepAliveTime);
         Assert.Equal(TimeSpan.FromSeconds(10), options.TcpKeepAliveInterval);
+    }
+
+    [Fact]
+    public void TcpTransportOptions_ApplyNoDelaySetting()
+    {
+        using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+
+        var options = new RedisConnectionOptions
+        {
+            Host = "localhost",
+            Port = 6379,
+            EnableTcpNoDelay = false
+        };
+
+        var method = typeof(VapeCache.Infrastructure.Connections.RedisConnectionFactory)
+            .GetMethod("TryConfigureSocketTransport", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        Assert.NotNull(method);
+        method.Invoke(null, new object[] { socket, options });
+
+        Assert.False(socket.NoDelay, "NoDelay should be disabled when EnableTcpNoDelay=false");
     }
 
     [Theory]

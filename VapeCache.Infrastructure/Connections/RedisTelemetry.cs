@@ -27,6 +27,9 @@ public static class RedisTelemetry
 
     public static readonly Counter<long> BytesSent = Meter.CreateCounter<long>("redis.bytes.sent");
     public static readonly Counter<long> BytesReceived = Meter.CreateCounter<long>("redis.bytes.received");
+    public static readonly Counter<long> CoalescedWriteBatches = Meter.CreateCounter<long>("redis.coalesced.batches");
+    public static readonly Histogram<long> CoalescedWriteBatchBytes = Meter.CreateHistogram<long>("redis.coalesced.batch.bytes");
+    public static readonly Histogram<int> CoalescedWriteBatchSegments = Meter.CreateHistogram<int>("redis.coalesced.batch.segments");
 
     public static readonly Histogram<double> QueueWaitMs = Meter.CreateHistogram<double>(
         "redis.queue.wait.ms",

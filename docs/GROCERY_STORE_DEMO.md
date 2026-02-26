@@ -13,8 +13,9 @@ This comprehensive stress test simulates a high-traffic grocery store using **al
 ## What It Tests
 
 ### Stress Test Parameters
-- **10,000 total shoppers** simulated over 2 minutes
-- **1,000 concurrent shoppers** at any given time
+- **Config-driven workload** via `GroceryStoreStress` options
+- **Default (appsettings.json):** 100,000 shoppers, 2,000 concurrency, 180s target duration
+- **Development (appsettings.Development.json):** 5,000 shoppers, 200 concurrency, 30s target duration
 - **Real-world shopping patterns** (browse → cart → checkout)
 - **Flash sales** with limited inventory
 - **Live metrics** reported every 10 seconds
@@ -48,11 +49,11 @@ This comprehensive stress test simulates a high-traffic grocery store using **al
 Each simulated shopper performs realistic actions:
 
 ```
-70% - Browse 3-8 products (cache hits/misses)
+70% - Browse 10-25 products (cache hits/misses)
 30% - Join a flash sale (SET operations)
-50% - Add 1-5 items to cart (LIST operations)
+50% - Add 15-35 items to cart (LIST operations)
 30% - View cart (LRANGE)
-20% - Checkout/clear cart (multiple LPOP)
+20% - Checkout/clear cart (single key delete)
 10% - Remove item from cart (RPOP)
 ```
 
@@ -73,6 +74,43 @@ Each simulated shopper performs realistic actions:
 ```bash
 cd VapeCache.Console
 dotnet run
+```
+
+### Head-to-Head Comparison Mode (VapeCache vs StackExchange.Redis)
+
+```powershell
+$env:VAPECACHE_MAX_CART_SIZE = "40"
+$env:VAPECACHE_BENCH_TRACK = "optimized" # optimized | apples | both
+$env:VAPECACHE_BENCH_MUX_CONNECTIONS = "4"
+$env:VAPECACHE_BENCH_MUX_INFLIGHT = "8192"
+$env:VAPECACHE_BENCH_MUX_COALESCE = "true"
+$env:VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS = "0"
+"2" | dotnet run -c Release -- --compare
+```
+
+This runs the 50,000 shopper scenario and prints side-by-side throughput and latency.
+
+For repeatable medians + pass/fail gating:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
+  -Trials 5 `
+  -ShopperCount 50000 `
+  -MaxCartSize 40 `
+  -Track optimized `
+  -FailBelowRatio 1.0
+```
+
+### Fast Dogfood Run (Recommended)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-grocery-dogfood.ps1 `
+  -ConnectionString "redis://localhost:6379/0" `
+  -ConcurrentShoppers 200 `
+  -TotalShoppers 5000 `
+  -TargetDurationSeconds 30 `
+  -Profile FullTilt `
+  -EnablePluginDemo
 ```
 
 ### Expected Output
@@ -225,17 +263,34 @@ var count = await store.GetFlashSaleParticipantCountAsync(sale.Id);
 |------|---------|
 | [Models.cs](../VapeCache.Console/GroceryStore/Models.cs) | Domain models (Product, CartItem, FlashSale, etc.) |
 | [GroceryStoreService.cs](../VapeCache.Console/GroceryStore/GroceryStoreService.cs) | Cache service using typed collections |
-| [GroceryStoreStressTest.cs](../VapeCache.Console/GroceryStore/GroceryStoreStressTest.cs) | Stress test simulation (10K shoppers) |
+| [GroceryStoreStressTest.cs](../VapeCache.Console/GroceryStore/GroceryStoreStressTest.cs) | Stress test simulation (configurable workload) |
+| [GroceryStoreStressOptions.cs](../VapeCache.Console/GroceryStore/GroceryStoreStressOptions.cs) | Runtime knobs for concurrency and workload size |
+| [run-grocery-dogfood.ps1](../VapeCache.Console/run-grocery-dogfood.ps1) | Repeatable dogfood execution script |
+| [PLUGINS.md](../VapeCache.Console/PLUGINS.md) | Plugin extension pattern used by console host |
 | [Program.cs](../VapeCache.Console/Program.cs) | DI registration and startup |
 
 ## Customization
 
-Want to make it even more stressful? Edit `GroceryStoreStressTest.cs`:
+Tune workload intensity directly from `GroceryStoreStress` settings:
 
-```csharp
-private const int ConcurrentShoppers = 2000;  // Double the concurrency!
-private const int TotalShoppers = 50000;      // 50K shoppers!
-private const int TestDurationSeconds = 300;   // 5 minute marathon
+```json
+"GroceryStoreStress": {
+  "ConcurrentShoppers": 2000,
+  "TotalShoppers": 100000,
+  "BrowseChancePercent": 70,
+  "BrowseMinProducts": 10,
+  "BrowseMaxProducts": 25,
+  "AddToCartChancePercent": 50,
+  "CartItemsMin": 15,
+  "CartItemsMax": 35
+}
+```
+
+Or pick a runnable profile:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-grocery-dogfood.ps1 `
+  -Profile FullTilt
 ```
 
 ## Observability

@@ -186,6 +186,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         public bool TryLPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new InvalidOperationException("redis down");
         public bool TryRPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new InvalidOperationException("redis down");
         public ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct) => throw new InvalidOperationException("redis down");
+        public ValueTask<long> RPushManyAsync(string key, ReadOnlyMemory<byte>[] values, int count, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
         public bool TryRPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task) => throw new InvalidOperationException("redis down");
         public ValueTask<long> LLenAsync(string key, CancellationToken ct) => throw new InvalidOperationException("redis down");
@@ -304,6 +305,7 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         public bool TryLPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new NotSupportedException();
         public bool TryRPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task) => throw new NotSupportedException();
         public ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct) => throw new NotSupportedException();
+        public ValueTask<long> RPushManyAsync(string key, ReadOnlyMemory<byte>[] values, int count, CancellationToken ct) => throw new NotSupportedException();
         public ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct) => throw new NotSupportedException();
         public bool TryRPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task) => throw new NotSupportedException();
         public ValueTask<long> LLenAsync(string key, CancellationToken ct) => throw new NotSupportedException();

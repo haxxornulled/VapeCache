@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.DependencyInjection;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Console.Stress;
 
@@ -9,7 +8,7 @@ namespace VapeCache.Console.Hosting;
 
 internal sealed class RedisConnectionPoolReaperHostedService(
     IOptions<RedisStressOptions> stressOptions,
-    IServiceProvider services,
+    IRedisConnectionPoolReaper reaper,
     ILogger<RedisConnectionPoolReaperHostedService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -17,8 +16,6 @@ internal sealed class RedisConnectionPoolReaperHostedService(
         var mode = (stressOptions.Value.Mode ?? "pool").Trim().ToLowerInvariant();
         if (mode != "pool")
             return;
-
-        var reaper = services.GetRequiredService<IRedisConnectionPoolReaper>();
 
         logger.LogInformation("Redis pool reaper hosted service starting.");
         try

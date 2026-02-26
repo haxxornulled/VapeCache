@@ -12,25 +12,30 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
     private readonly IMemoryCache _cache;
     private readonly ICurrentCacheService _current;
     private readonly CacheStats _stats;
-    private readonly InMemorySpillOptions _spillOptions;
+    private readonly IOptionsMonitor<InMemorySpillOptions> _spillOptionsMonitor;
+    private InMemorySpillOptions SpillOptions => _spillOptionsMonitor.CurrentValue;
     private readonly IInMemorySpillStore _spillStore;
-    private readonly bool _spillEnabled;
+    private readonly bool _spillStoreSupportsWrites;
+    private readonly ICacheIntentRegistry _intentRegistry;
+    private static readonly ICacheIntentRegistry NoopIntentRegistry = new NoopCacheIntentRegistry();
 
     public InMemoryCacheService(
         IMemoryCache cache,
         ICurrentCacheService current,
         CacheStatsRegistry statsRegistry,
         IOptionsMonitor<InMemorySpillOptions> spillOptions,
-        IInMemorySpillStore spillStore)
+        IInMemorySpillStore spillStore,
+        ICacheIntentRegistry? intentRegistry = null)
     {
         _cache = cache;
         _current = current;
         _stats = statsRegistry.GetOrCreate(CacheStatsNames.Memory);
-        _spillOptions = spillOptions.CurrentValue;
+        _spillOptionsMonitor = spillOptions;
         _spillStore = spillStore;
+        _intentRegistry = intentRegistry ?? NoopIntentRegistry;
         // Avoid writing spill references when the no-op store is active.
         // This prevents large entries from becoming unreadable in free-tier/default wiring.
-        _spillEnabled = _spillOptions.EnableSpillToDisk && spillStore is not NoopSpillStore;
+        _spillStoreSupportsWrites = spillStore is not NoopSpillStore;
     }
 
     public string Name => "memory";
@@ -69,6 +74,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
             }
 
             _stats.IncMiss();
+            _intentRegistry.RecordRemove(key);
             CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
             CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
             return null;
@@ -86,12 +92,20 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         _current.SetCurrent(Name);
         _stats.IncSet();
         CacheTelemetry.SetCalls.Add(1, new TagList { { "backend", Name } });
+        CacheTelemetry.SetPayloadBytes.Record(value.Length, new TagList
+        {
+            { "backend", Name },
+            { "bucket", CacheTelemetry.GetPayloadBucket(value.Length) }
+        });
+        if (value.Length > 65536)
+            CacheTelemetry.LargeKeyWrites.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
         try
         {
-            if (ShouldSpill(value.Length))
+            var spillOptions = SpillOptions;
+            if (ShouldSpill(value.Length, spillOptions))
             {
-                var inlinePrefixBytes = Math.Max(0, _spillOptions.InlinePrefixBytes);
+                var inlinePrefixBytes = Math.Max(0, spillOptions.InlinePrefixBytes);
                 if (inlinePrefixBytes < value.Length)
                 {
                     var spillRef = Guid.NewGuid();
@@ -102,6 +116,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
                     {
                         await _spillStore.WriteAsync(spillRef, tail, ct).ConfigureAwait(false);
                         StoreEntry(key, options, new SpillEntry(spillRef, inlinePrefix, inlinePrefixBytes, value.Length));
+                        _intentRegistry.RecordSet(key, Name, options, value.Length);
                         return;
                     }
                     catch
@@ -112,6 +127,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
             }
 
             StoreEntry(key, options, value);
+            _intentRegistry.RecordSet(key, Name, options, value.Length);
         }
         finally
         {
@@ -128,6 +144,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
         _cache.Remove(key);
+        _intentRegistry.RecordRemove(key);
         CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "remove" } });
         return ValueTask.FromResult(true);
     }
@@ -165,10 +182,13 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         return created;
     }
 
-    private bool ShouldSpill(int length)
-        => _spillEnabled &&
-           _spillOptions.SpillThresholdBytes > 0 &&
-           length > _spillOptions.SpillThresholdBytes;
+    private bool ShouldSpill(int length, InMemorySpillOptions spillOptions)
+    {
+        return _spillStoreSupportsWrites &&
+               spillOptions.EnableSpillToDisk &&
+               spillOptions.SpillThresholdBytes > 0 &&
+               length > spillOptions.SpillThresholdBytes;
+    }
 
     private void StoreEntry(string key, CacheEntryOptions options, ReadOnlyMemory<byte> value)
     {
@@ -177,6 +197,11 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         {
             if (options.Ttl is not null)
                 entry.AbsoluteExpirationRelativeToNow = options.Ttl;
+
+            entry.RegisterPostEvictionCallback(static (_, _, reason, _) =>
+            {
+                CacheTelemetry.Evictions.Add(1, new TagList { { "backend", "memory" }, { "reason", reason.ToString().ToLowerInvariant() } });
+            });
 
             if (MemoryMarshal.TryGetArray(value, out ArraySegment<byte> segment) &&
                 segment.Array is not null &&
@@ -204,8 +229,9 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
                 entry.AbsoluteExpirationRelativeToNow = options.Ttl;
 
             entry.Value = entryValue;
-            entry.RegisterPostEvictionCallback(static (_, value, _, state) =>
+            entry.RegisterPostEvictionCallback(static (_, value, reason, state) =>
             {
+                CacheTelemetry.Evictions.Add(1, new TagList { { "backend", "memory" }, { "reason", reason.ToString().ToLowerInvariant() } });
                 if (value is SpillEntry spill)
                 {
                     var store = (IInMemorySpillStore)state!;
@@ -267,5 +293,17 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         public byte[]? InlinePrefix { get; }
         public int InlineLength { get; }
         public int TotalLength { get; }
+    }
+
+    private sealed class NoopCacheIntentRegistry : ICacheIntentRegistry
+    {
+        public IReadOnlyList<CacheIntentEntry> GetRecent(int maxCount) => Array.Empty<CacheIntentEntry>();
+        public void RecordRemove(string key) { }
+        public void RecordSet(string key, string backend, in CacheEntryOptions options, int payloadBytes) { }
+        public bool TryGet(string key, out CacheIntentEntry? entry)
+        {
+            entry = null;
+            return false;
+        }
     }
 }

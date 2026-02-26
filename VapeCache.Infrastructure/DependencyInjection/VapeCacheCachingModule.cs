@@ -26,9 +26,13 @@ public sealed class VapeCacheCachingModule : Module
             .OnActivated(e => CacheTelemetry.Initialize(e.Instance));
         builder.RegisterType<CacheStatsRegistry>().AsSelf().SingleInstance();
         builder.RegisterType<CurrentCacheStats>().As<ICacheStats>().SingleInstance();
+        builder.RegisterType<CacheIntentRegistry>().As<ICacheIntentRegistry>().SingleInstance();
 
-        builder.RegisterInstance(Options.Create(new MemoryCacheOptions())).As<IOptions<MemoryCacheOptions>>().SingleInstance();
-        builder.RegisterInstance(Options.Create(new InMemorySpillOptions())).As<IOptions<InMemorySpillOptions>>().SingleInstance();
+        RegisterStaticOptions(builder, new MemoryCacheOptions());
+        RegisterStaticOptions(builder, new InMemorySpillOptions());
+        RegisterStaticOptions(builder, new CacheStampedeOptions());
+        RegisterStaticOptions(builder, new RedisCircuitBreakerOptions());
+        RegisterStaticOptions(builder, new RedisMultiplexerOptions());
         builder.RegisterType<MemoryCache>().As<IMemoryCache>().SingleInstance();
 
         builder.RegisterType<RedisCommandExecutor>().AsSelf().SingleInstance();
@@ -41,7 +45,7 @@ public sealed class VapeCacheCachingModule : Module
         builder.RegisterType<NoopSpillStore>().As<IInMemorySpillStore>().SingleInstance();
 
         builder.RegisterType<RedisCacheService>()
-            .UsingConstructor(typeof(RedisCommandExecutor), typeof(ICurrentCacheService), typeof(CacheStatsRegistry))
+            .UsingConstructor(typeof(RedisCommandExecutor), typeof(ICurrentCacheService), typeof(CacheStatsRegistry), typeof(ICacheIntentRegistry))
             .AsSelf()
             .SingleInstance();
         builder.RegisterType<InMemoryCacheService>().AsSelf().As<ICacheFallbackService>().SingleInstance();
@@ -51,7 +55,10 @@ public sealed class VapeCacheCachingModule : Module
             .As<IRedisFailoverController>()
             .SingleInstance();
 
-        builder.RegisterType<HybridCommandExecutor>().As<IRedisCommandExecutor>().SingleInstance();
+        builder.RegisterType<HybridCommandExecutor>()
+            .As<IRedisCommandExecutor>()
+            .As<IRedisMultiplexerDiagnostics>()
+            .SingleInstance();
         builder.RegisterType<HybridStampedeCacheService>().As<ICacheService>().SingleInstance();
 
         builder.RegisterType<SystemTextJsonCodecProvider>()
@@ -65,5 +72,15 @@ public sealed class VapeCacheCachingModule : Module
         builder.RegisterType<RedisSearchService>().As<IRedisSearchService>().SingleInstance();
         builder.RegisterType<RedisBloomService>().As<IRedisBloomService>().SingleInstance();
         builder.RegisterType<RedisTimeSeriesService>().As<IRedisTimeSeriesService>().SingleInstance();
+    }
+
+    private static void RegisterStaticOptions<T>(ContainerBuilder builder, T value)
+        where T : class
+    {
+        builder.RegisterInstance(new StaticOptionsMonitor<T>(value))
+            .As<IOptions<T>>()
+            .As<IOptionsMonitor<T>>()
+            .SingleInstance()
+            .PreserveExistingDefaults();
     }
 }

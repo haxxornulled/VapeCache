@@ -2,17 +2,24 @@
 
 This index tracks the current feature set and supported APIs.
 
+## Start Here (Juniors)
+- [QUICKSTART.md](QUICKSTART.md) - Copy/paste setup from zero to first endpoint
+- [CONFIGURATION.md](CONFIGURATION.md) - Every knob, sane defaults, and limits
+- [API_REFERENCE.md](API_REFERENCE.md) - Exact interfaces and endpoint contracts
+
 ## Getting Started
 - [README.md](../README.md) - Project overview and quick start
-- [QUICKSTART.md](QUICKSTART.md) - Minimal setup walkthrough
+- [QUICKSTART.md](QUICKSTART.md) - Junior-friendly setup walkthrough
 - [CONFIGURATION.md](CONFIGURATION.md) - Options and appsettings.json
 - [NUGET_PACKAGES.md](NUGET_PACKAGES.md) - Package overview
 - [.NET Aspire integration](../VapeCache.Extensions.Aspire/README.md) - Aspire usage
 - [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md) - Detailed Aspire guide
+- [WRAPPER_PLUGIN_GUIDE.md](WRAPPER_PLUGIN_GUIDE.md) - Wrapper endpoints + plugin pattern
+- [BLAZOR_DASHBOARD_EXAMPLE.md](BLAZOR_DASHBOARD_EXAMPLE.md) - Realtime dashboard wiring from `/vapecache/stream`
 - [Sample app](../samples/VapeCache.Sample) - Buildable usage example
 
 ## API Reference
-- [API_REFERENCE.md](API_REFERENCE.md) - Public API details + examples
+- [API_REFERENCE.md](API_REFERENCE.md) - Core APIs, intent model, stampede profiles, Aspire endpoints
 - [TYPED_COLLECTIONS.md](TYPED_COLLECTIONS.md) - Lists, sets, hashes, sorted sets
 - [REDIS_PROTOCOL_SUPPORT.md](REDIS_PROTOCOL_SUPPORT.md) - Supported Redis commands
 - [REDIS_MODULES.md](REDIS_MODULES.md) - Module detection + RedisJSON/RediSearch/Bloom/TimeSeries
@@ -21,9 +28,11 @@ This index tracks the current feature set and supported APIs.
 ## Architecture & Performance
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System design and data flow
 - [COALESCED_WRITES.md](COALESCED_WRITES.md) - Coalesced write strategy
+- [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md) - Multiplexed lanes + autoscaler architecture and tuning
 - [INMEMORY_PERSISTENCE.md](INMEMORY_PERSISTENCE.md) - In-memory fallback spill design
 - [PERFORMANCE.md](PERFORMANCE.md) - Benchmark methodology and results
 - [BENCHMARKING.md](BENCHMARKING.md) - How to run benchmarks
+- [ENGINEERING_PLAYBOOK.md](ENGINEERING_PLAYBOOK.md) - Analyzer, profiling, and capture workflow
 
 ## Observability & Operations
 - [OBSERVABILITY_ARCHITECTURE.md](OBSERVABILITY_ARCHITECTURE.md) - Metrics, traces, logging
@@ -54,6 +63,10 @@ dotnet add package VapeCache.Extensions.Aspire
 ```csharp
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
+
+builder.Services.AddOptions<CacheStampedeOptions>()
+    .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
+    .Bind(builder.Configuration.GetSection("CacheStampede"));
 ```
 
 ### Basic Registration (Autofac)
@@ -63,4 +76,4 @@ builder.RegisterModule(new VapeCache.Infrastructure.DependencyInjection.VapeCach
 ```
 
 ### Console Demo
-The console demo runs background workloads and logs cache activity. It does not expose HTTP endpoints.
+The console demo runs background workloads and logs cache activity; see `VapeCache.Console/PLUGINS.md` for extension points and `docs/WRAPPER_PLUGIN_GUIDE.md` for optional endpoint mapping in wrapper hosts.

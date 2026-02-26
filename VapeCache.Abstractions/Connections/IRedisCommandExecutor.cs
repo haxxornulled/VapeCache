@@ -36,6 +36,7 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     // Lists
     ValueTask<long> LPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct);
     ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct);
+    ValueTask<long> RPushManyAsync(string key, ReadOnlyMemory<byte>[] values, int count, CancellationToken ct);
     ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct);
     ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct);
     bool TryLPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task);

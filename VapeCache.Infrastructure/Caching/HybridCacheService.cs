@@ -28,7 +28,8 @@ internal sealed class HybridCacheService(
     public string Name => "hybrid";
 
     private readonly CacheStats _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
-    private readonly RedisCircuitBreakerOptions _breaker = breakerOptions.CurrentValue;
+    private readonly IOptionsMonitor<RedisCircuitBreakerOptions> _breakerOptions = breakerOptions;
+    private RedisCircuitBreakerOptions _breaker => _breakerOptions.CurrentValue;
     private int _failures;
     private long _openUntilTicks;
     private int _halfOpenProbeInFlight;
@@ -55,6 +56,32 @@ internal sealed class HybridCacheService(
         return timeProvider.GetTimestamp() >= openUntil;
     }
 
+    private bool TryEnterHalfOpenProbe(in RedisCircuitBreakerOptions breaker, out bool probeTaken)
+    {
+        probeTaken = false;
+        if (!breaker.Enabled || Volatile.Read(ref _openUntilTicks) == 0)
+            return true;
+
+        var probeNum = Interlocked.Increment(ref _halfOpenProbeInFlight);
+        probeTaken = true;
+        if (probeNum <= breaker.MaxHalfOpenProbes)
+            return true;
+
+        Interlocked.Decrement(ref _halfOpenProbeInFlight);
+        probeTaken = false;
+        return false;
+    }
+
+    private static CancellationTokenSource? CreateProbeCts(in RedisCircuitBreakerOptions breaker, bool probeTaken, CancellationToken ct)
+    {
+        if (!probeTaken || breaker.HalfOpenProbeTimeout <= TimeSpan.Zero)
+            return null;
+
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(breaker.HalfOpenProbeTimeout);
+        return cts;
+    }
+
     public void MarkRedisSuccess()
     {
         if (!_breaker.Enabled) return;
@@ -69,20 +96,23 @@ internal sealed class HybridCacheService(
     public void MarkRedisFailure()
     {
         if (!_breaker.Enabled) return;
+        var breaker = _breaker;
         var failures = Interlocked.Increment(ref _failures);
-        if (failures >= Math.Max(1, _breaker.ConsecutiveFailuresToOpen))
+        var threshold = Math.Max(1, breaker.ConsecutiveFailuresToOpen);
+        if (failures >= threshold)
         {
             var attempts = Interlocked.Increment(ref _openAttempts);
-            var breakDuration = _breaker.BreakDuration;
-            if (_breaker.UseExponentialBackoff)
+            var breakDuration = breaker.BreakDuration;
+            if (breaker.UseExponentialBackoff)
             {
-                var scaled = _breaker.BreakDuration.TotalSeconds * Math.Pow(2, Math.Max(0, attempts - 1));
-                var capped = Math.Min(_breaker.MaxBreakDuration.TotalSeconds, scaled);
+                var scaled = breaker.BreakDuration.TotalSeconds * Math.Pow(2, Math.Max(0, attempts - 1));
+                var capped = Math.Min(breaker.MaxBreakDuration.TotalSeconds, scaled);
                 breakDuration = TimeSpan.FromSeconds(capped);
             }
 
             // If we've exceeded max retries, hold the breaker open indefinitely
-            if (_breaker.MaxConsecutiveRetries > 0 && attempts > _breaker.MaxConsecutiveRetries)
+            var wasClosed = Volatile.Read(ref _openUntilTicks) == 0;
+            if (breaker.MaxConsecutiveRetries > 0 && attempts > breaker.MaxConsecutiveRetries)
             {
                 Volatile.Write(ref _openUntilTicks, long.MaxValue);
                 logger.LogWarning("Redis circuit breaker reached MaxConsecutiveRetries ({Attempts}); holding open indefinitely until manual reset.", attempts);
@@ -92,12 +122,11 @@ internal sealed class HybridCacheService(
                 var until = AddDurationToTimestamp(timeProvider.GetTimestamp(), breakDuration);
                 Volatile.Write(ref _openUntilTicks, until);
             }
-            if (failures == _breaker.ConsecutiveFailuresToOpen)
+            if (wasClosed)
             {
                 _stats.IncBreakerOpened();
                 CacheTelemetry.RedisBreakerOpened.Add(1, new TagList { { "backend", Name } });
-                logger.LogWarning("⚡ CIRCUIT BREAKER OPENED after {Failures} consecutive failures. Switching to {Fallback} mode for {Duration} seconds.", failures, fallback.Name, breakDuration.TotalSeconds);
-                System.Console.WriteLine($"\n🔥🔥🔥 ⚡ CIRCUIT BREAKER OPENED! Failures={failures}, switching to {fallback.Name.ToUpperInvariant()} mode for {breakDuration.TotalSeconds} seconds 🔥🔥🔥\n");
+                logger.LogWarning("Circuit breaker opened after {Failures} consecutive failures. Switching to {Fallback} mode for {Duration} seconds.", failures, fallback.Name, breakDuration.TotalSeconds);
             }
         }
     }
@@ -128,6 +157,7 @@ internal sealed class HybridCacheService(
 
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
+        var breaker = _breaker;
         _stats.IncGet();
         CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
@@ -135,7 +165,7 @@ internal sealed class HybridCacheService(
         var probeTaken = false;
         try
         {
-            if (_breaker.Enabled && !IsRedisAllowedNow())
+            if (breaker.Enabled && !IsRedisAllowedNow())
             {
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
@@ -150,28 +180,15 @@ internal sealed class HybridCacheService(
             try
             {
                 // Half-open state: allow limited concurrent Redis probes during recovery
-                if (_breaker.Enabled && Volatile.Read(ref _openUntilTicks) != 0)
+                if (!TryEnterHalfOpenProbe(breaker, out probeTaken))
                 {
-                    var probeNum = Interlocked.Increment(ref _halfOpenProbeInFlight);
-                    probeTaken = true;
-
-                    if (probeNum > _breaker.MaxHalfOpenProbes)
-                    {
-                        Interlocked.Decrement(ref _halfOpenProbeInFlight);
-                        probeTaken = false;
-
-                        current.SetCurrent(fallback.Name);
-                        _stats.IncFallbackToMemory();
-                        CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
-                        return await fallback.GetAsync(key, ct).ConfigureAwait(false);
-                    }
+                    current.SetCurrent(fallback.Name);
+                    _stats.IncFallbackToMemory();
+                    CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
+                    return await fallback.GetAsync(key, ct).ConfigureAwait(false);
                 }
 
-                using var probeCts = probeTaken
-                    ? CancellationTokenSource.CreateLinkedTokenSource(ct)
-                    : null;
-                if (probeCts is not null && _breaker.HalfOpenProbeTimeout > TimeSpan.Zero)
-                    probeCts.CancelAfter(_breaker.HalfOpenProbeTimeout);
+                using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
 
                 var v = await redis.GetAsync(key, probeCts?.Token ?? ct).ConfigureAwait(false);
                 MarkRedisSuccess();
@@ -211,14 +228,22 @@ internal sealed class HybridCacheService(
 
     public async ValueTask SetAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions options, CancellationToken ct)
     {
+        var breaker = _breaker;
         _stats.IncSet();
         CacheTelemetry.SetCalls.Add(1, new TagList { { "backend", Name } });
+        CacheTelemetry.SetPayloadBytes.Record(value.Length, new TagList
+        {
+            { "backend", Name },
+            { "bucket", CacheTelemetry.GetPayloadBucket(value.Length) }
+        });
+        if (value.Length > 65536)
+            CacheTelemetry.LargeKeyWrites.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
 
         var probeTaken = false;
         try
         {
-            if (_breaker.Enabled && !IsRedisAllowedNow())
+            if (breaker.Enabled && !IsRedisAllowedNow())
             {
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
@@ -233,32 +258,17 @@ internal sealed class HybridCacheService(
             try
             {
                 // Half-open state: allow limited concurrent Redis probes during recovery
-                if (_breaker.Enabled && Volatile.Read(ref _openUntilTicks) != 0)
+                if (!TryEnterHalfOpenProbe(breaker, out probeTaken))
                 {
-                    var probeNum = Interlocked.Increment(ref _halfOpenProbeInFlight);
-                    probeTaken = true;
-
-                    if (probeNum > _breaker.MaxHalfOpenProbes)
-                    {
-                        Interlocked.Decrement(ref _halfOpenProbeInFlight);
-                        probeTaken = false;
-
-                        current.SetCurrent(fallback.Name);
-                        _stats.IncFallbackToMemory();
-                        CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
-                        await fallback.SetAsync(key, value, options, ct).ConfigureAwait(false);
-
-                        // Track write for reconciliation when Redis recovers
-                        reconciliation?.TrackWrite(key, value, options.Ttl);
-                        return;
-                    }
+                    current.SetCurrent(fallback.Name);
+                    _stats.IncFallbackToMemory();
+                    CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
+                    await fallback.SetAsync(key, value, options, ct).ConfigureAwait(false);
+                    reconciliation?.TrackWrite(key, value, options.Ttl);
+                    return;
                 }
 
-                using var probeCts = probeTaken
-                    ? CancellationTokenSource.CreateLinkedTokenSource(ct)
-                    : null;
-                if (probeCts is not null && _breaker.HalfOpenProbeTimeout > TimeSpan.Zero)
-                    probeCts.CancelAfter(_breaker.HalfOpenProbeTimeout);
+                using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
 
                 await redis.SetAsync(key, value, options, probeCts?.Token ?? ct).ConfigureAwait(false);
                 MarkRedisSuccess();
@@ -289,6 +299,7 @@ internal sealed class HybridCacheService(
 
     public async ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
     {
+        var breaker = _breaker;
         _stats.IncRemove();
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
@@ -296,7 +307,7 @@ internal sealed class HybridCacheService(
         var probeTaken = false;
         try
         {
-            if (_breaker.Enabled && !IsRedisAllowedNow())
+            if (breaker.Enabled && !IsRedisAllowedNow())
             {
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
@@ -308,29 +319,16 @@ internal sealed class HybridCacheService(
             try
             {
                 // Half-open state: allow limited concurrent Redis probes during recovery
-                if (_breaker.Enabled && Volatile.Read(ref _openUntilTicks) != 0)
+                if (!TryEnterHalfOpenProbe(breaker, out probeTaken))
                 {
-                    var probeNum = Interlocked.Increment(ref _halfOpenProbeInFlight);
-                    probeTaken = true;
-
-                    if (probeNum > _breaker.MaxHalfOpenProbes)
-                    {
-                        Interlocked.Decrement(ref _halfOpenProbeInFlight);
-                        probeTaken = false;
-
-                        current.SetCurrent(fallback.Name);
-                        _stats.IncFallbackToMemory();
-                        CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
-                        reconciliation?.TrackDelete(key);
-                        return ok;
-                    }
+                    current.SetCurrent(fallback.Name);
+                    _stats.IncFallbackToMemory();
+                    CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
+                    reconciliation?.TrackDelete(key);
+                    return ok;
                 }
 
-                using var probeCts = probeTaken
-                    ? CancellationTokenSource.CreateLinkedTokenSource(ct)
-                    : null;
-                if (probeCts is not null && _breaker.HalfOpenProbeTimeout > TimeSpan.Zero)
-                    probeCts.CancelAfter(_breaker.HalfOpenProbeTimeout);
+                using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
 
                 var rok = await redis.RemoveAsync(key, probeCts?.Token ?? ct).ConfigureAwait(false);
                 MarkRedisSuccess();
@@ -362,9 +360,75 @@ internal sealed class HybridCacheService(
 
     public async ValueTask<T?> GetAsync<T>(string key, SpanDeserializer<T> deserialize, CancellationToken ct)
     {
-        var bytes = await GetAsync(key, ct).ConfigureAwait(false);
-        if (bytes is null) return default;
-        return deserialize(bytes);
+        var breaker = _breaker;
+        _stats.IncGet();
+        CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
+        var start = Stopwatch.GetTimestamp();
+
+        var probeTaken = false;
+        try
+        {
+            if (breaker.Enabled && !IsRedisAllowedNow())
+            {
+                current.SetCurrent(fallback.Name);
+                _stats.IncFallbackToMemory();
+                CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
+
+                var fallbackBytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
+                if (fallbackBytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
+                else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
+                return fallbackBytes is null ? default : deserialize(fallbackBytes);
+            }
+
+            try
+            {
+                if (!TryEnterHalfOpenProbe(breaker, out probeTaken))
+                {
+                    current.SetCurrent(fallback.Name);
+                    _stats.IncFallbackToMemory();
+                    CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
+                    var fallbackBytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
+                    if (fallbackBytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
+                    else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
+                    return fallbackBytes is null ? default : deserialize(fallbackBytes);
+                }
+
+                using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
+
+                var redisValue = await redis.GetAsync(key, deserialize, probeCts?.Token ?? ct).ConfigureAwait(false);
+                MarkRedisSuccess();
+                current.SetCurrent(redis.Name);
+                if (redisValue is not null)
+                {
+                    _stats.IncHit();
+                    CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
+                    return redisValue;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                MarkRedisFailure();
+                current.SetCurrent(fallback.Name);
+                _stats.IncFallbackToMemory();
+                CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
+                logger.LogWarning(ex, "Redis GET failed; falling back to {Fallback}.", fallback.Name);
+            }
+
+            var bytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
+            if (bytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
+            else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
+            return bytes is null ? default : deserialize(bytes);
+        }
+        finally
+        {
+            if (probeTaken)
+                Interlocked.Decrement(ref _halfOpenProbeInFlight);
+            CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "get" } });
+        }
     }
 
     public ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)

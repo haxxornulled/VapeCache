@@ -63,7 +63,8 @@ internal sealed class RedisConnectionFactory(
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(effective.ConnectTimeout);
 
-            socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+            TryConfigureSocketTransport(socket, effective);
             TryConfigureKeepAlive(socket, effective);
             await socket.ConnectAsync(effective.Host, effective.Port, cts.Token).ConfigureAwait(false);
 
@@ -106,11 +107,14 @@ internal sealed class RedisConnectionFactory(
             try
             {
                 logger.LogInformation(
-                    "Redis connected (Id={Id}) {LocalEndPoint} -> {RemoteEndPoint} Tls={Tls} Time={Ms}ms",
+                    "Redis connected (Id={Id}) {LocalEndPoint} -> {RemoteEndPoint} Tls={Tls} NoDelay={NoDelay} SendBuf={SendBuf} RecvBuf={RecvBuf} Time={Ms}ms",
                     id,
                     socket.LocalEndPoint?.ToString() ?? "?",
                     socket.RemoteEndPoint?.ToString() ?? "?",
                     effective.UseTls,
+                    socket.NoDelay,
+                    socket.SendBufferSize,
+                    socket.ReceiveBufferSize,
                     sw.Elapsed.TotalMilliseconds);
             }
             catch { }
@@ -175,6 +179,39 @@ internal sealed class RedisConnectionFactory(
             try { stream?.Dispose(); } catch { }
             try { socket?.Dispose(); } catch { }
             return new Result<IRedisConnection>(ex);
+        }
+    }
+
+    private static void TryConfigureSocketTransport(Socket socket, RedisConnectionOptions o)
+    {
+        try
+        {
+            socket.NoDelay = o.EnableTcpNoDelay;
+        }
+        catch
+        {
+        }
+
+        TrySetSocketBufferSize(socket, isSendBuffer: true, o.TcpSendBufferBytes);
+        TrySetSocketBufferSize(socket, isSendBuffer: false, o.TcpReceiveBufferBytes);
+    }
+
+    private static void TrySetSocketBufferSize(Socket socket, bool isSendBuffer, int configuredBytes)
+    {
+        if (configuredBytes <= 0)
+            return;
+
+        var clamped = Math.Clamp(configuredBytes, 4 * 1024, 4 * 1024 * 1024);
+
+        try
+        {
+            if (isSendBuffer)
+                socket.SendBufferSize = clamped;
+            else
+                socket.ReceiveBufferSize = clamped;
+        }
+        catch
+        {
         }
     }
 
@@ -492,6 +529,7 @@ internal sealed class RedisConnectionFactory(
             };
         }
 
+        effective = RedisRuntimeOptionsNormalizer.NormalizeConnection(effective);
         return ApplyTcpChatterOptimization(effective);
     }
 

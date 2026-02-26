@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using VapeCache.Licensing;
 
 namespace VapeCache.LicenseGenerator;
@@ -8,13 +9,16 @@ namespace VapeCache.LicenseGenerator;
 /// </summary>
 internal class Program
 {
-    // IMPORTANT: This secret key MUST match the key used in RedisReconciliationExtensions
-    private const string LicenseSecretKey = "VapeCache-HMAC-Secret-2026-Production";
-
     static void Main(string[] args)
     {
-        Console.WriteLine("=== VapeCache License Key Generator ===");
-        Console.WriteLine("FOR INTERNAL USE ONLY - DO NOT DISTRIBUTE\n");
+        Console.Out.WriteLine("=== VapeCache License Key Generator ===");
+        Console.Out.WriteLine("FOR INTERNAL USE ONLY - DO NOT DISTRIBUTE\n");
+
+        if (args.Length > 0 && args[0] == "--create-keypair")
+        {
+            CreateKeyPair();
+            return;
+        }
 
         if (args.Length > 0 && args[0] == "--validate")
         {
@@ -27,28 +31,30 @@ internal class Program
 
     private static void GenerateLicenseKey()
     {
-        Console.WriteLine("Select License Tier:");
-        Console.WriteLine("  1. Pro ($99/month, max 5 instances)");
-        Console.WriteLine("  2. Enterprise ($499/month, unlimited instances)");
-        Console.Write("\nEnter tier (1 or 2): ");
-        var tierInput = Console.ReadLine();
+        Console.Out.WriteLine("=== VapeCache Enterprise License Generator ===");
+        Console.Out.WriteLine("Application-based licensing: $499/month per organization");
+        Console.Out.WriteLine("Unlimited deployments, unlimited Redis topology\n");
 
-        LicenseTier tier;
-        if (tierInput == "1")
-            tier = LicenseTier.Pro;
-        else if (tierInput == "2")
-            tier = LicenseTier.Enterprise;
-        else
+        string signingPrivateKeyPem;
+        try
         {
-            Console.WriteLine("Invalid tier selection. Exiting.");
+            signingPrivateKeyPem = LicenseValidationOptions.ResolveSigningPrivateKeyPem();
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Out.WriteLine(ex.Message);
+            Console.Out.WriteLine($"Set {LicenseValidationOptions.SigningPrivateKeyEnvironmentVariable} before generating licenses.");
+            Console.Out.WriteLine("Use --create-keypair to generate an ES256 key pair.");
             return;
         }
 
-        Console.Write("Enter Customer ID (e.g., CUST12345): ");
-        var customerId = Console.ReadLine()?.Trim();
-        if (string.IsNullOrWhiteSpace(customerId))
+        var keyId = LicenseValidationOptions.ResolveVerificationKeyId();
+
+        Console.Write("Enter Organization ID (e.g., acme, contoso): ");
+        var organizationId = Console.ReadLine()?.Trim();
+        if (string.IsNullOrWhiteSpace(organizationId))
         {
-            Console.WriteLine("Customer ID cannot be empty. Exiting.");
+            Console.Out.WriteLine("Organization ID cannot be empty. Exiting.");
             return;
         }
 
@@ -60,68 +66,101 @@ internal class Program
         {
             expiresAt = DateTimeOffset.UtcNow.AddYears(1);
         }
-        else
+        else if (!DateTimeOffset.TryParse(expiryInput, out expiresAt))
         {
-            if (!DateTimeOffset.TryParse(expiryInput, out expiresAt))
+            Console.Out.WriteLine("Invalid date format. Exiting.");
+            return;
+        }
+
+        var issuer = new LicenseTokenIssuer(signingPrivateKeyPem, keyId);
+        var licenseKey = issuer.GenerateEnterpriseLicenseKey(
+            organizationId,
+            expiresAt,
+            features: new[]
             {
-                Console.WriteLine("Invalid date format. Exiting.");
-                return;
-            }
-        }
+                LicenseFeatures.Persistence,
+                LicenseFeatures.Reconciliation
+            });
 
-        var validator = new LicenseValidator(LicenseSecretKey);
-        var licenseKey = validator.GenerateLicenseKey(tier, customerId, expiresAt);
-
-        Console.WriteLine("\n=== LICENSE KEY GENERATED ===");
-        Console.WriteLine($"Tier:       {tier}");
-        Console.WriteLine($"Customer:   {customerId}");
-        Console.WriteLine($"Expires:    {expiresAt:yyyy-MM-dd}");
-        Console.WriteLine($"Instances:  {(tier == LicenseTier.Pro ? "5" : "Unlimited")}");
-        Console.WriteLine($"\nLicense Key:\n{licenseKey}");
-        Console.WriteLine("\n=== USAGE ===");
-        Console.WriteLine("Add to appsettings.json or set environment variable:");
-        Console.WriteLine($"  VAPECACHE_LICENSE_KEY={licenseKey}");
-
-        if (tier == LicenseTier.Enterprise)
-        {
-            Console.WriteLine("\nFor reconciliation (Enterprise only):");
-            Console.WriteLine($"  services.AddVapeCacheRedisReconciliation(\"{licenseKey}\");");
-        }
-        else
-        {
-            Console.WriteLine("\nNOTE: Pro tier does NOT include reconciliation.");
-            Console.WriteLine("Pro features: Redis modules, advanced telemetry only.");
-        }
+        Console.Out.WriteLine();
+        Console.Out.WriteLine("=== ENTERPRISE LICENSE KEY GENERATED ===");
+        Console.Out.WriteLine("Tier:             Enterprise");
+        Console.Out.WriteLine($"Organization:     {organizationId}");
+        Console.Out.WriteLine($"Key ID (kid):     {keyId}");
+        Console.Out.WriteLine($"Expires:          {expiresAt:yyyy-MM-dd}");
+        Console.Out.WriteLine("Deployments:      Unlimited");
+        Console.Out.WriteLine("Redis Topology:   Any (standalone/sentinel/cluster)");
+        Console.Out.WriteLine("Features:         persistence, reconciliation");
+        Console.Out.WriteLine();
+        Console.Out.WriteLine("License Key:");
+        Console.Out.WriteLine(licenseKey);
+        Console.Out.WriteLine();
+        Console.Out.WriteLine("=== USAGE ===");
+        Console.Out.WriteLine("Add to appsettings.json or set environment variable:");
+        Console.Out.WriteLine($"  VAPECACHE_LICENSE_KEY={licenseKey}");
+        Console.Out.WriteLine();
+        Console.Out.WriteLine("For Persistence:");
+        Console.Out.WriteLine($"  services.AddVapeCachePersistence(\"{licenseKey}\");");
+        Console.Out.WriteLine();
+        Console.Out.WriteLine("For Reconciliation:");
+        Console.Out.WriteLine($"  services.AddVapeCacheRedisReconciliation(\"{licenseKey}\");");
+        Console.Out.Flush();
     }
 
     private static void ValidateLicenseKey()
     {
+        Console.Out.WriteLine($"Verifier key id: {LicenseValidationOptions.ResolveVerificationKeyId()}");
         Console.Write("Enter license key to validate: ");
         var licenseKey = Console.ReadLine()?.Trim();
 
         if (string.IsNullOrWhiteSpace(licenseKey))
         {
-            Console.WriteLine("License key cannot be empty. Exiting.");
+            Console.Out.WriteLine("License key cannot be empty. Exiting.");
             return;
         }
 
-        var validator = new LicenseValidator(LicenseSecretKey);
+        var validator = new LicenseValidator();
         var result = validator.Validate(licenseKey);
 
-        Console.WriteLine("\n=== VALIDATION RESULT ===");
-        Console.WriteLine($"Valid:      {result.IsValid}");
+        Console.Out.WriteLine("\n=== VALIDATION RESULT ===");
+        Console.Out.WriteLine($"Valid:      {result.IsValid}");
 
         if (result.IsValid)
         {
-            Console.WriteLine($"Tier:       {result.Tier}");
-            Console.WriteLine($"Customer:   {result.CustomerId}");
-            Console.WriteLine($"Expires:    {result.ExpiresAt:yyyy-MM-dd}");
-            Console.WriteLine($"Instances:  {(result.MaxInstances == 999 ? "Unlimited" : result.MaxInstances.ToString())}");
-            Console.WriteLine($"Expired:    {result.IsExpired}");
+            Console.Out.WriteLine($"Tier:       {result.Tier}");
+            Console.Out.WriteLine($"Customer:   {result.CustomerId}");
+            Console.Out.WriteLine($"Key ID:     {result.KeyId}");
+            Console.Out.WriteLine($"License ID: {result.LicenseId}");
+            Console.Out.WriteLine($"Expires:    {result.ExpiresAt:yyyy-MM-dd}");
+            Console.Out.WriteLine($"Features:   {string.Join(", ", result.Features)}");
+            Console.Out.WriteLine($"Expired:    {result.IsExpired}");
         }
         else
         {
-            Console.WriteLine($"Error:      {result.ErrorMessage}");
+            Console.Out.WriteLine($"Error:      {result.ErrorMessage}");
         }
     }
+
+    private static void CreateKeyPair()
+    {
+        using var ecdsa = ECDsa.Create();
+        ecdsa.GenerateKey(ECCurve.NamedCurves.nistP256);
+
+        var privateKeyPem = ecdsa.ExportPkcs8PrivateKeyPem();
+        var publicKeyPem = ecdsa.ExportSubjectPublicKeyInfoPem();
+
+        Console.Out.WriteLine("=== NEW ES256 KEYPAIR ===");
+        Console.Out.WriteLine();
+        Console.Out.WriteLine("Private key (store in secure signing environment only):");
+        Console.Out.WriteLine(privateKeyPem);
+        Console.Out.WriteLine();
+        Console.Out.WriteLine("Public key (safe to distribute for validation):");
+        Console.Out.WriteLine(publicKeyPem);
+        Console.Out.WriteLine();
+        Console.Out.WriteLine("Set environment variables:");
+        Console.Out.WriteLine($"  {LicenseValidationOptions.SigningPrivateKeyEnvironmentVariable}=<PRIVATE PEM>");
+        Console.Out.WriteLine($"  {LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable}=<PUBLIC PEM>");
+        Console.Out.WriteLine($"  {LicenseValidationOptions.VerificationKeyIdEnvironmentVariable}=vc-main-2026");
+    }
 }
+

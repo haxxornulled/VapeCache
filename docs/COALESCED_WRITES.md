@@ -166,15 +166,15 @@ Originally disabled for payload operations due to bugs. **Now works for ALL Redi
 **Key Method**: `TryBuildBatch(CoalescedWriteBatch batch)`
 
 **Limits:**
-- `MaxWriteBytes = 32KB`: Maximum total bytes per batch
-- `MaxSegments = 32`: Maximum segments per batch (for scatter/gather I/O)
-- `SmallCopyThreshold = 512 bytes`: Segments ≤512B copied to scratch, >512B sent directly
+- `CoalescedWriteMaxBytes` (default `1MB`): Maximum total bytes per batch
+- `CoalescedWriteMaxSegments` (default `256`): Maximum segments per batch (for scatter/gather I/O)
+- `CoalescedWriteSmallCopyThresholdBytes` (default `2048`): Segments at/under threshold copied to scratch, larger segments sent directly
 
 **Algorithm:**
 1. Dequeue up to 8 requests from queue (opportunistic batching)
 2. For each request, convert to segments: `[Header, Payload?, CRLF?]`
-3. Small segments (≤512B) copied to scratch buffer (reduces segment count)
-4. Large segments (>512B) added directly (avoid copy overhead)
+3. Small segments (at/under threshold) copied to scratch buffer (reduces segment count)
+4. Large segments (over threshold) added directly (avoid copy overhead)
 5. Prevents splitting single Redis command across multiple batches
 6. Returns batch with all segments ready for socket send
 
@@ -420,8 +420,8 @@ BufferList = subset;
 **Output**: `CoalescedWriteBatch` with optimized segments ready for socket send
 
 **Constraints**:
-- `MaxWriteBytes = 32KB`: Don't exceed per-batch size limit
-- `MaxSegments = 32`: Don't exceed scatter/gather I/O limit
+- `MaxWriteBytes = 1MB`: Don't exceed per-batch size limit
+- `MaxSegments = 256`: Don't exceed scatter/gather I/O limit
 - **Never split a single Redis command across batches** (RESP protocol integrity)
 
 **Algorithm Steps**:
@@ -470,8 +470,8 @@ public bool TryBuildBatch(CoalescedWriteBatch batch)
 
         // STEP 3: Process each segment of this request
         // =============================================
-        // Strategy: Small segments (≤512B) copied to scratch buffer to reduce
-        // segment count. Large segments (>512B) added directly to avoid copy overhead.
+        // Strategy: Small segments (≤2KB) copied to scratch buffer to reduce
+        // segment count. Large segments (>2KB) added directly to avoid copy overhead.
 
         for (var i = 0; i < req.Count; i++)
         {
@@ -482,7 +482,7 @@ public bool TryBuildBatch(CoalescedWriteBatch batch)
 
             // SMALL SEGMENT PATH: Copy to scratch buffer
             // ===========================================
-            if (segLen <= SmallCopyThreshold)  // 512 bytes
+            if (segLen <= SmallCopyThreshold)  // 2048 bytes
             {
                 batch.EnsureScratch();  // Rent 8KB buffer if needed
 
@@ -547,7 +547,7 @@ public bool TryBuildBatch(CoalescedWriteBatch batch)
 │   reqTotalBytes = 24, reqSegmentCount = 1                           │
 │   Fits in batch? YES (empty batch)                                  │
 │                                                                      │
-│   Segment 0: Header (24 bytes) ≤ 512 → SMALL PATH                  │
+│   Segment 0: Header (24 bytes) ≤ 2048 → SMALL PATH                 │
 │     - Copy to Scratch[0..24]                                        │
 │     - ScratchUsed = 24                                              │
 │     - totalBytes = 24                                               │
@@ -556,14 +556,14 @@ public bool TryBuildBatch(CoalescedWriteBatch batch)
 ┌─────────────────────────────────────────────────────────────────────┐
 │ Request 2: SET user:456 <1KB>                                       │
 │   reqTotalBytes = 1095 (69+1024+2), reqSegmentCount = 3             │
-│   Fits in batch? YES (24 + 1095 = 1119 < 32KB)                      │
+│   Fits in batch? YES (24 + 1095 = 1119 < 1MB)                       │
 │                                                                      │
-│   Segment 0: Header (69 bytes) ≤ 512 → SMALL PATH                  │
+│   Segment 0: Header (69 bytes) ≤ 2048 → SMALL PATH                 │
 │     - Copy to Scratch[24..93]                                       │
 │     - ScratchUsed = 93                                              │
 │     - totalBytes = 93                                               │
 │                                                                      │
-│   Segment 1: Payload (1024 bytes) > 512 → LARGE PATH               │
+│   Segment 1: Payload (1024 bytes) ≤ 2048 → SMALL PATH              │
 │     - CommitScratch():                                              │
 │       ├─▶ Add Scratch[0..93] to SegmentsToWrite                    │
 │       ├─▶ ScratchBaseOffset = 93                                   │
@@ -571,7 +571,7 @@ public bool TryBuildBatch(CoalescedWriteBatch batch)
 │     - Add Payload[0..1024] directly to SegmentsToWrite             │
 │     - totalBytes = 1117                                             │
 │                                                                      │
-│   Segment 2: CRLF (2 bytes) ≤ 512 → SMALL PATH                     │
+│   Segment 2: CRLF (2 bytes) ≤ 2048 → SMALL PATH                    │
 │     - Copy to Scratch[93..95]  ◀─── Uses BaseOffset!               │
 │     - ScratchUsed = 2                                               │
 │     - totalBytes = 1119                                             │
@@ -580,9 +580,9 @@ public bool TryBuildBatch(CoalescedWriteBatch batch)
 ┌─────────────────────────────────────────────────────────────────────┐
 │ Request 3: HGET session:abc field1                                  │
 │   reqTotalBytes = 38, reqSegmentCount = 1                           │
-│   Fits in batch? YES (1119 + 38 = 1157 < 32KB)                      │
+│   Fits in batch? YES (1119 + 38 = 1157 < 1MB)                       │
 │                                                                      │
-│   Segment 0: Header (38 bytes) ≤ 512 → SMALL PATH                  │
+│   Segment 0: Header (38 bytes) ≤ 2048 → SMALL PATH                 │
 │     - Copy to Scratch[95..133]  ◀─── Continues from offset 95      │
 │     - ScratchUsed = 40 (2 + 38)                                     │
 │     - totalBytes = 1157                                             │

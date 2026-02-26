@@ -8,6 +8,59 @@ namespace VapeCache.Benchmarks;
 
 internal static class BenchmarkRedisConfig
 {
+    public static bool IsQuickMode() => TryGetBool("VAPECACHE_BENCH_QUICK") ?? false;
+
+    public static bool UseTextPayload() => TryGetBool("VAPECACHE_BENCH_TEXT_PAYLOAD") ?? false;
+
+    public static int[] ResolveIntParams(string key, IReadOnlyList<int> fullDefaults, IReadOnlyList<int> quickDefaults)
+    {
+        var parsed = ParseCsv(Environment.GetEnvironmentVariable(key))
+            .Select(token => int.TryParse(token, out var value) ? value : (int?)null)
+            .Where(value => value.HasValue && value.Value > 0)
+            .Select(value => value!.Value)
+            .Distinct()
+            .ToArray();
+
+        if (parsed.Length > 0)
+            return parsed;
+
+        return (IsQuickMode() ? quickDefaults : fullDefaults).ToArray();
+    }
+
+    public static TEnum[] ResolveEnumParams<TEnum>(string key, IReadOnlyList<TEnum> fullDefaults, IReadOnlyList<TEnum> quickDefaults)
+        where TEnum : struct, Enum
+    {
+        var parsed = ParseCsv(Environment.GetEnvironmentVariable(key))
+            .Select(token => Enum.TryParse<TEnum>(token, ignoreCase: true, out var value) ? value : (TEnum?)null)
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .Distinct()
+            .ToArray();
+
+        if (parsed.Length > 0)
+            return parsed;
+
+        return (IsQuickMode() ? quickDefaults : fullDefaults).ToArray();
+    }
+
+    public static void FillPayload(Span<byte> buffer, int seed = 42)
+    {
+        if (buffer.IsEmpty)
+            return;
+
+        if (UseTextPayload())
+        {
+            // Deterministic printable payload for tools like RedisInsight.
+            const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            for (var i = 0; i < buffer.Length; i++)
+                buffer[i] = (byte)alphabet[i % alphabet.Length];
+            return;
+        }
+
+        var random = new Random(seed);
+        random.NextBytes(buffer);
+    }
+
     public static RedisConnectionOptions Load()
     {
         var connectionString = Environment.GetEnvironmentVariable("VAPECACHE_REDIS_CONNECTIONSTRING");
@@ -116,6 +169,18 @@ internal static class BenchmarkRedisConfig
 
     private static bool? TryGetBool(string key) =>
         bool.TryParse(Environment.GetEnvironmentVariable(key), out var v) ? v : null;
+
+    private static IEnumerable<string> ParseCsv(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            yield break;
+
+        foreach (var token in value.Split([',', ';', '|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!string.IsNullOrWhiteSpace(token))
+                yield return token;
+        }
+    }
 
     private sealed class SimpleOptionsMonitor : IOptionsMonitor<RedisConnectionOptions>
     {

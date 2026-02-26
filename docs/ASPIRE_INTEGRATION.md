@@ -2,7 +2,30 @@
 
 ## Overview
 
-VapeCache.Extensions.Aspire provides first-class integration with [.NET Aspire](https://learn.microsoft.com/en-us/dotnet/aspire/), Microsoft's opinionated stack for building observable, production-ready, cloud-native applications.
+`VapeCache.Extensions.Aspire` gives you a clean Aspire wiring layer:
+- register cache services
+- bind Redis from service discovery
+- expose health/diagnostics endpoints
+- emit OpenTelemetry metrics/traces
+
+No service locator patterns and no route clutter in `Program.cs`.
+
+## Minimal API Endpoints (Wrapper Surface)
+
+When you enable endpoint mapping (`WithAutoMappedEndpoints(...)` or `MapVapeCacheEndpoints(...)`), the wrapper surface is:
+
+- `GET /vapecache/status`
+- `GET /vapecache/stats`
+- `GET /vapecache/stream` (SSE)
+- `GET /vapecache/intent/{key}`
+- `GET /vapecache/intent?take=50`
+- optional admin: `POST /vapecache/breaker/force-open`
+- optional admin: `POST /vapecache/breaker/clear`
+
+Autoscaler diagnostics are included in `status`, `stats`, and stream samples when diagnostics are registered.
+See:
+- [VapeCache.Extensions.Aspire/README.md](../VapeCache.Extensions.Aspire/README.md)
+- [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md)
 
 ## What is .NET Aspire?
 
@@ -16,8 +39,8 @@ VapeCache.Extensions.Aspire provides first-class integration with [.NET Aspire](
 ## VapeCache + Aspire Integration Goals
 
 ### Developer Experience
-✅ **Single-line setup**: `builder.AddVapeCache().WithRedisFromAspire("redis")`
-✅ **Zero configuration**: Aspire resources auto-configure connection strings
+✅ **Low-friction setup**: `builder.AddVapeCache().WithRedisFromAspire("redis")`
+✅ **Minimal config**: Aspire resources auto-configure connection strings
 ✅ **Local dev parity**: Same code runs in dev (Docker) and prod (Azure)
 ✅ **Observable by default**: Metrics/traces flow to Aspire Dashboard
 
@@ -53,7 +76,10 @@ VapeCache.Extensions.Aspire provides first-class integration with [.NET Aspire](
 │ builder.AddVapeCache()  // From VapeCache.Extensions.Aspire│
 │     .WithRedisFromAspire("redis")  // Binds to resource     │
 │     .WithHealthChecks()             // Adds health checks   │
-│     .WithAspireTelemetry();         // OTel → Dashboard     │
+│     .WithAspireTelemetry()          // OTel → Dashboard     │
+│     .WithCacheStampedeProfile(      // Stampede defaults    │
+│         CacheStampedeProfile.Balanced)                      │
+│     .WithAutoMappedEndpoints();     // + status/stats/stream│
 │                                                              │
 │ var app = builder.Build();                                  │
 │ app.MapHealthChecks("/health");                             │
@@ -256,13 +282,17 @@ internal sealed class VapeCacheHealthCheck : IHealthCheck
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
     {
+        var snapshot = _stats.Snapshot;
+        var totalReads = snapshot.Hits + snapshot.Misses;
+        var hitRate = totalReads <= 0 ? 0d : (double)snapshot.Hits / totalReads;
+
         var data = new Dictionary<string, object>
         {
             ["breaker_open"] = _breaker.IsOpen,
             ["consecutive_failures"] = _breaker.ConsecutiveFailures,
-            ["hit_count"] = _stats.HitCount,
-            ["miss_count"] = _stats.MissCount,
-            ["hit_rate"] = _stats.HitRate
+            ["hit_count"] = snapshot.Hits,
+            ["miss_count"] = snapshot.Misses,
+            ["hit_rate"] = hitRate
         };
 
         if (_breaker.IsForcedOpen)
@@ -347,7 +377,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddVapeCache()
     .WithRedisFromAspire("redis")  // Binds to AppHost Redis resource
     .WithHealthChecks()             // Registers Redis + VapeCache health checks
-    .WithAspireTelemetry();         // Sends to Aspire Dashboard
+    .WithAspireTelemetry()          // Sends to Aspire Dashboard
+    .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
+    .WithAutoMappedEndpoints();     // /vapecache/status + /vapecache/stats + /vapecache/stream
 
 var app = builder.Build();
 
@@ -440,6 +472,21 @@ When you run your Aspire app, the dashboard (`http://localhost:15888`) will show
 - `cache.hits`: Cache hit count
 - `cache.misses`: Cache miss count
 - `cache.fallback_to_memory`: Redis fallback events
+- `cache.set.payload.bytes`: Payload size histogram for cache writes
+- `cache.set.large_key`: Large payload writes (>64 KB)
+- `cache.evictions`: In-memory evictions (by reason)
+- `cache.stampede.key_rejected`: Invalid/suspicious stampede key rejections
+- `cache.stampede.lock_wait_timeout`: Stampede lock wait timeouts
+- `cache.stampede.failure_backoff_rejected`: Stampede backoff rejections
+
+### Wrapper Endpoint Payload
+
+`GET /vapecache/status` and `GET /vapecache/stats` include:
+- `stampedeKeyRejected`
+- `stampedeLockWaitTimeout`
+- `stampedeFailureBackoffRejected`
+
+`GET /vapecache/stream` provides realtime SSE frames (`event: vapecache-stats`) for Blazor charting.
 
 ### Traces Tab (Distributed Tracing)
 - HTTP request → Cache lookup → Redis command

@@ -1,123 +1,153 @@
-# VapeCache Quickstart Guide
+# VapeCache QuickStart (No-Nonsense)
 
-Get VapeCache running in 5 minutes.
+This is the fastest clean path from zero to a working cache endpoint.
+Copy/paste it in order and you are up.
 
 ## Prerequisites
 
 - .NET 10 SDK
-- Redis server (localhost or remote)
+- Redis 7+
+- A Web API project
 
-## Step 1: Install (Coming Soon)
+## 1. Install Packages
 
 ```bash
 dotnet add package VapeCache
 ```
 
-For now, clone the repository:
+Optional, if you are using Aspire:
+
 ```bash
-git clone https://github.com/haxxornulled/VapeCache.git
-cd VapeCache
+dotnet add package VapeCache.Extensions.Aspire
 ```
 
-## Step 2: Add VapeCache to Your Project
+## 2. Run Redis
 
-```csharp
-// Program.cs
-var builder = WebApplication.CreateBuilder(args);
-
-// Add VapeCache services
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
-
-var app = builder.Build();
-app.Run();
+```bash
+docker run --name vapecache-redis -p 6379:6379 -d redis:7
 ```
 
-## Step 3: Configure Connection (appsettings.json)
+## 3. Add `appsettings.json`
 
 ```json
 {
   "RedisConnection": {
     "Host": "localhost",
-    "Port": 6379
+    "Port": 6379,
+    "Database": 0
+  },
+  "CacheStampede": {
+    "Profile": "Balanced"
   }
 }
 ```
 
-**Or via environment variable:**
+Equivalent environment variable:
+
 ```bash
-export VAPECACHE_REDIS_CONNECTIONSTRING="redis://localhost:6379/0"
+setx VAPECACHE_REDIS_CONNECTIONSTRING "redis://localhost:6379/0"
 ```
 
-## Step 4: Use the Cache
+## 4. Register VapeCache in `Program.cs`
+
+Use this when wiring services directly:
 
 ```csharp
-public class UserService
-{
-    private readonly ICacheService _cache;
+using VapeCache.Abstractions.Caching;
+using VapeCache.Infrastructure.Caching;
+using VapeCache.Infrastructure.Connections;
 
-    public UserService(ICacheService cache) => _cache = cache;
+var builder = WebApplication.CreateBuilder(args);
 
-    public async Task<User?> GetUserAsync(int id)
+builder.Services.AddVapecacheRedisConnections();
+builder.Services.AddVapecacheCaching();
+
+builder.Services.AddOptions<CacheStampedeOptions>()
+    .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
+    .ConfigureCacheStampede(options =>
     {
-        var key = $"user:{id}";
+        options.WithMaxKeys(50_000)
+            .WithLockWaitTimeout(TimeSpan.FromMilliseconds(750))
+            .WithFailureBackoff(TimeSpan.FromMilliseconds(500));
+    })
+    .Bind(builder.Configuration.GetSection("CacheStampede"));
+```
 
-        // Simple GET
-        var bytes = await _cache.GetAsync(key, CancellationToken.None);
-        if (bytes != null)
-            return JsonSerializer.Deserialize<User>(bytes);
+Use this when you are on Aspire and want one fluent chain:
 
-        // Fetch from DB
-        var user = await _db.Users.FindAsync(id);
+```csharp
+builder.AddVapeCache()
+    .WithRedisFromAspire("redis")
+    .WithHealthChecks()
+    .WithAspireTelemetry()
+    .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
+    .WithAutoMappedEndpoints();
+```
 
-        // SET with 5-minute TTL
-        var json = JsonSerializer.SerializeToUtf8Bytes(user);
-        await _cache.SetAsync(
+## 5. Add a Typed Cache Service
+
+```csharp
+using VapeCache.Abstractions.Caching;
+
+public sealed class ProductCacheService(IVapeCache cache, IProductRepository repository)
+{
+    public ValueTask<ProductDto> GetAsync(int id, CancellationToken ct)
+    {
+        var key = CacheKey<ProductDto>.From($"products:{id}");
+        var options = new CacheEntryOptions(
+            Ttl: TimeSpan.FromMinutes(10),
+            Intent: new CacheIntent(
+                CacheIntentKind.ReadThrough,
+                Reason: "Product details page"));
+
+        return cache.GetOrCreateAsync(
             key,
-            json,
-            new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(5)),
-            CancellationToken.None);
-
-        return user;
+            token => new ValueTask<ProductDto>(repository.GetByIdAsync(id, token)),
+            options,
+            ct);
     }
 }
 ```
 
-## Step 5: Use Get-or-Set Pattern (Recommended)
+## 6. Expose One Endpoint
 
 ```csharp
-public async Task<User?> GetUserAsync(int id, CancellationToken ct)
-{
-    var key = $"user:{id}";
+var app = builder.Build();
 
-    return await _cache.GetOrSetAsync(
-        key,
-        async ct => await _db.Users.FindAsync(id, ct), // Factory
-        (writer, user) => JsonSerializer.Serialize(writer, user), // Serialize
-        bytes => JsonSerializer.Deserialize<User>(bytes), // Deserialize
-        new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(5)),
-        ct);
-}
+app.MapGet("/products/{id:int}", async (int id, ProductCacheService service, CancellationToken ct) =>
+{
+    var product = await service.GetAsync(id, ct);
+    return Results.Ok(product);
+});
+
+app.MapHealthChecks("/health");
+app.Run();
 ```
 
-**Benefits:**
-- Single method call
-- Stampede protection (coalesces concurrent requests)
-- Circuit breaker (falls back to memory if Redis is down)
-
-## Step 6: Verify It Works
-
-Run the console host to test the connection:
+## 7. Smoke Test
 
 ```bash
-dotnet run --project VapeCache.Console -c Release
+curl http://localhost:5000/products/42
+curl http://localhost:5000/health
 ```
 
-The console host runs demo workloads and logs cache activity; it does not expose HTTP endpoints.
+If auto-mapped wrapper endpoints are enabled:
 
-## Next Steps
+```bash
+curl http://localhost:5000/vapecache/status
+curl http://localhost:5000/vapecache/stats
+```
 
-- [Configuration Guide](CONFIGURATION.md) - Full appsettings.json reference
-- [Architecture Overview](ARCHITECTURE.md) - How VapeCache works internally
-- [Observability](OBSERVABILITY_ARCHITECTURE.md) - Metrics, traces, and logs
-- [.NET Aspire Integration](ASPIRE_INTEGRATION.md) - Cloud-native deployment
+## Common Mistakes
+
+- Redis is not running, or wrong host/port in config.
+- Registered `AddVapecacheCaching()` but forgot `AddVapecacheRedisConnections()`.
+- Invalid `CacheStampede` values (out of allowed ranges).
+- Breaker control endpoints exposed publicly without auth.
+
+## Next Docs
+
+- [CONFIGURATION.md](CONFIGURATION.md)
+- [API_REFERENCE.md](API_REFERENCE.md)
+- [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md)
+- [WRAPPER_PLUGIN_GUIDE.md](WRAPPER_PLUGIN_GUIDE.md)

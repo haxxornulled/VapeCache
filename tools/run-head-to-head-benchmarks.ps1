@@ -1,6 +1,18 @@
 param(
     [string]$Job = "Short",
-    [string]$ConnectionString = ""
+    [ValidateSet("all", "client", "endtoend", "modules")]
+    [string]$Suite = "all",
+    [ValidateSet("fair", "realworld")]
+    [string]$Mode = "fair",
+    [ValidateSet("standard", "aggressive", "extreme")]
+    [string]$Profile = "standard",
+    [switch]$Quick,
+    [switch]$TextPayload,
+    [string]$ConnectionString = "",
+    [string]$ArtifactsRoot = "",
+    [switch]$AllReports,
+    [switch]$ContentionMatrix,
+    [string]$ContentionProcessorCounts = "4,16,32"
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,23 +28,135 @@ if ([string]::IsNullOrWhiteSpace($env:VAPECACHE_REDIS_CONNECTIONSTRING) -and [st
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $project = Join-Path $repoRoot "VapeCache.Benchmarks\VapeCache.Benchmarks.csproj"
-$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$artifacts = Join-Path $repoRoot "BenchmarkDotNet.Artifacts\head-to-head\$timestamp"
+
+function Set-EnvIfEmpty([string]$name, [string]$value) {
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+        [Environment]::SetEnvironmentVariable($name, $value)
+    }
+}
+
+switch ($Profile) {
+    "aggressive" {
+        Set-EnvIfEmpty "VAPECACHE_BENCH_LAUNCH_COUNT" "3"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_WARMUP_COUNT" "6"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_ITERATION_COUNT" "20"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_CLIENT_PAYLOADS" "256,1024,4096,16384,65536"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_E2E_PAYLOADS" "256,1024,4096,16384,65536"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_MODULE_JSON_CHARS" "256,1024,4096,16384"
+    }
+    "extreme" {
+        Set-EnvIfEmpty "VAPECACHE_BENCH_LAUNCH_COUNT" "4"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_WARMUP_COUNT" "8"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_ITERATION_COUNT" "30"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_CLIENT_PAYLOADS" "256,1024,4096,16384,65536,262144"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_E2E_PAYLOADS" "256,1024,4096,16384,65536"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_MODULE_JSON_CHARS" "256,1024,4096,16384,65536"
+    }
+}
+
+if ($Quick.IsPresent) {
+    $env:VAPECACHE_BENCH_QUICK = "true"
+    if ($Job -eq "Short") {
+        $Job = "Dry"
+    }
+}
+else {
+    $env:VAPECACHE_BENCH_QUICK = "false"
+}
+
+$env:VAPECACHE_BENCH_TEXT_PAYLOAD = if ($TextPayload.IsPresent) { "true" } else { "false" }
+$env:VAPECACHE_BENCH_INSTRUMENT = if ($Mode -eq "realworld") { "true" } else { "false" }
+
+switch ($Suite) {
+    "client"   { $filters = @("*RedisClientHeadToHeadBenchmarks*") }
+    "endtoend" { $filters = @("*RedisEndToEndHeadToHeadBenchmarks*") }
+    "modules"  { $filters = @("*RedisModuleHeadToHeadBenchmarks*") }
+    default    { $filters = @("*RedisClientHeadToHeadBenchmarks*", "*RedisEndToEndHeadToHeadBenchmarks*", "*RedisModuleHeadToHeadBenchmarks*") }
+}
+
+if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $artifacts = Join-Path $repoRoot "BenchmarkDotNet.Artifacts\head-to-head\$timestamp"
+}
+else {
+    $artifacts = $ArtifactsRoot
+}
+
+New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
 
 Write-Host "Running head-to-head benchmarks..."
 Write-Host "Artifacts: $artifacts"
+Write-Host "Suite: $Suite"
+Write-Host "Job: $Job"
+Write-Host "Mode: $Mode (VAPECACHE_BENCH_INSTRUMENT=$env:VAPECACHE_BENCH_INSTRUMENT)"
+Write-Host "Profile: $Profile"
+Write-Host "Quick mode: $($Quick.IsPresent)"
+Write-Host "Text payload: $($TextPayload.IsPresent)"
+Write-Host "Launch/Warmup/Iteration: $env:VAPECACHE_BENCH_LAUNCH_COUNT / $env:VAPECACHE_BENCH_WARMUP_COUNT / $env:VAPECACHE_BENCH_ITERATION_COUNT"
 
-dotnet run -c Release --project $project -- `
-    -j $Job `
-    --filter "*RedisClientHeadToHeadBenchmarks*" "*RedisEndToEndHeadToHeadBenchmarks*" "*RedisModuleHeadToHeadBenchmarks*" `
-    --artifacts $artifacts
+function Invoke-Benchmarks([string]$targetArtifacts) {
+    dotnet run -c Release --project $project -- `
+        -j $Job `
+        --filter $filters `
+        --artifacts $targetArtifacts
+}
 
-$comparisonFiles = Get-ChildItem -Path $artifacts -Filter comparison.md -Recurse -ErrorAction SilentlyContinue
-if ($comparisonFiles.Count -eq 0) {
+if ($ContentionMatrix.IsPresent) {
+    $counts =
+        $ContentionProcessorCounts.Split(",", [System.StringSplitOptions]::RemoveEmptyEntries) |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -match '^\d+$' }
+
+    if (($counts | Measure-Object).Count -eq 0) {
+        Write-Error "Contention matrix enabled but no valid processor counts were provided."
+        exit 1
+    }
+
+    $originalDotnetProcessorCount = [Environment]::GetEnvironmentVariable("DOTNET_PROCESSOR_COUNT")
+    try {
+        foreach ($count in $counts) {
+            [Environment]::SetEnvironmentVariable("DOTNET_PROCESSOR_COUNT", $count)
+            $matrixArtifacts = Join-Path $artifacts "cpu-$count"
+            New-Item -ItemType Directory -Path $matrixArtifacts -Force | Out-Null
+            Write-Host "Running contention profile DOTNET_PROCESSOR_COUNT=$count"
+            Invoke-Benchmarks -targetArtifacts $matrixArtifacts
+        }
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable("DOTNET_PROCESSOR_COUNT", $originalDotnetProcessorCount)
+    }
+}
+else {
+    Invoke-Benchmarks -targetArtifacts $artifacts
+}
+
+$searchRoots = @(
+    $artifacts,
+    (Join-Path $repoRoot "BenchmarkDotNet.Artifacts\results"),
+    (Join-Path $repoRoot "BenchmarkDotNet.Artifacts")
+) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+$comparisonFiles =
+    $searchRoots |
+    ForEach-Object {
+        if (Test-Path $_) {
+            Get-ChildItem -Path $_ -Filter comparison.md -Recurse -ErrorAction SilentlyContinue
+        }
+    } |
+    Sort-Object -Property LastWriteTimeUtc, FullName -Descending -Unique
+
+if (($comparisonFiles | Measure-Object).Count -eq 0) {
     Write-Host "No comparison.md generated."
     exit 1
 }
 
 Write-Host ""
-Write-Host "Comparison reports:"
-$comparisonFiles | ForEach-Object { Write-Host " - $($_.FullName)" }
+if ($AllReports.IsPresent) {
+    Write-Host "Comparison reports:"
+    $comparisonFiles | ForEach-Object { Write-Host " - $($_.FullName)" }
+}
+else {
+    $latest = $comparisonFiles | Select-Object -First 1
+    Write-Host "Latest comparison report:"
+    Write-Host " - $($latest.FullName)"
+}

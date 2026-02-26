@@ -1,15 +1,15 @@
 # VapeCache API Reference
 
-This reference covers the public API surface in `VapeCache.Abstractions`.
+This is the source of truth for the public API surface:
+- `VapeCache.Abstractions`
+- `VapeCache.Infrastructure` fluent options extensions
+- `VapeCache.Extensions.Aspire` host/wrapper integrations
 
-## Overview
+Use this page for exact signatures and endpoint contracts.
 
-VapeCache exposes three main layers:
-- **ICacheService**: byte[] + delegate-based serialization (low-level).
-- **IVapeCache**: typed, codec-driven API with `CacheKey<T>` and regions.
-- **Typed Collections**: lists/sets/hashes/sorted sets with automatic serialization.
+## Core Cache APIs
 
-## ICacheService (Low-Level)
+### `ICacheService` (low-level bytes + delegates)
 
 Namespace: `VapeCache.Abstractions.Caching`
 
@@ -35,18 +35,7 @@ public interface ICacheService
 }
 ```
 
-### Example
-```csharp
-var bytes = await cache.GetAsync("user:123", ct);
-
-await cache.SetAsync(
-    "user:123",
-    Encoding.UTF8.GetBytes("payload"),
-    new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(5)),
-    ct);
-```
-
-## IVapeCache (Typed Keys + Codecs)
+### `IVapeCache` (typed ergonomic API)
 
 Namespace: `VapeCache.Abstractions.Caching`
 
@@ -65,31 +54,140 @@ public interface IVapeCache
 }
 ```
 
-### Example
-```csharp
-var key = CacheKey<User>.From("users:123");
+### `ICacheRegion`
 
-var user = await vapeCache.GetOrCreateAsync(
-    key,
-    ct => repository.GetUserAsync("123", ct),
-    new CacheEntryOptions(TimeSpan.FromMinutes(10)),
-    ct);
-```
-
-## Cache Regions
-
-`ICacheRegion` provides key prefixing and typed access:
+Namespace: `VapeCache.Abstractions.Caching`
 
 ```csharp
-var users = vapeCache.Region("users");
-var user = await users.GetOrCreateAsync(
-    "123",
-    ct => repository.GetUserAsync("123", ct),
-    new CacheEntryOptions(TimeSpan.FromMinutes(10)),
-    ct);
+public interface ICacheRegion
+{
+    string Name { get; }
+    CacheKey<T> Key<T>(string id);
+    ValueTask<T> GetOrCreateAsync<T>(string id, Func<CancellationToken, ValueTask<T>> factory, CacheEntryOptions options = default, CancellationToken ct = default);
+    ValueTask<T?> GetAsync<T>(string id, CancellationToken ct = default);
+    ValueTask SetAsync<T>(string id, T value, CacheEntryOptions options = default, CancellationToken ct = default);
+    ValueTask<bool> RemoveAsync(string id, CancellationToken ct = default);
+}
 ```
 
-## Typed Collections
+## Entry Options and Intent-Aware Caching
+
+### `CacheEntryOptions`
+
+```csharp
+public readonly record struct CacheEntryOptions(
+    TimeSpan? Ttl = null,
+    CacheIntent? Intent = null);
+```
+
+### `CacheIntent`
+
+```csharp
+public sealed record CacheIntent(
+    CacheIntentKind Kind,
+    string? Reason = null,
+    string? Owner = null,
+    string[]? Tags = null);
+```
+
+Intent kinds:
+- `Unspecified`
+- `ReadThrough`
+- `QueryResult`
+- `SessionState`
+- `Idempotency`
+- `RateLimit`
+- `FeatureFlag`
+- `ComputedView`
+- `Preload`
+
+### `ICacheIntentRegistry`
+
+Used by wrapper endpoints and diagnostics to explain why entries exist.
+
+```csharp
+public interface ICacheIntentRegistry
+{
+    void RecordSet(string key, string backend, in CacheEntryOptions options, int payloadBytes);
+    void RecordRemove(string key);
+    bool TryGet(string key, out CacheIntentEntry? entry);
+    IReadOnlyList<CacheIntentEntry> GetRecent(int maxCount);
+}
+```
+
+## Stampede Protection APIs
+
+### `CacheStampedeOptions`
+
+Namespace: `VapeCache.Abstractions.Caching`
+
+```csharp
+public sealed record CacheStampedeOptions
+{
+    bool Enabled { get; set; }
+    int MaxKeys { get; set; }
+    bool RejectSuspiciousKeys { get; set; }
+    int MaxKeyLength { get; set; }
+    TimeSpan LockWaitTimeout { get; set; }
+    bool EnableFailureBackoff { get; set; }
+    TimeSpan FailureBackoff { get; set; }
+}
+```
+
+### Named profiles
+
+```csharp
+public enum CacheStampedeProfile
+{
+    Strict,
+    Balanced,
+    Relaxed
+}
+```
+
+### Fluent options extensions
+
+Namespace: `VapeCache.Infrastructure.Caching`
+
+```csharp
+services.AddOptions<CacheStampedeOptions>()
+    .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
+    .ConfigureCacheStampede(options =>
+    {
+        options.WithLockWaitTimeout(TimeSpan.FromMilliseconds(600))
+            .WithFailureBackoff(TimeSpan.FromMilliseconds(400));
+    })
+    .Bind(configuration.GetSection("CacheStampede"));
+```
+
+## Cache Statistics APIs
+
+### `ICacheStats`
+
+```csharp
+public interface ICacheStats
+{
+    CacheStatsSnapshot Snapshot { get; }
+}
+```
+
+### `CacheStatsSnapshot`
+
+```csharp
+public readonly record struct CacheStatsSnapshot(
+    long GetCalls,
+    long Hits,
+    long Misses,
+    long SetCalls,
+    long RemoveCalls,
+    long FallbackToMemory,
+    long RedisBreakerOpened,
+    long StampedeKeyRejected,
+    long StampedeLockWaitTimeout,
+    long StampedeFailureBackoffRejected);
+```
+
+## Typed Collection APIs
 
 Namespace: `VapeCache.Abstractions.Collections`
 
@@ -103,72 +201,105 @@ public interface ICacheCollectionFactory
 }
 ```
 
-### Lists
-```csharp
-var queue = collections.List<WorkItem>("jobs:pending");
-await queue.PushBackAsync(item, ct);
-var next = await queue.PopFrontAsync(ct);
-```
+Examples:
 
-### Sets
 ```csharp
+var jobs = collections.List<string>("jobs:pending");
+await jobs.PushBackAsync("job-1", ct);
+var next = await jobs.PopFrontAsync(ct);
+
 var online = collections.Set<string>("users:online");
 await online.AddAsync("alice", ct);
-var all = await online.MembersAsync(ct);
-```
 
-### Hashes
-```csharp
 var profiles = collections.Hash<UserProfile>("users:profiles");
 await profiles.SetAsync("alice", profile, ct);
-var loaded = await profiles.GetAsync("alice", ct);
+
+var scores = collections.SortedSet<string>("scores:weekly");
+await scores.AddAsync("alice", 100, ct);
 ```
 
-### Sorted Sets
-```csharp
-var leaderboard = collections.SortedSet<PlayerScore>("scores:weekly");
-await leaderboard.AddAsync(new PlayerScore("alice"), 100, ct);
-var top = await leaderboard.RangeByRankAsync(0, 9, descending: true, ct);
-```
+## JSON and Redis Module APIs
 
-## JSON + Module Services
+Interfaces:
+- `IJsonCache`
+- `IRedisSearchService`
+- `IRedisBloomService`
+- `IRedisTimeSeriesService`
+- `IRedisModuleDetector`
 
-When Redis modules are available, the following helpers are registered:
-- `IJsonCache` (JSON.GET/JSON.SET/JSON.DEL)
-- `IRedisSearchService` (RediSearch)
-- `IRedisBloomService` (RedisBloom)
-- `IRedisTimeSeriesService` (RedisTimeSeries)
-
-Module detection is exposed via `IRedisModuleDetector`.
-
-### Zero-copy JSON (lease)
-
-For high-throughput JSON workloads, use the lease-based APIs on `IJsonCache` to avoid extra byte[] allocations. Always dispose the lease.
+High-throughput JSON path (lease-based):
 
 ```csharp
-var jsonCache = serviceProvider.GetRequiredService<IJsonCache>();
-
 using var lease = await jsonCache.GetLeaseAsync("doc:1", ".", ct);
 if (!lease.IsNull)
 {
-    // Use lease.Span/Memory before disposing.
     await jsonCache.SetLeaseAsync("doc:copy:1", lease, ".", ct);
 }
 ```
 
-## CacheEntryOptions
+`RedisValueLease` is a sealed reference type and must be disposed when pooled.
+
+## Aspire Wrapper APIs
+
+### Host builder extensions
+
+Namespace: `VapeCache.Extensions.Aspire`
 
 ```csharp
-public readonly record struct CacheEntryOptions(TimeSpan? Ttl = null);
+builder.AddVapeCache()
+    .WithRedisFromAspire("redis")
+    .WithHealthChecks()
+    .WithAspireTelemetry()
+    .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
+    .WithAutoMappedEndpoints();
 ```
 
-## Error Handling
+### Endpoint mapping
 
-- Redis/network failures surface as exceptions from the Redis executor.
-- The hybrid cache (`HybridCacheService` + `HybridCommandExecutor`) catches Redis failures and fails over to the configured fallback for core cache operations, including module commands.
-- Module fallback semantics are simplified; see `docs/REDIS_MODULES.md`.
+```csharp
+app.MapVapeCacheEndpoints(
+    prefix: "/vapecache",
+    includeBreakerControlEndpoints: false,
+    includeLiveStreamEndpoint: true,
+    includeIntentEndpoints: true);
+```
+
+Default wrapper routes:
+- `GET /vapecache/status`
+- `GET /vapecache/stats`
+- `GET /vapecache/stream`
+- `GET /vapecache/intent/{key}`
+- `GET /vapecache/intent?take=50`
+- `POST /vapecache/breaker/force-open` (opt-in)
+- `POST /vapecache/breaker/clear` (opt-in)
+
+## Autoscaler Diagnostics API
+
+Namespace: `VapeCache.Abstractions.Connections`
+
+```csharp
+public interface IRedisMultiplexerDiagnostics
+{
+    RedisAutoscalerSnapshot GetAutoscalerSnapshot();
+}
+```
+
+`RedisAutoscalerSnapshot` includes current/target connection counts, queue and inflight pressure, rolling p95/p99, freeze state, and last scale decision metadata.
+
+## Error Handling Behavior
+
+- Redis/network failures can propagate from the Redis executor.
+- Hybrid cache mode can fail over to in-memory behavior based on breaker state.
+- Stampede lock-wait timeout surfaces as `TimeoutException`.
+- Wrapper breaker control endpoints should be protected with authN/authZ when enabled.
+
+Bottom line: autoscaling, wrapper endpoints, and extra diagnostics are operational layers. Core cache correctness does not depend on them.
 
 ## Related Docs
+
+- [QUICKSTART.md](QUICKSTART.md)
 - [CONFIGURATION.md](CONFIGURATION.md)
-- [REDIS_PROTOCOL_SUPPORT.md](REDIS_PROTOCOL_SUPPORT.md)
+- [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md)
 - [TYPED_COLLECTIONS.md](TYPED_COLLECTIONS.md)
+- [REDIS_MODULES.md](REDIS_MODULES.md)
+- [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md)

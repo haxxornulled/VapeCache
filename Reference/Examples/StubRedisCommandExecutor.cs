@@ -107,6 +107,7 @@ internal sealed class StubRedisCommandExecutor : IRedisCommandExecutor
 
     public ValueTask<long> LPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct) => ValueTask.FromResult(1L);
     public ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct) => ValueTask.FromResult(1L);
+    public ValueTask<long> RPushManyAsync(string key, ReadOnlyMemory<byte>[] values, int count, CancellationToken ct) => ValueTask.FromResult((long)count);
     public ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct) => ValueTask.FromResult<byte[]?>(null);
     public bool TryLPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {

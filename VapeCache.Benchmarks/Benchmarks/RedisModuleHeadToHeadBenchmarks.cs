@@ -19,18 +19,38 @@ namespace VapeCache.Benchmarks.Benchmarks;
 [BenchmarkCategory("RedisModules")]
 public class RedisModuleHeadToHeadBenchmarks
 {
-    [Params(
+    private static readonly RedisModuleOperation[] FullOperations =
+    [
         RedisModuleOperation.JsonSet,
         RedisModuleOperation.JsonGet,
         RedisModuleOperation.FtSearch,
         RedisModuleOperation.BfAdd,
         RedisModuleOperation.BfExists,
         RedisModuleOperation.TsAdd,
-        RedisModuleOperation.TsRange)]
+        RedisModuleOperation.TsRange
+    ];
+
+    private static readonly RedisModuleOperation[] QuickOperations =
+    [
+        RedisModuleOperation.JsonSet,
+        RedisModuleOperation.JsonGet,
+        RedisModuleOperation.BfExists
+    ];
+
+    private static readonly int[] FullJsonPayloadChars = [128, 1024];
+    private static readonly int[] QuickJsonPayloadChars = [128];
+
+    [ParamsSource(nameof(Operations))]
     public RedisModuleOperation Operation { get; set; }
 
-    [Params(128, 1024)]
+    [ParamsSource(nameof(JsonPayloadSizes))]
     public int JsonPayloadChars { get; set; }
+
+    public IEnumerable<RedisModuleOperation> Operations =>
+        BenchmarkRedisConfig.ResolveEnumParams("VAPECACHE_BENCH_MODULE_OPERATIONS", FullOperations, QuickOperations);
+
+    public IEnumerable<int> JsonPayloadSizes =>
+        BenchmarkRedisConfig.ResolveIntParams("VAPECACHE_BENCH_MODULE_JSON_CHARS", FullJsonPayloadChars, QuickJsonPayloadChars);
 
     private readonly Consumer _consumer = new();
 
@@ -57,7 +77,7 @@ public class RedisModuleHeadToHeadBenchmarks
         var options = BenchmarkRedisConfig.Load();
         _ser = await BenchmarkRedisConfig.ConnectStackExchangeAsync(options).ConfigureAwait(false);
         _db = _ser.GetDatabase(options.Database);
-        _executor = BenchmarkRedisConfig.CreateVapeCacheExecutor(options);
+        _executor = BenchmarkRedisConfig.CreateVapeCacheExecutor(options, enableInstrumentation: false);
 
         var payload = new string('a', JsonPayloadChars);
         _jsonPayload = Encoding.UTF8.GetBytes($"{{\"name\":\"bench\",\"payload\":\"{payload}\"}}");

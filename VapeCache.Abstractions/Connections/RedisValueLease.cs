@@ -2,17 +2,20 @@ using System.Buffers;
 
 namespace VapeCache.Abstractions.Connections;
 
-// CRITICAL FIX P1-3: Add disposal tracking to prevent double-dispose bug
-// Cannot use 'ref struct' because it's incompatible with ValueTask<T>
-// Instead use disposal flag - small overhead (4 bytes) but prevents buffer pool corruption
-public struct RedisValueLease : IDisposable
+/// <summary>
+/// Represents a leased Redis value buffer.
+/// Reference type by design so disposal state cannot be bypassed via struct copies.
+/// </summary>
+public sealed class RedisValueLease : IDisposable
 {
+    private static readonly RedisValueLease NullInstance = new(buffer: null, length: 0, pooled: false);
+
     private readonly byte[]? _buffer;
     private readonly int _length;
     private readonly bool _pooled;
     private int _disposed; // 0 = not disposed, 1 = disposed
 
-    internal RedisValueLease(byte[] buffer, int length, bool pooled)
+    internal RedisValueLease(byte[]? buffer, int length, bool pooled)
     {
         _buffer = buffer;
         _length = length;
@@ -20,7 +23,7 @@ public struct RedisValueLease : IDisposable
         _disposed = 0;
     }
 
-    public static RedisValueLease Null => default;
+    public static RedisValueLease Null => NullInstance;
 
     public bool IsNull => _buffer is null;
     public int Length => _buffer is null ? 0 : _length;
@@ -30,8 +33,6 @@ public struct RedisValueLease : IDisposable
 
     public void Dispose()
     {
-        // CRITICAL FIX P1-3: Atomic check-and-set to prevent double-dispose
-        // Only first thread to dispose will return buffer to pool
         if (_pooled && _buffer is not null)
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
@@ -39,4 +40,3 @@ public struct RedisValueLease : IDisposable
         }
     }
 }
-

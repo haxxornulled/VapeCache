@@ -12,18 +12,21 @@ internal sealed class RedisCacheService : ICacheService
     private readonly IRedisCommandExecutor _redis;
     private readonly ICurrentCacheService _current;
     private readonly CacheStats _stats;
+    private readonly ICacheIntentRegistry _intentRegistry;
+    private static readonly ICacheIntentRegistry NoopIntentRegistry = new NoopCacheIntentRegistry();
 
     [ActivatorUtilitiesConstructor]
-    public RedisCacheService(RedisCommandExecutor redis, ICurrentCacheService current, CacheStatsRegistry statsRegistry)
-        : this((IRedisCommandExecutor)redis, current, statsRegistry)
+    public RedisCacheService(RedisCommandExecutor redis, ICurrentCacheService current, CacheStatsRegistry statsRegistry, ICacheIntentRegistry? intentRegistry = null)
+        : this((IRedisCommandExecutor)redis, current, statsRegistry, intentRegistry)
     {
     }
 
-    public RedisCacheService(IRedisCommandExecutor redis, ICurrentCacheService current, CacheStatsRegistry statsRegistry)
+    public RedisCacheService(IRedisCommandExecutor redis, ICurrentCacheService current, CacheStatsRegistry statsRegistry, ICacheIntentRegistry? intentRegistry = null)
     {
         _redis = redis;
         _current = current;
         _stats = statsRegistry.GetOrCreate(CacheStatsNames.Redis);
+        _intentRegistry = intentRegistry ?? NoopIntentRegistry;
     }
 
     public string Name => "redis";
@@ -40,6 +43,7 @@ internal sealed class RedisCacheService : ICacheService
             var bytes = await _redis.GetAsync(key, ct).ConfigureAwait(false);
             if (bytes is null)
             {
+                _intentRegistry.RecordRemove(key);
                 _stats.IncMiss();
                 CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
             }
@@ -62,10 +66,18 @@ internal sealed class RedisCacheService : ICacheService
         _current.SetCurrent(Name);
         _stats.IncSet();
         CacheTelemetry.SetCalls.Add(1, new TagList { { "backend", Name } });
+        CacheTelemetry.SetPayloadBytes.Record(value.Length, new TagList
+        {
+            { "backend", Name },
+            { "bucket", CacheTelemetry.GetPayloadBucket(value.Length) }
+        });
+        if (value.Length > 65536)
+            CacheTelemetry.LargeKeyWrites.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
         var ok = await _redis.SetAsync(key, value, options.Ttl, ct).ConfigureAwait(false);
         CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "set" } });
         if (!ok) throw new InvalidOperationException("Redis SET failed.");
+        _intentRegistry.RecordSet(key, Name, options, value.Length);
     }
 
     public async ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
@@ -77,7 +89,10 @@ internal sealed class RedisCacheService : ICacheService
         var start = Stopwatch.GetTimestamp();
         try
         {
-            return await _redis.DeleteAsync(key, ct).ConfigureAwait(false);
+            var removed = await _redis.DeleteAsync(key, ct).ConfigureAwait(false);
+            if (removed)
+                _intentRegistry.RecordRemove(key);
+            return removed;
         }
         finally
         {
@@ -87,9 +102,30 @@ internal sealed class RedisCacheService : ICacheService
 
     public async ValueTask<T?> GetAsync<T>(string key, SpanDeserializer<T> deserialize, CancellationToken ct)
     {
-        var bytes = await GetAsync(key, ct).ConfigureAwait(false);
-        if (bytes is null) return default;
-        return deserialize(bytes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        _current.SetCurrent(Name);
+        _stats.IncGet();
+        CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
+        var start = Stopwatch.GetTimestamp();
+        try
+        {
+            using var lease = await _redis.GetLeaseAsync(key, ct).ConfigureAwait(false);
+            if (lease.IsNull)
+            {
+                _intentRegistry.RecordRemove(key);
+                _stats.IncMiss();
+                CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
+                return default;
+            }
+
+            _stats.IncHit();
+            CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
+            return deserialize(lease.Span);
+        }
+        finally
+        {
+            CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "get" } });
+        }
     }
 
     public async ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
@@ -114,5 +150,17 @@ internal sealed class RedisCacheService : ICacheService
         var created = await factory(ct).ConfigureAwait(false);
         await SetAsync(key, created, serialize, options, ct).ConfigureAwait(false);
         return created;
+    }
+
+    private sealed class NoopCacheIntentRegistry : ICacheIntentRegistry
+    {
+        public IReadOnlyList<CacheIntentEntry> GetRecent(int maxCount) => Array.Empty<CacheIntentEntry>();
+        public void RecordRemove(string key) { }
+        public void RecordSet(string key, string backend, in CacheEntryOptions options, int payloadBytes) { }
+        public bool TryGet(string key, out CacheIntentEntry? entry)
+        {
+            entry = null;
+            return false;
+        }
     }
 }

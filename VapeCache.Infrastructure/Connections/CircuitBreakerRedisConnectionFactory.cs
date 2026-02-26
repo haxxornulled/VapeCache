@@ -20,19 +20,21 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
     private readonly ResiliencePipeline<Result<IRedisConnection>> _pipeline;
     private readonly ILogger<CircuitBreakerRedisConnectionFactory> _logger;
     private readonly CacheStats _stats;
-    private readonly RedisCircuitBreakerOptions _options;
+    private readonly IOptionsMonitor<RedisCircuitBreakerOptions> _optionsMonitor;
+    private RedisCircuitBreakerOptions _options => _optionsMonitor.CurrentValue;
+    private readonly System.Threading.Lock _stateGate = new();
     private CircuitState _currentState = CircuitState.Closed;
     private int _consecutiveRetries = 0;
     private TimeSpan _currentBreakDuration;
 
     public CircuitBreakerRedisConnectionFactory(
         RedisConnectionFactory inner, // Concrete type to avoid circular dep with IRedisConnectionFactory
-        IOptions<RedisCircuitBreakerOptions> options,
+        IOptionsMonitor<RedisCircuitBreakerOptions> options,
         CacheStatsRegistry statsRegistry,
         ILogger<CircuitBreakerRedisConnectionFactory> logger)
     {
         _inner = inner;
-        _options = options.Value;
+        _optionsMonitor = options;
         _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
         _logger = logger;
         _currentBreakDuration = _options.BreakDuration; // Initialize with base duration
@@ -56,76 +58,93 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
                 // Dynamic break duration with exponential backoff support
                 BreakDurationGenerator = args =>
                 {
-                    var duration = _currentBreakDuration;
-
-                    // Check if max retries exceeded (if configured)
-                    if (_options.MaxConsecutiveRetries > 0 && _consecutiveRetries >= _options.MaxConsecutiveRetries)
+                    lock (_stateGate)
                     {
-                        _logger.LogError(
-                            "Circuit breaker: Max retries ({MaxRetries}) exceeded. Staying in OPEN state indefinitely.",
-                            _options.MaxConsecutiveRetries);
-                        // Return a very long duration to effectively stay open
-                        return ValueTask.FromResult(TimeSpan.FromDays(365));
-                    }
+                        var optionsSnapshot = _options;
+                        if (optionsSnapshot.MaxConsecutiveRetries > 0 && _consecutiveRetries >= optionsSnapshot.MaxConsecutiveRetries)
+                        {
+                            _logger.LogError(
+                                "Circuit breaker: Max retries ({MaxRetries}) exceeded. Staying in OPEN state indefinitely.",
+                                optionsSnapshot.MaxConsecutiveRetries);
+                            // Keep open effectively forever until operator intervention.
+                            return ValueTask.FromResult(TimeSpan.FromDays(365));
+                        }
 
-                    return ValueTask.FromResult(duration);
+                        return ValueTask.FromResult(_currentBreakDuration);
+                    }
                 },
                 OnOpened = args =>
                 {
-                    var previous = _currentState;
-                    _currentState = CircuitState.Open;
-                    _stats.IncBreakerOpened();
-                    CacheTelemetry.RedisBreakerOpened.Add(1, new System.Diagnostics.TagList { { "backend", "hybrid" } });
-
-                    // Increment retry counter
-                    _consecutiveRetries++;
-
-                    // Apply exponential backoff if enabled
-                    if (_options.UseExponentialBackoff)
+                    int retries;
+                    TimeSpan duration;
+                    CircuitState previous;
+                    CircuitState current;
+                    lock (_stateGate)
                     {
-                        var newDuration = TimeSpan.FromMilliseconds(_currentBreakDuration.TotalMilliseconds * 2);
-                        _currentBreakDuration = newDuration > _options.MaxBreakDuration
-                            ? _options.MaxBreakDuration
-                            : newDuration;
+                        previous = _currentState;
+                        _currentState = CircuitState.Open;
+                        current = _currentState;
+                        _stats.IncBreakerOpened();
+                        CacheTelemetry.RedisBreakerOpened.Add(1, new System.Diagnostics.TagList { { "backend", "hybrid" } });
+
+                        _consecutiveRetries++;
+                        retries = _consecutiveRetries;
+
+                        var optionsSnapshot = _options;
+                        if (optionsSnapshot.UseExponentialBackoff)
+                        {
+                            var doubled = TimeSpan.FromMilliseconds(_currentBreakDuration.TotalMilliseconds * 2);
+                            _currentBreakDuration = doubled > optionsSnapshot.MaxBreakDuration
+                                ? optionsSnapshot.MaxBreakDuration
+                                : doubled;
+                        }
+
+                        duration = _currentBreakDuration;
                     }
 
                     _logger.LogWarning(
-                        "⚡ CIRCUIT BREAKER OPENED - Redis connections failing (retry #{Retry}). Switching to in-memory mode for {Duration} seconds. State: {Previous}->{Current}",
-                        _consecutiveRetries,
-                        _currentBreakDuration.TotalSeconds,
+                        "Circuit breaker OPENED - Redis connections failing (retry #{Retry}). Switching to in-memory mode for {Duration} seconds. State: {Previous}->{Current}",
+                        retries,
+                        duration.TotalSeconds,
                         previous,
-                        _currentState);
-
-                    Console.WriteLine(
-                        $"\n🔥🔥🔥 ⚡ CIRCUIT BREAKER OPENED! Redis connections failing (retry #{_consecutiveRetries}), switching to IN-MEMORY mode for {_currentBreakDuration.TotalSeconds} seconds 🔥🔥🔥\n");
+                        current);
 
                     return ValueTask.CompletedTask;
                 },
                 OnClosed = args =>
                 {
-                    var previous = _currentState;
-                    _currentState = CircuitState.Closed;
-
-                    // Reset retry counter and break duration on successful recovery
-                    var totalRetries = _consecutiveRetries;
-                    _consecutiveRetries = 0;
-                    _currentBreakDuration = _options.BreakDuration;
+                    var optionsSnapshot = _options;
+                    int totalRetries;
+                    CircuitState previous;
+                    CircuitState current;
+                    lock (_stateGate)
+                    {
+                        previous = _currentState;
+                        _currentState = CircuitState.Closed;
+                        current = _currentState;
+                        totalRetries = _consecutiveRetries;
+                        _consecutiveRetries = 0;
+                        _currentBreakDuration = optionsSnapshot.BreakDuration;
+                    }
 
                     _logger.LogInformation(
-                        "✅ Circuit breaker CLOSED. Redis operations resumed after {Retries} retries. State: {Previous}->{Current}",
+                        "Circuit breaker CLOSED. Redis operations resumed after {Retries} retries. State: {Previous}->{Current}",
                         totalRetries,
                         previous,
-                        _currentState);
-                    Console.WriteLine(
-                        $"\n✅✅✅ Circuit breaker CLOSED! Redis operations resumed after {totalRetries} retries. ✅✅✅\n");
+                        current);
                     return ValueTask.CompletedTask;
                 },
                 OnHalfOpened = args =>
                 {
-                    var previous = _currentState;
-                    _currentState = CircuitState.HalfOpen;
-                    _logger.LogInformation("🔄 Circuit breaker HALF-OPEN. Testing Redis connection... State: {Previous}->{Current}", previous, _currentState);
-                    Console.WriteLine("\n🔄 Circuit breaker HALF-OPEN. Testing Redis connection...\n");
+                    CircuitState previous;
+                    CircuitState current;
+                    lock (_stateGate)
+                    {
+                        previous = _currentState;
+                        _currentState = CircuitState.HalfOpen;
+                        current = _currentState;
+                    }
+                    _logger.LogInformation("Circuit breaker HALF-OPEN. Testing Redis connection. State: {Previous}->{Current}", previous, current);
                     return ValueTask.CompletedTask;
                 }
             })

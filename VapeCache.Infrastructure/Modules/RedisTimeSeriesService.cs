@@ -14,7 +14,7 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
     private bool? _available;
 
     private readonly ConcurrentDictionary<string, SortedDictionary<long, double>> _series = new();
-    private readonly ConcurrentDictionary<string, object> _locks = new();
+    private readonly ConcurrentDictionary<string, System.Threading.Lock> _locks = new();
 
     public RedisTimeSeriesService(IRedisCommandExecutor redis, IRedisModuleDetector modules, ILogger<RedisTimeSeriesService> logger)
     {
@@ -51,7 +51,7 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
 
         _logger.LogDebug("RedisTimeSeries unavailable; using in-memory fallback for {Key}.", key);
         _series.GetOrAdd(key, _ => new SortedDictionary<long, double>());
-        _locks.GetOrAdd(key, _ => new object());
+        _locks.GetOrAdd(key, _ => new System.Threading.Lock());
         return true;
     }
 
@@ -62,7 +62,7 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
 
         _logger.LogDebug("RedisTimeSeries unavailable; using in-memory fallback for {Key}.", key);
         var series = _series.GetOrAdd(key, _ => new SortedDictionary<long, double>());
-        var gate = _locks.GetOrAdd(key, _ => new object());
+        var gate = _locks.GetOrAdd(key, _ => new System.Threading.Lock());
         lock (gate)
         {
             series[timestamp] = value;
@@ -78,7 +78,7 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
         if (!_series.TryGetValue(key, out var series))
             return Array.Empty<(long Timestamp, double Value)>();
 
-        var gate = _locks.GetOrAdd(key, _ => new object());
+        var gate = _locks.GetOrAdd(key, _ => new System.Threading.Lock());
         var results = new List<(long Timestamp, double Value)>();
         lock (gate)
         {

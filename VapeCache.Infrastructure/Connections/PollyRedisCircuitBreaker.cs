@@ -16,7 +16,8 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
     private readonly ResiliencePipeline _pipeline;
     private readonly ILogger<PollyRedisCircuitBreaker> _logger;
     private readonly CacheStats _stats;
-    private readonly RedisCircuitBreakerOptions _options;
+    private readonly IOptionsMonitor<RedisCircuitBreakerOptions> _optionsMonitor;
+    private RedisCircuitBreakerOptions _options => _optionsMonitor.CurrentValue;
     private CircuitState _currentState = CircuitState.Closed;
     private string? _forcedReason;
 
@@ -25,7 +26,7 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
         CacheStatsRegistry statsRegistry,
         ILogger<PollyRedisCircuitBreaker> logger)
     {
-        _options = options.CurrentValue;
+        _optionsMonitor = options;
         _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
         _logger = logger;
 
@@ -44,34 +45,23 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
                     CacheTelemetry.RedisBreakerOpened.Add(1, new System.Diagnostics.TagList { { "backend", "hybrid" } });
 
                     _logger.LogWarning(
-                        "⚡ CIRCUIT BREAKER OPENED after failures. Switching to in-memory mode for {Duration} seconds.",
+                        "Circuit breaker opened after failures. Switching to in-memory mode for {Duration} seconds.",
                         _options.BreakDuration.TotalSeconds);
-
-                    Console.WriteLine(
-                        $"\n🔥🔥🔥 ⚡ CIRCUIT BREAKER OPENED! Switching to IN-MEMORY mode for {_options.BreakDuration.TotalSeconds} seconds 🔥🔥🔥\n");
-
-                    // Warn free tier users about data loss without reconciliation
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine("⚠️  WARNING: Cache writes during this outage will NOT be synced back to Redis!");
-                    Console.WriteLine("⚠️  Upgrade to VapeCache Pro for zero-data-loss reconciliation with SQLite persistence.");
-                    Console.WriteLine("⚠️  Visit https://vapecache.com/pricing for details.");
-                    Console.ResetColor();
-                    Console.WriteLine();
+                    _logger.LogWarning(
+                        "Cache writes during this outage are not reconciled back to Redis without a reconciliation store.");
 
                     return ValueTask.CompletedTask;
                 },
                 OnClosed = args =>
                 {
                     _currentState = CircuitState.Closed;
-                    _logger.LogInformation("✅ Circuit breaker CLOSED. Redis operations resumed.");
-                    Console.WriteLine("\n✅✅✅ Circuit breaker CLOSED! Redis operations resumed. ✅✅✅\n");
+                    _logger.LogInformation("Circuit breaker closed. Redis operations resumed.");
                     return ValueTask.CompletedTask;
                 },
                 OnHalfOpened = args =>
                 {
                     _currentState = CircuitState.HalfOpen;
-                    _logger.LogInformation("🔄 Circuit breaker HALF-OPEN. Testing Redis connection...");
-                    Console.WriteLine("\n🔄 Circuit breaker HALF-OPEN. Testing Redis connection...\n");
+                    _logger.LogInformation("Circuit breaker half-open. Testing Redis connection.");
                     return ValueTask.CompletedTask;
                 }
             })
@@ -134,3 +124,4 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
         _logger.LogInformation("Circuit breaker manual override cleared");
     }
 }
+

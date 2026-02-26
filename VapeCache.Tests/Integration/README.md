@@ -72,6 +72,11 @@ Tests coalesced write functionality (batching multiple commands into single sock
 
 - `CoalescedWrites_SingleCommand`: Verifies basic SET/GET/DELETE with coalescing enabled
 - `CoalescedWrites_Concurrent`: Stress test with 100 concurrent operations
+- `CoalescedWrites_Hash_RoundTrip`: Validates coalesced write path for HASH commands
+- `CoalescedWrites_List_RoundTrip`: Validates coalesced write path for LIST commands
+- `CoalescedWrites_Set_RoundTrip`: Validates coalesced write path for SET commands
+- `CoalescedWrites_SortedSet_RoundTrip`: Validates coalesced write path for SORTED SET commands
+- `CoalescedWrites_Json_RoundTrip_WhenRedisJsonAvailable`: Validates coalesced JSON commands when RedisJSON is installed
 
 ### RedisCommandExecutorIntegrationTests
 Tests core Redis commands against live server.
