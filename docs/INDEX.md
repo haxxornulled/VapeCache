@@ -16,6 +16,7 @@ This index tracks the current feature set and supported APIs.
 - [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md) - Detailed Aspire guide
 - [WRAPPER_PLUGIN_GUIDE.md](WRAPPER_PLUGIN_GUIDE.md) - Wrapper endpoints + plugin pattern
 - [BLAZOR_DASHBOARD_EXAMPLE.md](BLAZOR_DASHBOARD_EXAMPLE.md) - Realtime dashboard wiring from `/vapecache/stream`
+- [ASPNETCORE_PIPELINE_CACHING.md](ASPNETCORE_PIPELINE_CACHING.md) - Output-cache pipeline hooks for MVC/Minimal API/Blazor
 - [Sample app](../samples/VapeCache.Sample) - Buildable usage example
 
 ## API Reference
@@ -31,6 +32,7 @@ This index tracks the current feature set and supported APIs.
 - [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md) - Multiplexed lanes + autoscaler architecture and tuning
 - [INMEMORY_PERSISTENCE.md](INMEMORY_PERSISTENCE.md) - In-memory fallback spill design
 - [PERFORMANCE.md](PERFORMANCE.md) - Benchmark methodology and results
+- [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) - Current benchmark snapshot (environment + latest comparison)
 - [BENCHMARKING.md](BENCHMARKING.md) - How to run benchmarks
 - [ENGINEERING_PLAYBOOK.md](ENGINEERING_PLAYBOOK.md) - Analyzer, profiling, and capture workflow
 
@@ -39,6 +41,9 @@ This index tracks the current feature set and supported APIs.
 - [CURRENT_BACKEND_METRIC.md](CURRENT_BACKEND_METRIC.md) - Active backend metric
 - [FAILURE_SCENARIOS.md](FAILURE_SCENARIOS.md) - Redis outage behavior
 - [TLS_SECURITY.md](TLS_SECURITY.md) - TLS guidance
+- [LICENSE_OPERATIONS_RUNBOOK.md](LICENSE_OPERATIONS_RUNBOOK.md) - Key rotation, revocation, and incident flow
+- [LICENSE_CONTROL_PLANE.md](LICENSE_CONTROL_PLANE.md) - Online revocation/kill-switch service
+- [LICENSE_GENERATOR_EXTERNALIZATION.md](LICENSE_GENERATOR_EXTERNALIZATION.md) - Moving issuance/signing out of this repo
 
 ## Roadmap & Risk
 - [FUTURE_PROOFING.md](FUTURE_PROOFING.md) - Hardening notes and risk assessment

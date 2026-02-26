@@ -25,6 +25,13 @@ Aspire integration helpers.
 dotnet add package VapeCache.Extensions.Aspire
 ```
 
+### VapeCache.Extensions.AspNetCore
+ASP.NET Core output-cache pipeline hooks (MVC/Blazor/Minimal API) backed by VapeCache storage.
+
+```bash
+dotnet add package VapeCache.Extensions.AspNetCore
+```
+
 ### VapeCache.Reconciliation
 Optional reconciliation service to sync in-memory writes after Redis recovery.
 

@@ -1,6 +1,6 @@
 # Redis Protocol Support
 
-VapeCache targets **RESP2** and focuses on cache-friendly commands. This document tracks the public command surface exposed via `IRedisCommandExecutor`.
+VapeCache targets cache-friendly Redis command flows with RESP2/RESP3 parsing support. This document tracks the public command surface exposed via `IRedisCommandExecutor`.
 
 ## Supported Commands
 
@@ -84,21 +84,33 @@ var set = batch.QueueAsync((exec, ct) => exec.SetAsync("k2", payload, null, ct))
 await batch.ExecuteAsync(ct);
 ```
 
-## RESP2 Reply Types
+## RESP Reply Types
 
-VapeCache parses the RESP2 reply types:
+VapeCache parses RESP2 core reply types:
 - Simple strings
 - Errors
 - Integers
 - Bulk strings (including null)
 - Arrays (including null)
 
+VapeCache also parses RESP3 structural types used in modern deployments:
+- Null (`_`)
+- Boolean (`#`)
+- Double/Big number payload lines
+- Verbatim string (`=`)
+- Blob error (`!`)
+- Set (`~`), Map (`%`), Attribute (`|`), Push (`>`)
+
 ## Not Supported (Non-Goals)
 
 - Pub/Sub
 - Lua scripting
 - Transactions (MULTI/EXEC)
-- Cluster redirects (MOVED/ASK)
-- RESP3 push messages
+- Full cluster orchestration (slot-map ownership across the entire command surface)
+- RESP3 client-side caching orchestration
 
-If you need these features, use StackExchange.Redis alongside VapeCache.
+Notes:
+- Core cache-path MOVED/ASK redirects are supported with bounded retries.
+- RESP3 push frames are safely ignored in request/response loops.
+- Enable redirects with `RedisConnection:EnableClusterRedirection=true`.
+- Control hop budget with `RedisConnection:MaxClusterRedirects` (default `3`, clamped `0..16`).

@@ -371,6 +371,10 @@ You'll see VapeCache metrics grouped by meter:
 - `cache.spill.orphan.scanned` (Counter) - Spill files scanned for cleanup
 - `cache.spill.orphan.cleanup.count` (Counter) - Spill files deleted during cleanup
 - `cache.spill.orphan.cleanup.bytes` (Counter) - Spill bytes deleted during cleanup
+- `cache.spill.store_unavailable` (Counter) - Spill enabled but no writable spill store registered
+- `cache.spill.shard.active` (Gauge) - Active spill shards with at least one file
+- `cache.spill.shard.max_files` (Gauge) - Max files in any single shard
+- `cache.spill.shard.imbalance_ratio` (Gauge) - Shard imbalance (max/avg files per active shard)
 - `cache.op.ms` (Histogram) - Operation latency
 
 **VapeCache.Redis (Redis Metrics):**
@@ -409,6 +413,9 @@ While Aspire Dashboard doesn't support custom dashboards yet (as of .NET 9), you
 - `stampedeKeyRejected`
 - `stampedeLockWaitTimeout`
 - `stampedeFailureBackoffRejected`
+- `spill.mode` (`noop` or `file`)
+- `spill.totalSpillFiles`, `spill.activeShards`, `spill.maxFilesInShard`
+- `spill.imbalanceRatio`, `spill.topShards` (hot shard prefixes)
 
 `GET /vapecache/stream` exposes realtime SSE frames (`event: vapecache-stats`) for Blazor charting.
 

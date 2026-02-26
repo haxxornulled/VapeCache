@@ -69,3 +69,5 @@ REVENUE_PROJECTIONS.md
 *.key
 licenses/
 customers/
+VapeCache.Licensing.ControlPlane/data/
+VapeCahe.Core/

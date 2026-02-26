@@ -42,6 +42,18 @@ dotnet add package VapeCache
 }
 ```
 
+Optional for Redis Cluster + RESP3:
+
+```json
+{
+  "RedisConnection": {
+    "RespProtocolVersion": 3,
+    "EnableClusterRedirection": true,
+    "MaxClusterRedirects": 3
+  }
+}
+```
+
 ### 4. Register VapeCache (`Program.cs`)
 
 ```csharp
@@ -95,6 +107,44 @@ public sealed class PingService(ICacheService cache)
 }
 ```
 
+### 6. ASP.NET Core Pipeline Hook (MVC/Blazor/Minimal API)
+
+```bash
+dotnet add package VapeCache.Extensions.AspNetCore
+```
+
+```csharp
+builder.Services.AddVapeCacheOutputCaching(options =>
+{
+    options.AddBasePolicy(policy => policy.Expire(TimeSpan.FromSeconds(30)));
+});
+
+builder.Services.AddVapeCacheFailoverAffinityHints();
+
+var app = builder.Build();
+app.UseVapeCacheOutputCaching();
+app.UseVapeCacheFailoverAffinityHints();
+```
+
+### 7. Stream Large Payloads (Chunked + Failover)
+
+```csharp
+app.MapGet("/media/{id}", async (string id, HttpResponse response, ICacheChunkStreamService streams, CancellationToken ct) =>
+{
+    var manifest = await streams.GetManifestAsync($"media:{id}", ct);
+    if (manifest is null)
+        return Results.NotFound();
+
+    if (!string.IsNullOrWhiteSpace(manifest.Value.ContentType))
+        response.ContentType = manifest.Value.ContentType;
+
+    var copied = await streams.CopyToAsync($"media:{id}", response.Body, ct);
+    return copied ? Results.Empty : Results.NotFound();
+});
+```
+
+This uses the same hybrid backend as normal cache operations, so reads can continue from in-memory fallback if Redis is unavailable.
+
 Need the full setup and tuning knobs? Jump to [📦 Quick Start](#-quick-start) below.
 
 ---
@@ -131,6 +181,7 @@ powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -
 ```
 
 See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for interpretation and [docs/BENCHMARKING.md](docs/BENCHMARKING.md) for full runbook.
+Current checked-in baseline snapshot: [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md).
 
 ---
 ## 🔧 Development
@@ -213,6 +264,15 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 
 ---
 
+## 🔐 Enterprise Licensing Ops
+
+- Online revocation/kill-switch service: `VapeCache.Licensing.ControlPlane`
+- Runtime operations runbook: [docs/LICENSE_OPERATIONS_RUNBOOK.md](docs/LICENSE_OPERATIONS_RUNBOOK.md)
+- Control-plane setup guide: [docs/LICENSE_CONTROL_PLANE.md](docs/LICENSE_CONTROL_PLANE.md)
+- Issuer externalization plan: [docs/LICENSE_GENERATOR_EXTERNALIZATION.md](docs/LICENSE_GENERATOR_EXTERNALIZATION.md)
+
+---
+
 ## 🎯 Use Cases
 
 ### ✅ When to Use VapeCache
@@ -226,7 +286,7 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 - Need full Redis command surface (200+ commands) → VapeCache focuses on caching use cases
 - Need Pub/Sub → Not currently supported (see roadmap)
 - Need Lua scripting → Not currently supported (see roadmap)
-- Need cluster mode → Single-instance and Sentinel support only
+- Need full cross-slot cluster orchestration across every Redis command → use StackExchange.Redis for now
 
 See [docs/NON_GOALS.md](docs/NON_GOALS.md) for strategic positioning.
 

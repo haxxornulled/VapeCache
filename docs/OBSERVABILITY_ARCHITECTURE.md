@@ -290,6 +290,10 @@ builder.Services.AddVapecacheCaching();
 | `cache.spill.orphan.scanned` | Counter | count | Spill files scanned for cleanup |
 | `cache.spill.orphan.cleanup.count` | Counter | count | Spill files deleted during cleanup |
 | `cache.spill.orphan.cleanup.bytes` | Counter | bytes | Spill bytes deleted during cleanup |
+| `cache.spill.store_unavailable` | Counter | count | Spill enabled but no writable spill store registered |
+| `cache.spill.shard.active` | Gauge | shards | Active spill shard directories |
+| `cache.spill.shard.max_files` | Gauge | files | Max files in any one spill shard |
+| `cache.spill.shard.imbalance_ratio` | Gauge | ratio | Spill shard imbalance (max/avg) |
 | `cache.op.ms` | Histogram | milliseconds | Cache operation latency (tagged by op) |
 | `redis.breaker.opened` | Counter | count | Circuit breaker opened |
 

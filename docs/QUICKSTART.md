@@ -48,6 +48,18 @@ Equivalent environment variable:
 setx VAPECACHE_REDIS_CONNECTIONSTRING "redis://localhost:6379/0"
 ```
 
+Cluster + RESP3 (optional):
+
+```json
+{
+  "RedisConnection": {
+    "RespProtocolVersion": 3,
+    "EnableClusterRedirection": true,
+    "MaxClusterRedirects": 3
+  }
+}
+```
+
 ## 4. Register VapeCache in `Program.cs`
 
 Use this when wiring services directly:
@@ -138,6 +150,43 @@ curl http://localhost:5000/vapecache/status
 curl http://localhost:5000/vapecache/stats
 ```
 
+## 8. Stream Large Payloads (Chunked)
+
+For large payloads (for example media chunks), use `ICacheChunkStreamService`:
+
+```csharp
+app.MapPut("/media/{id}", async (string id, HttpRequest request, ICacheChunkStreamService streams, CancellationToken ct) =>
+{
+    var manifest = await streams.WriteAsync(
+        $"media:{id}",
+        request.Body,
+        new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(30)),
+        new CacheChunkStreamWriteOptions
+        {
+            ChunkSizeBytes = 64 * 1024,
+            ContentType = request.ContentType
+        },
+        ct);
+
+    return Results.Ok(manifest);
+});
+
+app.MapGet("/media/{id}", async (string id, HttpResponse response, ICacheChunkStreamService streams, CancellationToken ct) =>
+{
+    var manifest = await streams.GetManifestAsync($"media:{id}", ct);
+    if (manifest is null)
+        return Results.NotFound();
+
+    if (!string.IsNullOrWhiteSpace(manifest.Value.ContentType))
+        response.ContentType = manifest.Value.ContentType;
+
+    var copied = await streams.CopyToAsync($"media:{id}", response.Body, ct);
+    return copied ? Results.Empty : Results.NotFound();
+});
+```
+
+With hybrid cache enabled, this stream path automatically reads from in-memory fallback when Redis is down.
+
 ## Common Mistakes
 
 - Redis is not running, or wrong host/port in config.
@@ -151,3 +200,40 @@ curl http://localhost:5000/vapecache/stats
 - [API_REFERENCE.md](API_REFERENCE.md)
 - [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md)
 - [WRAPPER_PLUGIN_GUIDE.md](WRAPPER_PLUGIN_GUIDE.md)
+- [LICENSE_CONTROL_PLANE.md](LICENSE_CONTROL_PLANE.md)
+- [ASPNETCORE_PIPELINE_CACHING.md](ASPNETCORE_PIPELINE_CACHING.md)
+
+## Enterprise License Runtime (Optional but Recommended)
+
+For enterprise features (Persistence/Reconciliation), set explicit license + revocation config:
+
+```bash
+setx VAPECACHE_LICENSE_KEY "VC2...."
+setx VAPECACHE_LICENSE_REVOCATION_ENABLED "true"
+setx VAPECACHE_LICENSE_REVOCATION_ENDPOINT "https://license-control-plane.internal"
+setx VAPECACHE_LICENSE_REVOCATION_API_KEY "<secret>"
+```
+
+## ASP.NET Core Output Caching Hook (MVC/Blazor/Minimal API)
+
+```bash
+dotnet add package VapeCache.Extensions.AspNetCore
+```
+
+```csharp
+builder.Services.AddVapeCacheOutputCaching(options =>
+{
+    options.AddBasePolicy(policy => policy.Expire(TimeSpan.FromSeconds(30)));
+});
+
+var app = builder.Build();
+app.UseVapeCacheOutputCaching();
+```
+
+For multi-node/web-garden apps, add failover affinity hints:
+
+```csharp
+builder.Services.AddVapeCacheFailoverAffinityHints();
+var app = builder.Build();
+app.UseVapeCacheFailoverAffinityHints();
+```

@@ -92,6 +92,35 @@ When publishing results internally or externally:
 - Include allocation and percentile context.
 - Include artifact references (`comparison.md`, CSV/JSON/HTML exports).
 
+### Publishable Header (Required)
+
+Every published result must include this header block:
+
+- Environment:
+  CPU model, logical cores, RAM, OS, .NET version, GC mode.
+- Redis target:
+  Redis version/config basics (persistence mode, eviction policy, maxmemory) and network topology/RTT context.
+- Workload definition:
+  operation mix, key cardinality/distribution, payload size distribution, TTL distribution, concurrency, duration, run count.
+- Fairness statement:
+  same payload bytes, serializer assumptions, equivalent command semantics, and whether defaults or tuned settings were used.
+
+### GroceryStore Unit Definition
+
+When reporting `shoppers/sec`, define it explicitly:
+
+- `1 shopper` means one full synthetic shopper flow:
+  `JoinFlashSale -> IsInFlashSale -> BuildCartItems -> AddToCart -> CartReadPhase -> SessionAndSalePhase -> ClearCart`.
+- Cart item count is currently random in `15..maxCartSize`.
+- Product catalog size is 25; flash-sale key-space is 5.
+
+If this definition is missing, the throughput number is not publishable.
+
+### Sanity Matrix (Minimum)
+
+- Payload scaling: run at `64B`, `256B`, `1KB`, `4KB`, `16KB`.
+- Network sensitivity: run at baseline + injected RTT profiles (for example `1ms`, `5ms`, `20ms`).
+
 ## References
 
 - [docs/BENCHMARKING.md](BENCHMARKING.md)

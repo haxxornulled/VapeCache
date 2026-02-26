@@ -6,6 +6,7 @@ This runbook defines the operational process for VapeCache license signing and v
 
 - Enterprise signing/verification keys
 - Customer license issuance lifecycle
+- Online revocation / kill-switch operations
 - Emergency response for key compromise
 - Rotation cadence and compatibility window
 
@@ -23,7 +24,8 @@ This runbook defines the operational process for VapeCache license signing and v
 ## Baseline Controls
 
 1. Keep private signing key in dedicated secret store (never source control).
-2. Keep public verification key and `kid` in deploy-time config (env vars/secret manager).
+2. Keep public verification key and `kid` in deploy-time config.
+3. Verifier env-var override is now disabled by default and only enabled with `VAPECACHE_LICENSE_ALLOW_VERIFIER_ENV_OVERRIDE=true`.
 3. Require dual control for signing-key replacement.
 4. Keep issuance audit log for each generated key:
    - customer/org id
@@ -57,8 +59,28 @@ This runbook defines the operational process for VapeCache license signing and v
 ## Runtime Safety Expectations
 
 1. Invalid/expired/untrusted licenses fail closed for enterprise-only extensions.
+2. Missing/blank license keys fail closed for enterprise extensions (`ValidateRequired` path).
 2. Core OSS-safe cache behavior remains functional when enterprise checks fail.
 3. License validation failures are logged with reason code (no secret leakage).
+
+## Online Revocation / Kill-Switch
+
+Use `VapeCache.Licensing.ControlPlane` as the source of truth for revocation state.
+
+Control scopes:
+
+1. License id revoke/activate
+2. Organization kill-switch on/off
+3. Signing key id revoke/activate
+
+Runtime client config:
+
+1. `VAPECACHE_LICENSE_REVOCATION_ENABLED=true`
+2. `VAPECACHE_LICENSE_REVOCATION_ENDPOINT=https://<control-plane>`
+3. `VAPECACHE_LICENSE_REVOCATION_API_KEY=<secret>`
+4. `VAPECACHE_LICENSE_REVOCATION_FAIL_OPEN=true|false`
+5. `VAPECACHE_LICENSE_REVOCATION_TIMEOUT_MS=2000`
+6. `VAPECACHE_LICENSE_REVOCATION_CACHE_SECONDS=60`
 
 ## Minimum Monitoring
 
@@ -71,8 +93,8 @@ This runbook defines the operational process for VapeCache license signing and v
 2. Alert on spikes in unknown `kid` and invalid signature failures.
 3. Track enterprise feature activation attempts vs successful validations.
 
-## Planned Hardening (Recommended)
+## Additional Hardening Backlog
 
-1. Add revocation list / online check endpoint for hard deny of compromised licenses.
+1. Move signing/token-issuance code to separate private repo/service.
 2. Add signed issuance ledger export for auditability.
 3. Add canary validator endpoint in CI/CD smoke tests.

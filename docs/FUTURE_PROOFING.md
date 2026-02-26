@@ -42,7 +42,7 @@ We design the library so consumer code is predictable, boring, and buildable:
 - **Explicit behavior**: documented fallbacks and command coverage.
 - **Buildable examples**: sample app compiles against the current API.
 - **Autofac‑first**: registrations follow the real DI pattern used in the repo.
-- **Clear non‑goals**: no Pub/Sub, Lua scripting, RESP3, or cluster support.
+- **Clear non‑goals**: no Pub/Sub/Lua/Streams; RESP3 and cluster support are cache-path focused, not full protocol orchestration.
 
 ## Security Risk Assessment
 

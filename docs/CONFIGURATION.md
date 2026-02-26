@@ -54,7 +54,10 @@ Controls connection pooling and socket behavior.
     "AllowAuthFallbackToPasswordOnly": true,
     "LogWhoAmIOnConnect": false,
     "MaxBulkStringBytes": 16777216,
-    "MaxArrayDepth": 64
+    "MaxArrayDepth": 64,
+    "RespProtocolVersion": 3,
+    "EnableClusterRedirection": true,
+    "MaxClusterRedirects": 3
   }
 }
 ```
@@ -66,6 +69,9 @@ Controls connection pooling and socket behavior.
 - Defaults are full-tilt for high-throughput links (`TcpSendBufferBytes=4MB`, `TcpReceiveBufferBytes=4MB`).
 - `EnableTcpNoDelay=true` is best for low-latency cache workloads.
 - `TcpSendBufferBytes` / `TcpReceiveBufferBytes` let you tune socket buffering for high-throughput links.
+- `RespProtocolVersion` supports `2` or `3`; default negotiation is `RESP2` unless configured.
+- `EnableClusterRedirection=true` enables MOVED/ASK retries on cache-path commands.
+- `MaxClusterRedirects` bounds redirect hops per command (default `3`, clamped `0..16`).
 
 ## RedisMultiplexer (RedisMultiplexerOptions)
 
@@ -166,6 +172,29 @@ Controls hybrid failover behavior.
 }
 ```
 
+## HybridFailover (HybridFailoverOptions)
+
+Controls how VapeCache keeps local in-memory fallback warm while Redis is healthy.
+
+```json
+{
+  "HybridFailover": {
+    "MirrorWritesToFallbackWhenRedisHealthy": true,
+    "WarmFallbackOnRedisReadHit": true,
+    "FallbackWarmReadTtl": "00:02:00",
+    "FallbackMirrorWriteTtlWhenMissing": "00:05:00",
+    "MaxMirrorPayloadBytes": 262144,
+    "RemoveStaleFallbackOnRedisMiss": true
+  }
+}
+```
+
+**Notes**
+- `MirrorWritesToFallbackWhenRedisHealthy=true` gives immediate failover continuity for recent writes.
+- `WarmFallbackOnRedisReadHit=true` warms hot keys locally from Redis hits.
+- `RemoveStaleFallbackOnRedisMiss=true` avoids stale local values during outages after Redis eviction.
+- In multi-node/web-garden deployments, local in-memory fallback is still node-local. Use sticky sessions/affinity during failover.
+
 ## CacheStampede (CacheStampedeOptions)
 
 Controls stampede protection.
@@ -198,7 +227,7 @@ Controls large-payload spill behavior for the in-memory fallback cache.
 ```json
 {
   "InMemorySpill": {
-    "EnableSpillToDisk": true,
+    "EnableSpillToDisk": false,
     "SpillThresholdBytes": 262144,
     "InlinePrefixBytes": 4096,
     "SpillDirectory": "%LOCALAPPDATA%/VapeCache/spill",
@@ -211,6 +240,7 @@ Controls large-payload spill behavior for the in-memory fallback cache.
 
 **Notes**
 - Values larger than `SpillThresholdBytes` are stored with an in-memory prefix and a disk tail.
+- `EnableSpillToDisk` requires a writable spill store registration (`AddVapeCachePersistence(...)`); otherwise fallback remains memory-only and emits diagnostics as `mode=noop`.
 - Register a custom `ISpillEncryptionProvider` to encrypt spill files.
 - Orphan cleanup is best-effort and only runs when enabled.
 
@@ -249,6 +279,78 @@ builder.Services.AddVapeCacheRedisReconciliation(options =>
     options.MaxOperationAge = TimeSpan.FromMinutes(5);
 });
 ```
+
+## ASP.NET Core Output Caching (MVC/Blazor/Minimal API)
+
+Use `VapeCache.Extensions.AspNetCore` to keep ASP.NET Core output-cache middleware/policies while storing responses in VapeCache:
+
+```csharp
+builder.Services.AddVapeCacheOutputCaching(
+    configureOutputCache: options =>
+    {
+        options.AddBasePolicy(policy => policy.Expire(TimeSpan.FromSeconds(30)));
+    },
+    configureStore: store =>
+    {
+        store.KeyPrefix = "vapecache:output";
+        store.DefaultTtl = TimeSpan.FromSeconds(30);
+        store.EnableTagIndexing = true;
+});
+```
+
+Sticky-session affinity hints for clustered/web-garden hosts:
+
+```csharp
+builder.Services.AddVapeCacheFailoverAffinityHints(options =>
+{
+    options.NodeId = Environment.MachineName;
+    options.CookieName = "VapeCacheAffinity";
+});
+
+var app = builder.Build();
+app.UseVapeCacheFailoverAffinityHints();
+```
+
+Configuration binding option:
+
+```csharp
+builder.Services.AddVapeCacheOutputCaching(builder.Configuration);
+```
+
+```json
+{
+  "VapeCacheOutputCache": {
+    "KeyPrefix": "vapecache:output",
+    "DefaultTtl": "00:00:30",
+    "EnableTagIndexing": true
+  }
+}
+```
+
+## Enterprise Licensing Runtime
+
+Enterprise extension gates now fail closed on missing keys. Set a key explicitly:
+
+```bash
+$env:VAPECACHE_LICENSE_KEY = "VC2...."
+```
+
+Optional online revocation/kill-switch checks:
+
+```bash
+$env:VAPECACHE_LICENSE_REVOCATION_ENABLED = "true"
+$env:VAPECACHE_LICENSE_REVOCATION_ENDPOINT = "https://license-control-plane.internal"
+$env:VAPECACHE_LICENSE_REVOCATION_API_KEY = "<secret>"
+$env:VAPECACHE_LICENSE_REVOCATION_FAIL_OPEN = "true"
+$env:VAPECACHE_LICENSE_REVOCATION_TIMEOUT_MS = "2000"
+$env:VAPECACHE_LICENSE_REVOCATION_CACHE_SECONDS = "60"
+```
+
+Verifier override hardening:
+
+- Default behavior ignores verifier env overrides.
+- To opt in (dev/test only), set:
+  - `$env:VAPECACHE_LICENSE_ALLOW_VERIFIER_ENV_OVERRIDE = "true"`
 
 ## Environment Variables
 

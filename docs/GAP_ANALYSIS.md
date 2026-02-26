@@ -27,22 +27,21 @@ VapeCache has **strong fundamentals** in transport, performance, reliability, an
 
 ## Critical Gaps (Must Fix Before v1.0)
 
-### 1. RESP Protocol Surface Area 🔴 **CRITICAL**
+### 1. RESP Protocol Surface Area 🟡 **HIGH PRIORITY**
 
-**Problem:** Unclear what RESP features are supported/unsupported.
+**Status Update:** Core RESP3 parsing and cache-path MOVED/ASK redirects are implemented.
 
-**Impact:** Users may assume features work that don't (Lua, Pub/Sub, Streams).
+**Remaining Gap:** Advanced protocol orchestration still needs explicit boundaries (client-side caching, full cluster slot-map orchestration).
 
 **Action Items:**
-- [ ] Document RESP2 vs RESP3 support explicitly
-- [ ] State feature gaps:
+- [x] Document RESP2 vs RESP3 support explicitly
+- [x] Document MOVED/ASK cache-path redirect handling
+- [ ] Keep feature-gap list explicit:
   - ❌ Lua scripting (EVAL, EVALSHA)
   - ❌ Pub/Sub (SUBSCRIBE, PSUBSCRIBE, PUBLISH)
   - ❌ Streams (XADD, XREAD, XGROUP)
-  - ❌ RESP3 push messages
-  - ❌ Client-side caching (RESP3)
-  - ❌ Cluster mode (MOVED, ASK redirects)
-- [ ] Add to [docs/REDIS_PROTOCOL_SUPPORT.md](docs/REDIS_PROTOCOL_SUPPORT.md)
+  - ❌ Client-side caching orchestration (RESP3)
+  - ❌ Full cluster topology/slot-map orchestration across all commands
 
 **Deliverable:**
 ```markdown

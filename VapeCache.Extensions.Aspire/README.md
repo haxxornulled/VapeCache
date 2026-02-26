@@ -13,6 +13,8 @@ You get service discovery, health checks, telemetry, and wrapper endpoints in on
 ✅ **SEQ by Default** - OTLP exporter falls back to Seq when no endpoint is configured
 ✅ **Fluent Telemetry API** - `.UseSeq(...)`, custom headers, and wrapper callbacks
 ✅ **Fluent Stampede Profiles** - `.WithCacheStampedeProfile(...)` with optional overrides
+✅ **ASP.NET Core Pipeline Hook** - `.WithAspNetCoreOutputCaching(...)` for MVC/Blazor/minimal output cache store
+✅ **Failover Affinity Hints** - `.WithFailoverAffinityHints(...)` for cluster/web-garden sticky-session routing
 ✅ **Low Ceremony** - Single fluent chain to enable all major features
 
 ## Installation
@@ -48,11 +50,15 @@ builder.AddVapeCache()
     .WithRedisFromAspire("redis")     // Bind to AppHost Redis resource
     .WithHealthChecks()                // Add health checks (host maps endpoints)
     .WithAspireTelemetry()             // Send metrics to Aspire Dashboard
+    .WithAspNetCoreOutputCaching()     // Replace output-cache store with VapeCache
+    .WithFailoverAffinityHints()       // Emit sticky-session hints during failover
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
     .WithAutoMappedEndpoints();        // Auto-maps /vapecache/status + /vapecache/stats + /vapecache/stream
 
 var app = builder.Build();
 
+app.UseVapeCacheOutputCaching();
+app.UseVapeCacheFailoverAffinityHints();
 app.MapHealthChecks("/health");
 app.Run();
 ```
@@ -165,6 +171,44 @@ Applies named stampede defaults with optional fluent overrides.
 .WithCacheStampedeProfile(
     CacheStampedeProfile.Balanced,
     options => options.WithLockWaitTimeout(TimeSpan.FromMilliseconds(600)));
+```
+
+### `WithAspNetCoreOutputCaching(configureOutputCache?, configureStore?)`
+
+Adds ASP.NET Core output caching and swaps the default store for `VapeCacheOutputCacheStore`.
+
+```csharp
+builder.AddVapeCache()
+    .WithAspNetCoreOutputCaching(
+        configureOutputCache: options =>
+        {
+            options.AddBasePolicy(policy => policy.Expire(TimeSpan.FromSeconds(30)));
+        },
+        configureStore: store =>
+        {
+            store.KeyPrefix = "vapecache:output";
+            store.DefaultTtl = TimeSpan.FromSeconds(30);
+            store.EnableTagIndexing = true;
+        });
+
+var app = builder.Build();
+app.UseVapeCacheOutputCaching();
+```
+
+### `WithFailoverAffinityHints(configure?)`
+
+Adds options for middleware that emits node-affinity hints during failover:
+
+```csharp
+builder.AddVapeCache()
+    .WithFailoverAffinityHints(options =>
+    {
+        options.NodeId = Environment.MachineName;
+        options.CookieName = "VapeCacheAffinity";
+    });
+
+var app = builder.Build();
+app.UseVapeCacheFailoverAffinityHints();
 ```
 
 ### `MapVapeCacheEndpoints(prefix, includeBreakerControlEndpoints, includeLiveStreamEndpoint, includeIntentEndpoints)`
