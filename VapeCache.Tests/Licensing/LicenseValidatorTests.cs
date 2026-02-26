@@ -20,6 +20,20 @@ public class LicenseValidatorTests
     }
 
     [Fact]
+    public void ValidateRequired_NullOrWhitespace_ReturnsFailure()
+    {
+        var (_, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+        var validator = new LicenseValidator(publicKeyPem, "test-key-2026");
+
+        var nullResult = validator.ValidateRequired(null, "VapeCache.Persistence");
+        var emptyResult = validator.ValidateRequired("   ", "VapeCache.Persistence");
+
+        Assert.False(nullResult.IsValid);
+        Assert.False(emptyResult.IsValid);
+        Assert.Contains("Missing license key", nullResult.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void GenerateEnterpriseLicense_ThenValidate_ReturnsEnterpriseWithClaims()
     {
         var (privateKeyPem, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();

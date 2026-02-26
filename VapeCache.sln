@@ -29,6 +29,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Persistence", "Va
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Reconciliation", "VapeCache.Reconciliation\VapeCache.Reconciliation.csproj", "{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Licensing.ControlPlane", "VapeCache.Licensing.ControlPlane\VapeCache.Licensing.ControlPlane.csproj", "{6763221D-747F-4D10-9CD6-1AFB9E4A3650}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VapeCache.Extensions.AspNetCore", "VapeCache.Extensions.AspNetCore\VapeCache.Extensions.AspNetCore.csproj", "{69553AA1-2697-4F61-B109-FA558349AEC6}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -195,6 +199,30 @@ Global
 		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Release|x64.Build.0 = Release|Any CPU
 		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Release|x86.ActiveCfg = Release|Any CPU
 		{663A2E4F-4121-45E0-B14F-E52B71FCC8F9}.Release|x86.Build.0 = Release|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Debug|x64.Build.0 = Debug|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Debug|x86.Build.0 = Debug|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Release|x64.ActiveCfg = Release|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Release|x64.Build.0 = Release|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Release|x86.ActiveCfg = Release|Any CPU
+		{6763221D-747F-4D10-9CD6-1AFB9E4A3650}.Release|x86.Build.0 = Release|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Debug|x64.Build.0 = Debug|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Debug|x86.Build.0 = Debug|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Release|x64.ActiveCfg = Release|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Release|x64.Build.0 = Release|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Release|x86.ActiveCfg = Release|Any CPU
+		{69553AA1-2697-4F61-B109-FA558349AEC6}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Licensing;
 
@@ -19,34 +19,22 @@ public static class PersistenceServiceExtensions
         string licenseKey,
         Action<InMemorySpillOptions>? configure = null)
     {
-        // Validate Enterprise license
-        var validator = new LicenseValidator();
-        var result = validator.Validate(licenseKey);
-
-        if (!result.IsValid)
-            throw new InvalidOperationException($"Invalid VapeCache license: {result.ErrorMessage}");
-
-        if (result.Tier != LicenseTier.Enterprise)
-            throw new InvalidOperationException(
-                $"VapeCache.Persistence requires Enterprise tier. Current tier: {result.Tier}. " +
-                "Upgrade at https://vapecache.com/pricing");
-
-        if (!result.HasFeature(LicenseFeatures.Persistence))
-            throw new InvalidOperationException(
-                $"VapeCache.Persistence requires '{LicenseFeatures.Persistence}' entitlement in your Enterprise license. " +
-                "Visit https://vapecache.com/account to update features.");
-
-        if (result.IsExpired)
-            throw new InvalidOperationException(
-                $"VapeCache license expired on {result.ExpiresAt:yyyy-MM-dd}. " +
-                "Renew at https://vapecache.com/account");
+        LicenseFeatureGate.RequireEnterpriseFeature(
+            licenseKey,
+            LicenseFeatures.Persistence,
+            "VapeCache.Persistence");
 
         // Register persistence services
         if (configure != null)
             services.Configure(configure);
 
         services.AddSingleton<ISpillEncryptionProvider, NoopSpillEncryptionProvider>();
-        services.AddSingleton<IInMemorySpillStore, FileSpillStore>();
+        services.RemoveAll<FileSpillStore>();
+        services.RemoveAll<IInMemorySpillStore>();
+        services.RemoveAll<ISpillStoreDiagnostics>();
+        services.AddSingleton<FileSpillStore>();
+        services.AddSingleton<IInMemorySpillStore>(sp => sp.GetRequiredService<FileSpillStore>());
+        services.AddSingleton<ISpillStoreDiagnostics>(sp => sp.GetRequiredService<FileSpillStore>());
 
         return services;
     }
@@ -61,30 +49,22 @@ public static class PersistenceServiceExtensions
         Action<InMemorySpillOptions>? configure = null)
         where TEncryption : class, ISpillEncryptionProvider
     {
-        // Validate license (same as above)
-        var validator = new LicenseValidator();
-        var result = validator.Validate(licenseKey);
-
-        if (!result.IsValid)
-            throw new InvalidOperationException($"Invalid VapeCache license: {result.ErrorMessage}");
-
-        if (result.Tier != LicenseTier.Enterprise)
-            throw new InvalidOperationException(
-                $"VapeCache.Persistence requires Enterprise tier. Current tier: {result.Tier}");
-
-        if (!result.HasFeature(LicenseFeatures.Persistence))
-            throw new InvalidOperationException(
-                $"VapeCache.Persistence requires '{LicenseFeatures.Persistence}' entitlement in your Enterprise license.");
-
-        if (result.IsExpired)
-            throw new InvalidOperationException($"VapeCache license expired on {result.ExpiresAt:yyyy-MM-dd}");
+        LicenseFeatureGate.RequireEnterpriseFeature(
+            licenseKey,
+            LicenseFeatures.Persistence,
+            "VapeCache.Persistence");
 
         // Register with custom encryption
         if (configure != null)
             services.Configure(configure);
 
         services.AddSingleton<ISpillEncryptionProvider, TEncryption>();
-        services.AddSingleton<IInMemorySpillStore, FileSpillStore>();
+        services.RemoveAll<FileSpillStore>();
+        services.RemoveAll<IInMemorySpillStore>();
+        services.RemoveAll<ISpillStoreDiagnostics>();
+        services.AddSingleton<FileSpillStore>();
+        services.AddSingleton<IInMemorySpillStore>(sp => sp.GetRequiredService<FileSpillStore>());
+        services.AddSingleton<ISpillStoreDiagnostics>(sp => sp.GetRequiredService<FileSpillStore>());
 
         return services;
     }

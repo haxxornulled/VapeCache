@@ -33,5 +33,7 @@
     <ProjectReference Include="..\VapeCache.Persistence\VapeCache.Persistence.csproj" />
     <ProjectReference Include="..\VapeCache.Reconciliation\VapeCache.Reconciliation.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.AspNetCore\VapeCache.Extensions.AspNetCore.csproj" />
+    <ProjectReference Include="..\VapeCache.Licensing.ControlPlane\VapeCache.Licensing.ControlPlane.csproj" />
   </ItemGroup>
 </Project>

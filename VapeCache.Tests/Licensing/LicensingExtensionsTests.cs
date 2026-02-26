@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Infrastructure.Caching;
 using VapeCache.Licensing;
 using VapeCache.Persistence;
 using VapeCache.Reconciliation;
@@ -19,11 +20,13 @@ public class LicensingExtensionsTests
         {
             var originalPublicKey = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable);
             var originalKeyId = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable);
+            var originalAllowVerifierOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
 
             try
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, publicKeyPem);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, keyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, "true");
 
                 var issuer = new LicenseTokenIssuer(privateKeyPem, keyId);
                 var key = issuer.GenerateEnterpriseLicenseKey(orgId, DateTimeOffset.UtcNow.AddDays(7));
@@ -37,6 +40,48 @@ public class LicensingExtensionsTests
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, originalPublicKey);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, originalKeyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowVerifierOverride);
+            }
+        }
+    }
+
+    [Fact]
+    public void AddVapeCachePersistence_RegistersSharedFileSpillDiagnosticsInstance()
+    {
+        const string keyId = "persistence-test-kid";
+        var (privateKeyPem, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+
+        lock (LicenseTestEnvironment.EnvironmentLock)
+        {
+            var originalPublicKey = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable);
+            var originalKeyId = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable);
+            var originalAllowVerifierOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
+
+            try
+            {
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, publicKeyPem);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, keyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, "true");
+
+                var issuer = new LicenseTokenIssuer(privateKeyPem, keyId);
+                var key = issuer.GenerateEnterpriseLicenseKey("acme", DateTimeOffset.UtcNow.AddDays(7));
+
+                var services = new ServiceCollection();
+                services.AddVapecacheCaching();
+                services.AddVapeCachePersistence(key);
+                using var provider = services.BuildServiceProvider();
+
+                var spillStore = provider.GetRequiredService<IInMemorySpillStore>();
+                var spillDiagnostics = provider.GetRequiredService<ISpillStoreDiagnostics>();
+
+                Assert.IsType<FileSpillStore>(spillStore);
+                Assert.Same(spillStore, spillDiagnostics);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, originalPublicKey);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, originalKeyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowVerifierOverride);
             }
         }
     }
@@ -51,11 +96,13 @@ public class LicensingExtensionsTests
         {
             var originalPublicKey = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable);
             var originalKeyId = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable);
+            var originalAllowVerifierOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
 
             try
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, publicKeyPem);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, keyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, "true");
 
                 var issuer = new LicenseTokenIssuer(privateKeyPem, keyId);
                 var key = issuer.GenerateEnterpriseLicenseKey(
@@ -72,6 +119,7 @@ public class LicensingExtensionsTests
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, originalPublicKey);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, originalKeyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowVerifierOverride);
             }
         }
     }
@@ -87,11 +135,13 @@ public class LicensingExtensionsTests
             var originalPublicKey = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable);
             var originalKeyId = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable);
             var originalLicenseKey = Environment.GetEnvironmentVariable("VAPECACHE_LICENSE_KEY");
+            var originalAllowVerifierOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
 
             try
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, publicKeyPem);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, keyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, "true");
                 Environment.SetEnvironmentVariable("VAPECACHE_LICENSE_KEY", null);
 
                 var issuer = new LicenseTokenIssuer(privateKeyPem, keyId);
@@ -114,12 +164,13 @@ public class LicensingExtensionsTests
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, originalPublicKey);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, originalKeyId);
                 Environment.SetEnvironmentVariable("VAPECACHE_LICENSE_KEY", originalLicenseKey);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowVerifierOverride);
             }
         }
     }
 
     [Fact]
-    public void AddVapeCacheRedisReconciliation_NoLicenseKey_ThrowsEnterpriseOnly()
+    public void AddVapeCacheRedisReconciliation_NoLicenseKey_ThrowsMissingKey()
     {
         lock (LicenseTestEnvironment.EnvironmentLock)
         {
@@ -128,23 +179,26 @@ public class LicensingExtensionsTests
             var originalPublicKey = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable);
             var originalKeyId = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable);
             var originalLicenseKey = Environment.GetEnvironmentVariable("VAPECACHE_LICENSE_KEY");
+            var originalAllowVerifierOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
             try
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, publicKeyPem);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, keyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, "true");
                 Environment.SetEnvironmentVariable("VAPECACHE_LICENSE_KEY", null);
                 var services = new ServiceCollection();
 
                 var ex = Assert.Throws<VapeCacheLicenseException>(() =>
                     services.AddVapeCacheRedisReconciliation((string?)null));
 
-                Assert.Contains("ENTERPRISE-ONLY", ex.Message, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("Missing license key", ex.Message, StringComparison.OrdinalIgnoreCase);
             }
             finally
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, originalPublicKey);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, originalKeyId);
                 Environment.SetEnvironmentVariable("VAPECACHE_LICENSE_KEY", originalLicenseKey);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowVerifierOverride);
             }
         }
     }

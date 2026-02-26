@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 
@@ -8,6 +9,7 @@ namespace VapeCache.Licensing;
 /// Issues signed enterprise license keys using ECDSA (ES256).
 /// Keep this in private/internal tooling only.
 /// </summary>
+[EditorBrowsable(EditorBrowsableState.Never)]
 public sealed class LicenseTokenIssuer
 {
     private static readonly JsonSerializerOptions JsonOptions = new();

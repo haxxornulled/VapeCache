@@ -24,6 +24,17 @@ public sealed class LicenseValidator
     }
 
     /// <summary>
+    /// Creates a validator and optionally enables environment-based verification key overrides.
+    /// Use only in controlled development/test tooling.
+    /// </summary>
+    public LicenseValidator(bool allowVerificationEnvironmentOverride)
+        : this(
+            LicenseValidationOptions.ResolveVerificationPublicKeyPem(allowVerificationEnvironmentOverride),
+            LicenseValidationOptions.ResolveVerificationKeyId(allowVerificationEnvironmentOverride))
+    {
+    }
+
+    /// <summary>
     /// Creates a validator from explicit PEM public key and key id.
     /// </summary>
     public LicenseValidator(string verificationPublicKeyPem, string expectedKeyId)
@@ -72,6 +83,23 @@ public sealed class LicenseValidator
             return LicenseValidationResult.Failure("Invalid license signature");
 
         return ValidateClaims(header, payload);
+    }
+
+    /// <summary>
+    /// Validates a required license key for enterprise-only feature gates.
+    /// Missing/blank keys are treated as validation failures.
+    /// </summary>
+    public LicenseValidationResult ValidateRequired(string? licenseKey, string componentName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(componentName);
+
+        if (string.IsNullOrWhiteSpace(licenseKey))
+        {
+            return LicenseValidationResult.Failure(
+                $"Missing license key for {componentName}. Provide an enterprise key explicitly or set VAPECACHE_LICENSE_KEY.");
+        }
+
+        return Validate(licenseKey);
     }
 
     private static bool TrySplitToken(

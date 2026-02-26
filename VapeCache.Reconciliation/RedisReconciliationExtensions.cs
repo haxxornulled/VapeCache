@@ -38,37 +38,12 @@ public static class RedisReconciliationExtensions
         Action<RedisReconciliationOptions>? configure = null,
         Action<RedisReconciliationStoreOptions>? configureStore = null)
     {
-        // COMMERCIAL LICENSE VALIDATION - Reconciliation is an ENTERPRISE-ONLY feature
-        var validator = new LicenseValidator();
-
-        // If no license key provided, try to read from environment variable
         licenseKey ??= Environment.GetEnvironmentVariable("VAPECACHE_LICENSE_KEY");
-
-        var validationResult = validator.Validate(licenseKey);
-
-        // Validate license is not expired
-        if (!validationResult.IsValid)
-        {
-            throw new VapeCacheLicenseException(
-                $"VapeCache license validation failed: {validationResult.ErrorMessage}. " +
-                "Visit https://vapecache.com to renew your license.");
-        }
-
-        // Only Enterprise tier can use reconciliation
-        if (validationResult.Tier != LicenseTier.Enterprise)
-        {
-            throw new VapeCacheLicenseException(
-                "VapeCache Reconciliation is an ENTERPRISE-ONLY feature. " +
-                "This premium capability provides zero-data-loss failover with SQLite-backed persistence of cache writes during Redis outages. " +
-                "Contact sales at https://vapecache.com/enterprise or use the free tier without reconciliation.");
-        }
-
-        if (!validationResult.HasFeature(LicenseFeatures.Reconciliation))
-        {
-            throw new VapeCacheLicenseException(
-                $"VapeCache Reconciliation requires '{LicenseFeatures.Reconciliation}' entitlement in your Enterprise license. " +
-                "Visit https://vapecache.com/account to update your license features.");
-        }
+        LicenseFeatureGate.RequireEnterpriseFeature(
+            licenseKey,
+            LicenseFeatures.Reconciliation,
+            "VapeCache.Reconciliation",
+            static message => new VapeCacheLicenseException(message));
 
         var optionsBuilder = services.AddOptions<RedisReconciliationOptions>()
             .Validate(o => o.MaxOperationAge > TimeSpan.Zero, "MaxOperationAge must be greater than zero")

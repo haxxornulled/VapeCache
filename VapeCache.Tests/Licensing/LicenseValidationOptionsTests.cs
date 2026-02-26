@@ -10,9 +10,11 @@ public class LicenseValidationOptionsTests
         lock (LicenseTestEnvironment.EnvironmentLock)
         {
             var original = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable);
+            var originalAllowOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
             try
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, null);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, null);
 
                 var resolved = LicenseValidationOptions.ResolveVerificationPublicKeyPem();
 
@@ -21,12 +23,13 @@ public class LicenseValidationOptionsTests
             finally
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, original);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowOverride);
             }
         }
     }
 
     [Fact]
-    public void ResolveVerificationPublicKeyPem_WithOverride_ReturnsOverride()
+    public void ResolveVerificationPublicKeyPem_WithOverrideButNoOptIn_ReturnsDefault()
     {
         const string customPublicPem = """
 -----BEGIN PUBLIC KEY-----
@@ -37,9 +40,41 @@ ABC123
         lock (LicenseTestEnvironment.EnvironmentLock)
         {
             var original = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable);
+            var originalAllowOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
             try
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, customPublicPem);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, null);
+
+                var resolved = LicenseValidationOptions.ResolveVerificationPublicKeyPem();
+
+                Assert.Equal(LicenseValidationOptions.DefaultVerificationPublicKeyPem, resolved);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, original);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowOverride);
+            }
+        }
+    }
+
+    [Fact]
+    public void ResolveVerificationPublicKeyPem_WithOverrideAndOptIn_ReturnsOverride()
+    {
+        const string customPublicPem = """
+-----BEGIN PUBLIC KEY-----
+ABC123
+-----END PUBLIC KEY-----
+""";
+
+        lock (LicenseTestEnvironment.EnvironmentLock)
+        {
+            var original = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable);
+            var originalAllowOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
+            try
+            {
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, customPublicPem);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, "true");
 
                 var resolved = LicenseValidationOptions.ResolveVerificationPublicKeyPem();
 
@@ -48,6 +83,7 @@ ABC123
             finally
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, original);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowOverride);
             }
         }
     }
@@ -60,9 +96,11 @@ ABC123
         lock (LicenseTestEnvironment.EnvironmentLock)
         {
             var original = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable);
+            var originalAllowOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
             try
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, escapedPem);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, "1");
 
                 var resolved = LicenseValidationOptions.ResolveVerificationPublicKeyPem();
 
@@ -73,6 +111,7 @@ ABC123
             finally
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, original);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowOverride);
             }
         }
     }
@@ -83,9 +122,11 @@ ABC123
         lock (LicenseTestEnvironment.EnvironmentLock)
         {
             var original = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable);
+            var originalAllowOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
             try
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, null);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, null);
 
                 var resolved = LicenseValidationOptions.ResolveVerificationKeyId();
 
@@ -94,21 +135,50 @@ ABC123
             finally
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, original);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowOverride);
             }
         }
     }
 
     [Fact]
-    public void ResolveVerificationKeyId_WithOverride_ReturnsOverride()
+    public void ResolveVerificationKeyId_WithOverrideButNoOptIn_ReturnsDefault()
     {
         const string customKeyId = "kid-2026-rotated";
 
         lock (LicenseTestEnvironment.EnvironmentLock)
         {
             var original = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable);
+            var originalAllowOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
             try
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, customKeyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, null);
+
+                var resolved = LicenseValidationOptions.ResolveVerificationKeyId();
+
+                Assert.Equal(LicenseValidationOptions.DefaultVerificationKeyId, resolved);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, original);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowOverride);
+            }
+        }
+    }
+
+    [Fact]
+    public void ResolveVerificationKeyId_WithOverrideAndOptIn_ReturnsOverride()
+    {
+        const string customKeyId = "kid-2026-rotated";
+
+        lock (LicenseTestEnvironment.EnvironmentLock)
+        {
+            var original = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable);
+            var originalAllowOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
+            try
+            {
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, customKeyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, "true");
 
                 var resolved = LicenseValidationOptions.ResolveVerificationKeyId();
 
@@ -117,6 +187,7 @@ ABC123
             finally
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, original);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowOverride);
             }
         }
     }

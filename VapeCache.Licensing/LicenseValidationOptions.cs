@@ -6,6 +6,12 @@ namespace VapeCache.Licensing;
 public static class LicenseValidationOptions
 {
     /// <summary>
+    /// Explicit opt-in switch that allows verifier key-id/public-key environment overrides.
+    /// Disabled by default for production hardening.
+    /// </summary>
+    public const string AllowVerificationOverrideEnvironmentVariable = "VAPECACHE_LICENSE_ALLOW_VERIFIER_ENV_OVERRIDE";
+
+    /// <summary>
     /// Optional override for the verifier key id (kid).
     /// </summary>
     public const string VerificationKeyIdEnvironmentVariable = "VAPECACHE_LICENSE_PUBLIC_KEY_ID";
@@ -38,26 +44,48 @@ xVBRzeAikMZGRGb6MdjC87Hhvi1Bt2cfgBSGO7iP5+sjphWjflpBcKt6aw==
 """;
 
     /// <summary>
-    /// Resolves key id from environment with fallback.
+    /// Resolves whether verifier environment overrides are enabled.
     /// </summary>
-    public static string ResolveVerificationKeyId()
+    public static bool ResolveAllowVerifierEnvironmentOverride()
     {
-        var overrideValue = Environment.GetEnvironmentVariable(VerificationKeyIdEnvironmentVariable);
-        return string.IsNullOrWhiteSpace(overrideValue)
-            ? DefaultVerificationKeyId
-            : overrideValue.Trim();
+        var value = Environment.GetEnvironmentVariable(AllowVerificationOverrideEnvironmentVariable);
+        return IsTruthy(value);
     }
 
     /// <summary>
-    /// Resolves verification public key from environment with fallback.
+    /// Resolves key id with optional environment override support.
     /// </summary>
-    public static string ResolveVerificationPublicKeyPem()
+    public static string ResolveVerificationKeyId(bool allowEnvironmentOverride)
     {
-        var overrideValue = Environment.GetEnvironmentVariable(VerificationPublicKeyEnvironmentVariable);
-        return string.IsNullOrWhiteSpace(overrideValue)
-            ? DefaultVerificationPublicKeyPem
-            : NormalizePem(overrideValue);
+        if (!allowEnvironmentOverride && !ResolveAllowVerifierEnvironmentOverride())
+            return DefaultVerificationKeyId;
+
+        var overrideValue = Environment.GetEnvironmentVariable(VerificationKeyIdEnvironmentVariable);
+        return string.IsNullOrWhiteSpace(overrideValue) ? DefaultVerificationKeyId : overrideValue.Trim();
     }
+
+    /// <summary>
+    /// Resolves key id using hardened defaults (environment overrides disabled unless explicit opt-in is enabled).
+    /// </summary>
+    public static string ResolveVerificationKeyId() => ResolveVerificationKeyId(allowEnvironmentOverride: false);
+
+    /// <summary>
+    /// Resolves verification public key with optional environment override support.
+    /// </summary>
+    public static string ResolveVerificationPublicKeyPem(bool allowEnvironmentOverride)
+    {
+        if (!allowEnvironmentOverride && !ResolveAllowVerifierEnvironmentOverride())
+            return DefaultVerificationPublicKeyPem;
+
+        var overrideValue = Environment.GetEnvironmentVariable(VerificationPublicKeyEnvironmentVariable);
+        return string.IsNullOrWhiteSpace(overrideValue) ? DefaultVerificationPublicKeyPem : NormalizePem(overrideValue);
+    }
+
+    /// <summary>
+    /// Resolves verification public key using hardened defaults
+    /// (environment overrides disabled unless explicit opt-in is enabled).
+    /// </summary>
+    public static string ResolveVerificationPublicKeyPem() => ResolveVerificationPublicKeyPem(allowEnvironmentOverride: false);
 
     /// <summary>
     /// Resolves signing private key from environment.
@@ -86,5 +114,24 @@ xVBRzeAikMZGRGb6MdjC87Hhvi1Bt2cfgBSGO7iP5+sjphWjflpBcKt6aw==
         }
 
         return normalized;
+    }
+
+    private static bool IsTruthy(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        return value.Trim() switch
+        {
+            "1" => true,
+            "true" => true,
+            "TRUE" => true,
+            "True" => true,
+            "yes" => true,
+            "YES" => true,
+            "on" => true,
+            "ON" => true,
+            _ => false
+        };
     }
 }
