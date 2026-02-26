@@ -9,6 +9,7 @@ This index tracks the current feature set and supported APIs.
 
 ## Getting Started
 - [README.md](../README.md) - Project overview and quick start
+- [WORKFLOWS.md](WORKFLOWS.md) - CI/CD workflow maps with Mermaid diagrams
 - [QUICKSTART.md](QUICKSTART.md) - Junior-friendly setup walkthrough
 - [CONFIGURATION.md](CONFIGURATION.md) - Options and appsettings.json
 - [NUGET_PACKAGES.md](NUGET_PACKAGES.md) - Package overview

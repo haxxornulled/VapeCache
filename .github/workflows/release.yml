@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-test-pack-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore VapeCache.sln
+
+      - name: Unit tests
+        run: dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj
+
+      - name: Perf gates tests
+        run: dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj
+
+      - name: Vulnerability scan
+        run: dotnet list VapeCache.sln package --vulnerable --include-transitive
+
+      - name: Pack
+        run: dotnet pack VapeCache.sln -c Release --no-build
+
+      - name: Collect release packages
+        run: |
+          rm -rf artifacts/packages
+          mkdir -p artifacts/packages
+          find . -type f -name "*.nupkg" ! -name "*.symbols.nupkg" -exec cp {} artifacts/packages/ \;
+          ls -la artifacts/packages
+
+      - name: Generate checksums
+        run: |
+          cd artifacts/packages
+          sha256sum *.nupkg > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages-${{ github.ref_name }}
+          path: artifacts/packages/*
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/packages/*.nupkg
+            artifacts/packages/SHA256SUMS.txt
