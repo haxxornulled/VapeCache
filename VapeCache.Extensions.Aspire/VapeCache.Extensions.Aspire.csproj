@@ -34,6 +34,7 @@
 
   <ItemGroup>
     <!-- Core VapeCache Dependencies -->
+    <ProjectReference Include="..\VapeCache.Extensions.AspNetCore\VapeCache.Extensions.AspNetCore.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
   </ItemGroup>
 

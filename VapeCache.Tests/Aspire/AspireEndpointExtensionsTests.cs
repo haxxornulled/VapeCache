@@ -34,6 +34,9 @@ public sealed class AspireEndpointExtensionsTests
         Assert.Equal("redis", status!.CurrentBackend);
         Assert.Equal(0, stats!.GetCalls);
         Assert.Equal(0d, stats.HitRate);
+        Assert.NotNull(status.Spill);
+        Assert.NotNull(stats.Spill);
+        Assert.Equal("noop", status.Spill!.Mode);
     }
 
     [Fact]

@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>true</IsPackable>
+    <PackageId>VapeCache.Extensions.AspNetCore</PackageId>
+    <Title>VapeCache Extensions for ASP.NET Core</Title>
+    <Version>1.0.1</Version>
+    <Description>ASP.NET Core output caching integration for VapeCache. Use MVC/Minimal API/Blazor output caching middleware with VapeCache as the backing store.</Description>
+    <Authors>HaxxorNulled</Authors>
+    <Company>HaxxorNulled</Company>
+    <Product>VapeCache.Extensions.AspNetCore</Product>
+    <PackageTags>cache;redis;aspnetcore;output-cache;mvc;blazor;minimal-api</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>vapecache-icon.png</PackageIcon>
+    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <RepositoryBranch>main</RepositoryBranch>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
+    <PackageReleaseNotes>ASP.NET Core output-caching hooks for MVC/Minimal API/Blazor with VapeCache backend store.</PackageReleaseNotes>
+    <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

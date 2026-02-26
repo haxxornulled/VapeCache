@@ -2,8 +2,10 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.OutputCaching;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Extensions.AspNetCore;
 using VapeCache.Extensions.Aspire;
 
 namespace VapeCache.Tests.Aspire;
@@ -105,5 +107,28 @@ public sealed class AspireExtensionsTests
         Assert.Same(builder, result);
         Assert.True(metricsConfigured);
         Assert.True(tracingConfigured);
+    }
+
+    [Fact]
+    public async Task WithAspNetCoreOutputCaching_RegistersVapeCacheStore()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        var builder = hostBuilder.AddVapeCache()
+            .WithAspNetCoreOutputCaching(
+                configureStore: store =>
+                {
+                    store.DefaultTtl = TimeSpan.FromSeconds(45);
+                    store.KeyPrefix = "test:output";
+                });
+
+        Assert.NotNull(builder);
+
+        await using var provider = hostBuilder.Services.BuildServiceProvider();
+        var store = provider.GetRequiredService<IOutputCacheStore>();
+        var options = provider.GetRequiredService<IOptionsMonitor<VapeCacheOutputCacheStoreOptions>>().CurrentValue;
+
+        Assert.IsType<VapeCacheOutputCacheStore>(store);
+        Assert.Equal("test:output", options.KeyPrefix);
+        Assert.Equal(TimeSpan.FromSeconds(45), options.DefaultTtl);
     }
 }

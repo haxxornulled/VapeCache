@@ -45,11 +45,13 @@ public static class AspireEndpointExtensions
             ICacheStats stats,
             IRedisCircuitBreakerState breaker,
             IRedisFailoverController failover,
+            ISpillStoreDiagnostics? spillDiagnostics,
             IEnumerable<IRedisMultiplexerDiagnostics> diagnostics) =>
         {
             var snapshot = stats.Snapshot;
             var hitRate = ComputeHitRate(snapshot);
             var autoscaler = diagnostics.FirstOrDefault()?.GetAutoscalerSnapshot();
+            var spill = spillDiagnostics?.GetSnapshot();
 
             var response = new VapeCacheEndpointStatusResponse(
                 TimestampUtc: DateTimeOffset.UtcNow,
@@ -66,6 +68,7 @@ public static class AspireEndpointExtensions
                     StampedeLockWaitTimeout: snapshot.StampedeLockWaitTimeout,
                     StampedeFailureBackoffRejected: snapshot.StampedeFailureBackoffRejected,
                     HitRate: hitRate,
+                    Spill: spill,
                     Autoscaler: autoscaler),
                 CircuitBreaker: new VapeCacheEndpointBreakerResponse(
                     Enabled: breaker.Enabled,
@@ -75,17 +78,19 @@ public static class AspireEndpointExtensions
                     HalfOpenProbeInFlight: breaker.HalfOpenProbeInFlight,
                     IsForcedOpen: failover.IsForcedOpen,
                     Reason: failover.Reason),
+                Spill: spill,
                 Autoscaler: autoscaler);
 
             return Results.Ok(response);
         })
         .WithName("VapeCacheStatus");
 
-        group.MapGet("/stats", static (ICacheStats stats, IEnumerable<IRedisMultiplexerDiagnostics> diagnostics) =>
+        group.MapGet("/stats", static (ICacheStats stats, ISpillStoreDiagnostics? spillDiagnostics, IEnumerable<IRedisMultiplexerDiagnostics> diagnostics) =>
         {
             var snapshot = stats.Snapshot;
             var hitRate = ComputeHitRate(snapshot);
             var autoscaler = diagnostics.FirstOrDefault()?.GetAutoscalerSnapshot();
+            var spill = spillDiagnostics?.GetSnapshot();
             var response = new VapeCacheEndpointStatsResponse(
                 GetCalls: snapshot.GetCalls,
                 Hits: snapshot.Hits,
@@ -98,6 +103,7 @@ public static class AspireEndpointExtensions
                 StampedeLockWaitTimeout: snapshot.StampedeLockWaitTimeout,
                 StampedeFailureBackoffRejected: snapshot.StampedeFailureBackoffRejected,
                 HitRate: hitRate,
+                Spill: spill,
                 Autoscaler: autoscaler);
             return Results.Ok(response);
         })
@@ -202,6 +208,7 @@ public sealed record VapeCacheEndpointStatusResponse(
     string CurrentBackend,
     VapeCacheEndpointStatsResponse Stats,
     VapeCacheEndpointBreakerResponse CircuitBreaker,
+    SpillStoreDiagnosticsSnapshot? Spill,
     RedisAutoscalerSnapshot? Autoscaler);
 
 /// <summary>
@@ -219,6 +226,7 @@ public sealed record VapeCacheEndpointStatsResponse(
     long StampedeLockWaitTimeout,
     long StampedeFailureBackoffRejected,
     double HitRate,
+    SpillStoreDiagnosticsSnapshot? Spill,
     RedisAutoscalerSnapshot? Autoscaler);
 
 /// <summary>

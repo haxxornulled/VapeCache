@@ -25,12 +25,14 @@ public sealed record VapeCacheLiveSample(
     long StampedeLockWaitTimeout,
     long StampedeFailureBackoffRejected,
     double HitRate,
+    SpillStoreDiagnosticsSnapshot? Spill,
     RedisAutoscalerSnapshot? Autoscaler);
 
 internal sealed class VapeCacheLiveMetricsFeed(
     ICacheStats stats,
     ICurrentCacheService current,
     IOptions<VapeCacheEndpointOptions> options,
+    ISpillStoreDiagnostics? spillDiagnostics = null,
     IRedisMultiplexerDiagnostics? diagnostics = null) : BackgroundService, IVapeCacheLiveMetricsFeed
 {
     private readonly ConcurrentDictionary<int, Channel<VapeCacheLiveSample>> _subscribers = new();
@@ -90,6 +92,7 @@ internal sealed class VapeCacheLiveMetricsFeed(
                 StampedeLockWaitTimeout: snapshot.StampedeLockWaitTimeout,
                 StampedeFailureBackoffRejected: snapshot.StampedeFailureBackoffRejected,
                 HitRate: reads == 0 ? 0d : (double)snapshot.Hits / reads,
+                Spill: spillDiagnostics?.GetSnapshot(),
                 Autoscaler: diagnostics?.GetAutoscalerSnapshot());
 
             foreach (var kvp in _subscribers)
