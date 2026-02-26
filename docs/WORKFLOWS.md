@@ -2,15 +2,17 @@
 
 This document maps VapeCache automation from first commit to release artifacts.
 
+Style note: diagrams use transparent fills and high-contrast strokes to stay readable in both GitHub light and dark themes.
+
 ## 1. End-to-End Flow (Top to Bottom)
 
 ```mermaid
 flowchart TB
-    classDef trigger fill:#e7f5ff,stroke:#1971c2,stroke-width:1px,color:#0b3d75
-    classDef gate fill:#fff3bf,stroke:#f08c00,stroke-width:1px,color:#7c4d00
-    classDef success fill:#ebfbee,stroke:#2b8a3e,stroke-width:1px,color:#1b5e20
-    classDef fail fill:#fff5f5,stroke:#c92a2a,stroke-width:1px,color:#7f1d1d
-    classDef action fill:#f8f9fa,stroke:#495057,stroke-width:1px,color:#212529
+    classDef trigger fill:transparent,stroke:#1971c2,stroke-width:2px
+    classDef gate fill:transparent,stroke:#f08c00,stroke-width:2px,stroke-dasharray: 6 4
+    classDef success fill:transparent,stroke:#2b8a3e,stroke-width:2px
+    classDef fail fill:transparent,stroke:#c92a2a,stroke-width:2px
+    classDef action fill:transparent,stroke:#495057,stroke-width:2px
 
     A[Developer Pushes Branch<br/>or Opens PR]:::trigger --> B{GitHub Event}:::gate
     B -->|pull_request / push| C[CI Workflow<br/>.github/workflows/ci.yml]:::action
@@ -37,9 +39,9 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    classDef job fill:#f1f3f5,stroke:#343a40,stroke-width:1px,color:#212529
-    classDef step fill:#ffffff,stroke:#868e96,stroke-width:1px,color:#212529
-    classDef gate fill:#fff3bf,stroke:#f08c00,stroke-width:1px,color:#7c4d00
+    classDef job fill:transparent,stroke:#343a40,stroke-width:2px
+    classDef step fill:transparent,stroke:#868e96,stroke-width:2px
+    classDef gate fill:transparent,stroke:#f08c00,stroke-width:2px,stroke-dasharray: 6 4
 
     A[CI Trigger<br/>push / pull_request] --> B{Run Jobs in Parallel}:::gate
 
@@ -65,11 +67,11 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    classDef step fill:#ffffff,stroke:#868e96,stroke-width:1px,color:#212529
-    classDef gate fill:#fff3bf,stroke:#f08c00,stroke-width:1px,color:#7c4d00
-    classDef done fill:#ebfbee,stroke:#2b8a3e,stroke-width:1px,color:#1b5e20
+    classDef step fill:transparent,stroke:#868e96,stroke-width:2px
+    classDef gate fill:transparent,stroke:#f08c00,stroke-width:2px,stroke-dasharray: 6 4
+    classDef done fill:transparent,stroke:#2b8a3e,stroke-width:2px
 
-    A[Trigger<br/>push tag v* or manual dispatch] --> B[Checkout + .NET 10 setup]:::step
+    A[Trigger<br/>push tag v* or manual dispatch]:::gate --> B[Checkout + .NET 10 setup]:::step
     B --> C[Restore + Build Release]:::step
     C --> D[Run unit tests + perf-gate tests]:::step
     D --> E[Vulnerability scan]:::step
@@ -84,11 +86,16 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    A[pull_request_target event] --> B{Draft PR?}
-    B -->|Yes| C[Skip]
-    B -->|No| D{Matches policy?}
-    D -->|Label auto-approve| E[Approve PR]
+    classDef trigger fill:transparent,stroke:#1971c2,stroke-width:2px
+    classDef gate fill:transparent,stroke:#f08c00,stroke-width:2px,stroke-dasharray: 6 4
+    classDef success fill:transparent,stroke:#2b8a3e,stroke-width:2px
+    classDef fail fill:transparent,stroke:#c92a2a,stroke-width:2px
+
+    A[pull_request_target event]:::trigger --> B{Draft PR?}:::gate
+    B -->|Yes| C[Skip]:::fail
+    B -->|No| D{Matches policy?}:::gate
+    D -->|Label auto-approve| E[Approve PR]:::success
     D -->|dependabot[bot]| E
     D -->|renovate[bot]| E
-    D -->|No match| F[No auto-approval]
+    D -->|No match| F[No auto-approval]:::fail
 ```

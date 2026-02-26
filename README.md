@@ -77,45 +77,57 @@ See [docs/WORKFLOWS.md](docs/WORKFLOWS.md) for the full diagram set.
 
 ```mermaid
 flowchart TB
-    A[Developer Pushes Branch<br/>or Opens PR] --> B{GitHub Event}
-    B -->|pull_request / push| C[CI Workflow]
-    B -->|pull_request_target| D[PR Auto Approve Workflow]
-    C --> E[build-test job]
-    C --> F[perf-contention-gate job]
-    E --> G{Checks Pass?}
+    classDef trigger fill:transparent,stroke:#1971c2,stroke-width:2px
+    classDef gate fill:transparent,stroke:#f08c00,stroke-width:2px,stroke-dasharray: 6 4
+    classDef success fill:transparent,stroke:#2b8a3e,stroke-width:2px
+    classDef fail fill:transparent,stroke:#c92a2a,stroke-width:2px
+    classDef action fill:transparent,stroke:#495057,stroke-width:2px
+
+    A[Developer Pushes Branch<br/>or Opens PR]:::trigger --> B{GitHub Event}:::gate
+    B -->|pull_request / push| C[CI Workflow]:::action
+    B -->|pull_request_target| D[PR Auto Approve Workflow]:::action
+    C --> E[build-test job]:::action
+    C --> F[perf-contention-gate job]:::action
+    E --> G{Checks Pass?}:::gate
     F --> G
-    G -->|No| H[Fix + Push Again]
+    G -->|No| H[Fix + Push Again]:::fail
     H --> A
-    G -->|Yes| I[Merge to main]
-    I --> J{Tag v* Created?}
-    J -->|No| K[Main stays continuously validated]
-    J -->|Yes| L[Release Workflow]
-    L --> M[Build + Test + Scan + Pack]
-    M --> N[GitHub Release with .nupkg + SHA256SUMS]
+    G -->|Yes| I[Merge to main]:::success
+    I --> J{Tag v* Created?}:::gate
+    J -->|No| K[Main stays continuously validated]:::success
+    J -->|Yes| L[Release Workflow]:::action
+    L --> M[Build + Test + Scan + Pack]:::action
+    M --> N[GitHub Release with .nupkg + SHA256SUMS]:::success
 ```
 
 ### CI Quality Gates
 
 ```mermaid
 flowchart TB
-    A[CI Trigger] --> B{Parallel Jobs}
+    classDef trigger fill:transparent,stroke:#1971c2,stroke-width:2px
+    classDef gate fill:transparent,stroke:#f08c00,stroke-width:2px,stroke-dasharray: 6 4
+    classDef action fill:transparent,stroke:#495057,stroke-width:2px
+    classDef success fill:transparent,stroke:#2b8a3e,stroke-width:2px
+    classDef fail fill:transparent,stroke:#c92a2a,stroke-width:2px
+
+    A[CI Trigger]:::trigger --> B{Parallel Jobs}:::gate
 
     subgraph W[build-test (windows-latest)]
       direction TB
-      W1[Restore] --> W2[Build Release] --> W3[Unit Tests] --> W4[Transport Regression Tests] --> W5[Perf Gate Script]
+      W1[Restore]:::action --> W2[Build Release]:::action --> W3[Unit Tests]:::action --> W4[Transport Regression Tests]:::action --> W5[Perf Gate Script]:::action
     end
 
     subgraph U[perf-contention-gate (ubuntu + Redis)]
       direction TB
-      U1[Restore] --> U2[Contention Perf Gate] --> U3[Grocery Tail Perf Gate]
+      U1[Restore]:::action --> U2[Contention Perf Gate]:::action --> U3[Grocery Tail Perf Gate]:::action
     end
 
     B --> W
     B --> U
-    W --> C{All Required Jobs Green?}
+    W --> C{All Required Jobs Green?}:::gate
     U --> C
-    C -->|Yes| D[PR/Merge Allowed]
-    C -->|No| E[Blocked Until Fixed]
+    C -->|Yes| D[PR/Merge Allowed]:::success
+    C -->|No| E[Blocked Until Fixed]:::fail
 ```
 
 ## Quick Start
@@ -216,4 +228,3 @@ dotnet pack VapeCache.sln -c Release --no-build
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
