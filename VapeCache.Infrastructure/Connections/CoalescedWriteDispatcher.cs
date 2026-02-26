@@ -70,6 +70,9 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             () => _getWriteQueueDepth());
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async Task SendAsync(PendingRequest first, Socket socket, CancellationToken ct)
     {
         _coalesceQueue.Clear();
@@ -165,6 +168,9 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         }
     }
 
+    /// <summary>
+    /// Releases resources used by the current instance.
+    /// </summary>
     public void Dispose()
     {
         _coalesceBatch.Dispose();

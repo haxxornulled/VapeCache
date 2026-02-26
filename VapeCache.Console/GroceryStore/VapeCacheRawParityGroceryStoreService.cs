@@ -26,6 +26,9 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
         _redis = redis;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<Product?> GetProductAsync(string productId)
     {
         var key = $"product:{productId}";
@@ -45,6 +48,9 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
         return product;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask CacheProductAsync(Product product, TimeSpan ttl)
     {
         var key = $"product:{product.Id}";
@@ -52,6 +58,9 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
         await _redis.SetAsync(key, serialized, ttl, CancellationToken.None);
     }
 
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public async ValueTask AddToCartAsync(string userId, CartItem item)
     {
         var key = $"cart:{userId}";
@@ -67,6 +76,9 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
         }
     }
 
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public async ValueTask AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items)
     {
         if (items.Count == 0)
@@ -119,6 +131,9 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
         }
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<CartItem[]> GetCartAsync(string userId)
     {
         var key = $"cart:{userId}";
@@ -152,39 +167,60 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
         return cart;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<long> GetCartCountAsync(string userId)
     {
         return await _redis.LLenAsync($"cart:{userId}", CancellationToken.None);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask ClearCartAsync(string userId)
     {
         await _redis.DeleteAsync($"cart:{userId}", CancellationToken.None);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask JoinFlashSaleAsync(string saleId, string userId)
     {
         await ExecuteWithRentedUtf8Async(userId, payload =>
             _redis.SAddAsync($"sale:{saleId}:participants", payload, CancellationToken.None)).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId)
     {
         return await ExecuteWithRentedUtf8Async(userId, payload =>
             _redis.SIsMemberAsync($"sale:{saleId}:participants", payload, CancellationToken.None)).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId)
     {
         return await _redis.SCardAsync($"sale:{saleId}:participants", CancellationToken.None);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask SaveSessionAsync(string sessionId, UserSession session)
     {
         var serialized = SessionBinaryCodec.Serialize(session);
         await _redis.SetAsync($"session:{sessionId}", serialized, TimeSpan.FromHours(1), CancellationToken.None);
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<UserSession?> GetSessionAsync(string sessionId)
     {
         using var lease = await _redis.GetLeaseAsync($"session:{sessionId}", CancellationToken.None);

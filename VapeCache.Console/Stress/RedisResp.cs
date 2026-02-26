@@ -7,6 +7,9 @@ namespace VapeCache.Console.Stress;
 
 internal static class RedisResp
 {
+    /// <summary>
+    /// Builds value.
+    /// </summary>
     public static byte[] BuildCommand(params string[] parts)
     {
         var sb = new StringBuilder();
@@ -20,6 +23,9 @@ internal static class RedisResp
         return Encoding.UTF8.GetBytes(sb.ToString());
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static async Task<string> ReadLineAsync(IRedisConnection conn, CancellationToken ct)
     {
         var one = ArrayPool<byte>.Shared.Rent(1);

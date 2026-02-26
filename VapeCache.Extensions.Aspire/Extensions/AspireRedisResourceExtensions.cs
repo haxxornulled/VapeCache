@@ -4,6 +4,9 @@ namespace VapeCache.Extensions.Aspire;
 
 public static class AspireRedisResourceExtensions
 {
+    /// <summary>
+    /// Configures value.
+    /// </summary>
     public static AspireVapeCacheBuilder WithRedisFromAspire(
         this AspireVapeCacheBuilder builder,
         string connectionName)

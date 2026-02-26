@@ -2,6 +2,9 @@ namespace VapeCache.Abstractions.Connections;
 
 public sealed class RedisConnectionStringBuilder : IRedisConnectionStringBuilder
 {
+    /// <summary>
+    /// Builds value.
+    /// </summary>
     public string Build(RedisConnectionOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

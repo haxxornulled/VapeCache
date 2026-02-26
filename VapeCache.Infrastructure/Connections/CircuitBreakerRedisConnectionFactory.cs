@@ -151,6 +151,9 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
             .Build();
     }
 
+    /// <summary>
+    /// Creates value.
+    /// </summary>
     public async ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
     {
         if (!_options.Enabled)
@@ -171,6 +174,9 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
         }
     }
 
+    /// <summary>
+    /// Asynchronously releases resources used by the current instance.
+    /// </summary>
     public ValueTask DisposeAsync()
     {
         return _inner.DisposeAsync();

@@ -60,6 +60,9 @@ internal static class RedisRespReader
         ArrayPool<RespValue>.Shared.Return(array, clearArray: true);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static ValueTask<RespValue> ReadAsync(
         Stream stream,
         CancellationToken ct,
@@ -230,12 +233,33 @@ internal static class RedisRespReader
         public int ArrayLength { get; }
         public bool ArrayIsPooled { get; }
 
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public static RespValue SimpleString(string s) => new(RespKind.SimpleString, s, null, 0, false, 0, null, 0, false);
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public static RespValue Error(string s) => new(RespKind.Error, s, null, 0, false, 0, null, 0, false);
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public static RespValue Integer(long v) => new(RespKind.Integer, null, null, 0, false, v, null, 0, false);
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public static RespValue BulkString(byte[] bytes, int length, bool pooled) => new(RespKind.BulkString, null, bytes, length, pooled, 0, null, 0, false);
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public static RespValue NullBulkString() => new(RespKind.NullBulkString, null, null, 0, false, 0, null, 0, false);
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public static RespValue Array(RespValue[] items, int length, bool pooled = false) => new(RespKind.Array, null, null, 0, false, 0, items, length, pooled);
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public static RespValue NullArray() => new(RespKind.NullArray, null, null, 0, false, 0, null, 0, false);
     }
 

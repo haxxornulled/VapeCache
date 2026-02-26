@@ -138,7 +138,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         private readonly T _value;
         public OptionsMonitorWrapper(T value) => _value = value;
         public T CurrentValue => _value;
+        /// <summary>
+        /// Gets value.
+        /// </summary>
         public T Get(string? name) => _value;
+        /// <summary>
+        /// Executes value.
+        /// </summary>
         public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 
@@ -152,6 +158,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             optionsName);
     }
 
+    /// <summary>
+    /// Creates value.
+    /// </summary>
     public IRedisBatch CreateBatch()
         => new RedisBatch(this);
 
@@ -235,6 +244,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         return parsed;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("GET");
@@ -279,6 +291,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -318,6 +333,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<RedisValueLease> GetLeaseAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("GET");
@@ -361,6 +379,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -400,6 +421,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<byte[]?> GetExAsync(string key, TimeSpan? ttl, CancellationToken ct)
     {
         using var activity = StartCommandActivity("GETEX");
@@ -453,6 +477,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetExAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -499,6 +526,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<RedisValueLease> GetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct)
     {
         using var activity = StartCommandActivity("GETEX");
@@ -551,6 +581,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<byte[]?> GetRangeAsync(string key, long start, long end, CancellationToken ct)
     {
         using var activity = StartCommandActivity("GETRANGE");
@@ -595,6 +628,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?[]> MGetAsync(string[] keys, CancellationToken ct)
     {
         using var activity = StartCommandActivity("MGET");
@@ -661,6 +697,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Sets value.
+    /// </summary>
     public async ValueTask<bool> SetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct)
     {
         using var activity = StartCommandActivity("SET");
@@ -744,6 +783,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> MSetAsync((string Key, ReadOnlyMemory<byte> Value)[] items, CancellationToken ct)
     {
         using var activity = StartCommandActivity("MSET");
@@ -782,6 +824,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> DeleteAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("DEL");
@@ -819,6 +864,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> UnlinkAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("UNLINK");
@@ -856,6 +904,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> TtlSecondsAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("TTL");
@@ -893,6 +944,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> PTtlMillisecondsAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("PTTL");
@@ -930,6 +984,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> HSetAsync(string key, string field, ReadOnlyMemory<byte> value, CancellationToken ct)
     {
         using var activity = StartCommandActivity("HSET");
@@ -992,6 +1049,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<RedisValueLease> HGetLeaseAsync(string key, string field, CancellationToken ct)
     {
         using var activity = StartCommandActivity("HGET");
@@ -1059,6 +1119,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?> HGetAsync(string key, string field, CancellationToken ct)
     {
         using var activity = StartCommandActivity("HGET");
@@ -1125,6 +1188,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?[]> HMGetAsync(string key, string[] fields, CancellationToken ct)
     {
         using var activity = StartCommandActivity("HMGET");
@@ -1191,6 +1257,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> LPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LPUSH");
@@ -1230,6 +1299,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LPOP");
@@ -1273,6 +1345,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> ExpireAsync(string key, TimeSpan ttl, CancellationToken ct)
     {
         using var activity = StartCommandActivity("EXPIRE");
@@ -1317,6 +1392,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryHGetAsync(string key, string field, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -1379,6 +1457,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TrySetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct, out ValueTask<bool> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -1454,6 +1535,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryGetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -1500,6 +1584,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryLPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -1540,6 +1627,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<RedisValueLease> LPopLeaseAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LPOP");
@@ -1583,6 +1673,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?> LIndexAsync(string key, long index, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LINDEX");
@@ -1627,6 +1720,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?[]> LRangeAsync(string key, long start, long stop, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LRANGE");
@@ -1690,6 +1786,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Asynchronously releases resources used by the current instance.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         _msetLengthsCache = null;
@@ -2468,6 +2567,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             frozenUntilUtc);
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public RedisAutoscalerSnapshot GetAutoscalerSnapshot()
     {
         var eventTicks = Volatile.Read(ref _lastScaleEventTicks);
@@ -2812,6 +2914,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryLPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -2879,6 +2984,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     // ========== List Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> RPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)
     {
         using var activity = StartCommandActivity("RPUSH");
@@ -2921,6 +3029,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> RPushManyAsync(string key, ReadOnlyMemory<byte>[] values, int count, CancellationToken ct)
     {
         if (count <= 0 || values.Length == 0)
@@ -2994,6 +3105,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("RPOP");
@@ -3041,6 +3155,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryRPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -3081,6 +3198,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<RedisValueLease> RPopLeaseAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("RPOP");
@@ -3127,6 +3247,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryRPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -3166,6 +3289,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> LLenAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LLEN");
@@ -3210,6 +3336,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     // ========== Set Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> SAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         using var activity = StartCommandActivity("SADD");
@@ -3252,6 +3381,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> SRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         using var activity = StartCommandActivity("SREM");
@@ -3294,6 +3426,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> SIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         using var activity = StartCommandActivity("SISMEMBER");
@@ -3334,6 +3469,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TrySIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct, out ValueTask<bool> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -3373,6 +3511,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?[]> SMembersAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("SMEMBERS");
@@ -3438,6 +3579,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> SCardAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("SCARD");
@@ -3482,6 +3626,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     // ========== Sorted Set Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> ZAddAsync(string key, double score, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         using var activity = StartCommandActivity("ZADD");
@@ -3525,6 +3672,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> ZRemAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         using var activity = StartCommandActivity("ZREM");
@@ -3567,6 +3717,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> ZCardAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("ZCARD");
@@ -3609,6 +3762,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<double?> ZScoreAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         using var activity = StartCommandActivity("ZSCORE");
@@ -3654,6 +3810,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long?> ZRankAsync(string key, ReadOnlyMemory<byte> member, bool descending, CancellationToken ct)
     {
         using var activity = StartCommandActivity(descending ? "ZREVRANK" : "ZRANK");
@@ -3699,6 +3858,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<double> ZIncrByAsync(string key, double increment, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         using var activity = StartCommandActivity("ZINCRBY");
@@ -3899,6 +4061,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     // ========== JSON Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<byte[]?> JsonGetAsync(string key, string? path, CancellationToken ct)
     {
         using var activity = StartCommandActivity("JSON.GET");
@@ -3946,6 +4111,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<RedisValueLease> JsonGetLeaseAsync(string key, string? path, CancellationToken ct)
     {
         using var activity = StartCommandActivity("JSON.GET");
@@ -3992,6 +4160,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryJsonGetLeaseAsync(string key, string? path, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         if (_instrument) RedisTelemetry.CommandCalls.Add(1);
@@ -4031,6 +4202,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> JsonSetAsync(string key, string? path, ReadOnlyMemory<byte> json, CancellationToken ct)
     {
         using var activity = StartCommandActivity("JSON.SET");
@@ -4102,12 +4276,18 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> JsonSetLeaseAsync(string key, string? path, RedisValueLease json, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(json);
         return JsonSetAsync(key, path, json.Memory, ct);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> JsonDelAsync(string key, string? path, CancellationToken ct)
     {
         using var activity = StartCommandActivity("JSON.DEL");
@@ -4152,6 +4332,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     // ========== RediSearch / RedisBloom / RedisTimeSeries ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> FtCreateAsync(string index, string prefix, string[] fields, CancellationToken ct)
     {
         using var activity = StartCommandActivity("FT.CREATE");
@@ -4191,6 +4374,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<string[]> FtSearchAsync(string index, string query, int? offset, int? count, CancellationToken ct)
     {
         using var activity = StartCommandActivity("FT.SEARCH");
@@ -4266,6 +4452,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> BfAddAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct)
     {
         using var activity = StartCommandActivity("BF.ADD");
@@ -4306,6 +4495,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> BfExistsAsync(string key, ReadOnlyMemory<byte> item, CancellationToken ct)
     {
         using var activity = StartCommandActivity("BF.EXISTS");
@@ -4346,6 +4538,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> TsCreateAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("TS.CREATE");
@@ -4386,6 +4581,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> TsAddAsync(string key, long timestamp, double value, CancellationToken ct)
     {
         using var activity = StartCommandActivity("TS.ADD");
@@ -4503,6 +4701,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     // ========== Scan Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async IAsyncEnumerable<string> ScanAsync(
         string? pattern = null,
         int pageSize = 128,
@@ -4521,6 +4722,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         } while (cursor != 0);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async IAsyncEnumerable<byte[]> SScanAsync(
         string key,
         string? pattern = null,
@@ -4795,6 +4999,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     // ========== Server Commands ==========
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<string> PingAsync(CancellationToken ct)
     {
         using var activity = StartCommandActivity("PING");
@@ -4833,6 +5040,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<string[]> ModuleListAsync(CancellationToken ct)
     {
         using var activity = StartCommandActivity("MODULE");

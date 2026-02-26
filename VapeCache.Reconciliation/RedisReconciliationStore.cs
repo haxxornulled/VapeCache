@@ -32,8 +32,14 @@ internal sealed class InMemoryReconciliationStore : IRedisReconciliationStore
 {
     private readonly ConcurrentDictionary<string, TrackedOperation> _pending = new();
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<int> CountAsync(CancellationToken ct) => ValueTask.FromResult(_pending.Count);
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public ValueTask<bool> TryUpsertWriteAsync(string key, ReadOnlyMemory<byte> value, DateTimeOffset trackedAt, DateTimeOffset? expiresAt, CancellationToken ct)
     {
         var op = new TrackedOperation
@@ -49,6 +55,9 @@ internal sealed class InMemoryReconciliationStore : IRedisReconciliationStore
         return ValueTask.FromResult(true);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public ValueTask<bool> TryUpsertDeleteAsync(string key, DateTimeOffset trackedAt, CancellationToken ct)
     {
         var op = new TrackedOperation
@@ -62,6 +71,9 @@ internal sealed class InMemoryReconciliationStore : IRedisReconciliationStore
         return ValueTask.FromResult(true);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<IReadOnlyList<TrackedOperation>> SnapshotAsync(int maxOperations, CancellationToken ct)
     {
         var snapshot = _pending.Values.ToArray();
@@ -73,6 +85,9 @@ internal sealed class InMemoryReconciliationStore : IRedisReconciliationStore
         return ValueTask.FromResult<IReadOnlyList<TrackedOperation>>(snapshot);
     }
 
+    /// <summary>
+    /// Removes value.
+    /// </summary>
     public ValueTask RemoveAsync(IReadOnlyList<string> keys, CancellationToken ct)
     {
         foreach (var key in keys)
@@ -80,6 +95,9 @@ internal sealed class InMemoryReconciliationStore : IRedisReconciliationStore
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask ClearAsync(CancellationToken ct)
     {
         _pending.Clear();

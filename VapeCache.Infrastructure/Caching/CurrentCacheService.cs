@@ -8,6 +8,9 @@ internal sealed class CurrentCacheService : ICurrentCacheService
 
     public string CurrentName => Volatile.Read(ref _current);
 
+    /// <summary>
+    /// Sets value.
+    /// </summary>
     public void SetCurrent(string name)
     {
         if (string.IsNullOrWhiteSpace(name)) return;

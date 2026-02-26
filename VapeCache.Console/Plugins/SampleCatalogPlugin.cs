@@ -11,6 +11,9 @@ internal sealed class SampleCatalogPlugin(
 {
     public string Name => "sample-catalog";
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask ExecuteAsync(
         ICacheService cache,
         ICurrentCacheService current,

@@ -37,11 +37,20 @@ internal sealed class StampedeProtectedCacheService : ICacheService
 
     public string Name => _inner.Name;
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public ValueTask<byte[]?> GetAsync(string key, CancellationToken ct) => _inner.GetAsync(key, ct);
 
+    /// <summary>
+    /// Sets value.
+    /// </summary>
     public ValueTask SetAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions options, CancellationToken ct)
         => _inner.SetAsync(key, value, options, ct);
 
+    /// <summary>
+    /// Removes value.
+    /// </summary>
     public ValueTask<bool> RemoveAsync(string key, CancellationToken ct) => _inner.RemoveAsync(key, ct);
 
     public ValueTask<T?> GetAsync<T>(string key, SpanDeserializer<T> deserialize, CancellationToken ct)

@@ -6,6 +6,9 @@ namespace VapeCache.Infrastructure.Caching;
 
 public static class CacheStampedeOptionsFluentExtensions
 {
+    /// <summary>
+    /// Configures value.
+    /// </summary>
     public static OptionsBuilder<CacheStampedeOptions> UseCacheStampedeProfile(
         this OptionsBuilder<CacheStampedeOptions> builder,
         CacheStampedeProfile profile)
@@ -15,6 +18,9 @@ public static class CacheStampedeOptionsFluentExtensions
         return builder;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static OptionsBuilder<CacheStampedeOptions> ConfigureCacheStampede(
         this OptionsBuilder<CacheStampedeOptions> builder,
         Action<CacheStampedeOptionsBuilder> configure)
@@ -36,48 +42,72 @@ public sealed class CacheStampedeOptionsBuilder
         _options = options;
     }
 
+    /// <summary>
+    /// Configures value.
+    /// </summary>
     public CacheStampedeOptionsBuilder UseProfile(CacheStampedeProfile profile)
     {
         CacheStampedeProfiles.Apply(_options, profile);
         return this;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public CacheStampedeOptionsBuilder Enabled(bool enabled = true)
     {
         _options.Enabled = enabled;
         return this;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public CacheStampedeOptionsBuilder RejectSuspiciousKeys(bool reject = true)
     {
         _options.RejectSuspiciousKeys = reject;
         return this;
     }
 
+    /// <summary>
+    /// Configures value.
+    /// </summary>
     public CacheStampedeOptionsBuilder WithMaxKeys(int maxKeys)
     {
         _options.MaxKeys = maxKeys;
         return this;
     }
 
+    /// <summary>
+    /// Configures value.
+    /// </summary>
     public CacheStampedeOptionsBuilder WithMaxKeyLength(int maxKeyLength)
     {
         _options.MaxKeyLength = maxKeyLength;
         return this;
     }
 
+    /// <summary>
+    /// Configures value.
+    /// </summary>
     public CacheStampedeOptionsBuilder WithLockWaitTimeout(TimeSpan timeout)
     {
         _options.LockWaitTimeout = timeout;
         return this;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public CacheStampedeOptionsBuilder EnableFailureBackoff(bool enabled = true)
     {
         _options.EnableFailureBackoff = enabled;
         return this;
     }
 
+    /// <summary>
+    /// Configures value.
+    /// </summary>
     public CacheStampedeOptionsBuilder WithFailureBackoff(TimeSpan backoff)
     {
         _options.FailureBackoff = backoff;

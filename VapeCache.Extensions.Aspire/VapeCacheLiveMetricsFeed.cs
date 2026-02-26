@@ -36,6 +36,9 @@ internal sealed class VapeCacheLiveMetricsFeed(
     private readonly ConcurrentDictionary<int, Channel<VapeCacheLiveSample>> _subscribers = new();
     private int _subscriberId;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ChannelReader<VapeCacheLiveSample> Subscribe(CancellationToken ct)
     {
         var capacity = Math.Max(8, options.Value.LiveChannelCapacity);

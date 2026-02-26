@@ -29,6 +29,9 @@ internal sealed class CoalescedWriteBatch : IDisposable
     public int ScratchBaseOffset { get; set; }
     public List<IDisposable> Owners { get; } = new(8);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void Reset()
     {
         SegmentsToWrite.Clear();
@@ -37,11 +40,17 @@ internal sealed class CoalescedWriteBatch : IDisposable
         ScratchBaseOffset = 0;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void EnsureScratch()
     {
         Scratch ??= ArrayPool<byte>.Shared.Rent(DefaultScratchSize);
     }
 
+    /// <summary>
+    /// Releases resources used by the current instance.
+    /// </summary>
     public void Dispose()
     {
         if (Scratch is not null)
@@ -55,6 +64,9 @@ internal sealed class CoalescedWriteBatch : IDisposable
         Owners.Clear();
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void RecycleAfterSend()
     {
         for (var i = 0; i < Owners.Count; i++)
@@ -109,6 +121,9 @@ internal sealed class Coalescer
         _queueDepthProvider = queueDepthProvider;
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryBuildBatch(CoalescedWriteBatch batch)
     {
         batch.Reset();
@@ -255,6 +270,9 @@ internal sealed class ArrayPoolLease : IDisposable
 
     public ArrayPoolLease(byte[] buffer) => _buffer = buffer;
 
+    /// <summary>
+    /// Releases resources used by the current instance.
+    /// </summary>
     public void Dispose()
     {
         var buffer = Interlocked.Exchange(ref _buffer, null);

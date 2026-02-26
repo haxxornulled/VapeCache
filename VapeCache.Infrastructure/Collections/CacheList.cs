@@ -22,6 +22,9 @@ internal sealed class CacheList<T> : ICacheList<T>
         _codec = codec;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> PushFrontAsync(T item, CancellationToken ct = default)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -29,6 +32,9 @@ internal sealed class CacheList<T> : ICacheList<T>
         return await _executor.LPushAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<long> PushBackAsync(T item, CancellationToken ct = default)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -36,6 +42,9 @@ internal sealed class CacheList<T> : ICacheList<T>
         return await _executor.RPushAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<T?> PopFrontAsync(CancellationToken ct = default)
     {
         var bytes = await _executor.LPopAsync(Key, ct).ConfigureAwait(false);
@@ -43,6 +52,9 @@ internal sealed class CacheList<T> : ICacheList<T>
         return _codec.Deserialize(bytes);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<T?> PopBackAsync(CancellationToken ct = default)
     {
         var bytes = await _executor.RPopAsync(Key, ct).ConfigureAwait(false);
@@ -50,6 +62,9 @@ internal sealed class CacheList<T> : ICacheList<T>
         return _codec.Deserialize(bytes);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryPopFrontAsync(CancellationToken ct, out ValueTask<T?> task)
     {
         if (!_executor.TryLPopAsync(Key, ct, out var bytesTask))
@@ -62,6 +77,9 @@ internal sealed class CacheList<T> : ICacheList<T>
         return true;
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public bool TryPopBackAsync(CancellationToken ct, out ValueTask<T?> task)
     {
         if (!_executor.TryRPopAsync(Key, ct, out var bytesTask))
@@ -74,6 +92,9 @@ internal sealed class CacheList<T> : ICacheList<T>
         return true;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<T[]> RangeAsync(long start, long stop, CancellationToken ct = default)
     {
         var items = await _executor.LRangeAsync(Key, start, stop, ct).ConfigureAwait(false);
@@ -86,11 +107,17 @@ internal sealed class CacheList<T> : ICacheList<T>
         return result;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<long> LengthAsync(CancellationToken ct = default)
     {
         return _executor.LLenAsync(Key, ct);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async IAsyncEnumerable<T> StreamAsync(
         int pageSize = 128,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)

@@ -36,41 +36,74 @@ internal static class RedisRespProtocol
     private static readonly byte[] PxBulkString = "$2\r\nPX\r\n"u8.ToArray();
     private static readonly byte[] CrLf = "\r\n"u8.ToArray();
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetSelectCommandLength(int database)
         => GetCommandLength(2, "SELECT", GetIntLength(database));
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetAuthCommandLength(string? username, string password)
         => string.IsNullOrEmpty(username)
             ? GetCommandLength(2, "AUTH", password)
             : GetCommandLength(3, "AUTH", username, password);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetAclWhoAmICommandLength()
         => GetCommandLength(2, "ACL", "WHOAMI");
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteSelectCommand(Span<byte> destination, int database)
         => WriteCommand(destination, 2, "SELECT", database);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteAuthCommand(Span<byte> destination, string? username, string password)
         => string.IsNullOrEmpty(username)
             ? WriteCommand(destination, 2, "AUTH", password)
             : WriteCommand(destination, 3, "AUTH", username, password);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteAclWhoAmICommand(Span<byte> destination)
         => WriteCommand(destination, 2, "ACL", "WHOAMI");
 
     // HELLO command to negotiate RESP protocol version (for Redis 6+)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetHelloCommandLength(int protocolVersion)
         => GetCommandLength(2, "HELLO", GetIntLength(protocolVersion));
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteHelloCommand(Span<byte> destination, int protocolVersion)
         => WriteCommand(destination, 2, "HELLO", protocolVersion);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetGetCommandLength(string key) => GetCommandLength(2, "GET", key);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteGetCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "GET", key);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetGetExCommandLength(string key, int? ttlMs)
     {
         if (ttlMs is null)
@@ -84,6 +117,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(GetIntLength(ttlMs.Value)) + GetIntLength(ttlMs.Value) + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteGetExCommand(Span<byte> destination, string key, int? ttlMs)
     {
         if (ttlMs is null)
@@ -98,24 +134,45 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetTtlCommandLength(string key) => GetCommandLength(2, "TTL", key);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteTtlCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "TTL", key);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetPTtlCommandLength(string key) => GetCommandLength(2, "PTTL", key);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WritePTtlCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "PTTL", key);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetDelCommandLength(string key) => GetCommandLength(2, "DEL", key);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteDelCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "DEL", key);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetExpireCommandLength(string key, int seconds)
     {
         // EXPIRE key seconds
@@ -126,6 +183,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(secondsLen) + secondsLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteExpireCommand(Span<byte> destination, string key, int seconds)
     {
         var idx = 0;
@@ -136,18 +196,33 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetUnlinkCommandLength(string key) => GetCommandLength(2, "UNLINK", key);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteUnlinkCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "UNLINK", key);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetHGetCommandLength(string key, string field) => GetCommandLength(3, "HGET", key, field);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteHGetCommand(Span<byte> destination, string key, string field) => WriteCommand(destination, 3, "HGET", key, field);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetHSetCommandLength(string key, string field, int valueLen)
     {
@@ -159,6 +234,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(valueLen) + valueLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteHSetCommand(Span<byte> destination, string key, string field, ReadOnlySpan<byte> value)
     {
@@ -171,6 +249,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteHSetCommandHeader(Span<byte> destination, string key, string field, int valueLen)
     {
@@ -183,6 +264,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetHMGetCommandLength(string key, string[] fields)
     {
         var count = 2 + fields.Length;
@@ -196,6 +280,9 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteHMGetCommand(Span<byte> destination, string key, string[] fields)
     {
         var idx = 0;
@@ -207,6 +294,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetLPushCommandLength(string key, int valueLen)
     {
         // LPUSH key value
@@ -216,6 +306,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(valueLen) + valueLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteLPushCommand(Span<byte> destination, string key, ReadOnlySpan<byte> value)
     {
         var idx = 0;
@@ -226,6 +319,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteLPushCommandHeader(Span<byte> destination, string key, int valueLen)
     {
         var idx = 0;
@@ -236,9 +332,18 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetLPopCommandLength(string key) => GetCommandLength(2, "LPOP", key);
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteLPopCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "LPOP", key);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetLRangeCommandLength(string key, long start, long stop)
     {
         // LRANGE key start stop
@@ -251,6 +356,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(stopLen) + stopLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteLRangeCommand(Span<byte> destination, string key, long start, long stop)
     {
         var idx = 0;
@@ -262,6 +370,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetLIndexCommandLength(string key, long index)
     {
         // LINDEX key index
@@ -272,6 +383,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(indexLen) + indexLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteLIndexCommand(Span<byte> destination, string key, long index)
     {
         var idx = 0;
@@ -282,6 +396,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetGetRangeCommandLength(string key, long start, long end)
     {
         // GETRANGE key start end
@@ -294,6 +411,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(endLen) + endLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteGetRangeCommand(Span<byte> destination, string key, long start, long end)
     {
         var idx = 0;
@@ -305,6 +425,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetMGetCommandLength(string[] keys)
     {
@@ -317,6 +440,9 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteMGetCommand(Span<byte> destination, string[] keys)
     {
@@ -329,6 +455,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetMSetCommandLength((string Key, int ValueLen)[] items)
     {
@@ -343,6 +472,9 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetMSetCommandLength((string Key, ReadOnlyMemory<byte> Value)[] items)
     {
@@ -357,6 +489,9 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteMSetCommand(Span<byte> destination, (string Key, ReadOnlyMemory<byte> Value)[] items)
     {
@@ -372,6 +507,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetMSetHeaderLength((string Key, int ValueLen)[] items)
     {
         if (items.Length == 0) return 0;
@@ -382,6 +520,9 @@ internal static class RedisRespProtocol
         return total - payloadAndSuffix;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteMSetCommandHeader(Span<byte> destination, ReadOnlySpan<(string Key, int ValueLen)> items)
     {
@@ -398,6 +539,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetSetCommandLength(string key, int valueByteLen, int? ttlMs)
     {
@@ -416,6 +560,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(GetIntLength(ttlMs.Value)) + GetIntLength(ttlMs.Value) + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteSetCommand(Span<byte> destination, string key, ReadOnlySpan<byte> value, int? ttlMs)
     {
@@ -443,6 +590,9 @@ internal static class RedisRespProtocol
 
     // Header-only variant (omits value bytes and trailing CRLF) for scatter/gather writes.
     // This is only used for SET without TTL, since SET with TTL requires building the full command.
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteSetCommandHeader(Span<byte> destination, string key, int valueByteLen, int? ttlMs)
     {
@@ -459,6 +609,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Builds value.
+    /// </summary>
     public static byte[] BuildCommand(params string[] parts)
     {
         var sb = new StringBuilder();
@@ -472,6 +625,9 @@ internal static class RedisRespProtocol
         return Encoding.UTF8.GetBytes(sb.ToString());
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static async Task<string> ReadLineAsync(Stream stream, CancellationToken ct)
     {
         var buf = ArrayPool<byte>.Shared.Rent(256);
@@ -501,11 +657,17 @@ internal static class RedisRespProtocol
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static async Task ExpectOkAsync(Stream stream, CancellationToken ct)
     {
         await ExpectExactAsync(stream, OkLine, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static async Task<string> ReadBulkStringAsync(Stream stream, CancellationToken ct)
     {
         var header = await ReadLineAsync(stream, ct).ConfigureAwait(false);
@@ -537,12 +699,18 @@ internal static class RedisRespProtocol
         return Encoding.UTF8.GetString(buf);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static async Task ExpectPongAsync(Stream stream, CancellationToken ct)
     {
         await ExpectExactAsync(stream, PongLine, ct).ConfigureAwait(false);
     }
 
     // HELLO response is a map/array in RESP2 - just skip it recursively
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static async Task SkipHelloResponseAsync(Stream stream, CancellationToken ct)
     {
         await SkipRespValueAsync(stream, ct).ConfigureAwait(false);
@@ -582,6 +750,9 @@ internal static class RedisRespProtocol
         // Simple string (+), integer (:), and null ($-1) are already consumed by ReadLineAsync
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public static async Task<bool> TryExpectOkAsync(Stream stream, CancellationToken ct)
     {
         byte[]? rented = null;
@@ -913,6 +1084,9 @@ internal static class RedisRespProtocol
     // ======================
 
     // RPUSH (push to tail of list)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetRPushCommandLength(string key, int valueLen)
     {
@@ -923,6 +1097,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(valueLen) + valueLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteRPushCommand(Span<byte> destination, string key, ReadOnlySpan<byte> value)
     {
@@ -934,6 +1111,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetRPushManyCommandLength(string key, ReadOnlyMemory<byte>[] values, int count)
     {
@@ -954,6 +1134,9 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteRPushManyCommand(Span<byte> destination, string key, ReadOnlyMemory<byte>[] values, int count)
     {
@@ -971,6 +1154,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetRPushManyPrefixLength(string key, int count)
     {
@@ -982,6 +1168,9 @@ internal static class RedisRespProtocol
                + GetBulkStringLen(key) + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteRPushManyPrefix(Span<byte> destination, string key, int count)
     {
@@ -995,25 +1184,43 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetBulkLengthPrefixLength(int payloadLength)
         => GetBulkLen(payloadLength);
 
     // RPOP (pop from tail of list)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetRPopCommandLength(string key) => GetCommandLength(2, "RPOP", key);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteRPopCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "RPOP", key);
 
     // LLEN (get list length)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetLLenCommandLength(string key) => GetCommandLength(2, "LLEN", key);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteLLenCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "LLEN", key);
 
     // SADD (add to set)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetSAddCommandLength(string key, int memberLen)
     {
@@ -1024,6 +1231,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(memberLen) + memberLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteSAddCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member)
     {
@@ -1036,6 +1246,9 @@ internal static class RedisRespProtocol
     }
 
     // SREM (remove from set)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetSRemCommandLength(string key, int memberLen)
     {
@@ -1046,6 +1259,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(memberLen) + memberLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteSRemCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member)
     {
@@ -1058,6 +1274,9 @@ internal static class RedisRespProtocol
     }
 
     // SISMEMBER (check set membership)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetSIsMemberCommandLength(string key, int memberLen)
     {
@@ -1068,6 +1287,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(memberLen) + memberLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteSIsMemberCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member)
     {
@@ -1080,20 +1302,35 @@ internal static class RedisRespProtocol
     }
 
     // SMEMBERS (get all set members)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetSMembersCommandLength(string key) => GetCommandLength(2, "SMEMBERS", key);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteSMembersCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "SMEMBERS", key);
 
     // SCARD (get set cardinality/count)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetSCardCommandLength(string key) => GetCommandLength(2, "SCARD", key);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteSCardCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "SCARD", key);
 
     // ZADD (add/update sorted set member)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetZAddCommandLength(string key, string score, int memberLen)
     {
@@ -1104,6 +1341,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(memberLen) + memberLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteZAddCommand(Span<byte> destination, string key, string score, ReadOnlySpan<byte> member)
     {
@@ -1117,6 +1357,9 @@ internal static class RedisRespProtocol
     }
 
     // ZREM (remove sorted set member)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetZRemCommandLength(string key, int memberLen)
     {
@@ -1126,6 +1369,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(memberLen) + memberLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteZRemCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member)
     {
@@ -1138,13 +1384,22 @@ internal static class RedisRespProtocol
     }
 
     // ZCARD (sorted set cardinality)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetZCardCommandLength(string key) => GetCommandLength(2, "ZCARD", key);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteZCardCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "ZCARD", key);
 
     // ZSCORE (member score)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetZScoreCommandLength(string key, int memberLen)
     {
@@ -1154,6 +1409,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(memberLen) + memberLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteZScoreCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member)
     {
@@ -1166,6 +1424,9 @@ internal static class RedisRespProtocol
     }
 
     // ZRANK/ZREVRANK (member rank)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetZRankCommandLength(string key, int memberLen, bool descending)
     {
@@ -1176,6 +1437,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(memberLen) + memberLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteZRankCommand(Span<byte> destination, string key, ReadOnlySpan<byte> member, bool descending)
     {
@@ -1188,6 +1452,9 @@ internal static class RedisRespProtocol
     }
 
     // ZINCRBY (increment score)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetZIncrByCommandLength(string key, string increment, int memberLen)
     {
@@ -1198,6 +1465,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(memberLen) + memberLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteZIncrByCommand(Span<byte> destination, string key, string increment, ReadOnlySpan<byte> member)
     {
@@ -1211,6 +1481,9 @@ internal static class RedisRespProtocol
     }
 
     // ZRANGE/ZREVRANGE (with scores)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetZRangeWithScoresCommandLength(string key, long start, long stop, bool descending)
     {
@@ -1226,6 +1499,9 @@ internal static class RedisRespProtocol
                + GetBulkStringLen("WITHSCORES") + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteZRangeWithScoresCommand(Span<byte> destination, string key, long start, long stop, bool descending)
     {
@@ -1240,6 +1516,9 @@ internal static class RedisRespProtocol
     }
 
     // ZRANGEBYSCORE/ZREVRANGEBYSCORE (with scores)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetZRangeByScoreWithScoresCommandLength(
         string key,
         string min,
@@ -1272,6 +1551,9 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteZRangeByScoreWithScoresCommand(
         Span<byte> destination,
         string key,
@@ -1304,12 +1586,18 @@ internal static class RedisRespProtocol
     }
 
     // JSON.GET
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetJsonGetCommandLength(string key, string? path)
         => path is null
             ? GetCommandLength(2, "JSON.GET", key)
             : GetCommandLength(3, "JSON.GET", key, path);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteJsonGetCommand(Span<byte> destination, string key, string? path)
         => path is null
@@ -1317,6 +1605,9 @@ internal static class RedisRespProtocol
             : WriteCommand(destination, 3, "JSON.GET", key, path);
 
     // JSON.SET
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetJsonSetCommandLength(string key, string path, int jsonLength)
     {
         return GetHeaderLen(4)
@@ -1327,6 +1618,9 @@ internal static class RedisRespProtocol
     }
 
     // Header-only variant (omits JSON bytes and trailing CRLF) for scatter/gather writes.
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteJsonSetCommandHeader(Span<byte> destination, string key, string path, int jsonLength)
     {
         var idx = 0;
@@ -1339,12 +1633,18 @@ internal static class RedisRespProtocol
     }
 
     // JSON.DEL
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetJsonDelCommandLength(string key, string? path)
         => path is null
             ? GetCommandLength(2, "JSON.DEL", key)
             : GetCommandLength(3, "JSON.DEL", key, path);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteJsonDelCommand(Span<byte> destination, string key, string? path)
         => path is null
@@ -1352,6 +1652,9 @@ internal static class RedisRespProtocol
             : WriteCommand(destination, 3, "JSON.DEL", key, path);
 
     // SCAN/SSCAN/HSCAN/ZSCAN
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetScanCommandLength(string command, string? key, long cursor, string? pattern, int count)
     {
         var parts = key is null ? 2 : 3;
@@ -1381,6 +1684,9 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteScanCommand(Span<byte> destination, string command, string? key, long cursor, string? pattern, int count)
     {
         var parts = key is null ? 2 : 3;
@@ -1412,6 +1718,9 @@ internal static class RedisRespProtocol
     }
 
     // BF.ADD / BF.EXISTS (RedisBloom)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetBfAddCommandLength(string key, int itemLen)
     {
@@ -1421,6 +1730,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(itemLen) + itemLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteBfAddCommand(Span<byte> destination, string key, ReadOnlySpan<byte> item)
     {
@@ -1432,6 +1744,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetBfExistsCommandLength(string key, int itemLen)
     {
@@ -1441,6 +1756,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(itemLen) + itemLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteBfExistsCommand(Span<byte> destination, string key, ReadOnlySpan<byte> item)
     {
@@ -1453,6 +1771,9 @@ internal static class RedisRespProtocol
     }
 
     // FT.CREATE / FT.SEARCH (RediSearch)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetFtCreateCommandLength(string index, string prefix, string[] fields)
     {
         var parts = 8 + fields.Length * 2;
@@ -1475,6 +1796,9 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteFtCreateCommand(Span<byte> destination, string index, string prefix, string[] fields)
     {
         var parts = 8 + fields.Length * 2;
@@ -1497,6 +1821,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetFtSearchCommandLength(string index, string query, int? offset, int? count)
     {
         var parts = 3;
@@ -1520,6 +1847,9 @@ internal static class RedisRespProtocol
         return len;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteFtSearchCommand(Span<byte> destination, string index, string query, int? offset, int? count)
     {
         var parts = 3;
@@ -1543,12 +1873,21 @@ internal static class RedisRespProtocol
     }
 
     // TS.CREATE / TS.ADD / TS.RANGE (RedisTimeSeries)
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetTsCreateCommandLength(string key) => GetCommandLength(2, "TS.CREATE", key);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteTsCreateCommand(Span<byte> destination, string key) => WriteCommand(destination, 2, "TS.CREATE", key);
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetTsAddCommandLength(string key, long timestamp, string value)
     {
         var tsLen = GetIntLength(timestamp);
@@ -1559,6 +1898,9 @@ internal static class RedisRespProtocol
                + GetBulkStringLen(value) + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteTsAddCommand(Span<byte> destination, string key, long timestamp, string value)
     {
         var idx = 0;
@@ -1570,6 +1912,9 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public static int GetTsRangeCommandLength(string key, long from, long to)
     {
         var fromLen = GetIntLength(from);
@@ -1581,6 +1926,9 @@ internal static class RedisRespProtocol
                + GetBulkLen(toLen) + toLen + 2;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public static int WriteTsRangeCommand(Span<byte> destination, string key, long from, long to)
     {
         var idx = 0;

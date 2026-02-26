@@ -41,6 +41,9 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void TrackWrite(string key, ReadOnlyMemory<byte> value, TimeSpan? expiry)
     {
         if (!_options.Enabled) return;
@@ -64,6 +67,9 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void TrackDelete(string key)
     {
         if (!_options.Enabled) return;
@@ -117,6 +123,9 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
             Volatile.Write(ref _pendingEstimate, 0);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask ReconcileAsync(CancellationToken ct = default)
     {
         if (!_options.Enabled) return;
@@ -234,12 +243,18 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
             "Redis reconciliation complete: {Synced} synced, {Skipped} skipped, {Failed} failed", synced, skipped, failed);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void Clear()
     {
         _store.ClearAsync(CancellationToken.None).GetAwaiter().GetResult();
         Volatile.Write(ref _pendingEstimate, 0);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask FlushAsync(CancellationToken ct = default)
     {
         await _store.ClearAsync(ct).ConfigureAwait(false);

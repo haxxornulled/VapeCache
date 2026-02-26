@@ -18,12 +18,18 @@ internal sealed class RedisModuleDetector : IRedisModuleDetector
         _executor = executor;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> IsModuleInstalledAsync(string moduleName, CancellationToken ct = default)
     {
         var modules = await GetInstalledModulesAsync(ct).ConfigureAwait(false);
         return Array.Exists(modules, m => string.Equals(m, moduleName, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<string[]> GetInstalledModulesAsync(CancellationToken ct = default)
     {
         // Return cached result if available
@@ -50,6 +56,9 @@ internal sealed class RedisModuleDetector : IRedisModuleDetector
         }
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public async ValueTask<bool> HasRedisJsonAsync(CancellationToken ct = default)
     {
         // RedisJSON module is named "ReJSON"

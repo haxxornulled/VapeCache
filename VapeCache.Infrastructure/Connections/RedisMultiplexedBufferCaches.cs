@@ -17,6 +17,9 @@ internal sealed class RedisMultiplexedBufferCaches
 
     private const int MaxSharedCacheSize = 64;
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public byte[] RentHeaderBuffer(int minLength)
     {
         if (minLength <= 512)
@@ -45,6 +48,9 @@ internal sealed class RedisMultiplexedBufferCaches
         return ArrayPool<byte>.Shared.Rent(Math.Max(2048, minLength));
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void ReturnHeaderBuffer(byte[]? buffer)
     {
         if (buffer is null)
@@ -78,6 +84,9 @@ internal sealed class RedisMultiplexedBufferCaches
         ArrayPool<byte>.Shared.Return(buffer);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ReadOnlyMemory<byte>[] RentPayloadArray(int minLength)
     {
         if (minLength <= 16)
@@ -106,6 +115,9 @@ internal sealed class RedisMultiplexedBufferCaches
         return ArrayPool<ReadOnlyMemory<byte>>.Shared.Rent(Math.Max(64, minLength));
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void ReturnPayloadArray(ReadOnlyMemory<byte>[]? payloads)
     {
         if (payloads is null)

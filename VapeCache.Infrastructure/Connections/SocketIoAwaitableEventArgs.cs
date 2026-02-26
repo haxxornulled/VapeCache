@@ -30,6 +30,9 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
     /// </summary>
     public void Reset() => ResetForOperation();
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void ResetForOperation()
     {
         _ctr.Dispose();
@@ -48,6 +51,9 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
     [ThreadStatic] private static ArraySegment<byte>[]? _cachedSubset16;
     [ThreadStatic] private static ArraySegment<byte>[]? _cachedSubset32;
 
+    /// <summary>
+    /// Sets value.
+    /// </summary>
     public void SetBufferList(ArraySegment<byte>[] buffers, int count)
     {
         if ((uint)count == 0 || count > buffers.Length)
@@ -121,8 +127,14 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
     /// </summary>
     public void SetBuffer(ArraySegment<byte>[] buffers, int count) => SetBufferList(buffers, count);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<int> WaitAsync() => new(this, _core.Version);
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void RegisterCancellation(CancellationToken ct)
     {
         if (!ct.CanBeCanceled)
@@ -132,6 +144,9 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
         _ctr = ct.Register(static state => ((SocketIoAwaitableEventArgs)state!).TrySetCanceled(), this);
     }
 
+    /// <summary>
+    /// Attempts to value.
+    /// </summary>
     public void TrySetCanceled()
     {
         if (Interlocked.Exchange(ref _completed, 1) != 0)
@@ -184,6 +199,9 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
             _core.SetException(new SocketException((int)error));
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public int GetResult(short token) => _core.GetResult(token);
 
     ValueTaskSourceStatus IValueTaskSource<int>.GetStatus(short token) => _core.GetStatus(token);

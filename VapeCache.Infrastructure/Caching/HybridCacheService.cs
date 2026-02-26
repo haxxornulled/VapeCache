@@ -82,6 +82,9 @@ internal sealed class HybridCacheService(
         return cts;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void MarkRedisSuccess()
     {
         if (!_breaker.Enabled) return;
@@ -93,6 +96,9 @@ internal sealed class HybridCacheService(
             TryStartReconciliation();
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void MarkRedisFailure()
     {
         if (!_breaker.Enabled) return;
@@ -155,6 +161,9 @@ internal sealed class HybridCacheService(
         return TimeSpan.FromSeconds(seconds);
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
         var breaker = _breaker;
@@ -226,6 +235,9 @@ internal sealed class HybridCacheService(
         }
     }
 
+    /// <summary>
+    /// Sets value.
+    /// </summary>
     public async ValueTask SetAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions options, CancellationToken ct)
     {
         var breaker = _breaker;
@@ -297,6 +309,9 @@ internal sealed class HybridCacheService(
         }
     }
 
+    /// <summary>
+    /// Removes value.
+    /// </summary>
     public async ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
     {
         var breaker = _breaker;
@@ -455,6 +470,9 @@ internal sealed class HybridCacheService(
         return created;
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void ForceOpen(string reason)
     {
         if (!_breaker.Enabled) return;
@@ -464,6 +482,9 @@ internal sealed class HybridCacheService(
         Volatile.Write(ref _openUntilTicks, 1);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void ClearForcedOpen()
     {
         if (!_breaker.Enabled) return;

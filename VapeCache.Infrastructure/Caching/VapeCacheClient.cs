@@ -18,6 +18,9 @@ public sealed class VapeCacheClient : IVapeCache
         _codecs = codecs ?? throw new ArgumentNullException(nameof(codecs));
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ICacheRegion Region(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -57,6 +60,9 @@ public sealed class VapeCacheClient : IVapeCache
         return result;
     }
 
+    /// <summary>
+    /// Removes value.
+    /// </summary>
     public ValueTask<bool> RemoveAsync(CacheKey key, CancellationToken ct = default)
         => _inner.RemoveAsync(key.Value, ct);
 
@@ -101,6 +107,9 @@ public sealed class VapeCacheClient : IVapeCache
         public ValueTask SetAsync<T>(string id, T value, CacheEntryOptions options = default, CancellationToken ct = default)
             => _cache.SetAsync(Key<T>(id), value, options, ct);
 
+        /// <summary>
+        /// Removes value.
+        /// </summary>
         public ValueTask<bool> RemoveAsync(string id, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(id))

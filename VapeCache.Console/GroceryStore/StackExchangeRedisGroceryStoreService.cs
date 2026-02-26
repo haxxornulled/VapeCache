@@ -17,6 +17,9 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
         _db = redis.GetDatabase();
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<Product?> GetProductAsync(string productId)
     {
         var value = await _db.StringGetAsync($"product:{productId}");
@@ -25,18 +28,27 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
         return JsonSerializer.Deserialize((byte[])value!, JsonContext.Product);
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask CacheProductAsync(Product product, TimeSpan ttl)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(product, JsonContext.Product);
         return new ValueTask(_db.StringSetAsync($"product:{product.Id}", payload, ttl));
     }
 
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public ValueTask AddToCartAsync(string userId, CartItem item)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(item, JsonContext.CartItem);
         return new ValueTask(_db.ListRightPushAsync($"cart:{userId}", payload));
     }
 
+    /// <summary>
+    /// Adds value.
+    /// </summary>
     public async ValueTask AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items)
     {
         if (items.Count == 0)
@@ -55,6 +67,9 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
         await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<CartItem[]> GetCartAsync(string userId)
     {
         var values = await _db.ListRangeAsync($"cart:{userId}");
@@ -69,37 +84,58 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
         return items;
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public ValueTask<long> GetCartCountAsync(string userId)
     {
         return new ValueTask<long>(_db.ListLengthAsync($"cart:{userId}"));
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask ClearCartAsync(string userId)
     {
         return new ValueTask(_db.KeyDeleteAsync($"cart:{userId}"));
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask JoinFlashSaleAsync(string saleId, string userId)
     {
         return new ValueTask(_db.SetAddAsync($"sale:{saleId}:participants", userId));
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId)
     {
         return new ValueTask<bool>(_db.SetContainsAsync($"sale:{saleId}:participants", userId));
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId)
     {
         return new ValueTask<long>(_db.SetLengthAsync($"sale:{saleId}:participants"));
     }
 
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask SaveSessionAsync(string sessionId, UserSession session)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(session, JsonContext.UserSession);
         return new ValueTask(_db.StringSetAsync($"session:{sessionId}", payload, TimeSpan.FromHours(1)));
     }
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     public async ValueTask<UserSession?> GetSessionAsync(string sessionId)
     {
         var value = await _db.StringGetAsync($"session:{sessionId}");
