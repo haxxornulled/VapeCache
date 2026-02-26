@@ -2,6 +2,8 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 
@@ -17,6 +19,8 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
     private readonly IInMemorySpillStore _spillStore;
     private readonly bool _spillStoreSupportsWrites;
     private readonly ICacheIntentRegistry _intentRegistry;
+    private readonly ILogger<InMemoryCacheService> _logger;
+    private int _spillStoreWarningIssued;
     private static readonly ICacheIntentRegistry NoopIntentRegistry = new NoopCacheIntentRegistry();
 
     public InMemoryCacheService(
@@ -25,7 +29,8 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         CacheStatsRegistry statsRegistry,
         IOptionsMonitor<InMemorySpillOptions> spillOptions,
         IInMemorySpillStore spillStore,
-        ICacheIntentRegistry? intentRegistry = null)
+        ICacheIntentRegistry? intentRegistry = null,
+        ILogger<InMemoryCacheService>? logger = null)
     {
         _cache = cache;
         _current = current;
@@ -33,9 +38,12 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         _spillOptionsMonitor = spillOptions;
         _spillStore = spillStore;
         _intentRegistry = intentRegistry ?? NoopIntentRegistry;
+        _logger = logger ?? NullLogger<InMemoryCacheService>.Instance;
         // Avoid writing spill references when the no-op store is active.
         // This prevents large entries from becoming unreadable in free-tier/default wiring.
         _spillStoreSupportsWrites = spillStore is not NoopSpillStore;
+        if (spillStore is ISpillStoreDiagnostics spillDiagnostics)
+            CacheTelemetry.InitializeSpillDiagnostics(spillDiagnostics);
     }
 
     public string Name => "memory";
@@ -108,6 +116,8 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         var start = Stopwatch.GetTimestamp();
         try
         {
+            await TryDeleteExistingSpillAsync(key, ct).ConfigureAwait(false);
+
             var spillOptions = SpillOptions;
             if (ShouldSpill(value.Length, spillOptions))
             {
@@ -144,7 +154,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
     /// <summary>
     /// Removes value.
     /// </summary>
-    public ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
+    public async ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ct.ThrowIfCancellationRequested();
@@ -152,10 +162,18 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         _stats.IncRemove();
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
+        var existed = false;
+        if (_cache.TryGetValue(key, out object? current))
+        {
+            existed = true;
+            if (current is SpillEntry spill)
+                await TryDeleteSpillRefAsync(spill.SpillRef, ct).ConfigureAwait(false);
+        }
+
         _cache.Remove(key);
         _intentRegistry.RecordRemove(key);
         CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "remove" } });
-        return ValueTask.FromResult(true);
+        return existed;
     }
 
     public async ValueTask<T?> GetAsync<T>(string key, SpanDeserializer<T> deserialize, CancellationToken ct)
@@ -193,10 +211,24 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
 
     private bool ShouldSpill(int length, InMemorySpillOptions spillOptions)
     {
+        if (spillOptions.EnableSpillToDisk && !_spillStoreSupportsWrites)
+            ReportSpillStoreUnavailable();
+
         return _spillStoreSupportsWrites &&
                spillOptions.EnableSpillToDisk &&
                spillOptions.SpillThresholdBytes > 0 &&
                length > spillOptions.SpillThresholdBytes;
+    }
+
+    private void ReportSpillStoreUnavailable()
+    {
+        if (Interlocked.Exchange(ref _spillStoreWarningIssued, 1) != 0)
+            return;
+
+        CacheTelemetry.SpillStoreUnavailable.Add(1);
+        _logger.LogWarning(
+            "InMemory spill-to-disk is enabled, but the active spill store is no-op. " +
+            "Register persistence spill services (AddVapeCachePersistence) to enable file-backed scatter spill.");
     }
 
     private void StoreEntry(string key, CacheEntryOptions options, ReadOnlyMemory<byte> value)
@@ -262,6 +294,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
             if (tail is null)
             {
                 _cache.Remove(key);
+                await TryDeleteSpillRefAsync(spill.SpillRef, CancellationToken.None).ConfigureAwait(false);
                 return null;
             }
 
@@ -273,6 +306,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
             if (expectedTail != tail.Length)
             {
                 _cache.Remove(key);
+                await TryDeleteSpillRefAsync(spill.SpillRef, CancellationToken.None).ConfigureAwait(false);
                 return null;
             }
 
@@ -284,7 +318,26 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         catch
         {
             _cache.Remove(key);
+            await TryDeleteSpillRefAsync(spill.SpillRef, CancellationToken.None).ConfigureAwait(false);
             return null;
+        }
+    }
+
+    private async ValueTask TryDeleteExistingSpillAsync(string key, CancellationToken ct)
+    {
+        if (_cache.TryGetValue(key, out object? existing) && existing is SpillEntry spill)
+            await TryDeleteSpillRefAsync(spill.SpillRef, ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask TryDeleteSpillRefAsync(Guid spillRef, CancellationToken ct)
+    {
+        try
+        {
+            await _spillStore.DeleteAsync(spillRef, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best-effort cleanup only; never fail cache operations on spill delete.
         }
     }
 

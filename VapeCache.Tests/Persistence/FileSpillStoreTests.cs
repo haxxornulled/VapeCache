@@ -95,6 +95,33 @@ public sealed class FileSpillStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSnapshot_ReportsShardBalance()
+    {
+        var options = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions
+        {
+            SpillDirectory = _testRoot,
+            EnableSpillToDisk = true,
+            EnableOrphanCleanup = false
+        });
+        var store = new FileSpillStore(options, new NoopSpillEncryptionProvider());
+
+        await store.WriteAsync(Guid.Parse("00010000-0000-0000-0000-000000000001"), new byte[] { 1 }, CancellationToken.None);
+        await store.WriteAsync(Guid.Parse("00010000-0000-0000-0000-000000000002"), new byte[] { 2 }, CancellationToken.None);
+        await store.WriteAsync(Guid.Parse("00ff0000-0000-0000-0000-000000000003"), new byte[] { 3 }, CancellationToken.None);
+
+        var snapshot = store.GetSnapshot();
+
+        Assert.True(snapshot.SupportsDiskSpill);
+        Assert.True(snapshot.SpillToDiskConfigured);
+        Assert.Equal("file", snapshot.Mode);
+        Assert.Equal(3, snapshot.TotalSpillFiles);
+        Assert.Equal(2, snapshot.ActiveShards);
+        Assert.Equal(2, snapshot.MaxFilesInShard);
+        Assert.True(snapshot.ImbalanceRatio >= 1d);
+        Assert.NotEmpty(snapshot.TopShards);
+    }
+
+    [Fact]
     public async Task TryReadAsync_ReturnsData_WhenFileExists()
     {
         // Arrange

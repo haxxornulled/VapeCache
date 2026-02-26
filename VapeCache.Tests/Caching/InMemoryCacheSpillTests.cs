@@ -76,4 +76,64 @@ public sealed class InMemoryCacheSpillTests
         Assert.NotNull(fetched);
         Assert.Equal(payload, fetched);
     }
+
+    [Fact]
+    public async Task RemoveAsync_ReturnsFalse_WhenEntryDoesNotExist()
+    {
+        var options = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions
+        {
+            EnableSpillToDisk = false
+        });
+
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var current = new CurrentCacheService();
+        var stats = new CacheStatsRegistry();
+        var service = new InMemoryCacheService(cache, current, stats, options, new NoopSpillStore());
+
+        var removed = await service.RemoveAsync("missing:key", CancellationToken.None);
+        Assert.False(removed);
+    }
+
+    [Fact]
+    public async Task OverwritingSpilledEntry_LeavesSingleSpillFile()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "vapecache-spill-overwrite", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(root);
+
+        var options = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions
+        {
+            EnableSpillToDisk = true,
+            SpillThresholdBytes = 16,
+            InlinePrefixBytes = 4,
+            SpillDirectory = root
+        });
+
+        var spillStore = new FileSpillStore(options, new NoopSpillEncryptionProvider());
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var current = new CurrentCacheService();
+        var stats = new CacheStatsRegistry();
+        var service = new InMemoryCacheService(cache, current, stats, options, spillStore);
+
+        try
+        {
+            var payload1 = new byte[64];
+            var payload2 = new byte[96];
+            Random.Shared.NextBytes(payload1);
+            Random.Shared.NextBytes(payload2);
+
+            await service.SetAsync("spill:overwrite", payload1, default, CancellationToken.None);
+            await service.SetAsync("spill:overwrite", payload2, default, CancellationToken.None);
+            var fetched = await service.GetAsync("spill:overwrite", CancellationToken.None);
+
+            Assert.NotNull(fetched);
+            Assert.Equal(payload2, fetched);
+
+            var files = Directory.GetFiles(root, "*.bin", SearchOption.AllDirectories);
+            Assert.Single(files);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
 }

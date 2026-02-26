@@ -1,4 +1,5 @@
 using VapeCache.Abstractions.Caching;
+using Microsoft.Extensions.Options;
 
 namespace VapeCache.Infrastructure.Caching;
 
@@ -7,8 +8,11 @@ namespace VapeCache.Infrastructure.Caching;
 /// For Enterprise spill-to-disk functionality with scatter/gather distribution
 /// and encryption at rest, install VapeCache.Persistence package.
 /// </summary>
-internal sealed class NoopSpillStore : IInMemorySpillStore
+internal sealed class NoopSpillStore(
+    IOptionsMonitor<InMemorySpillOptions>? optionsMonitor = null) : IInMemorySpillStore, ISpillStoreDiagnostics
 {
+    private readonly IOptionsMonitor<InMemorySpillOptions>? _optionsMonitor = optionsMonitor;
+
     /// <summary>
     /// Executes value.
     /// </summary>
@@ -26,4 +30,23 @@ internal sealed class NoopSpillStore : IInMemorySpillStore
     /// </summary>
     public ValueTask DeleteAsync(Guid spillRef, CancellationToken ct)
         => ValueTask.CompletedTask;
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public SpillStoreDiagnosticsSnapshot GetSnapshot()
+    {
+        var configured = _optionsMonitor?.CurrentValue.EnableSpillToDisk ?? false;
+        return new SpillStoreDiagnosticsSnapshot(
+            SupportsDiskSpill: false,
+            SpillToDiskConfigured: configured,
+            Mode: "noop",
+            TotalSpillFiles: 0,
+            ActiveShards: 0,
+            MaxFilesInShard: 0,
+            AvgFilesPerActiveShard: 0d,
+            ImbalanceRatio: 0d,
+            TopShards: Array.Empty<SpillShardLoad>(),
+            SampledAtUtc: DateTimeOffset.UtcNow);
+    }
 }

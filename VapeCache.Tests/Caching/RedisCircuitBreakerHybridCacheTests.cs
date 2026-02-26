@@ -151,8 +151,23 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         });
         var store = new InMemoryReconciliationStore();
         var reconciliation = new RedisReconciliationService(new TestReconciliationExecutor(flakyRedis), reconciliationOptions, NullLogger<RedisReconciliationService>.Instance, time, store);
+        var failoverOptions = new TestOptionsMonitor<HybridFailoverOptions>(new HybridFailoverOptions
+        {
+            MirrorWritesToFallbackWhenRedisHealthy = false,
+            WarmFallbackOnRedisReadHit = false,
+            RemoveStaleFallbackOnRedisMiss = false
+        });
 
-        var hybrid = new HybridCacheService(redis, memory, current, time, breaker, statsRegistry, NullLogger<HybridCacheService>.Instance, reconciliation);
+        var hybrid = new HybridCacheService(
+            redis,
+            memory,
+            current,
+            time,
+            breaker,
+            statsRegistry,
+            NullLogger<HybridCacheService>.Instance,
+            failoverOptions,
+            reconciliation);
 
         // First call fails redis and opens the breaker.
         Assert.Null(await hybrid.GetAsync("demo", CancellationToken.None));
@@ -165,7 +180,16 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         // Allow breaker to transition to half-open/closed and make redis succeed.
         time.Advance(TimeSpan.FromSeconds(2));
 
-        var fetched = await hybrid.GetAsync("demo", CancellationToken.None);
+        byte[]? fetched = null;
+        var fetchSw = Stopwatch.StartNew();
+        while (fetchSw.Elapsed < TimeSpan.FromSeconds(2))
+        {
+            fetched = await hybrid.GetAsync("demo", CancellationToken.None);
+            if (fetched is not null)
+                break;
+            await Task.Delay(25);
+        }
+
         Assert.Equal(payload, fetched);
 
         // Wait for reconciliation to push the write to redis and clear pending ops.
@@ -178,6 +202,167 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         Assert.Equal(0, reconciliation.PendingOperations);
         Assert.True(flakyRedis.TryGetValue("demo", out var redisValue));
         Assert.Equal(payload, redisValue);
+    }
+
+    [Fact]
+    public async Task Healthy_write_is_mirrored_to_local_fallback_for_immediate_failover()
+    {
+        var time = new ManualTimeProvider();
+        var redisExec = new FlakyExecutor(failuresBeforeSuccess: 0);
+        await using var _ = redisExec.ConfigureAwait(false);
+
+        var current = new CurrentCacheService();
+        var statsRegistry = new CacheStatsRegistry();
+        var redis = new RedisCacheService(redisExec, current, statsRegistry);
+        var memory = CreateMemoryCacheService(current, statsRegistry);
+
+        var breaker = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
+        {
+            Enabled = true,
+            ConsecutiveFailuresToOpen = 1,
+            BreakDuration = TimeSpan.FromSeconds(5)
+        });
+        var failoverOptions = new TestOptionsMonitor<HybridFailoverOptions>(new HybridFailoverOptions
+        {
+            MirrorWritesToFallbackWhenRedisHealthy = true,
+            WarmFallbackOnRedisReadHit = false,
+            FallbackMirrorWriteTtlWhenMissing = TimeSpan.FromMinutes(5)
+        });
+
+        var hybrid = new HybridCacheService(
+            redis,
+            memory,
+            current,
+            time,
+            breaker,
+            statsRegistry,
+            NullLogger<HybridCacheService>.Instance,
+            failoverOptions);
+
+        var payload = "session-data"u8.ToArray();
+        await hybrid.SetAsync("session:1", payload, new CacheEntryOptions(TimeSpan.FromMinutes(10)), CancellationToken.None);
+
+        ((IRedisFailoverController)hybrid).ForceOpen("redis-down");
+        var failoverValue = await hybrid.GetAsync("session:1", CancellationToken.None);
+
+        Assert.Equal(payload, failoverValue);
+        Assert.Equal("memory", current.CurrentName);
+    }
+
+    [Fact]
+    public async Task Redis_miss_cleans_stale_local_fallback_when_enabled()
+    {
+        var time = new ManualTimeProvider();
+        var redisExec = new FlakyExecutor(failuresBeforeSuccess: 0);
+        await using var _ = redisExec.ConfigureAwait(false);
+
+        var current = new CurrentCacheService();
+        var statsRegistry = new CacheStatsRegistry();
+        var redis = new RedisCacheService(redisExec, current, statsRegistry);
+        var memory = CreateMemoryCacheService(current, statsRegistry);
+
+        var breaker = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
+        {
+            Enabled = true,
+            ConsecutiveFailuresToOpen = 1,
+            BreakDuration = TimeSpan.FromSeconds(5)
+        });
+        var failoverOptions = new TestOptionsMonitor<HybridFailoverOptions>(new HybridFailoverOptions
+        {
+            MirrorWritesToFallbackWhenRedisHealthy = true,
+            WarmFallbackOnRedisReadHit = false,
+            RemoveStaleFallbackOnRedisMiss = true
+        });
+
+        var hybrid = new HybridCacheService(
+            redis,
+            memory,
+            current,
+            time,
+            breaker,
+            statsRegistry,
+            NullLogger<HybridCacheService>.Instance,
+            failoverOptions);
+
+        var payload = "value"u8.ToArray();
+        await hybrid.SetAsync("demo:stale", payload, new CacheEntryOptions(TimeSpan.FromMinutes(2)), CancellationToken.None);
+        await redisExec.DeleteAsync("demo:stale", CancellationToken.None);
+
+        var liveRead = await hybrid.GetAsync("demo:stale", CancellationToken.None);
+        Assert.Null(liveRead);
+
+        ((IRedisFailoverController)hybrid).ForceOpen("forced");
+        var fallbackRead = await hybrid.GetAsync("demo:stale", CancellationToken.None);
+        Assert.Null(fallbackRead);
+    }
+
+    [Fact]
+    public async Task WebGarden_failover_requires_sticky_or_node_warmup()
+    {
+        var time = new ManualTimeProvider();
+        var redisExec = new FlakyExecutor(failuresBeforeSuccess: 0);
+        await using var _ = redisExec.ConfigureAwait(false);
+
+        var sharedBreakerOptions = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
+        {
+            Enabled = true,
+            ConsecutiveFailuresToOpen = 1,
+            BreakDuration = TimeSpan.FromSeconds(10)
+        });
+        var failoverOptions = new TestOptionsMonitor<HybridFailoverOptions>(new HybridFailoverOptions
+        {
+            MirrorWritesToFallbackWhenRedisHealthy = true,
+            WarmFallbackOnRedisReadHit = true,
+            FallbackWarmReadTtl = TimeSpan.FromMinutes(1)
+        });
+
+        var nodeAStats = new CacheStatsRegistry();
+        var nodeACurrent = new CurrentCacheService();
+        var nodeARedis = new RedisCacheService(redisExec, nodeACurrent, nodeAStats);
+        var nodeAMemory = CreateMemoryCacheService(nodeACurrent, nodeAStats);
+        var nodeA = new HybridCacheService(
+            nodeARedis,
+            nodeAMemory,
+            nodeACurrent,
+            time,
+            sharedBreakerOptions,
+            nodeAStats,
+            NullLogger<HybridCacheService>.Instance,
+            failoverOptions);
+
+        var nodeBStats = new CacheStatsRegistry();
+        var nodeBCurrent = new CurrentCacheService();
+        var nodeBRedis = new RedisCacheService(redisExec, nodeBCurrent, nodeBStats);
+        var nodeBMemory = CreateMemoryCacheService(nodeBCurrent, nodeBStats);
+        var nodeB = new HybridCacheService(
+            nodeBRedis,
+            nodeBMemory,
+            nodeBCurrent,
+            time,
+            sharedBreakerOptions,
+            nodeBStats,
+            NullLogger<HybridCacheService>.Instance,
+            failoverOptions);
+
+        var payload = "garden-session"u8.ToArray();
+        await nodeA.SetAsync("session:user-42", payload, new CacheEntryOptions(TimeSpan.FromMinutes(10)), CancellationToken.None);
+
+        ((IRedisFailoverController)nodeA).ForceOpen("redis-outage");
+        ((IRedisFailoverController)nodeB).ForceOpen("redis-outage");
+
+        var stickyRead = await nodeA.GetAsync("session:user-42", CancellationToken.None);
+        var nonStickyRead = await nodeB.GetAsync("session:user-42", CancellationToken.None);
+
+        Assert.Equal(payload, stickyRead);
+        Assert.Null(nonStickyRead);
+
+        ((IRedisFailoverController)nodeB).ClearForcedOpen();
+        var warmupRead = await nodeB.GetAsync("session:user-42", CancellationToken.None);
+        Assert.Equal(payload, warmupRead);
+
+        ((IRedisFailoverController)nodeB).ForceOpen("redis-outage");
+        var warmedFailoverRead = await nodeB.GetAsync("session:user-42", CancellationToken.None);
+        Assert.Equal(payload, warmedFailoverRead);
     }
 
     private sealed class ThrowingExecutor : IRedisCommandExecutor

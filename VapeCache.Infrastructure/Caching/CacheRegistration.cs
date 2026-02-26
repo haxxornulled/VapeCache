@@ -22,6 +22,7 @@ public static class CacheRegistration
     {
         services.AddMemoryCache();
         services.AddOptions<InMemorySpillOptions>();
+        services.AddOptions<HybridFailoverOptions>();
 
         services.AddSingleton<ICurrentCacheService>(sp =>
         {
@@ -44,6 +45,11 @@ public static class CacheRegistration
         services.TryAddSingleton<IRedisFallbackCommandExecutor, InMemoryCommandExecutor>();
 
         services.TryAddSingleton<IInMemorySpillStore, NoopSpillStore>();
+        services.TryAddSingleton<ISpillStoreDiagnostics>(sp =>
+        {
+            var spillStore = sp.GetRequiredService<IInMemorySpillStore>();
+            return spillStore as ISpillStoreDiagnostics ?? FallbackSpillDiagnostics.Instance;
+        });
 
         // Cache services
         // IMPORTANT: RedisCacheService gets the RAW RedisCommandExecutor (no hybrid wrapper)
@@ -81,6 +87,11 @@ public static class CacheRegistration
             .Validate(o => o.FailureBackoff >= TimeSpan.Zero, "FailureBackoff must be greater than or equal to zero.")
             .Validate(o => o.FailureBackoff <= TimeSpan.FromSeconds(30), "FailureBackoff must be less than or equal to 30 seconds.")
             .ValidateOnStart();
+        services.AddOptions<HybridFailoverOptions>()
+            .Validate(o => o.FallbackWarmReadTtl > TimeSpan.Zero, "FallbackWarmReadTtl must be greater than zero.")
+            .Validate(o => o.FallbackMirrorWriteTtlWhenMissing > TimeSpan.Zero, "FallbackMirrorWriteTtlWhenMissing must be greater than zero.")
+            .Validate(o => o.MaxMirrorPayloadBytes >= 0, "MaxMirrorPayloadBytes must be greater than or equal to zero.")
+            .ValidateOnStart();
         // Default cache service is the hybrid implementation, wrapped with stampede protection.
         services.AddSingleton<ICacheService, HybridStampedeCacheService>();
 
@@ -89,6 +100,7 @@ public static class CacheRegistration
             new SystemTextJsonCodecProvider(new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         services.AddSingleton<IVapeCache, VapeCacheClient>();
         services.AddSingleton<IJsonCache, JsonCacheService>();
+        services.AddSingleton<ICacheChunkStreamService, ChunkedCacheStreamService>();
 
         // Typed collection APIs (LIST, SET, HASH)
         services.AddSingleton<ICacheCollectionFactory, CacheCollectionFactory>();
@@ -100,5 +112,23 @@ public static class CacheRegistration
         services.AddSingleton<IRedisTimeSeriesService, RedisTimeSeriesService>();
 
         return services;
+    }
+
+    private sealed class FallbackSpillDiagnostics : ISpillStoreDiagnostics
+    {
+        public static readonly FallbackSpillDiagnostics Instance = new();
+
+        public SpillStoreDiagnosticsSnapshot GetSnapshot()
+            => new(
+                SupportsDiskSpill: false,
+                SpillToDiskConfigured: false,
+                Mode: "unknown",
+                TotalSpillFiles: 0,
+                ActiveShards: 0,
+                MaxFilesInShard: 0,
+                AvgFilesPerActiveShard: 0d,
+                ImbalanceRatio: 0d,
+                TopShards: Array.Empty<SpillShardLoad>(),
+                SampledAtUtc: DateTimeOffset.UtcNow);
     }
 }

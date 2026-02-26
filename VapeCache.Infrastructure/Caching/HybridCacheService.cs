@@ -20,6 +20,7 @@ internal sealed class HybridCacheService(
     IOptionsMonitor<RedisCircuitBreakerOptions> breakerOptions,
     CacheStatsRegistry statsRegistry,
     ILogger<HybridCacheService> logger,
+    IOptionsMonitor<HybridFailoverOptions>? failoverOptions = null,
     IRedisReconciliationService? reconciliation = null) : ICacheService
     , IRedisCircuitBreakerState
     , IRedisFailoverController
@@ -29,7 +30,9 @@ internal sealed class HybridCacheService(
 
     private readonly CacheStats _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
     private readonly IOptionsMonitor<RedisCircuitBreakerOptions> _breakerOptions = breakerOptions;
+    private readonly IOptionsMonitor<HybridFailoverOptions> _failoverOptions = failoverOptions ?? DefaultHybridFailoverOptionsMonitor.Instance;
     private RedisCircuitBreakerOptions _breaker => _breakerOptions.CurrentValue;
+    private HybridFailoverOptions _failover => _failoverOptions.CurrentValue;
     private int _failures;
     private long _openUntilTicks;
     private int _halfOpenProbeInFlight;
@@ -204,10 +207,13 @@ internal sealed class HybridCacheService(
                 current.SetCurrent(redis.Name);
                 if (v is not null)
                 {
+                    await TryWarmFallbackFromReadAsync(key, v, ct).ConfigureAwait(false);
                     _stats.IncHit();
                     CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
                     return v;
                 }
+
+                await TryRemoveStaleFallbackOnMissAsync(key, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -285,6 +291,7 @@ internal sealed class HybridCacheService(
                 await redis.SetAsync(key, value, options, probeCts?.Token ?? ct).ConfigureAwait(false);
                 MarkRedisSuccess();
                 current.SetCurrent(redis.Name);
+                await TryMirrorFallbackWriteAsync(key, value, options, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -410,15 +417,18 @@ internal sealed class HybridCacheService(
 
                 using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
 
-                var redisValue = await redis.GetAsync(key, deserialize, probeCts?.Token ?? ct).ConfigureAwait(false);
+                var redisBytes = await redis.GetAsync(key, probeCts?.Token ?? ct).ConfigureAwait(false);
                 MarkRedisSuccess();
                 current.SetCurrent(redis.Name);
-                if (redisValue is not null)
+                if (redisBytes is not null)
                 {
+                    await TryWarmFallbackFromReadAsync(key, redisBytes, ct).ConfigureAwait(false);
                     _stats.IncHit();
                     CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
-                    return redisValue;
+                    return deserialize(redisBytes);
                 }
+
+                await TryRemoveStaleFallbackOnMissAsync(key, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -469,6 +479,97 @@ internal sealed class HybridCacheService(
         await SetAsync(key, created, serialize, options, ct).ConfigureAwait(false);
         return created;
     }
+
+    private async ValueTask TryWarmFallbackFromReadAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)
+    {
+        var options = _failover;
+        if (!options.WarmFallbackOnRedisReadHit || !ShouldMirrorPayload(options, value.Length))
+            return;
+
+        try
+        {
+            var writeOptions = new CacheEntryOptions(
+                Ttl: options.FallbackWarmReadTtl,
+                Intent: new CacheIntent(
+                    CacheIntentKind.ReadThrough,
+                    Reason: "hybrid-failover-read-warm",
+                    Owner: Name,
+                    Tags: new[] { "hybrid-failover", "read-warm" }));
+            await fallback.SetAsync(key, value, writeOptions, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Fallback read-warm failed for key {Key}.", key);
+        }
+    }
+
+    private async ValueTask TryMirrorFallbackWriteAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions sourceOptions, CancellationToken ct)
+    {
+        var options = _failover;
+        if (!options.MirrorWritesToFallbackWhenRedisHealthy)
+        {
+            await TryRemoveFallbackEntryAsync(key, ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (!ShouldMirrorPayload(options, value.Length))
+        {
+            await TryRemoveFallbackEntryAsync(key, ct).ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            var ttl = sourceOptions.Ttl ?? options.FallbackMirrorWriteTtlWhenMissing;
+            var writeOptions = new CacheEntryOptions(
+                Ttl: ttl,
+                Intent: sourceOptions.Intent ?? new CacheIntent(
+                    CacheIntentKind.ReadThrough,
+                    Reason: "hybrid-failover-write-mirror",
+                    Owner: Name,
+                    Tags: new[] { "hybrid-failover", "write-mirror" }));
+            await fallback.SetAsync(key, value, writeOptions, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Fallback write-mirror failed for key {Key}.", key);
+        }
+    }
+
+    private async ValueTask TryRemoveStaleFallbackOnMissAsync(string key, CancellationToken ct)
+    {
+        if (!_failover.RemoveStaleFallbackOnRedisMiss)
+            return;
+
+        await TryRemoveFallbackEntryAsync(key, ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask TryRemoveFallbackEntryAsync(string key, CancellationToken ct)
+    {
+        try
+        {
+            await fallback.RemoveAsync(key, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Fallback remove failed for key {Key}.", key);
+        }
+    }
+
+    private static bool ShouldMirrorPayload(HybridFailoverOptions options, int payloadBytes)
+        => options.MaxMirrorPayloadBytes <= 0 || payloadBytes <= options.MaxMirrorPayloadBytes;
 
     /// <summary>
     /// Executes value.
@@ -522,5 +623,23 @@ internal sealed class HybridCacheService(
                 Interlocked.Exchange(ref _reconcileInFlight, 0);
             }
         });
+    }
+
+    private sealed class DefaultHybridFailoverOptionsMonitor : IOptionsMonitor<HybridFailoverOptions>
+    {
+        public static readonly DefaultHybridFailoverOptionsMonitor Instance = new();
+        private static readonly HybridFailoverOptions ValueInstance = new();
+
+        public HybridFailoverOptions CurrentValue => ValueInstance;
+        public HybridFailoverOptions Get(string? name) => ValueInstance;
+        public IDisposable OnChange(Action<HybridFailoverOptions, string?> listener) => NoopDisposable.Instance;
+
+        private sealed class NoopDisposable : IDisposable
+        {
+            public static readonly NoopDisposable Instance = new();
+            public void Dispose()
+            {
+            }
+        }
     }
 }

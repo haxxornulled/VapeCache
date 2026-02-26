@@ -30,6 +30,7 @@ public sealed class VapeCacheCachingModule : Module
 
         RegisterStaticOptions(builder, new MemoryCacheOptions());
         RegisterStaticOptions(builder, new InMemorySpillOptions());
+        RegisterStaticOptions(builder, new HybridFailoverOptions());
         RegisterStaticOptions(builder, new CacheStampedeOptions());
         RegisterStaticOptions(builder, new RedisCircuitBreakerOptions());
         RegisterStaticOptions(builder, new RedisMultiplexerOptions());
@@ -42,7 +43,11 @@ public sealed class VapeCacheCachingModule : Module
             .SingleInstance();
         // Free tier: No-op spill store (no disk persistence)
         // For Enterprise spill-to-disk, install VapeCache.Persistence package
-        builder.RegisterType<NoopSpillStore>().As<IInMemorySpillStore>().SingleInstance();
+        builder.RegisterType<NoopSpillStore>()
+            .As<IInMemorySpillStore>()
+            .As<ISpillStoreDiagnostics>()
+            .SingleInstance()
+            .IfNotRegistered(typeof(IInMemorySpillStore));
 
         builder.RegisterType<RedisCacheService>()
             .UsingConstructor(typeof(RedisCommandExecutor), typeof(ICurrentCacheService), typeof(CacheStatsRegistry), typeof(ICacheIntentRegistry))
@@ -67,6 +72,7 @@ public sealed class VapeCacheCachingModule : Module
             .WithParameter("options", new JsonSerializerOptions(JsonSerializerDefaults.Web));
         builder.RegisterType<VapeCacheClient>().As<IVapeCache>().SingleInstance();
         builder.RegisterType<JsonCacheService>().As<IJsonCache>().SingleInstance();
+        builder.RegisterType<ChunkedCacheStreamService>().As<ICacheChunkStreamService>().SingleInstance();
         builder.RegisterType<CacheCollectionFactory>().As<ICacheCollectionFactory>().SingleInstance();
         builder.RegisterType<RedisModuleDetector>().As<IRedisModuleDetector>().SingleInstance();
         builder.RegisterType<RedisSearchService>().As<IRedisSearchService>().SingleInstance();

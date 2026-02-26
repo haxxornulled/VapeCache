@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
@@ -10,7 +12,7 @@ namespace VapeCache.Persistence;
 /// ENTERPRISE ONLY: File-based spill store with scatter/gather distribution.
 /// Distributes spill files across 65,536 directories to avoid filesystem bottlenecks.
 /// </summary>
-public sealed class FileSpillStore : IInMemorySpillStore
+public sealed class FileSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics
 {
     private readonly string _rootPath;
     private readonly ISpillEncryptionProvider _encryption;
@@ -18,6 +20,9 @@ public sealed class FileSpillStore : IInMemorySpillStore
     private readonly long _cleanupIntervalTicks;
     private long _lastCleanupTicks;
     private int _cleanupRunning;
+    private readonly ConcurrentDictionary<int, int> _shardFileCounts = new();
+    private long _totalSpillFiles;
+    private int _inventoryInitialized;
 
     public FileSpillStore(IOptionsMonitor<InMemorySpillOptions> options, ISpillEncryptionProvider encryption)
     {
@@ -33,7 +38,10 @@ public sealed class FileSpillStore : IInMemorySpillStore
     /// </summary>
     public async ValueTask WriteAsync(Guid spillRef, ReadOnlyMemory<byte> data, CancellationToken ct)
     {
+        EnsureInventoryInitialized();
         var path = GetPath(spillRef);
+        var shardKey = GetShardKey(spillRef);
+        var existedBefore = File.Exists(path);
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(dir))
             Directory.CreateDirectory(dir);
@@ -54,6 +62,8 @@ public sealed class FileSpillStore : IInMemorySpillStore
         }
 
         File.Move(tempPath, path, overwrite: true);
+        if (!existedBefore)
+            IncrementShard(shardKey);
 
         CacheTelemetry.SpillWriteCount.Add(1);
         CacheTelemetry.SpillWriteBytes.Add(data.Length);
@@ -103,19 +113,61 @@ public sealed class FileSpillStore : IInMemorySpillStore
     /// </summary>
     public ValueTask DeleteAsync(Guid spillRef, CancellationToken ct)
     {
+        EnsureInventoryInitialized();
+        var shardKey = GetShardKey(spillRef);
+        var deleted = false;
         try
         {
             var path = GetPath(spillRef);
             if (File.Exists(path))
+            {
                 File.Delete(path);
+                deleted = true;
+            }
         }
         catch
         {
             // Best-effort cleanup.
         }
 
+        if (deleted)
+            DecrementShard(shardKey);
+
         TryScheduleOrphanCleanup();
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public SpillStoreDiagnosticsSnapshot GetSnapshot()
+    {
+        EnsureInventoryInitialized();
+
+        var shards = _shardFileCounts.ToArray();
+        var total = Volatile.Read(ref _totalSpillFiles);
+        var activeShards = shards.Length;
+        var maxFilesInShard = activeShards == 0 ? 0 : shards.Max(static pair => pair.Value);
+        var avgFilesPerActive = activeShards == 0 ? 0d : total / (double)activeShards;
+        var imbalance = avgFilesPerActive <= 0d ? 0d : maxFilesInShard / avgFilesPerActive;
+
+        var top = shards
+            .OrderByDescending(static pair => pair.Value)
+            .Take(8)
+            .Select(static pair => new SpillShardLoad(FormatShard(pair.Key), pair.Value))
+            .ToArray();
+
+        return new SpillStoreDiagnosticsSnapshot(
+            SupportsDiskSpill: true,
+            SpillToDiskConfigured: _options.EnableSpillToDisk,
+            Mode: "file",
+            TotalSpillFiles: total,
+            ActiveShards: activeShards,
+            MaxFilesInShard: maxFilesInShard,
+            AvgFilesPerActiveShard: avgFilesPerActive,
+            ImbalanceRatio: imbalance,
+            TopShards: top,
+            SampledAtUtc: DateTimeOffset.UtcNow);
     }
 
     /// <summary>
@@ -150,6 +202,77 @@ public sealed class FileSpillStore : IInMemorySpillStore
 
         return data.ToArray();
     }
+
+    private void EnsureInventoryInitialized()
+    {
+        if (Volatile.Read(ref _inventoryInitialized) != 0)
+            return;
+        if (Interlocked.CompareExchange(ref _inventoryInitialized, 1, 0) != 0)
+            return;
+
+        if (!Directory.Exists(_rootPath))
+            return;
+
+        long total = 0;
+        foreach (var file in Directory.EnumerateFiles(_rootPath, "*.bin", SearchOption.AllDirectories))
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            if (name is null || name.Length < 4)
+                continue;
+
+            var shardKey = ParseShard(name);
+            if (shardKey < 0)
+                continue;
+
+            _shardFileCounts.AddOrUpdate(shardKey, 1, static (_, current) => current + 1);
+            total++;
+        }
+
+        Interlocked.Exchange(ref _totalSpillFiles, total);
+    }
+
+    private void IncrementShard(int shardKey)
+    {
+        _shardFileCounts.AddOrUpdate(shardKey, 1, static (_, current) => current + 1);
+        Interlocked.Increment(ref _totalSpillFiles);
+    }
+
+    private void DecrementShard(int shardKey)
+    {
+        while (true)
+        {
+            if (!_shardFileCounts.TryGetValue(shardKey, out var current))
+                break;
+
+            if (current <= 1)
+            {
+                if (_shardFileCounts.TryRemove(new KeyValuePair<int, int>(shardKey, current)))
+                    break;
+
+                continue;
+            }
+
+            if (_shardFileCounts.TryUpdate(shardKey, current - 1, current))
+                break;
+        }
+
+        InterlockedExtensions.DecrementIfPositive(ref _totalSpillFiles);
+    }
+
+    private static int GetShardKey(Guid spillRef)
+    {
+        var name = spillRef.ToString("N");
+        return ParseShard(name);
+    }
+
+    private static int ParseShard(string spillName)
+    {
+        return int.TryParse(spillName.AsSpan(0, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var shard)
+            ? shard
+            : -1;
+    }
+
+    private static string FormatShard(int shard) => shard.ToString("x4", CultureInfo.InvariantCulture);
 
     private void TryScheduleOrphanCleanup()
     {
@@ -274,5 +397,21 @@ public sealed class NoopSpillEncryptionProvider : ISpillEncryptionProvider
         }
 
         return data.ToArray();
+    }
+}
+
+internal static class InterlockedExtensions
+{
+    public static void DecrementIfPositive(ref long value)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref value);
+            if (current <= 0)
+                return;
+
+            if (Interlocked.CompareExchange(ref value, current - 1, current) == current)
+                return;
+        }
     }
 }
