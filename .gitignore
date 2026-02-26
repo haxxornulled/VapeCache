@@ -49,6 +49,9 @@ run_comparison.ps1
 
 # Temporary files
 nul
+tmp/
+**/TestResults/
+tools/VapeCache.DocCommenter/
 
 # ===================================
 # ENTERPRISE / PRIVATE CODE

@@ -14,13 +14,21 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Restore
         run: dotnet restore
 
+      - name: Build
+        run: dotnet build -c Release --no-restore VapeCache.sln
+
       - name: Unit tests
-        run: dotnet test -c Release VapeCache.sln
+        run: dotnet test -c Release --no-build VapeCache.sln
+
+      - name: Transport regression checks
+        run: |
+          dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj --filter "FullyQualifiedName~RedisCommandExecutorScriptedTests.Executes_and_parses_core_command_surfaces"
+          dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj --filter "FullyQualifiedName~RedisTransportProfilesTests"
 
       - name: Perf gates
         run: |
