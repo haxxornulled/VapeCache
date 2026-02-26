@@ -8,7 +8,7 @@ High-performance Redis caching for .NET 10 with hybrid failover, production tele
 
 [![CI](https://github.com/haxxornulled/VapeCache-Enterprise/actions/workflows/ci.yml/badge.svg)](https://github.com/haxxornulled/VapeCache-Enterprise/actions/workflows/ci.yml)
 [![Release](https://github.com/haxxornulled/VapeCache-Enterprise/actions/workflows/release.yml/badge.svg)](https://github.com/haxxornulled/VapeCache-Enterprise/actions/workflows/release.yml)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-NonCommercial%20%2B%20Enterprise-red)](LICENSE.md)
 [![.NET](https://img.shields.io/badge/.NET-10.0-blue)](https://dot.net)
 
 ## Package Map
@@ -227,4 +227,5 @@ dotnet pack VapeCache.sln -c Release --no-build
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Community use is licensed under [LICENSE.md](LICENSE.md) (non-commercial only).  
+Commercial use requires a paid Enterprise license.

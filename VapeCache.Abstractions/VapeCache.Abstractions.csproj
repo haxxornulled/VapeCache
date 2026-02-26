@@ -13,7 +13,8 @@
     <Product>VapeCache</Product>
     <Description>Public contracts and options for VapeCache - a high-performance Redis client optimized for caching workloads. 5-30% faster than StackExchange.Redis with coalesced writes and zero-allocation pooling.</Description>
     <PackageTags>redis;cache;performance;distributed-cache;async;netcore</PackageTags>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
     <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
     <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
@@ -30,6 +31,7 @@
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>

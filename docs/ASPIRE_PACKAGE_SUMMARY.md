@@ -36,7 +36,7 @@ VapeCache.Extensions.Aspire/
 
 **Package Metadata:**
 - PackageId: `VapeCache.Extensions.Aspire`
-- License: Apache-2.0
+- License: Community non-commercial (`LICENSE.md`) + Enterprise commercial terms
 - Description: .NET Aspire integration for VapeCache
 
 ### 2. [AspireVapeCacheBuilder.cs](../VapeCache.Extensions.Aspire/AspireVapeCacheBuilder.cs)

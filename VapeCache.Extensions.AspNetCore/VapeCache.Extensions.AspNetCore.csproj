@@ -14,7 +14,8 @@
     <Company>HaxxorNulled</Company>
     <Product>VapeCache.Extensions.AspNetCore</Product>
     <PackageTags>cache;redis;aspnetcore;output-cache;mvc;blazor;minimal-api</PackageTags>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
     <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
     <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
@@ -39,6 +40,7 @@
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

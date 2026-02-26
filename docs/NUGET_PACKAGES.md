@@ -2,6 +2,12 @@
 
 VapeCache ships a small set of packages to keep dependencies clean and optional.
 
+## Licensing
+
+- Community license: non-commercial only (`LICENSE.md`)
+- Commercial/production use: requires paid Enterprise licensing
+- Enterprise packages (`VapeCache.Persistence`, `VapeCache.Reconciliation`, `VapeCache.Licensing`) are distributed under `LICENSE-ENTERPRISE.txt`
+
 ## Packages
 
 ### VapeCache
