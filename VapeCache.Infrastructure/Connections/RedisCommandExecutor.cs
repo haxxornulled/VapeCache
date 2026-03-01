@@ -92,11 +92,14 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private HSetHeaderCacheEntry? _hsetHeaderCache;
     private static readonly ReadOnlyMemory<byte> AskingCommand = "*1\r\n$6\r\nASKING\r\n"u8.ToArray();
 
-    // Backwards compatibility constructor - delegates to IOptions<T> monitor
     public RedisCommandExecutor(
         IRedisConnectionFactory factory,
         IOptions<RedisMultiplexerOptions> options)
-        : this(factory, new OptionsMonitorWrapper<RedisMultiplexerOptions>(options.Value), null)
+        : this(
+            factory,
+            options.Value,
+            new RedisConnectionOptions(),
+            NullLogger<RedisCommandExecutor>.Instance)
     {
     }
 
@@ -106,12 +109,30 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         IOptionsMonitor<RedisMultiplexerOptions> options,
         IOptionsMonitor<RedisConnectionOptions>? connectionOptions = null,
         ILogger<RedisCommandExecutor>? logger = null)
+        : this(
+            factory,
+            options.CurrentValue,
+            connectionOptions?.CurrentValue ?? new RedisConnectionOptions(),
+            logger ?? NullLogger<RedisCommandExecutor>.Instance)
     {
-        _logger = logger ?? NullLogger<RedisCommandExecutor>.Instance;
+        _muxOptionsChangeRegistration = options.OnChange((updated, _) =>
+        {
+            var applied = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(updated);
+            _muxOptions = applied;
+            LogNormalizationIfChanged("RedisMultiplexer", updated, applied);
+            ApplyAutoscaleOptions(applied);
+        });
+    }
 
-        var configuredMuxOptions = options.CurrentValue;
+    private RedisCommandExecutor(
+        IRedisConnectionFactory factory,
+        RedisMultiplexerOptions configuredMuxOptions,
+        RedisConnectionOptions configuredConnectionOptions,
+        ILogger<RedisCommandExecutor> logger)
+    {
+        _logger = logger;
+
         var o = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(configuredMuxOptions);
-        var configuredConnectionOptions = connectionOptions?.CurrentValue ?? new RedisConnectionOptions();
         var connOpts = RedisRuntimeOptionsNormalizer.NormalizeConnection(configuredConnectionOptions);
         _factory = factory;
         _connectionOptions = connOpts;
@@ -129,29 +150,6 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         LogNormalizationIfChanged("RedisConnection", configuredConnectionOptions, connOpts);
         ApplyAutoscaleOptions(o);
         _autoscaleTask = Task.Run(AutoscaleLoopAsync);
-        _muxOptionsChangeRegistration = options.OnChange((updated, _) =>
-        {
-            var applied = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(updated);
-            _muxOptions = applied;
-            LogNormalizationIfChanged("RedisMultiplexer", updated, applied);
-            ApplyAutoscaleOptions(applied);
-        });
-    }
-
-    // Simple wrapper to convert IOptions to IOptionsMonitor
-    private class OptionsMonitorWrapper<T> : IOptionsMonitor<T>
-    {
-        private readonly T _value;
-        public OptionsMonitorWrapper(T value) => _value = value;
-        public T CurrentValue => _value;
-        /// <summary>
-        /// Gets value.
-        /// </summary>
-        public T Get(string? name) => _value;
-        /// <summary>
-        /// Executes value.
-        /// </summary>
-        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 
     private static RedisTransportProfile NormalizeTransportProfile(RedisTransportProfile profile)
