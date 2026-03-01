@@ -4,20 +4,18 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <IsPackable>true</IsPackable>
+    <IsPackable>false</IsPackable>
     <PackageId>VapeCache.Reconciliation</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>VapeCache Contributors</Authors>
     <Company>VapeCache</Company>
     <Product>VapeCache</Product>
-    <Description>Redis reconciliation services for VapeCache. Tracks in-memory writes during outages and syncs back on recovery. COMMERCIAL LICENSE REQUIRED - Visit vapecache.com for pricing.</Description>
-    <PackageTags>redis;cache;reconciliation;failover;circuit-breaker;commercial</PackageTags>
-    <PackageLicenseExpression>COMMERCIAL</PackageLicenseExpression>
-    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
-    <RepositoryUrl>https://github.com/yourusername/VapeCache</RepositoryUrl>
+    <Description>Outage reconciliation services used by enterprise-only recovery flows. This project remains in the OSS tree for source compatibility but is not published from this repository.</Description>
+    <PackageTags>redis;cache;reconciliation;failover;internal</PackageTags>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache-Enterprise</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/yourusername/VapeCache</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache-Enterprise</PackageProjectUrl>
     <Copyright>Copyright (c) 2025 VapeCache Contributors</Copyright>
   </PropertyGroup>
 

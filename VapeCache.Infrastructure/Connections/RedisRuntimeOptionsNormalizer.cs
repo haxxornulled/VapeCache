@@ -14,6 +14,11 @@ internal static class RedisRuntimeOptionsNormalizer
     private const int MaxMaxBulkStringBytes = 256 * 1024 * 1024;
     private const int DefaultMaxArrayDepth = 64;
     private const int MaxArrayDepthUpperBound = 1024;
+    private const int MinRespProtocolVersion = 2;
+    private const int MaxRespProtocolVersion = 3;
+    private const int DefaultRespProtocolVersion = 2;
+    private const int DefaultMaxClusterRedirects = 3;
+    private const int MaxClusterRedirectsUpperBound = 16;
     private const int MinMultiplexerConnections = 1;
     private const int MaxMultiplexerConnections = 256;
     private const int MinInFlightPerConnection = 64;
@@ -72,6 +77,8 @@ internal static class RedisRuntimeOptionsNormalizer
         var tcpKeepAliveInterval = NormalizePositive(profiled.TcpKeepAliveInterval, DefaultTcpKeepAliveInterval);
         var maxBulkStringBytes = NormalizeMaxBulkStringBytes(profiled.MaxBulkStringBytes);
         var maxArrayDepth = NormalizeMaxArrayDepth(profiled.MaxArrayDepth);
+        var respProtocolVersion = NormalizeRespProtocolVersion(profiled.RespProtocolVersion);
+        var maxClusterRedirects = NormalizeMaxClusterRedirects(profiled.MaxClusterRedirects);
 
         return profiled with
         {
@@ -92,7 +99,9 @@ internal static class RedisRuntimeOptionsNormalizer
             TcpKeepAliveTime = tcpKeepAliveTime,
             TcpKeepAliveInterval = tcpKeepAliveInterval,
             MaxBulkStringBytes = maxBulkStringBytes,
-            MaxArrayDepth = maxArrayDepth
+            MaxArrayDepth = maxArrayDepth,
+            RespProtocolVersion = respProtocolVersion,
+            MaxClusterRedirects = maxClusterRedirects
         };
     }
 
@@ -274,6 +283,21 @@ internal static class RedisRuntimeOptionsNormalizer
 
         return NormalizeInt(configuredDepth, 1, MaxArrayDepthUpperBound, fallbackWhenInvalid: DefaultMaxArrayDepth);
     }
+
+    private static int NormalizeRespProtocolVersion(int configuredVersion)
+        => NormalizeInt(
+            configuredVersion,
+            MinRespProtocolVersion,
+            MaxRespProtocolVersion,
+            fallbackWhenInvalid: DefaultRespProtocolVersion);
+
+    private static int NormalizeMaxClusterRedirects(int configuredRedirects)
+        => NormalizeInt(
+            configuredRedirects,
+            0,
+            MaxClusterRedirectsUpperBound,
+            fallbackWhenInvalid: DefaultMaxClusterRedirects,
+            fallbackWhenNonPositive: 0);
 
     private static TimeSpan NormalizePositive(TimeSpan value, TimeSpan fallback)
         => value <= TimeSpan.Zero ? fallback : value;

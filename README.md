@@ -56,7 +56,6 @@ Those live in the enterprise repo.
 | `VapeCache` | Core runtime, Redis transport, cache APIs, telemetry |
 | `VapeCache.Abstractions` | Contracts, options, value types |
 | `VapeCache.Extensions.Aspire` | Aspire wiring, endpoints, telemetry integration |
-| `VapeCache.Extensions.AspNetCore` | ASP.NET Core output cache integration |
 
 ## Quick Start
 

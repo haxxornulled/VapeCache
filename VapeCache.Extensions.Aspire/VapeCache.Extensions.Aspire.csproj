@@ -12,12 +12,12 @@
     <!-- NuGet Package Metadata -->
     <PackageId>VapeCache.Extensions.Aspire</PackageId>
     <Title>VapeCache Extensions for Aspire</Title>
-    <Version>1.0.1</Version>
-    <Description>.NET Aspire integration for VapeCache - Service discovery, health checks, and telemetry. Seamless integration with Aspire Dashboard for distributed caching observability.</Description>
+    <Version>1.1.0</Version>
+    <Description>.NET Aspire integration for VapeCache. Adds service discovery, health checks, and OpenTelemetry wiring for Aspire-hosted applications.</Description>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache.Extensions.Aspire</Product>
-    <PackageTags>cache;redis;aspire;opentelemetry;dotnet;blazor;distributed-cache;service-discovery;health-checks</PackageTags>
+    <PackageTags>cache;redis;aspire;opentelemetry;service-discovery;health-checks;dotnet</PackageTags>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageIcon>vapecache-icon.png</PackageIcon>
     <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
@@ -27,7 +27,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>Aspire integration package with improved NuGet metadata, icon, and discoverability.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.1.0 release: updated Aspire packaging metadata and telemetry integration alignment.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
