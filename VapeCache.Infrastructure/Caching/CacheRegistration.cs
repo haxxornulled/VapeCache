@@ -61,6 +61,7 @@ public static class CacheRegistration
 
         // Hybrid command executor - automatically switches between Redis and in-memory based on circuit breaker state
         services.AddSingleton<IRedisCommandExecutor, HybridCommandExecutor>();
+        services.AddSingleton<IRedisMultiplexerDiagnostics>(sp => sp.GetRequiredService<RedisCommandExecutor>());
 
         services.TryAddSingleton<CacheStampedeOptions>();
 
@@ -81,8 +82,11 @@ public static class CacheRegistration
             .Validate(o => o.FailureBackoff >= TimeSpan.Zero, "FailureBackoff must be greater than or equal to zero.")
             .Validate(o => o.FailureBackoff <= TimeSpan.FromSeconds(30), "FailureBackoff must be less than or equal to 30 seconds.")
             .ValidateOnStart();
-        // Default cache service is the hybrid implementation, wrapped with stampede protection.
-        services.AddSingleton<ICacheService, HybridStampedeCacheService>();
+        // Default cache service is the hybrid implementation with stampede protection applied directly.
+        services.AddSingleton<ICacheService>(sp => new StampedeProtectedCacheService(
+            sp.GetRequiredService<HybridCacheService>(),
+            sp.GetRequiredService<IOptionsMonitor<CacheStampedeOptions>>(),
+            sp.GetRequiredService<CacheStatsRegistry>().GetOrCreate(CacheStatsNames.Hybrid)));
 
         // Ergonomic typed caching API with codec-based serialization
         services.TryAddSingleton<ICacheCodecProvider>(sp =>

@@ -36,6 +36,9 @@ public sealed class VapeCacheCachingModule : Module
         builder.RegisterType<MemoryCache>().As<IMemoryCache>().SingleInstance();
 
         builder.RegisterType<RedisCommandExecutor>().AsSelf().SingleInstance();
+        builder.Register(ctx => (IRedisMultiplexerDiagnostics)ctx.Resolve<RedisCommandExecutor>())
+            .As<IRedisMultiplexerDiagnostics>()
+            .SingleInstance();
         builder.RegisterType<InMemoryCommandExecutor>()
             .AsSelf()
             .As<IRedisFallbackCommandExecutor>()
@@ -44,22 +47,36 @@ public sealed class VapeCacheCachingModule : Module
         // For Enterprise spill-to-disk, install VapeCache.Persistence package
         builder.RegisterType<NoopSpillStore>().As<IInMemorySpillStore>().SingleInstance();
 
-        builder.RegisterType<RedisCacheService>()
-            .UsingConstructor(typeof(RedisCommandExecutor), typeof(ICurrentCacheService), typeof(CacheStatsRegistry), typeof(ICacheIntentRegistry))
+        builder.Register(ctx => new RedisCacheService(
+                ctx.Resolve<RedisCommandExecutor>(),
+                ctx.Resolve<ICurrentCacheService>(),
+                ctx.Resolve<CacheStatsRegistry>(),
+                ctx.ResolveOptional<ICacheIntentRegistry>()))
             .AsSelf()
             .SingleInstance();
         builder.RegisterType<InMemoryCacheService>().AsSelf().As<ICacheFallbackService>().SingleInstance();
         builder.RegisterType<HybridCacheService>()
             .AsSelf()
+            .SingleInstance();
+        builder.Register(ctx => (IRedisCircuitBreakerState)ctx.Resolve<HybridCacheService>())
             .As<IRedisCircuitBreakerState>()
+            .SingleInstance();
+        builder.Register(ctx => (IRedisFailoverController)ctx.Resolve<HybridCacheService>())
             .As<IRedisFailoverController>()
             .SingleInstance();
 
         builder.RegisterType<HybridCommandExecutor>()
-            .As<IRedisCommandExecutor>()
-            .As<IRedisMultiplexerDiagnostics>()
+            .AsSelf()
             .SingleInstance();
-        builder.RegisterType<HybridStampedeCacheService>().As<ICacheService>().SingleInstance();
+        builder.Register(ctx => (IRedisCommandExecutor)ctx.Resolve<HybridCommandExecutor>())
+            .As<IRedisCommandExecutor>()
+            .SingleInstance();
+        builder.Register(ctx => new StampedeProtectedCacheService(
+                ctx.Resolve<HybridCacheService>(),
+                ctx.Resolve<IOptionsMonitor<CacheStampedeOptions>>(),
+                ctx.Resolve<CacheStatsRegistry>().GetOrCreate(CacheStatsNames.Hybrid)))
+            .As<ICacheService>()
+            .SingleInstance();
 
         builder.RegisterType<SystemTextJsonCodecProvider>()
             .As<ICacheCodecProvider>()

@@ -1,4 +1,3 @@
-using System.Buffers;
 using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Infrastructure.Caching;
@@ -39,7 +38,7 @@ public sealed class VapeCacheClient : IVapeCache
     public ValueTask SetAsync<T>(CacheKey<T> key, T value, CacheEntryOptions options = default, CancellationToken ct = default)
     {
         var codec = _codecs.Get<T>();
-        return _inner.SetAsync(key.Value, value, SerializeWrapper(codec), options, ct);
+        return _inner.SetAsync(key.Value, value, codec.Serialize, options, ct);
     }
 
     public async ValueTask<T> GetOrCreateAsync<T>(
@@ -52,7 +51,7 @@ public sealed class VapeCacheClient : IVapeCache
         var result = await _inner.GetOrSetAsync(
             key.Value,
             factory,
-            SerializeWrapper(codec),
+            codec.Serialize,
             codec.Deserialize,
             options,
             ct).ConfigureAwait(false);
@@ -65,10 +64,6 @@ public sealed class VapeCacheClient : IVapeCache
     /// </summary>
     public ValueTask<bool> RemoveAsync(CacheKey key, CancellationToken ct = default)
         => _inner.RemoveAsync(key.Value, ct);
-
-    // Adapter to convert ICacheCodec<T>.Serialize (IBufferWriter) to Action<IBufferWriter<byte>, T>
-    private static Action<IBufferWriter<byte>, T> SerializeWrapper<T>(ICacheCodec<T> codec)
-        => (buffer, value) => codec.Serialize(buffer, value);
 
     /// <summary>
     /// Internal cache region implementation that automatically prefixes keys.
