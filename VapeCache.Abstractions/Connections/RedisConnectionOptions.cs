@@ -78,4 +78,19 @@ public sealed record RedisConnectionOptions
     /// Default: 64 levels. Set to -1 for unlimited (not recommended).
     /// </summary>
     public int MaxArrayDepth { get; init; } = 64;
+
+    /// <summary>
+    /// RESP protocol version negotiated during connection setup. Supported values: 2 or 3.
+    /// </summary>
+    public int RespProtocolVersion { get; init; } = 2;
+
+    /// <summary>
+    /// Enables cluster redirect handling for MOVED/ASK responses on cache-path commands.
+    /// </summary>
+    public bool EnableClusterRedirection { get; init; } = false;
+
+    /// <summary>
+    /// Maximum number of redirect hops allowed for a single command.
+    /// </summary>
+    public int MaxClusterRedirects { get; init; } = 3;
 }

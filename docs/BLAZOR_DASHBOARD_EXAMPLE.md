@@ -46,6 +46,20 @@ This maps:
 Create a DTO in your Blazor app that matches the stream payload:
 
 ```csharp
+public sealed record RedisMuxLaneSnapshot(
+    int LaneIndex,
+    int ConnectionId,
+    string Role,
+    int WriteQueueDepth,
+    int InFlight,
+    int MaxInFlight,
+    double InFlightUtilization,
+    long BytesSent,
+    long BytesReceived,
+    long Operations,
+    long Failures,
+    bool Healthy);
+
 public sealed record VapeCacheLiveSample(
     DateTimeOffset TimestampUtc,
     string CurrentBackend,
@@ -58,7 +72,8 @@ public sealed record VapeCacheLiveSample(
     long StampedeKeyRejected,
     long StampedeLockWaitTimeout,
     long StampedeFailureBackoffRejected,
-    double HitRate);
+    double HitRate,
+    IReadOnlyList<RedisMuxLaneSnapshot>? Lanes);
 ```
 
 ## 3) Blazor Web App Program.cs (Current Pattern)
@@ -266,6 +281,7 @@ Create `Components/Pages/VapeCacheDashboard.razor`:
             {
                 _latest = sample;
                 _history.Add(sample);
+                AddLaneSample(sample);
                 if (_history.Count > MaxPoints)
                     _history.RemoveAt(0);
 
@@ -292,21 +308,125 @@ Create `Components/Pages/VapeCacheDashboard.razor`:
 }
 ```
 
-## 7) Recommended Charting
+## 7) Oscilloscope Lane Graph (Old-School Style)
 
-For chart visuals, bind `_history` into:
+Use `sample.Lanes` as cumulative counters and chart per-sample deltas for a stable waveform.
+Inside your pump loop, call `AddLaneSample(sample)` before `StateHasChanged`.
 
-- `ApexCharts.Blazor`
-- `Plotly.Blazor`
-- `ChartJs.Blazor`
+```razor
+<div class="scope-shell">
+    <div class="scope-title">MUX LANE OSCILLOSCOPE (KB/TICK)</div>
+    <svg class="scope-screen" viewBox="0 0 1200 260" preserveAspectRatio="none">
+        @foreach (var wave in _laneWaves)
+        {
+            <polyline class="scope-trace"
+                      style="stroke:@GetLaneColor(wave.Key);"
+                      points="@BuildPolyline(wave.Value)" />
+        }
+    </svg>
+</div>
 
-Map these Y-series at minimum:
+@code {
+    private readonly Dictionary<int, List<double>> _laneWaves = new();
+    private readonly Dictionary<int, long> _laneLastBytes = new();
+    private const int ScopePoints = 120;
 
-- `HitRate`
-- `Hits` / `Misses` deltas
-- `FallbackToMemory`
-- `RedisBreakerOpened`
-- `StampedeKeyRejected`
+    private void AddLaneSample(VapeCacheLiveSample sample)
+    {
+        foreach (var lane in sample.Lanes ?? Array.Empty<RedisMuxLaneSnapshot>())
+        {
+            var totalBytes = lane.BytesSent + lane.BytesReceived;
+            _laneLastBytes.TryGetValue(lane.ConnectionId, out var previousBytes);
+            var deltaBytes = Math.Max(0L, totalBytes - previousBytes);
+            _laneLastBytes[lane.ConnectionId] = totalBytes;
+
+            var kbPerTick = deltaBytes / 1024d;
+            if (!_laneWaves.TryGetValue(lane.ConnectionId, out var wave))
+            {
+                wave = new List<double>(ScopePoints);
+                _laneWaves[lane.ConnectionId] = wave;
+            }
+
+            wave.Add(Math.Min(100d, kbPerTick));
+            if (wave.Count > ScopePoints)
+                wave.RemoveAt(0);
+        }
+    }
+
+    private static string BuildPolyline(IReadOnlyList<double> values)
+    {
+        if (values.Count == 0)
+            return string.Empty;
+
+        var sb = new System.Text.StringBuilder(values.Count * 14);
+        var xStep = values.Count == 1 ? 0d : 1180d / (values.Count - 1);
+
+        for (var i = 0; i < values.Count; i++)
+        {
+            var x = 10d + (i * xStep);
+            var y = 240d - ((values[i] / 100d) * 220d);
+            if (i > 0)
+                sb.Append(' ');
+
+            sb.Append(x.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(y.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return sb.ToString();
+    }
+
+    private static string GetLaneColor(int connectionId)
+        => (connectionId % 4) switch
+        {
+            0 => "#8CFF9E",
+            1 => "#66E2FF",
+            2 => "#FFE16E",
+            _ => "#FF8A6E"
+        };
+}
+```
+
+```css
+.scope-shell {
+    border: 1px solid #2a4f2f;
+    border-radius: 8px;
+    padding: 10px;
+    background: radial-gradient(circle at 30% 20%, #0b1f11 0%, #050b08 70%);
+    box-shadow: inset 0 0 16px rgba(90, 255, 120, 0.12);
+}
+
+.scope-title {
+    color: #90ffa8;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+}
+
+.scope-screen {
+    width: 100%;
+    height: 260px;
+    background:
+        linear-gradient(rgba(130, 255, 150, 0.08) 1px, transparent 1px) 0 0 / 100% 20px,
+        linear-gradient(90deg, rgba(130, 255, 150, 0.08) 1px, transparent 1px) 0 0 / 30px 100%,
+        #050b08;
+}
+
+.scope-trace {
+    fill: none;
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 4px currentColor);
+    animation: scope-flicker 180ms steps(2) infinite;
+}
+
+@keyframes scope-flicker {
+    0%, 100% { opacity: 0.9; }
+    50% { opacity: 0.75; }
+}
+```
 
 ## 8) Operational Notes
 

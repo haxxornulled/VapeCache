@@ -13,6 +13,8 @@ You get service discovery, health checks, telemetry, and wrapper endpoints in on
 ✅ **SEQ by Default** - OTLP exporter falls back to Seq when no endpoint is configured
 ✅ **Fluent Telemetry API** - `.UseSeq(...)`, custom headers, and wrapper callbacks
 ✅ **Fluent Stampede Profiles** - `.WithCacheStampedeProfile(...)` with optional overrides
+✅ **ASP.NET Core Pipeline Hook** - `.WithAspNetCoreOutputCaching(...)` for MVC/Blazor/minimal output cache store
+✅ **Failover Affinity Hints** - `.WithFailoverAffinityHints(...)` for cluster/web-garden sticky-session routing
 ✅ **Low Ceremony** - Single fluent chain to enable all major features
 
 ## Installation
@@ -48,11 +50,15 @@ builder.AddVapeCache()
     .WithRedisFromAspire("redis")     // Bind to AppHost Redis resource
     .WithHealthChecks()                // Add health checks (host maps endpoints)
     .WithAspireTelemetry()             // Send metrics to Aspire Dashboard
+    .WithAspNetCoreOutputCaching()     // Replace output-cache store with VapeCache
+    .WithFailoverAffinityHints()       // Emit sticky-session hints during failover
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
     .WithAutoMappedEndpoints();        // Auto-maps /vapecache/status + /vapecache/stats + /vapecache/stream
 
 var app = builder.Build();
 
+app.UseVapeCacheOutputCaching();
+app.UseVapeCacheFailoverAffinityHints();
 app.MapHealthChecks("/health");
 app.Run();
 ```
@@ -98,6 +104,12 @@ Navigate to `http://localhost:15888` to view:
 - `cache.op.ms` - Operation latency
 - `redis.cmd.calls` - Redis commands executed
 - `redis.pool.wait.ms` - Connection pool wait time
+- `redis.mux.lane.inflight` - Current in-flight operations by lane (`connection.id` tag)
+- `redis.mux.lane.inflight.utilization` - In-flight utilization ratio by lane
+- `redis.mux.lane.bytes.sent` - Cumulative bytes sent by lane
+- `redis.mux.lane.bytes.received` - Cumulative bytes received by lane
+- `redis.mux.lane.operations` - Cumulative operations started by lane
+- `redis.mux.lane.failures` - Cumulative transport/connect failures by lane
 
 ### Traces
 
@@ -167,6 +179,44 @@ Applies named stampede defaults with optional fluent overrides.
     options => options.WithLockWaitTimeout(TimeSpan.FromMilliseconds(600)));
 ```
 
+### `WithAspNetCoreOutputCaching(configureOutputCache?, configureStore?)`
+
+Adds ASP.NET Core output caching and swaps the default store for `VapeCacheOutputCacheStore`.
+
+```csharp
+builder.AddVapeCache()
+    .WithAspNetCoreOutputCaching(
+        configureOutputCache: options =>
+        {
+            options.AddBasePolicy(policy => policy.Expire(TimeSpan.FromSeconds(30)));
+        },
+        configureStore: store =>
+        {
+            store.KeyPrefix = "vapecache:output";
+            store.DefaultTtl = TimeSpan.FromSeconds(30);
+            store.EnableTagIndexing = true;
+        });
+
+var app = builder.Build();
+app.UseVapeCacheOutputCaching();
+```
+
+### `WithFailoverAffinityHints(configure?)`
+
+Adds options for middleware that emits node-affinity hints during failover:
+
+```csharp
+builder.AddVapeCache()
+    .WithFailoverAffinityHints(options =>
+    {
+        options.NodeId = Environment.MachineName;
+        options.CookieName = "VapeCacheAffinity";
+    });
+
+var app = builder.Build();
+app.UseVapeCacheFailoverAffinityHints();
+```
+
 ### `MapVapeCacheEndpoints(prefix, includeBreakerControlEndpoints, includeLiveStreamEndpoint, includeIntentEndpoints)`
 
 Maps wrapper-facing HTTP endpoints:
@@ -217,7 +267,24 @@ They also include autoscaler diagnostics when `IRedisMultiplexerDiagnostics` is 
 - `autoscaler.lastScaleDirection`
 - `autoscaler.lastScaleReason`
 
+They also include lane diagnostics for graphing:
+- `lanes[].laneIndex`
+- `lanes[].connectionId`
+- `lanes[].role` (`read`, `write`, or `read-write`)
+- `lanes[].writeQueueDepth`
+- `lanes[].inFlight`
+- `lanes[].maxInFlight`
+- `lanes[].inFlightUtilization`
+- `lanes[].bytesSent`
+- `lanes[].bytesReceived`
+- `lanes[].operations`
+- `lanes[].failures`
+- `lanes[].healthy`
+
 `/stream` emits `event: vapecache-stats` frames with a JSON payload compatible with Blazor realtime chart components.
+
+Lane query/panel pack for Aspire Metrics explorer:
+- [`docs/ASPIRE_LANE_QUERY_PACK.md`](../docs/ASPIRE_LANE_QUERY_PACK.md)
 
 Example payload:
 ```json
@@ -259,7 +326,23 @@ Example payload:
     "lastScaleEventUtc": "2026-02-24T21:02:08.0000000+00:00",
     "lastScaleDirection": "up",
     "lastScaleReason": "inflight+queue"
-  }
+  },
+  "lanes": [
+    {
+      "laneIndex": 0,
+      "connectionId": 12,
+      "role": "read-write",
+      "writeQueueDepth": 1,
+      "inFlight": 22,
+      "maxInFlight": 128,
+      "inFlightUtilization": 0.171875,
+      "bytesSent": 8021569,
+      "bytesReceived": 14482991,
+      "operations": 54120,
+      "failures": 0,
+      "healthy": true
+    }
+  ]
 }
 ```
 

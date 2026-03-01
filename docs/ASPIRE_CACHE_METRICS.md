@@ -344,6 +344,9 @@ app.Run();
 
 When you run `dotnet run` in the AppHost project, the Aspire Dashboard opens at `http://localhost:15888`.
 
+For lane-focused dashboards and query recipes, use:
+- `docs/ASPIRE_LANE_QUERY_PACK.md`
+
 ### Metrics Tab
 
 You'll see VapeCache metrics grouped by meter:
@@ -371,6 +374,10 @@ You'll see VapeCache metrics grouped by meter:
 - `cache.spill.orphan.scanned` (Counter) - Spill files scanned for cleanup
 - `cache.spill.orphan.cleanup.count` (Counter) - Spill files deleted during cleanup
 - `cache.spill.orphan.cleanup.bytes` (Counter) - Spill bytes deleted during cleanup
+- `cache.spill.store_unavailable` (Counter) - Spill enabled but no writable spill store registered
+- `cache.spill.shard.active` (Gauge) - Active spill shards with at least one file
+- `cache.spill.shard.max_files` (Gauge) - Max files in any single shard
+- `cache.spill.shard.imbalance_ratio` (Gauge) - Shard imbalance (max/avg files per active shard)
 - `cache.op.ms` (Histogram) - Operation latency
 
 **VapeCache.Redis (Redis Metrics):**
@@ -382,6 +389,16 @@ You'll see VapeCache metrics grouped by meter:
 - `redis.pool.wait.ms` (Histogram) - Pool wait time
 - `redis.queue.depth` (Gauge) - Write/pending queue depth (tagged by queue and connection)
 - `redis.queue.wait.ms` (Histogram) - Write queue backpressure wait time
+- `redis.mux.lane.bytes.sent` (ObservableCounter) - Cumulative bytes sent per mux lane
+- `redis.mux.lane.bytes.received` (ObservableCounter) - Cumulative bytes received per mux lane
+- `redis.mux.lane.operations` (ObservableCounter) - Cumulative operations started per mux lane
+- `redis.mux.lane.responses` (ObservableCounter) - Cumulative responses observed per mux lane
+- `redis.mux.lane.failures` (ObservableCounter) - Cumulative transport/connect failures per mux lane
+- `redis.mux.lane.responses.orphaned` (ObservableCounter) - Responses that arrived after the waiting operation had already completed
+- `redis.mux.lane.response.sequence.mismatches` (ObservableCounter) - Request/response sequence mismatches detected by the mux lane
+- `redis.mux.lane.transport.resets` (ObservableCounter) - Transport resets on the mux lane
+- `redis.mux.lane.inflight` (ObservableGauge) - Current in-flight operations per mux lane
+- `redis.mux.lane.inflight.utilization` (ObservableGauge) - Current in-flight utilization ratio per mux lane
 - `redis.connect.attempts` (Counter) - Connection attempts
 - `redis.connect.failures` (Counter) - Connection failures
 
@@ -409,6 +426,9 @@ While Aspire Dashboard doesn't support custom dashboards yet (as of .NET 9), you
 - `stampedeKeyRejected`
 - `stampedeLockWaitTimeout`
 - `stampedeFailureBackoffRejected`
+- `spill.mode` (`noop` or `file`)
+- `spill.totalSpillFiles`, `spill.activeShards`, `spill.maxFilesInShard`
+- `spill.imbalanceRatio`, `spill.topShards` (hot shard prefixes)
 
 `GET /vapecache/stream` exposes realtime SSE frames (`event: vapecache-stats`) for Blazor charting.
 

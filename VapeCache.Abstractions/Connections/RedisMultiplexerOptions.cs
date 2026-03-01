@@ -34,6 +34,12 @@ public sealed record RedisMultiplexerOptions
     public bool EnableSocketRespReader { get; init; } = false;
 
     /// <summary>
+    /// Runs each mux lane reader/writer loop using LongRunning worker scheduling to reduce
+    /// thread-pool contention under extreme sustained load. Keep disabled by default.
+    /// </summary>
+    public bool UseDedicatedLaneWorkers { get; init; } = false;
+
+    /// <summary>
     /// Maximum bytes to include in one coalesced socket write batch.
     /// Defaults to a full-tilt profile (1MB). Decrease for lower single-command latency.
     /// </summary>

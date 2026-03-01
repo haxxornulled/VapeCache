@@ -54,6 +54,30 @@ public interface IVapeCache
 }
 ```
 
+### `ICacheChunkStreamService` (large payload streaming)
+
+Namespace: `VapeCache.Abstractions.Caching`
+
+```csharp
+public interface ICacheChunkStreamService
+{
+    ValueTask<CacheChunkStreamManifest> WriteAsync(
+        string key,
+        Stream source,
+        CacheEntryOptions options = default,
+        CacheChunkStreamWriteOptions? writeOptions = null,
+        CancellationToken ct = default);
+
+    ValueTask<CacheChunkStreamManifest?> GetManifestAsync(string key, CancellationToken ct = default);
+    IAsyncEnumerable<ReadOnlyMemory<byte>> ReadChunksAsync(string key, CancellationToken ct = default);
+    ValueTask<bool> CopyToAsync(string key, Stream destination, CancellationToken ct = default);
+    ValueTask<bool> RemoveAsync(string key, CancellationToken ct = default);
+}
+```
+
+`WriteAsync` stores stream content as chunked cache entries plus a manifest.  
+Because it uses the active `ICacheService`, hybrid deployments automatically fail over to in-memory when Redis is unavailable.
+
 ### `ICacheRegion`
 
 Namespace: `VapeCache.Abstractions.Caching`
@@ -133,6 +157,40 @@ public sealed record CacheStampedeOptions
     TimeSpan FailureBackoff { get; set; }
 }
 ```
+
+### `HybridFailoverOptions`
+
+```csharp
+public sealed class HybridFailoverOptions
+{
+    bool MirrorWritesToFallbackWhenRedisHealthy { get; set; }
+    bool WarmFallbackOnRedisReadHit { get; set; }
+    TimeSpan FallbackWarmReadTtl { get; set; }
+    TimeSpan FallbackMirrorWriteTtlWhenMissing { get; set; }
+    int MaxMirrorPayloadBytes { get; set; }
+    bool RemoveStaleFallbackOnRedisMiss { get; set; }
+}
+```
+
+## Redis Transport Options
+
+### `RedisConnectionOptions` (cluster + protocol knobs)
+
+Namespace: `VapeCache.Abstractions.Connections`
+
+```csharp
+public sealed record RedisConnectionOptions
+{
+    int RespProtocolVersion { get; init; } // 2 or 3
+    bool EnableClusterRedirection { get; init; } // MOVED/ASK handling for cache-path commands
+    int MaxClusterRedirects { get; init; } // 0..16
+}
+```
+
+Key behavior:
+- `RespProtocolVersion=3` enables HELLO 3 negotiation. If negotiation fails, handshake falls back safely.
+- `EnableClusterRedirection=true` enables bounded MOVED/ASK retries.
+- `MaxClusterRedirects` limits redirect hops for one command to prevent loops.
 
 ### Named profiles
 
@@ -273,6 +331,66 @@ Default wrapper routes:
 - `POST /vapecache/breaker/force-open` (opt-in)
 - `POST /vapecache/breaker/clear` (opt-in)
 
+Status/stats payloads include spill diagnostics:
+- `spill.mode` (`noop` or `file`)
+- `spill.totalSpillFiles`
+- `spill.activeShards`
+- `spill.maxFilesInShard`
+- `spill.imbalanceRatio`
+- `spill.topShards`
+
+## ASP.NET Core Pipeline Hooks
+
+Namespace: `VapeCache.Extensions.AspNetCore`
+
+```csharp
+services.AddVapeCacheOutputCaching(
+    configureOutputCache: options =>
+    {
+        options.AddBasePolicy(policy => policy.Expire(TimeSpan.FromSeconds(30)));
+    },
+    configureStore: store =>
+    {
+        store.KeyPrefix = "vapecache:output";
+        store.DefaultTtl = TimeSpan.FromSeconds(30);
+        store.EnableTagIndexing = true;
+    });
+```
+
+```csharp
+app.UseVapeCacheOutputCaching();
+```
+
+Minimal API endpoint hook:
+
+```csharp
+app.MapGet("/products/{id:int}", (int id) => Results.Ok(new { id }))
+   .CacheWithVapeCache();
+```
+
+Store options:
+
+```csharp
+public sealed class VapeCacheOutputCacheStoreOptions
+{
+    string KeyPrefix { get; set; } = "vapecache:output";
+    TimeSpan DefaultTtl { get; set; } = TimeSpan.FromSeconds(30);
+    bool EnableTagIndexing { get; set; } = true;
+}
+```
+
+Sticky-session affinity hints for clustered failover:
+
+```csharp
+services.AddVapeCacheFailoverAffinityHints(options =>
+{
+    options.NodeId = "node-1";
+    options.CookieName = "VapeCacheAffinity";
+});
+
+app.UseVapeCacheFailoverAffinityHints();
+```
+
 ## Autoscaler Diagnostics API
 
 Namespace: `VapeCache.Abstractions.Connections`
@@ -281,10 +399,26 @@ Namespace: `VapeCache.Abstractions.Connections`
 public interface IRedisMultiplexerDiagnostics
 {
     RedisAutoscalerSnapshot GetAutoscalerSnapshot();
+    IReadOnlyList<RedisMuxLaneSnapshot> GetMuxLaneSnapshots();
 }
 ```
 
 `RedisAutoscalerSnapshot` includes current/target connection counts, queue and inflight pressure, rolling p95/p99, freeze state, and last scale decision metadata.
+
+`RedisMuxLaneSnapshot` exposes per-lane transport counters and queue pressure for Aspire/dashboard graphing (`laneIndex`, `connectionId`, `role`, `writeQueueDepth`, `inFlight`, `inFlightUtilization`, `bytesSent`, `bytesReceived`, `operations`, `failures`, `responses`, `orphanedResponses`, `responseSequenceMismatches`, `transportResets`, `healthy`).
+
+## Spill Diagnostics API
+
+Namespace: `VapeCache.Abstractions.Caching`
+
+```csharp
+public interface ISpillStoreDiagnostics
+{
+    SpillStoreDiagnosticsSnapshot GetSnapshot();
+}
+```
+
+`SpillStoreDiagnosticsSnapshot` exposes spill mode (`noop`/`file`) and shard-balance signals (`activeShards`, `maxFilesInShard`, `imbalanceRatio`, `topShards`) for live scatter verification.
 
 ## Error Handling Behavior
 

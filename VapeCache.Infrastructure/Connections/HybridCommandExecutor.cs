@@ -55,6 +55,12 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
     public RedisAutoscalerSnapshot GetAutoscalerSnapshot()
         => _redis.GetAutoscalerSnapshot();
 
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public IReadOnlyList<RedisMuxLaneSnapshot> GetMuxLaneSnapshots()
+        => _redis.GetMuxLaneSnapshots();
+
     private readonly struct ProbeScope : IDisposable
     {
         private readonly HybridCommandExecutor _owner;

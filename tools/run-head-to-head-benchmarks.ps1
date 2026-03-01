@@ -1,6 +1,6 @@
 param(
     [string]$Job = "Short",
-    [ValidateSet("all", "client", "endtoend", "modules")]
+    [ValidateSet("all", "client", "throughput", "endtoend", "modules")]
     [string]$Suite = "all",
     [ValidateSet("fair", "realworld")]
     [string]$Mode = "fair",
@@ -41,6 +41,11 @@ switch ($Profile) {
         Set-EnvIfEmpty "VAPECACHE_BENCH_WARMUP_COUNT" "6"
         Set-EnvIfEmpty "VAPECACHE_BENCH_ITERATION_COUNT" "20"
         Set-EnvIfEmpty "VAPECACHE_BENCH_CLIENT_PAYLOADS" "256,1024,4096,16384,65536"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_PAYLOADS" "256,2048,16384"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_CONCURRENCY" "32,64,128,256"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_PIPELINE_DEPTH" "8,16,32"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_CONNECTIONS" "2,4,8,16"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_TOTAL_OPS" "16384"
         Set-EnvIfEmpty "VAPECACHE_BENCH_E2E_PAYLOADS" "256,1024,4096,16384,65536"
         Set-EnvIfEmpty "VAPECACHE_BENCH_MODULE_JSON_CHARS" "256,1024,4096,16384"
     }
@@ -49,6 +54,11 @@ switch ($Profile) {
         Set-EnvIfEmpty "VAPECACHE_BENCH_WARMUP_COUNT" "8"
         Set-EnvIfEmpty "VAPECACHE_BENCH_ITERATION_COUNT" "30"
         Set-EnvIfEmpty "VAPECACHE_BENCH_CLIENT_PAYLOADS" "256,1024,4096,16384,65536,262144"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_PAYLOADS" "256,2048,16384,65536"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_CONCURRENCY" "64,128,256,512"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_PIPELINE_DEPTH" "16,32,64"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_CONNECTIONS" "4,8,16,32"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_TOTAL_OPS" "32768"
         Set-EnvIfEmpty "VAPECACHE_BENCH_E2E_PAYLOADS" "256,1024,4096,16384,65536"
         Set-EnvIfEmpty "VAPECACHE_BENCH_MODULE_JSON_CHARS" "256,1024,4096,16384,65536"
     }
@@ -69,9 +79,10 @@ $env:VAPECACHE_BENCH_INSTRUMENT = if ($Mode -eq "realworld") { "true" } else { "
 
 switch ($Suite) {
     "client"   { $filters = @("*RedisClientHeadToHeadBenchmarks*") }
+    "throughput" { $filters = @("*RedisThroughputHeadToHeadBenchmarks*") }
     "endtoend" { $filters = @("*RedisEndToEndHeadToHeadBenchmarks*") }
     "modules"  { $filters = @("*RedisModuleHeadToHeadBenchmarks*") }
-    default    { $filters = @("*RedisClientHeadToHeadBenchmarks*", "*RedisEndToEndHeadToHeadBenchmarks*", "*RedisModuleHeadToHeadBenchmarks*") }
+    default    { $filters = @("*RedisClientHeadToHeadBenchmarks*", "*RedisThroughputHeadToHeadBenchmarks*", "*RedisEndToEndHeadToHeadBenchmarks*", "*RedisModuleHeadToHeadBenchmarks*") }
 }
 
 if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {

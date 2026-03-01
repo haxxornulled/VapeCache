@@ -7,6 +7,7 @@
 - bind Redis from service discovery
 - expose health/diagnostics endpoints
 - emit OpenTelemetry metrics/traces
+- wire ASP.NET Core output-caching middleware to VapeCache store
 
 No service locator patterns and no route clutter in `Program.cs`.
 
@@ -22,10 +23,11 @@ When you enable endpoint mapping (`WithAutoMappedEndpoints(...)` or `MapVapeCach
 - optional admin: `POST /vapecache/breaker/force-open`
 - optional admin: `POST /vapecache/breaker/clear`
 
-Autoscaler diagnostics are included in `status`, `stats`, and stream samples when diagnostics are registered.
+Autoscaler diagnostics and per-lane mux diagnostics are included in `status`, `stats`, and stream samples when diagnostics are registered.
 See:
 - [VapeCache.Extensions.Aspire/README.md](../VapeCache.Extensions.Aspire/README.md)
 - [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md)
+- [ASPIRE_LANE_QUERY_PACK.md](ASPIRE_LANE_QUERY_PACK.md)
 
 ## What is .NET Aspire?
 
@@ -77,6 +79,8 @@ See:
 │     .WithRedisFromAspire("redis")  // Binds to resource     │
 │     .WithHealthChecks()             // Adds health checks   │
 │     .WithAspireTelemetry()          // OTel → Dashboard     │
+│     .WithAspNetCoreOutputCaching()  // MVC/Blazor pipeline  │
+│     .WithFailoverAffinityHints()    // Cluster failover hint │
 │     .WithCacheStampedeProfile(      // Stampede defaults    │
 │         CacheStampedeProfile.Balanced)                      │
 │     .WithAutoMappedEndpoints();     // + status/stats/stream│
@@ -485,6 +489,9 @@ When you run your Aspire app, the dashboard (`http://localhost:15888`) will show
 - `stampedeKeyRejected`
 - `stampedeLockWaitTimeout`
 - `stampedeFailureBackoffRejected`
+- `spill.mode` (`noop` or `file`)
+- `spill.totalSpillFiles`, `spill.activeShards`, `spill.maxFilesInShard`
+- `spill.imbalanceRatio` and `spill.topShards` for scatter health
 
 `GET /vapecache/stream` provides realtime SSE frames (`event: vapecache-stats`) for Blazor charting.
 

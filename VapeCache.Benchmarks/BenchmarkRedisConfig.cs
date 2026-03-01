@@ -43,6 +43,21 @@ internal static class BenchmarkRedisConfig
         return (IsQuickMode() ? quickDefaults : fullDefaults).ToArray();
     }
 
+    public static bool[] ResolveBoolParams(string key, IReadOnlyList<bool> fullDefaults, IReadOnlyList<bool> quickDefaults)
+    {
+        var parsed = ParseCsv(Environment.GetEnvironmentVariable(key))
+            .Select(token => bool.TryParse(token, out var value) ? value : (bool?)null)
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .Distinct()
+            .ToArray();
+
+        if (parsed.Length > 0)
+            return parsed;
+
+        return (IsQuickMode() ? quickDefaults : fullDefaults).ToArray();
+    }
+
     public static void FillPayload(Span<byte> buffer, int seed = 42)
     {
         if (buffer.IsEmpty)
@@ -101,7 +116,8 @@ internal static class BenchmarkRedisConfig
         int connections = 1,
         int maxInFlight = 2048,
         bool enableInstrumentation = true,
-        bool enableCoalescedWrites = true)
+        bool enableCoalescedWrites = true,
+        bool useDedicatedLaneWorkers = false)
     {
         var envInstrument = TryGetBool("VAPECACHE_BENCH_INSTRUMENT");
         if (envInstrument.HasValue)
@@ -120,7 +136,8 @@ internal static class BenchmarkRedisConfig
                 Connections = connections,
                 MaxInFlightPerConnection = maxInFlight,
                 EnableCommandInstrumentation = enableInstrumentation,
-                EnableCoalescedSocketWrites = enableCoalescedWrites
+                EnableCoalescedSocketWrites = enableCoalescedWrites,
+                UseDedicatedLaneWorkers = useDedicatedLaneWorkers
             }));
     }
 
