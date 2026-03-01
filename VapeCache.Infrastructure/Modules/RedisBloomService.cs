@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Modules;
@@ -8,15 +7,20 @@ namespace VapeCache.Infrastructure.Modules;
 internal sealed class RedisBloomService : IRedisBloomService
 {
     private readonly IRedisCommandExecutor _redis;
+    private readonly IRedisFallbackCommandExecutor _fallback;
     private readonly IRedisModuleDetector _modules;
     private readonly ILogger<RedisBloomService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool? _available;
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<byte[], byte>> _fallback = new();
 
-    public RedisBloomService(IRedisCommandExecutor redis, IRedisModuleDetector modules, ILogger<RedisBloomService> logger)
+    public RedisBloomService(
+        IRedisCommandExecutor redis,
+        IRedisFallbackCommandExecutor fallback,
+        IRedisModuleDetector modules,
+        ILogger<RedisBloomService> logger)
     {
         _redis = redis;
+        _fallback = fallback;
         _modules = modules;
         _logger = logger;
     }
@@ -26,17 +30,18 @@ internal sealed class RedisBloomService : IRedisBloomService
     /// </summary>
     public async ValueTask<bool> IsAvailableAsync(CancellationToken ct = default)
     {
-        if (_available.HasValue)
-            return _available.Value;
+        if (_available == true)
+            return true;
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_available.HasValue)
-                return _available.Value;
+            if (_available == true)
+                return true;
 
             var available = await _modules.IsModuleInstalledAsync("bf", ct).ConfigureAwait(false);
-            _available = available;
+            if (available)
+                _available = true;
             return available;
         }
         finally
@@ -54,8 +59,7 @@ internal sealed class RedisBloomService : IRedisBloomService
             return await _redis.BfAddAsync(key, item, ct).ConfigureAwait(false);
 
         _logger.LogDebug("RedisBloom unavailable; using in-memory fallback for {Key}.", key);
-        var set = _fallback.GetOrAdd(key, _ => new ConcurrentDictionary<byte[], byte>(ByteArrayComparer.Instance));
-        return set.TryAdd(item.ToArray(), 0);
+        return await _fallback.BfAddAsync(key, item, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -66,31 +70,6 @@ internal sealed class RedisBloomService : IRedisBloomService
         if (await IsAvailableAsync(ct).ConfigureAwait(false))
             return await _redis.BfExistsAsync(key, item, ct).ConfigureAwait(false);
 
-        var set = _fallback.GetOrAdd(key, _ => new ConcurrentDictionary<byte[], byte>(ByteArrayComparer.Instance));
-        return set.ContainsKey(item.ToArray());
-    }
-
-    private sealed class ByteArrayComparer : IEqualityComparer<byte[]>
-    {
-        public static readonly ByteArrayComparer Instance = new();
-
-        /// <summary>
-        /// Executes value.
-        /// </summary>
-        public bool Equals(byte[]? x, byte[]? y)
-        {
-            if (x == null || y == null) return x == y;
-            return x.AsSpan().SequenceEqual(y.AsSpan());
-        }
-
-        /// <summary>
-        /// Gets value.
-        /// </summary>
-        public int GetHashCode(byte[] obj)
-        {
-            var hash = new HashCode();
-            hash.AddBytes(obj);
-            return hash.ToHashCode();
-        }
+        return await _fallback.BfExistsAsync(key, item, ct).ConfigureAwait(false);
     }
 }

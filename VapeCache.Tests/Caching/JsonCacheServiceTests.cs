@@ -55,6 +55,21 @@ public sealed class JsonCacheServiceTests
     }
 
     [Fact]
+    public async Task JsonCache_Availability_Rechecks_UntilModuleIsDetected()
+    {
+        var executor = new InMemoryCommandExecutor();
+        var cache = CreateMemoryCacheService();
+        var modules = new FakeModuleDetector { RedisJsonAvailable = false };
+        var service = new JsonCacheService(executor, cache, modules, NullLogger<JsonCacheService>.Instance);
+
+        Assert.False(await service.IsAvailableAsync());
+
+        modules.RedisJsonAvailable = true;
+
+        Assert.True(await service.IsAvailableAsync());
+    }
+
+    [Fact]
     public async Task JsonCache_GetLease_FallsBack_ToCache_WhenModuleUnavailable()
     {
         var executor = new InMemoryCommandExecutor();

@@ -52,6 +52,31 @@ public sealed class RedisModuleDetectorTests
     }
 
     [Fact]
+    public async Task GetInstalledModulesAsync_retries_after_transient_failure()
+    {
+        var attempts = 0;
+        var mock = new Mock<IRedisCommandExecutor>(MockBehavior.Strict);
+        mock.Setup(m => m.ModuleListAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                attempts++;
+                return attempts == 1
+                    ? ValueTask.FromException<string[]>(new InvalidOperationException("transient"))
+                    : ValueTask.FromResult(new[] { "search" });
+            });
+
+        var sut = new RedisModuleDetector(mock.Object, TimeProvider.System, TimeSpan.Zero);
+
+        var first = await sut.GetInstalledModulesAsync();
+        var second = await sut.GetInstalledModulesAsync();
+
+        Assert.Empty(first);
+        Assert.Single(second);
+        Assert.Equal("search", second[0]);
+        mock.Verify(m => m.ModuleListAsync(It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
     public async Task GetInstalledModulesAsync_propagates_user_cancellation()
     {
         var mock = new Mock<IRedisCommandExecutor>(MockBehavior.Strict);
@@ -62,6 +87,6 @@ public sealed class RedisModuleDetectorTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => sut.GetInstalledModulesAsync(cts.Token).AsTask());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sut.GetInstalledModulesAsync(cts.Token).AsTask());
     }
 }

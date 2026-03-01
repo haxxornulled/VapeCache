@@ -37,17 +37,18 @@ internal sealed class JsonCacheService : IJsonCache
     /// </summary>
     public async ValueTask<bool> IsAvailableAsync(CancellationToken ct = default)
     {
-        if (_redisJsonAvailable.HasValue)
-            return _redisJsonAvailable.Value;
+        if (_redisJsonAvailable == true)
+            return true;
 
         await _moduleGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_redisJsonAvailable.HasValue)
-                return _redisJsonAvailable.Value;
+            if (_redisJsonAvailable == true)
+                return true;
 
             var available = await _modules.HasRedisJsonAsync(ct).ConfigureAwait(false);
-            _redisJsonAvailable = available;
+            if (available)
+                _redisJsonAvailable = true;
             return available;
         }
         finally
