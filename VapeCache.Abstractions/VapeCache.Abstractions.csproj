@@ -7,23 +7,23 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Abstractions</PackageId>
     <Title>VapeCache Abstractions</Title>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache</Product>
-    <Description>Public contracts and options for VapeCache - a high-performance Redis client optimized for caching workloads. 5-30% faster than StackExchange.Redis with coalesced writes and zero-allocation pooling.</Description>
-    <PackageTags>redis;cache;performance;distributed-cache;async;netcore</PackageTags>
+    <Description>Public contracts, interfaces, and configuration types for VapeCache. Use this package when you need the shared API surface without the Redis transport implementation.</Description>
+    <PackageTags>redis;cache;abstractions;configuration;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
-    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
-    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
+    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache-Enterprise/main/assets/vapecache-icon.png</PackageIconUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache-Enterprise</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>Production-ready abstractions for VapeCache with polished NuGet metadata and docs.</PackageReleaseNotes>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache-Enterprise</PackageProjectUrl>
+    <PackageReleaseNotes>1.1.0 release: aligned public contracts with transport hardening and observability updates.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>

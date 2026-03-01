@@ -8,23 +8,23 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache</PackageId>
     <Title>VapeCache</Title>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache</Product>
-    <Description>VapeCache - High-performance Redis client for .NET optimized for caching workloads. Features coalesced writes (29% faster SETs), zero-allocation pooling, circuit breaker failover, and OpenTelemetry observability. 5-30% faster than StackExchange.Redis.</Description>
-    <PackageTags>redis;cache;performance;distributed-cache;async;netcore;hybrid-cache;circuit-breaker;opentelemetry</PackageTags>
+    <Description>Redis transport and caching runtime for VapeCache. Includes multiplexed connections, circuit breaking, pooling, and OpenTelemetry hooks for production cache workloads.</Description>
+    <PackageTags>redis;cache;distributed-cache;circuit-breaker;opentelemetry;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
-    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
-    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
+    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache-Enterprise/main/assets/vapecache-icon.png</PackageIconUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache-Enterprise</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>Performance-focused Redis caching library for .NET with polished NuGet metadata and package docs.</PackageReleaseNotes>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache-Enterprise</PackageProjectUrl>
+    <PackageReleaseNotes>1.1.0 release: transport hardening, lane telemetry, and production packaging cleanup.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>

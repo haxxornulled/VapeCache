@@ -7,23 +7,23 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Reconciliation</PackageId>
     <Title>VapeCache Reconciliation</Title>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache.Reconciliation</Product>
-    <Description>Data loss mitigation for VapeCache during Redis outages. SQLite-backed tracking of writes with automatic sync-back on recovery (Reaper background service). Mitigates but cannot guarantee zero data loss. Unlimited deployments, any Redis topology. ENTERPRISE LICENSE REQUIRED ($499/month per organization).</Description>
-    <PackageTags>redis;cache;reconciliation;failover;circuit-breaker;commercial;enterprise;data-loss-mitigation;sqlite;background-service</PackageTags>
+    <Description>Outage reconciliation services for VapeCache Enterprise. Tracks writes during Redis disruptions and replays them when connectivity is restored.</Description>
+    <PackageTags>redis;cache;reconciliation;failover;sqlite;enterprise;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE-ENTERPRISE.txt</PackageLicenseFile>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
-    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
-    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
+    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache-Enterprise/main/assets/vapecache-icon.png</PackageIconUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache-Enterprise</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://vapecache.com</PackageProjectUrl>
-    <PackageReleaseNotes>Enterprise reconciliation package with polished NuGet metadata, icon, and onboarding docs.</PackageReleaseNotes>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache-Enterprise</PackageProjectUrl>
+    <PackageReleaseNotes>1.1.0 release: aligned enterprise reconciliation packaging for production deployment.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg\enterprise</PackageOutputPath>
   </PropertyGroup>

@@ -8,23 +8,23 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.AspNetCore</PackageId>
     <Title>VapeCache Extensions for ASP.NET Core</Title>
-    <Version>1.0.1</Version>
-    <Description>ASP.NET Core output caching integration for VapeCache. Use MVC/Minimal API/Blazor output caching middleware with VapeCache as the backing store.</Description>
+    <Version>1.1.0</Version>
+    <Description>ASP.NET Core output cache integration for VapeCache. Registers VapeCache as the backing store for ASP.NET Core output caching.</Description>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache.Extensions.AspNetCore</Product>
-    <PackageTags>cache;redis;aspnetcore;output-cache;mvc;blazor;minimal-api</PackageTags>
+    <PackageTags>cache;redis;aspnetcore;output-cache;middleware;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
-    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
-    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
+    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache-Enterprise/main/assets/vapecache-icon.png</PackageIconUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache-Enterprise</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>ASP.NET Core output-caching hooks for MVC/Minimal API/Blazor with VapeCache backend store.</PackageReleaseNotes>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache-Enterprise</PackageProjectUrl>
+    <PackageReleaseNotes>1.1.0 release: updated ASP.NET Core integration packaging metadata for production release.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>

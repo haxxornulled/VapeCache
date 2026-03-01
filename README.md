@@ -69,7 +69,7 @@ Benchmarks are included in this repo because transport regressions matter. Read 
 | `VapeCache` | Core runtime, Redis transport, cache APIs, telemetry | Yes |
 | `VapeCache.Abstractions` | Contracts, options, value types | Yes |
 | `VapeCache.Extensions.Aspire` | Aspire wiring, endpoints, telemetry integration | Yes |
-| `VapeCache.Extensions.AspNetCore` | ASP.NET Core output cache integration | Yes |
+| `VapeCache.Extensions.AspNetCore` | ASP.NET Core output cache integration | No |
 | `VapeCache.Persistence` | Durable spill persistence | No |
 | `VapeCache.Reconciliation` | Replay persisted writes after recovery | No |
 | `VapeCache.Licensing.ControlPlane` | Enterprise control-plane service | No |
