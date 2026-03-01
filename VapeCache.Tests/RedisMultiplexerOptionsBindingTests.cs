@@ -15,6 +15,7 @@ public sealed class RedisMultiplexerOptionsBindingTests
 
         Assert.Equal(RedisTransportProfile.FullTilt, o.TransportProfile);
         Assert.False(o.EnableSocketRespReader);
+        Assert.False(o.UseDedicatedLaneWorkers);
         Assert.Equal(1024 * 1024, o.CoalescedWriteMaxBytes);
         Assert.Equal(256, o.CoalescedWriteMaxSegments);
         Assert.Equal(2048, o.CoalescedWriteSmallCopyThresholdBytes);
@@ -43,6 +44,7 @@ public sealed class RedisMultiplexerOptionsBindingTests
             "EnableCommandInstrumentation": true,
             "EnableCoalescedSocketWrites": true,
             "EnableSocketRespReader": true,
+            "UseDedicatedLaneWorkers": true,
             "CoalescedWriteMaxBytes": 131072,
             "CoalescedWriteMaxSegments": 64,
             "CoalescedWriteSmallCopyThresholdBytes": 1024,
@@ -79,6 +81,7 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.True(o.EnableCommandInstrumentation);
         Assert.True(o.EnableCoalescedSocketWrites);
         Assert.True(o.EnableSocketRespReader);
+        Assert.True(o.UseDedicatedLaneWorkers);
         Assert.Equal(131072, o.CoalescedWriteMaxBytes);
         Assert.Equal(64, o.CoalescedWriteMaxSegments);
         Assert.Equal(1024, o.CoalescedWriteSmallCopyThresholdBytes);

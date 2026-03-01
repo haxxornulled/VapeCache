@@ -12,6 +12,37 @@ namespace VapeCache.Tests.Connections;
 public sealed class RedisCommandExecutorAutoscalerTests
 {
     [Fact]
+    public void GetMuxLaneSnapshots_ReturnsCurrentLaneState()
+    {
+        using var harness = CreateHarness(new RedisMultiplexerOptions
+        {
+            Connections = 2,
+            EnableAutoscaling = false
+        });
+
+        var lanes = harness.Executor.GetMuxLaneSnapshots();
+
+        Assert.Equal(2, lanes.Count);
+        Assert.All(lanes, lane =>
+        {
+            Assert.Equal("read-write", lane.Role);
+            Assert.True(lane.ConnectionId > 0);
+            Assert.True(lane.MaxInFlight > 0);
+            Assert.True(lane.Healthy);
+            Assert.Equal(0, lane.WriteQueueDepth);
+            Assert.Equal(0, lane.InFlight);
+            Assert.Equal(0L, lane.BytesSent);
+            Assert.Equal(0L, lane.BytesReceived);
+            Assert.Equal(0L, lane.Operations);
+            Assert.Equal(0L, lane.Failures);
+            Assert.Equal(0L, lane.Responses);
+            Assert.Equal(0L, lane.OrphanedResponses);
+            Assert.Equal(0L, lane.ResponseSequenceMismatches);
+            Assert.Equal(0L, lane.TransportResets);
+        });
+    }
+
+    [Fact]
     public void EmergencyTimeoutSpike_ScalesUp_BoundedByMax()
     {
         using var harness = CreateHarness(new RedisMultiplexerOptions

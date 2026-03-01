@@ -104,6 +104,12 @@ Navigate to `http://localhost:15888` to view:
 - `cache.op.ms` - Operation latency
 - `redis.cmd.calls` - Redis commands executed
 - `redis.pool.wait.ms` - Connection pool wait time
+- `redis.mux.lane.inflight` - Current in-flight operations by lane (`connection.id` tag)
+- `redis.mux.lane.inflight.utilization` - In-flight utilization ratio by lane
+- `redis.mux.lane.bytes.sent` - Cumulative bytes sent by lane
+- `redis.mux.lane.bytes.received` - Cumulative bytes received by lane
+- `redis.mux.lane.operations` - Cumulative operations started by lane
+- `redis.mux.lane.failures` - Cumulative transport/connect failures by lane
 
 ### Traces
 
@@ -261,7 +267,24 @@ They also include autoscaler diagnostics when `IRedisMultiplexerDiagnostics` is 
 - `autoscaler.lastScaleDirection`
 - `autoscaler.lastScaleReason`
 
+They also include lane diagnostics for graphing:
+- `lanes[].laneIndex`
+- `lanes[].connectionId`
+- `lanes[].role` (`read`, `write`, or `read-write`)
+- `lanes[].writeQueueDepth`
+- `lanes[].inFlight`
+- `lanes[].maxInFlight`
+- `lanes[].inFlightUtilization`
+- `lanes[].bytesSent`
+- `lanes[].bytesReceived`
+- `lanes[].operations`
+- `lanes[].failures`
+- `lanes[].healthy`
+
 `/stream` emits `event: vapecache-stats` frames with a JSON payload compatible with Blazor realtime chart components.
+
+Lane query/panel pack for Aspire Metrics explorer:
+- [`docs/ASPIRE_LANE_QUERY_PACK.md`](../docs/ASPIRE_LANE_QUERY_PACK.md)
 
 Example payload:
 ```json
@@ -303,7 +326,23 @@ Example payload:
     "lastScaleEventUtc": "2026-02-24T21:02:08.0000000+00:00",
     "lastScaleDirection": "up",
     "lastScaleReason": "inflight+queue"
-  }
+  },
+  "lanes": [
+    {
+      "laneIndex": 0,
+      "connectionId": 12,
+      "role": "read-write",
+      "writeQueueDepth": 1,
+      "inFlight": 22,
+      "maxInFlight": 128,
+      "inFlightUtilization": 0.171875,
+      "bytesSent": 8021569,
+      "bytesReceived": 14482991,
+      "operations": 54120,
+      "failures": 0,
+      "healthy": true
+    }
+  ]
 }
 ```
 

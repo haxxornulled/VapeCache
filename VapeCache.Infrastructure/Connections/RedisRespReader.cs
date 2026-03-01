@@ -145,9 +145,8 @@ internal static class RedisRespReader
         if (maxBulkStringBytes >= 0 && len > maxBulkStringBytes)
             throw new InvalidOperationException($"Bulk string size {len} bytes exceeds maximum allowed size of {maxBulkStringBytes} bytes. Possible DoS attack or misconfigured server.");
 
-        // Use GC.AllocateArray instead of AllocateUninitializedArray to ensure zero-initialization
-        // This prevents potential garbage data in the array that can cause JSON deserialization errors
-        var buf = new byte[len];
+        // The payload is fully overwritten by the read loop, so zero-init is unnecessary work here.
+        var buf = GC.AllocateUninitializedArray<byte>(len);
         var read = 0;
         while (read < len)
         {

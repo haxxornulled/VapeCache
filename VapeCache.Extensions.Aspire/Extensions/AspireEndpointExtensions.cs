@@ -50,7 +50,9 @@ public static class AspireEndpointExtensions
         {
             var snapshot = stats.Snapshot;
             var hitRate = ComputeHitRate(snapshot);
-            var autoscaler = diagnostics.FirstOrDefault()?.GetAutoscalerSnapshot();
+            var diagnostic = diagnostics.FirstOrDefault();
+            var autoscaler = diagnostic?.GetAutoscalerSnapshot();
+            var lanes = diagnostic?.GetMuxLaneSnapshots();
             var spill = spillDiagnostics?.GetSnapshot();
 
             var response = new VapeCacheEndpointStatusResponse(
@@ -69,7 +71,8 @@ public static class AspireEndpointExtensions
                     StampedeFailureBackoffRejected: snapshot.StampedeFailureBackoffRejected,
                     HitRate: hitRate,
                     Spill: spill,
-                    Autoscaler: autoscaler),
+                    Autoscaler: autoscaler,
+                    Lanes: lanes),
                 CircuitBreaker: new VapeCacheEndpointBreakerResponse(
                     Enabled: breaker.Enabled,
                     IsOpen: breaker.IsOpen,
@@ -79,7 +82,8 @@ public static class AspireEndpointExtensions
                     IsForcedOpen: failover.IsForcedOpen,
                     Reason: failover.Reason),
                 Spill: spill,
-                Autoscaler: autoscaler);
+                Autoscaler: autoscaler,
+                Lanes: lanes);
 
             return Results.Ok(response);
         })
@@ -89,7 +93,9 @@ public static class AspireEndpointExtensions
         {
             var snapshot = stats.Snapshot;
             var hitRate = ComputeHitRate(snapshot);
-            var autoscaler = diagnostics.FirstOrDefault()?.GetAutoscalerSnapshot();
+            var diagnostic = diagnostics.FirstOrDefault();
+            var autoscaler = diagnostic?.GetAutoscalerSnapshot();
+            var lanes = diagnostic?.GetMuxLaneSnapshots();
             var spill = spillDiagnostics?.GetSnapshot();
             var response = new VapeCacheEndpointStatsResponse(
                 GetCalls: snapshot.GetCalls,
@@ -104,7 +110,8 @@ public static class AspireEndpointExtensions
                 StampedeFailureBackoffRejected: snapshot.StampedeFailureBackoffRejected,
                 HitRate: hitRate,
                 Spill: spill,
-                Autoscaler: autoscaler);
+                Autoscaler: autoscaler,
+                Lanes: lanes);
             return Results.Ok(response);
         })
         .WithName("VapeCacheStats");
@@ -209,7 +216,8 @@ public sealed record VapeCacheEndpointStatusResponse(
     VapeCacheEndpointStatsResponse Stats,
     VapeCacheEndpointBreakerResponse CircuitBreaker,
     SpillStoreDiagnosticsSnapshot? Spill,
-    RedisAutoscalerSnapshot? Autoscaler);
+    RedisAutoscalerSnapshot? Autoscaler,
+    IReadOnlyList<RedisMuxLaneSnapshot>? Lanes = null);
 
 /// <summary>
 /// Cache stats payload exposed by endpoint wrappers.
@@ -227,7 +235,8 @@ public sealed record VapeCacheEndpointStatsResponse(
     long StampedeFailureBackoffRejected,
     double HitRate,
     SpillStoreDiagnosticsSnapshot? Spill,
-    RedisAutoscalerSnapshot? Autoscaler);
+    RedisAutoscalerSnapshot? Autoscaler,
+    IReadOnlyList<RedisMuxLaneSnapshot>? Lanes = null);
 
 /// <summary>
 /// Circuit breaker status payload exposed by endpoint wrappers.

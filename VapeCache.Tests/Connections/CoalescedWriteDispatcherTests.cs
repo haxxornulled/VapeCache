@@ -44,6 +44,7 @@ public sealed class CoalescedWriteDispatcherTests
                 Interlocked.Increment(ref enqueuedPendingOps);
                 return ValueTask.CompletedTask;
             },
+            nextPendingSequence: static () => 1,
             returnHeaderBuffer: _ => Interlocked.Increment(ref returnedHeaders),
             returnPayloadArray: _ => Interlocked.Increment(ref returnedPayloadArrays),
             abortPendingRequest: (_, _) => Interlocked.Increment(ref aborted));
@@ -88,6 +89,63 @@ public sealed class CoalescedWriteDispatcherTests
         Assert.Equal(expectedHeaderReturns, returnedHeaders);
         Assert.Equal(expectedPayloadArrayReturns, returnedPayloadArrays);
         Assert.Equal(0, aborted);
+    }
+
+    [Fact]
+    public async Task SendAsync_when_pending_enqueue_fails_after_commit_keeps_already_sent_bytes_on_wire()
+    {
+        var returnedHeaders = 0;
+        var returnedPayloadArrays = 0;
+        var aborted = 0;
+
+        using var dispatcher = new CoalescedWriteDispatcher(
+            coalescedWriteMaxBytes: 64 * 1024,
+            coalescedWriteMaxSegments: 64,
+            coalescedWriteSmallCopyThresholdBytes: 1024,
+            enableAdaptiveCoalescing: true,
+            adaptiveCoalescingLowDepth: 4,
+            adaptiveCoalescingHighDepth: 32,
+            adaptiveCoalescingMinWriteBytes: 8 * 1024,
+            adaptiveCoalescingMinSegments: 8,
+            adaptiveCoalescingMinSmallCopyThresholdBytes: 256,
+            crlfMemory: "\r\n"u8.ToArray(),
+            tryDequeueWrite: (out PendingRequest req) =>
+            {
+                req = default;
+                return false;
+            },
+            getWriteQueueDepth: () => 0,
+            enqueuePendingOperation: static (_, _) => ValueTask.FromException(new InvalidOperationException("boom")),
+            nextPendingSequence: static () => 1,
+            returnHeaderBuffer: _ => Interlocked.Increment(ref returnedHeaders),
+            returnPayloadArray: _ => Interlocked.Increment(ref returnedPayloadArrays),
+            abortPendingRequest: (_, _) => Interlocked.Increment(ref aborted));
+
+        using var listener = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        listener.Listen(1);
+
+        using var client = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        client.NoDelay = true;
+        var acceptTask = listener.AcceptAsync();
+        await client.ConnectAsync((IPEndPoint)listener.LocalEndPoint!);
+        using var server = await acceptTask;
+        server.NoDelay = true;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var request = CreateSAddRequest(42);
+        var expected = FlattenRequests([request]);
+
+        var sendTask = dispatcher.SendAsync(request, client, cts.Token);
+        var received = await ReceiveExactAsync(server, expected.Length, cts.Token);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () => await sendTask);
+
+        Assert.Equal("boom", ex.Message);
+        Assert.Equal(expected, received);
+        Assert.Equal(1, returnedHeaders);
+        Assert.Equal(0, returnedPayloadArrays);
+        Assert.Equal(1, aborted);
     }
 
     private static List<PendingRequest> BuildRound(int round, int count)
@@ -170,9 +228,9 @@ public sealed class CoalescedWriteDispatcherTests
 
     private static PendingOperation CreatePendingOperation()
     {
-        var op = new PendingOperation(CancellationToken.None, new SemaphoreSlim(1, 1), static _ => { });
+        var op = new PendingOperation(CancellationToken.None, new SemaphoreSlim(1, 1), static _ => { }, null, null);
         op.Reset();
-        op.Start(poolBulk: false, ct: CancellationToken.None, holdsSlot: false);
+        op.Start(poolBulk: false, ct: CancellationToken.None, holdsSlot: false, sequenceId: 1);
         return op;
     }
 

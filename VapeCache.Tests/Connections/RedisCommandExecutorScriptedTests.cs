@@ -11,6 +11,95 @@ namespace VapeCache.Tests.Connections;
 public sealed class RedisCommandExecutorScriptedTests
 {
     [Fact]
+    public async Task HGetAsync_unexpected_shape_resets_transport_and_recovers()
+    {
+        var stream = new ScriptedResponseStream();
+        await using var factory = new ReconnectingConnectionFactory(stream);
+        await using var sut = CreateExecutor(factory);
+
+        stream.Enqueue(":1\r\n");
+        stream.Enqueue("+PONG\r\n");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await sut.HGetAsync("h1", "f1", default));
+
+        Assert.Contains("Unexpected HGET response", ex.Message);
+        Assert.Equal("PONG", await sut.PingAsync(default));
+
+        var lane = Assert.Single(((IRedisMultiplexerDiagnostics)sut).GetMuxLaneSnapshots());
+        Assert.True(lane.TransportResets >= 1);
+        Assert.True(factory.CreateCount >= 2);
+    }
+
+    [Fact]
+    public async Task TryHGetAsync_unexpected_shape_resets_transport_and_recovers()
+    {
+        var stream = new ScriptedResponseStream();
+        await using var factory = new ReconnectingConnectionFactory(stream);
+        await using var sut = CreateExecutor(factory);
+
+        stream.Enqueue(":1\r\n");
+        stream.Enqueue("$2\r\nok\r\n");
+
+        Assert.True(sut.TryHGetAsync("h1", "f1", default, out var task));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () => await task);
+
+        Assert.Contains("Unexpected HGET response", ex.Message);
+        Assert.Equal("ok", System.Text.Encoding.UTF8.GetString((await sut.GetAsync("k1", default))!));
+
+        var lane = Assert.Single(((IRedisMultiplexerDiagnostics)sut).GetMuxLaneSnapshots());
+        Assert.True(lane.TransportResets >= 1);
+        Assert.True(factory.CreateCount >= 2);
+    }
+
+    [Fact]
+    public async Task ModuleListAsync_unexpected_shape_resets_transport_and_recovers()
+    {
+        var stream = new ScriptedResponseStream();
+        await using var factory = new ReconnectingConnectionFactory(stream);
+        await using var sut = CreateExecutor(factory);
+
+        stream.Enqueue(":1\r\n");
+        stream.Enqueue("+PONG\r\n");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await sut.ModuleListAsync(default));
+
+        Assert.Contains("Unexpected MODULE LIST response", ex.Message);
+        Assert.Equal("PONG", await sut.PingAsync(default));
+
+        var lane = Assert.Single(((IRedisMultiplexerDiagnostics)sut).GetMuxLaneSnapshots());
+        Assert.True(lane.TransportResets >= 1);
+        Assert.True(factory.CreateCount >= 2);
+    }
+
+    [Fact]
+    public async Task TryGetAsync_with_autoscaling_enabled_records_transport_latency_sample()
+    {
+        var stream = new ScriptedResponseStream();
+        await using var factory = new ReconnectingConnectionFactory(stream);
+        await using var sut = CreateExecutor(
+            factory,
+            new RedisMultiplexerOptions
+            {
+                Connections = 1,
+                MaxInFlightPerConnection = 8,
+                EnableCoalescedSocketWrites = false,
+                EnableCommandInstrumentation = false,
+                EnableAutoscaling = true,
+                AutoscaleSampleInterval = TimeSpan.FromDays(1),
+                ResponseTimeout = TimeSpan.FromSeconds(2)
+            });
+
+        stream.Enqueue("$2\r\nok\r\n");
+
+        Assert.True(sut.TryGetAsync("k1", default, out var task));
+        Assert.Equal("ok", System.Text.Encoding.UTF8.GetString((await task)!));
+        InvokeEvaluateAutoscale(sut);
+        Assert.True(sut.GetAutoscalerSnapshot().RollingP95LatencyMs > 0);
+    }
+
+    [Fact]
     public async Task Executes_and_parses_core_command_surfaces()
     {
         var stream = new ScriptedResponseStream();
@@ -259,10 +348,49 @@ public sealed class RedisCommandExecutorScriptedTests
         Assert.Empty(await sut.ModuleListAsync(default));
     }
 
+    private static RedisCommandExecutor CreateExecutor(
+        IRedisConnectionFactory factory,
+        RedisMultiplexerOptions? options = null)
+        => new(
+            factory,
+            new TestOptionsMonitor<RedisMultiplexerOptions>(options ?? new RedisMultiplexerOptions
+            {
+                Connections = 1,
+                MaxInFlightPerConnection = 8,
+                EnableCoalescedSocketWrites = false,
+                EnableCommandInstrumentation = false,
+                ResponseTimeout = TimeSpan.FromSeconds(2)
+            }),
+            new TestOptionsMonitor<RedisConnectionOptions>(new RedisConnectionOptions()));
+
+    private static void InvokeEvaluateAutoscale(RedisCommandExecutor executor)
+    {
+        var method = typeof(RedisCommandExecutor).GetMethod(
+            "EvaluateAutoscale",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method!.Invoke(executor, null);
+    }
+
     private sealed class SingleConnectionFactory(ScriptedConnection connection) : IRedisConnectionFactory
     {
         public ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
             => ValueTask.FromResult(new Result<IRedisConnection>(connection));
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class ReconnectingConnectionFactory(ScriptedResponseStream stream) : IRedisConnectionFactory
+    {
+        private int _createCount;
+
+        public int CreateCount => Volatile.Read(ref _createCount);
+
+        public ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
+        {
+            Interlocked.Increment(ref _createCount);
+            return ValueTask.FromResult(new Result<IRedisConnection>(new ScriptedConnection(stream)));
+        }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Threading.Tasks.Sources;
 
@@ -8,11 +9,19 @@ internal sealed class PendingOperationPool
     private readonly ConcurrentBag<PendingOperation> _pool = new();
     private readonly CancellationToken _shutdownToken;
     private readonly SemaphoreSlim _inFlight;
+    private readonly Action<long>? _recordLatencyStopwatchTicks;
+    private readonly Func<bool>? _shouldRecordLatency;
 
-    public PendingOperationPool(CancellationToken shutdownToken, SemaphoreSlim inFlight)
+    public PendingOperationPool(
+        CancellationToken shutdownToken,
+        SemaphoreSlim inFlight,
+        Action<long>? recordLatencyStopwatchTicks = null,
+        Func<bool>? shouldRecordLatency = null)
     {
         _shutdownToken = shutdownToken;
         _inFlight = inFlight;
+        _recordLatencyStopwatchTicks = recordLatencyStopwatchTicks;
+        _shouldRecordLatency = shouldRecordLatency;
     }
 
     /// <summary>
@@ -26,7 +35,12 @@ internal sealed class PendingOperationPool
             return op;
         }
 
-        return new PendingOperation(_shutdownToken, _inFlight, Return);
+        return new PendingOperation(
+            _shutdownToken,
+            _inFlight,
+            Return,
+            _recordLatencyStopwatchTicks,
+            _shouldRecordLatency);
     }
 
     private void Return(PendingOperation operation) => _pool.Add(operation);
@@ -47,15 +61,26 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     private CancellationTokenRegistration _shutdownCtr;
     private CancellationToken _ct;
     private bool _holdsSlot;
+    private readonly Action<long>? _recordLatencyStopwatchTicks;
+    private readonly Func<bool>? _shouldRecordLatency;
     private int _completed;
     private int _responseProcessed;
     private int _awaiterObserved;
+    private long _sequenceId;
+    private long _startedStopwatchTicks;
 
-    public PendingOperation(CancellationToken shutdownToken, SemaphoreSlim inFlight, Action<PendingOperation> returnToPool)
+    public PendingOperation(
+        CancellationToken shutdownToken,
+        SemaphoreSlim inFlight,
+        Action<PendingOperation> returnToPool,
+        Action<long>? recordLatencyStopwatchTicks,
+        Func<bool>? shouldRecordLatency)
     {
         _shutdownToken = shutdownToken;
         _inFlight = inFlight;
         _returnToPool = returnToPool;
+        _recordLatencyStopwatchTicks = recordLatencyStopwatchTicks;
+        _shouldRecordLatency = shouldRecordLatency;
         _core = new ManualResetValueTaskSourceCore<RedisRespReader.RespValue>
         {
             RunContinuationsAsynchronously = true
@@ -65,6 +90,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     public bool PoolBulk { get; private set; }
     public bool IsCompleted => Volatile.Read(ref _completed) != 0;
     public ValueTask<RedisRespReader.RespValue> ValueTask { get; private set; }
+    public long SequenceId => Volatile.Read(ref _sequenceId);
 
     /// <summary>
     /// Executes value.
@@ -80,16 +106,24 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         Volatile.Write(ref _completed, 0);
         Volatile.Write(ref _responseProcessed, 0);
         Volatile.Write(ref _awaiterObserved, 0);
+        Volatile.Write(ref _sequenceId, 0);
+        Volatile.Write(ref _startedStopwatchTicks, 0);
     }
 
     /// <summary>
     /// Executes value.
     /// </summary>
-    public void Start(bool poolBulk, CancellationToken ct, bool holdsSlot)
+    public void Start(bool poolBulk, CancellationToken ct, bool holdsSlot, long sequenceId)
     {
         PoolBulk = poolBulk;
         _ct = ct;
         _holdsSlot = holdsSlot;
+        Volatile.Write(ref _sequenceId, sequenceId);
+        Volatile.Write(
+            ref _startedStopwatchTicks,
+            _recordLatencyStopwatchTicks is not null && (_shouldRecordLatency?.Invoke() ?? true)
+                ? Stopwatch.GetTimestamp()
+                : 0);
         ValueTask = new ValueTask<RedisRespReader.RespValue>(this, _core.Version);
 
         if (ct.CanBeCanceled)
@@ -113,6 +147,9 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         }
     }
 
+    public void AssignSequenceId(long sequenceId)
+        => Volatile.Write(ref _sequenceId, sequenceId);
+
     /// <summary>
     /// Attempts to value.
     /// </summary>
@@ -123,6 +160,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
 
         _ctr.Dispose();
         _shutdownCtr.Dispose();
+        TryRecordLatency();
         _core.SetResult(value);
     }
 
@@ -136,7 +174,19 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
 
         _ctr.Dispose();
         _shutdownCtr.Dispose();
+        TryRecordLatency();
         _core.SetException(ex);
+    }
+
+    private void TryRecordLatency()
+    {
+        var startedTicks = Volatile.Read(ref _startedStopwatchTicks);
+        if (startedTicks <= 0 || _recordLatencyStopwatchTicks is null)
+            return;
+
+        var elapsedTicks = Stopwatch.GetTimestamp() - startedTicks;
+        if (elapsedTicks > 0)
+            _recordLatencyStopwatchTicks(elapsedTicks);
     }
 
     /// <summary>

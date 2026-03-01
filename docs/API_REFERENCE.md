@@ -399,10 +399,13 @@ Namespace: `VapeCache.Abstractions.Connections`
 public interface IRedisMultiplexerDiagnostics
 {
     RedisAutoscalerSnapshot GetAutoscalerSnapshot();
+    IReadOnlyList<RedisMuxLaneSnapshot> GetMuxLaneSnapshots();
 }
 ```
 
 `RedisAutoscalerSnapshot` includes current/target connection counts, queue and inflight pressure, rolling p95/p99, freeze state, and last scale decision metadata.
+
+`RedisMuxLaneSnapshot` exposes per-lane transport counters and queue pressure for Aspire/dashboard graphing (`laneIndex`, `connectionId`, `role`, `writeQueueDepth`, `inFlight`, `inFlightUtilization`, `bytesSent`, `bytesReceived`, `operations`, `failures`, `responses`, `orphanedResponses`, `responseSequenceMismatches`, `transportResets`, `healthy`).
 
 ## Spill Diagnostics API
 

@@ -91,6 +91,17 @@ Tests connection establishment, pooling, and TLS.
 ### RedisConnectionPoolIntegrationTests
 Tests connection pool behavior, leasing, and cleanup.
 
+### RedisReconnectDrillIntegrationTests
+Controlled live reconnect/outage drill:
+
+- Runs high-concurrency SET/GET load through `RedisCommandExecutor`
+- Captures active mux lane client socket endpoints
+- Issues targeted `CLIENT KILL <addr:port>` only for those endpoints
+- Verifies traffic continues and post-drill operations recover
+
+This drill is opt-in and runs only when:
+- `VAPECACHE_RECONNECT_DRILL_ENABLED=true`
+
 ## Running Tests in CI/CD
 
 ### GitHub Actions Example
@@ -164,6 +175,22 @@ export VAPECACHE_REDIS_USE_TLS=true
 
 dotnet test --filter "FullyQualifiedName~Integration"
 ```
+
+## Reconnect Drill (Live Endpoint)
+
+Use the helper script to run a controlled client-kill reconnect drill against your configured benchmark endpoint:
+
+```powershell
+.\tools\run-redis-reconnect-drill.ps1 `
+  -Connections 4 `
+  -Workers 64 `
+  -DurationSeconds 20 `
+  -KillRounds 8 `
+  -KillIntervalMs 750
+```
+
+Key safety property:
+- The drill kills only lane client sockets opened by the test executor (not broad `CLIENT KILL TYPE normal` operations).
 
 ## Troubleshooting
 

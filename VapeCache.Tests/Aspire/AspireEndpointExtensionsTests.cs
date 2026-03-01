@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
@@ -37,6 +38,10 @@ public sealed class AspireEndpointExtensionsTests
         Assert.NotNull(status.Spill);
         Assert.NotNull(stats.Spill);
         Assert.Equal("noop", status.Spill!.Mode);
+        Assert.NotNull(status.Lanes);
+        Assert.NotNull(stats.Lanes);
+        Assert.NotEmpty(status.Lanes!);
+        Assert.NotEmpty(stats.Lanes!);
     }
 
     [Fact]
@@ -133,6 +138,30 @@ public sealed class AspireEndpointExtensionsTests
         Assert.Equal(HttpStatusCode.OK, stats.StatusCode);
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
         Assert.Equal("text/event-stream", stream.Content.Headers.ContentType?.MediaType);
+
+        await using var streamBody = await stream.Content.ReadAsStreamAsync();
+        using var reader = new StreamReader(streamBody);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        string? dataLine = null;
+        while (!cts.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(cts.Token);
+            if (line is null)
+                break;
+
+            if (!line.StartsWith("data:", StringComparison.Ordinal))
+                continue;
+
+            dataLine = line["data:".Length..].Trim();
+            if (dataLine.Length > 0)
+                break;
+        }
+
+        Assert.NotNull(dataLine);
+        using var doc = JsonDocument.Parse(dataLine!);
+        Assert.True(doc.RootElement.TryGetProperty("Lanes", out var lanesProperty));
+        Assert.Equal(JsonValueKind.Array, lanesProperty.ValueKind);
     }
 
     [Fact]
@@ -182,6 +211,7 @@ public sealed class AspireEndpointExtensionsTests
                 options.Enabled = enabled;
                 options.Prefix = "/vapecache";
                 options.IncludeBreakerControlEndpoints = false;
+                options.LiveSampleInterval = TimeSpan.FromMilliseconds(50);
             });
 
         var app = builder.Build();

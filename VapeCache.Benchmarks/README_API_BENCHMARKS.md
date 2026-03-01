@@ -8,6 +8,7 @@ Benchmark suite for the VapeCache public API using BenchmarkDotNet.
 - `TypedCollectionsBenchmarks`
 - `CircuitBreakerPerformanceBenchmarks`
 - `RedisClientHeadToHeadBenchmarks`
+- `RedisThroughputHeadToHeadBenchmarks`
 - `RedisEndToEndHeadToHeadBenchmarks`
 - `RedisModuleHeadToHeadBenchmarks`
 
@@ -26,6 +27,23 @@ powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode realworld
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Medium -Mode fair -Profile aggressive
 ```
+
+### Throughput suite (concurrency/pipeline matrix)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite throughput -Quick -Mode fair
+```
+
+Optional env overrides for throughput matrix:
+
+- `VAPECACHE_BENCH_THROUGHPUT_OPERATIONS`
+- `VAPECACHE_BENCH_THROUGHPUT_PAYLOADS`
+- `VAPECACHE_BENCH_THROUGHPUT_CONCURRENCY`
+- `VAPECACHE_BENCH_THROUGHPUT_PIPELINE_DEPTH`
+- `VAPECACHE_BENCH_THROUGHPUT_TOTAL_OPS`
+- `VAPECACHE_BENCH_THROUGHPUT_CONNECTIONS`
+- `VAPECACHE_BENCH_THROUGHPUT_DEDICATED_WORKERS`
+- `VAPECACHE_BENCH_THROUGHPUT_MAX_INFLIGHT`
 
 ### Payload scaling pass
 

@@ -67,6 +67,7 @@ public static class CacheRegistration
 
         // Hybrid command executor - automatically switches between Redis and in-memory based on circuit breaker state
         services.AddSingleton<IRedisCommandExecutor, HybridCommandExecutor>();
+        services.AddSingleton<IRedisMultiplexerDiagnostics>(sp => sp.GetRequiredService<RedisCommandExecutor>());
 
         services.TryAddSingleton<CacheStampedeOptions>();
 

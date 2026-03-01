@@ -79,6 +79,7 @@ public sealed class RedisTransportRuntimeGuardrailsTests
         var options = new RedisMultiplexerOptions
         {
             TransportProfile = RedisTransportProfile.Custom,
+            UseDedicatedLaneWorkers = true,
             EnableAutoscaling = true,
             Connections = 0,
             MaxInFlightPerConnection = 0,
@@ -115,6 +116,7 @@ public sealed class RedisTransportRuntimeGuardrailsTests
         var effective = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(options);
 
         Assert.Equal(4, effective.Connections);
+        Assert.True(effective.UseDedicatedLaneWorkers);
         Assert.Equal(64, effective.MaxInFlightPerConnection);
         Assert.Equal(16 * 1024, effective.CoalescedWriteMaxBytes);
         Assert.Equal(16, effective.CoalescedWriteMaxSegments);

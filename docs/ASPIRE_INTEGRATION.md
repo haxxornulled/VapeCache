@@ -23,10 +23,11 @@ When you enable endpoint mapping (`WithAutoMappedEndpoints(...)` or `MapVapeCach
 - optional admin: `POST /vapecache/breaker/force-open`
 - optional admin: `POST /vapecache/breaker/clear`
 
-Autoscaler diagnostics are included in `status`, `stats`, and stream samples when diagnostics are registered.
+Autoscaler diagnostics and per-lane mux diagnostics are included in `status`, `stats`, and stream samples when diagnostics are registered.
 See:
 - [VapeCache.Extensions.Aspire/README.md](../VapeCache.Extensions.Aspire/README.md)
 - [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md)
+- [ASPIRE_LANE_QUERY_PACK.md](ASPIRE_LANE_QUERY_PACK.md)
 
 ## What is .NET Aspire?
 

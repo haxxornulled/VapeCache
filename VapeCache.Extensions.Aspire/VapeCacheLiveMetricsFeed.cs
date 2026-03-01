@@ -26,7 +26,8 @@ public sealed record VapeCacheLiveSample(
     long StampedeFailureBackoffRejected,
     double HitRate,
     SpillStoreDiagnosticsSnapshot? Spill,
-    RedisAutoscalerSnapshot? Autoscaler);
+    RedisAutoscalerSnapshot? Autoscaler,
+    IReadOnlyList<RedisMuxLaneSnapshot>? Lanes = null);
 
 internal sealed class VapeCacheLiveMetricsFeed(
     ICacheStats stats,
@@ -93,7 +94,8 @@ internal sealed class VapeCacheLiveMetricsFeed(
                 StampedeFailureBackoffRejected: snapshot.StampedeFailureBackoffRejected,
                 HitRate: reads == 0 ? 0d : (double)snapshot.Hits / reads,
                 Spill: spillDiagnostics?.GetSnapshot(),
-                Autoscaler: diagnostics?.GetAutoscalerSnapshot());
+                Autoscaler: diagnostics?.GetAutoscalerSnapshot(),
+                Lanes: diagnostics?.GetMuxLaneSnapshots());
 
             foreach (var kvp in _subscribers)
             {

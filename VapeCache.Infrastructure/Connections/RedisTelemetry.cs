@@ -37,12 +37,73 @@ public static class RedisTelemetry
         description: "Time spent waiting for a write queue slot");
 
     private static readonly ConcurrentDictionary<int, Func<QueueDepthSnapshot>> QueueDepthProviders = new();
+    private static readonly ConcurrentDictionary<int, Func<MuxLaneUsageSnapshot>> MuxLaneUsageProviders = new();
 
     public static readonly ObservableGauge<int> QueueDepth = Meter.CreateObservableGauge(
         "redis.queue.depth",
         ObserveQueueDepth,
         unit: "items",
         description: "Depth of Redis command queues");
+
+    public static readonly ObservableCounter<long> MuxLaneBytesSent = Meter.CreateObservableCounter(
+        "redis.mux.lane.bytes.sent",
+        ObserveMuxLaneBytesSent,
+        unit: "bytes",
+        description: "Cumulative bytes sent through each mux lane");
+
+    public static readonly ObservableCounter<long> MuxLaneBytesReceived = Meter.CreateObservableCounter(
+        "redis.mux.lane.bytes.received",
+        ObserveMuxLaneBytesReceived,
+        unit: "bytes",
+        description: "Cumulative bytes received through each mux lane");
+
+    public static readonly ObservableCounter<long> MuxLaneOperations = Meter.CreateObservableCounter(
+        "redis.mux.lane.operations",
+        ObserveMuxLaneOperations,
+        unit: "operations",
+        description: "Cumulative operations started on each mux lane");
+
+    public static readonly ObservableCounter<long> MuxLaneResponses = Meter.CreateObservableCounter(
+        "redis.mux.lane.responses",
+        ObserveMuxLaneResponses,
+        unit: "responses",
+        description: "Cumulative responses observed on each mux lane");
+
+    public static readonly ObservableCounter<long> MuxLaneFailures = Meter.CreateObservableCounter(
+        "redis.mux.lane.failures",
+        ObserveMuxLaneFailures,
+        unit: "failures",
+        description: "Cumulative transport/connect failures observed by each mux lane");
+
+    public static readonly ObservableCounter<long> MuxLaneOrphanedResponses = Meter.CreateObservableCounter(
+        "redis.mux.lane.responses.orphaned",
+        ObserveMuxLaneOrphanedResponses,
+        unit: "responses",
+        description: "Cumulative responses observed after the waiting operation already completed");
+
+    public static readonly ObservableCounter<long> MuxLaneResponseSequenceMismatches = Meter.CreateObservableCounter(
+        "redis.mux.lane.response.sequence.mismatches",
+        ObserveMuxLaneResponseSequenceMismatches,
+        unit: "mismatches",
+        description: "Cumulative request/response sequence mismatches detected on each mux lane");
+
+    public static readonly ObservableCounter<long> MuxLaneTransportResets = Meter.CreateObservableCounter(
+        "redis.mux.lane.transport.resets",
+        ObserveMuxLaneTransportResets,
+        unit: "resets",
+        description: "Cumulative transport resets observed on each mux lane");
+
+    public static readonly ObservableGauge<int> MuxLaneInFlight = Meter.CreateObservableGauge(
+        "redis.mux.lane.inflight",
+        ObserveMuxLaneInFlight,
+        unit: "operations",
+        description: "Current in-flight operations on each mux lane");
+
+    public static readonly ObservableGauge<double> MuxLaneInFlightUtilization = Meter.CreateObservableGauge(
+        "redis.mux.lane.inflight.utilization",
+        ObserveMuxLaneInFlightUtilization,
+        unit: "ratio",
+        description: "Current in-flight utilization (0..1) on each mux lane");
 
     internal static void RegisterQueueDepthProvider(int connectionId, Func<QueueDepthSnapshot> provider)
     {
@@ -54,11 +115,29 @@ public static class RedisTelemetry
         QueueDepthProviders.TryRemove(connectionId, out _);
     }
 
+    internal static void RegisterMuxLaneUsageProvider(int connectionId, Func<MuxLaneUsageSnapshot> provider)
+    {
+        MuxLaneUsageProviders[connectionId] = provider;
+    }
+
+    internal static void UnregisterMuxLaneUsageProvider(int connectionId)
+    {
+        MuxLaneUsageProviders.TryRemove(connectionId, out _);
+    }
+
     private static IEnumerable<Measurement<int>> ObserveQueueDepth()
     {
         foreach (var entry in QueueDepthProviders)
         {
-            var snapshot = entry.Value();
+            QueueDepthSnapshot snapshot;
+            try
+            {
+                snapshot = entry.Value();
+            }
+            catch
+            {
+                continue;
+            }
             var connectionId = entry.Key;
             yield return new Measurement<int>(
                 snapshot.Writes,
@@ -69,5 +148,209 @@ public static class RedisTelemetry
         }
     }
 
+    private static IEnumerable<Measurement<long>> ObserveMuxLaneBytesSent()
+    {
+        foreach (var entry in MuxLaneUsageProviders)
+        {
+            MuxLaneUsageSnapshot snapshot;
+            try
+            {
+                snapshot = entry.Value();
+            }
+            catch
+            {
+                continue;
+            }
+            yield return new Measurement<long>(
+                snapshot.BytesSent,
+                new TagList { { "connection.id", entry.Key } });
+        }
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveMuxLaneBytesReceived()
+    {
+        foreach (var entry in MuxLaneUsageProviders)
+        {
+            MuxLaneUsageSnapshot snapshot;
+            try
+            {
+                snapshot = entry.Value();
+            }
+            catch
+            {
+                continue;
+            }
+            yield return new Measurement<long>(
+                snapshot.BytesReceived,
+                new TagList { { "connection.id", entry.Key } });
+        }
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveMuxLaneOperations()
+    {
+        foreach (var entry in MuxLaneUsageProviders)
+        {
+            MuxLaneUsageSnapshot snapshot;
+            try
+            {
+                snapshot = entry.Value();
+            }
+            catch
+            {
+                continue;
+            }
+            yield return new Measurement<long>(
+                snapshot.Operations,
+                new TagList { { "connection.id", entry.Key } });
+        }
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveMuxLaneFailures()
+    {
+        foreach (var entry in MuxLaneUsageProviders)
+        {
+            MuxLaneUsageSnapshot snapshot;
+            try
+            {
+                snapshot = entry.Value();
+            }
+            catch
+            {
+                continue;
+            }
+            yield return new Measurement<long>(
+                snapshot.Failures,
+                new TagList { { "connection.id", entry.Key } });
+        }
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveMuxLaneResponses()
+    {
+        foreach (var entry in MuxLaneUsageProviders)
+        {
+            MuxLaneUsageSnapshot snapshot;
+            try
+            {
+                snapshot = entry.Value();
+            }
+            catch
+            {
+                continue;
+            }
+            yield return new Measurement<long>(
+                snapshot.Responses,
+                new TagList { { "connection.id", entry.Key } });
+        }
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveMuxLaneOrphanedResponses()
+    {
+        foreach (var entry in MuxLaneUsageProviders)
+        {
+            MuxLaneUsageSnapshot snapshot;
+            try
+            {
+                snapshot = entry.Value();
+            }
+            catch
+            {
+                continue;
+            }
+            yield return new Measurement<long>(
+                snapshot.OrphanedResponses,
+                new TagList { { "connection.id", entry.Key } });
+        }
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveMuxLaneResponseSequenceMismatches()
+    {
+        foreach (var entry in MuxLaneUsageProviders)
+        {
+            MuxLaneUsageSnapshot snapshot;
+            try
+            {
+                snapshot = entry.Value();
+            }
+            catch
+            {
+                continue;
+            }
+            yield return new Measurement<long>(
+                snapshot.ResponseSequenceMismatches,
+                new TagList { { "connection.id", entry.Key } });
+        }
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveMuxLaneTransportResets()
+    {
+        foreach (var entry in MuxLaneUsageProviders)
+        {
+            MuxLaneUsageSnapshot snapshot;
+            try
+            {
+                snapshot = entry.Value();
+            }
+            catch
+            {
+                continue;
+            }
+            yield return new Measurement<long>(
+                snapshot.TransportResets,
+                new TagList { { "connection.id", entry.Key } });
+        }
+    }
+
+    private static IEnumerable<Measurement<int>> ObserveMuxLaneInFlight()
+    {
+        foreach (var entry in MuxLaneUsageProviders)
+        {
+            MuxLaneUsageSnapshot snapshot;
+            try
+            {
+                snapshot = entry.Value();
+            }
+            catch
+            {
+                continue;
+            }
+            yield return new Measurement<int>(
+                snapshot.InFlight,
+                new TagList { { "connection.id", entry.Key }, { "max_inflight", snapshot.MaxInFlight } });
+        }
+    }
+
+    private static IEnumerable<Measurement<double>> ObserveMuxLaneInFlightUtilization()
+    {
+        foreach (var entry in MuxLaneUsageProviders)
+        {
+            MuxLaneUsageSnapshot snapshot;
+            try
+            {
+                snapshot = entry.Value();
+            }
+            catch
+            {
+                continue;
+            }
+            var utilization = snapshot.MaxInFlight <= 0
+                ? 0d
+                : (double)snapshot.InFlight / snapshot.MaxInFlight;
+            yield return new Measurement<double>(
+                utilization,
+                new TagList { { "connection.id", entry.Key } });
+        }
+    }
+
     internal readonly record struct QueueDepthSnapshot(int Writes, int Pending, int WritesCapacity, int PendingCapacity);
+    internal readonly record struct MuxLaneUsageSnapshot(
+        long BytesSent,
+        long BytesReceived,
+        long Operations,
+        long Failures,
+        long Responses,
+        long OrphanedResponses,
+        long ResponseSequenceMismatches,
+        long TransportResets,
+        int InFlight,
+        int MaxInFlight);
 }

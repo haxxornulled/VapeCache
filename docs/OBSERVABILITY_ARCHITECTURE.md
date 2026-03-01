@@ -267,6 +267,12 @@ builder.Services.AddVapecacheCaching();
 | `redis.cmd.ms` | Histogram | milliseconds | Command latency |
 | `redis.queue.depth` | ObservableGauge | items | Write/pending queue depth (tagged by `queue`, `connection.id`, `capacity`) |
 | `redis.queue.wait.ms` | Histogram | milliseconds | Time waiting to enqueue when write queue is full |
+| `redis.mux.lane.bytes.sent` | ObservableCounter | bytes | Cumulative bytes sent per mux lane (tagged by `connection.id`) |
+| `redis.mux.lane.bytes.received` | ObservableCounter | bytes | Cumulative bytes received per mux lane (tagged by `connection.id`) |
+| `redis.mux.lane.operations` | ObservableCounter | operations | Cumulative operations started per mux lane (tagged by `connection.id`) |
+| `redis.mux.lane.failures` | ObservableCounter | failures | Cumulative transport/connect failures per mux lane (tagged by `connection.id`) |
+| `redis.mux.lane.inflight` | ObservableGauge | operations | Current in-flight operations per mux lane (tagged by `connection.id`, `max_inflight`) |
+| `redis.mux.lane.inflight.utilization` | ObservableGauge | ratio | Current in-flight utilization (0..1) per mux lane (tagged by `connection.id`) |
 | `redis.bytes.sent` | Counter | bytes | Bytes sent to Redis |
 | `redis.bytes.received` | Counter | bytes | Bytes received from Redis |
 | `redis.coalesced.batches` | Counter | count | Number of coalesced socket write batches |

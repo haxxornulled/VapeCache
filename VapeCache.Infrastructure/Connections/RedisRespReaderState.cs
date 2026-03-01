@@ -16,8 +16,15 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
     private readonly int _maxBulkStringBytes;
     private readonly int _maxArrayDepth;
     private int _currentArrayDepth;
+    private readonly Action<int>? _onBytesRead;
 
-    public RedisRespReaderState(Stream stream, int bufferSize = 8192, bool useUnsafeFastPath = false, int maxBulkStringBytes = 16 * 1024 * 1024, int maxArrayDepth = 64)
+    public RedisRespReaderState(
+        Stream stream,
+        int bufferSize = 8192,
+        bool useUnsafeFastPath = false,
+        int maxBulkStringBytes = 16 * 1024 * 1024,
+        int maxArrayDepth = 64,
+        Action<int>? onBytesRead = null)
     {
         _stream = stream;
         _buffer = ArrayPool<byte>.Shared.Rent(Math.Max(256, bufferSize));
@@ -25,6 +32,7 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
         _maxBulkStringBytes = maxBulkStringBytes;
         _maxArrayDepth = maxArrayDepth;
         _currentArrayDepth = 0;
+        _onBytesRead = onBytesRead;
     }
 
     /// <summary>
@@ -74,6 +82,8 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
         _len = 0;
         var read = await _stream.ReadAsync(_buffer.AsMemory(), ct).ConfigureAwait(false);
         if (read == 0) throw new EndOfStreamException();
+        RedisTelemetry.BytesReceived.Add(read);
+        _onBytesRead?.Invoke(read);
         _len = read;
     }
 
@@ -170,10 +180,10 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
         if (_maxBulkStringBytes >= 0 && len > _maxBulkStringBytes)
             throw new InvalidOperationException($"Bulk string size {len} bytes exceeds maximum allowed size of {_maxBulkStringBytes} bytes. Possible DoS attack or misconfigured server.");
 
-        // Use zero-initialized arrays to prevent garbage data that can cause JSON deserialization errors
+        // The payload is always fully overwritten by ReadExactAsync, so zero-init is unnecessary work here.
         var buf = poolBulk
             ? ArrayPool<byte>.Shared.Rent(len)
-            : new byte[len];
+            : GC.AllocateUninitializedArray<byte>(len);
         await ReadExactAsync(buf.AsMemory(0, len), ct).ConfigureAwait(false);
 
         // consume CRLF

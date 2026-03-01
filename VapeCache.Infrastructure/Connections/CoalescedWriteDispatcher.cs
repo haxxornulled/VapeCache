@@ -8,6 +8,7 @@ namespace VapeCache.Infrastructure.Connections;
 internal delegate bool TryDequeuePendingRequestDelegate(out PendingRequest request);
 internal delegate int GetWriteQueueDepthDelegate();
 internal delegate ValueTask EnqueuePendingOperationDelegate(PendingOperation operation, CancellationToken ct);
+internal delegate long NextPendingSequenceDelegate();
 internal delegate void ReturnHeaderBufferDelegate(byte[] buffer);
 internal delegate void ReturnPayloadArrayDelegate(ReadOnlyMemory<byte>[]? payloads);
 internal delegate void AbortPendingRequestDelegate(PendingRequest request, Exception ex);
@@ -27,9 +28,11 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     private readonly TryDequeuePendingRequestDelegate _tryDequeueWrite;
     private readonly GetWriteQueueDepthDelegate _getWriteQueueDepth;
     private readonly EnqueuePendingOperationDelegate _enqueuePendingOperation;
+    private readonly NextPendingSequenceDelegate _nextPendingSequence;
     private readonly ReturnHeaderBufferDelegate _returnHeaderBuffer;
     private readonly ReturnPayloadArrayDelegate _returnPayloadArray;
     private readonly AbortPendingRequestDelegate _abortPendingRequest;
+    private readonly Action<int>? _recordBytesSent;
 
     public CoalescedWriteDispatcher(
         int coalescedWriteMaxBytes,
@@ -45,17 +48,21 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         TryDequeuePendingRequestDelegate tryDequeueWrite,
         GetWriteQueueDepthDelegate getWriteQueueDepth,
         EnqueuePendingOperationDelegate enqueuePendingOperation,
+        NextPendingSequenceDelegate nextPendingSequence,
         ReturnHeaderBufferDelegate returnHeaderBuffer,
         ReturnPayloadArrayDelegate returnPayloadArray,
-        AbortPendingRequestDelegate abortPendingRequest)
+        AbortPendingRequestDelegate abortPendingRequest,
+        Action<int>? recordBytesSent = null)
     {
         _crlfMemory = crlfMemory;
         _tryDequeueWrite = tryDequeueWrite;
         _getWriteQueueDepth = getWriteQueueDepth;
         _enqueuePendingOperation = enqueuePendingOperation;
+        _nextPendingSequence = nextPendingSequence;
         _returnHeaderBuffer = returnHeaderBuffer;
         _returnPayloadArray = returnPayloadArray;
         _abortPendingRequest = abortPendingRequest;
+        _recordBytesSent = recordBytesSent;
         _coalescer = new Coalescer(
             _coalesceQueue,
             coalescedWriteMaxBytes,
@@ -95,55 +102,72 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             if (_coalesceQueue.Count >= drainLimit) break;
         }
 
+        var requestCommitOffsets = BuildRequestCommitOffsets(_coalesceDrained);
         var enqueuedToPending = 0;
-        try
+        long committedBytes = 0;
+
+        async ValueTask CommitSentBytesAsync(int sentBytes)
         {
-            // Register pending response operations before writing bytes so the reader loop
-            // can start consuming replies immediately as Redis responds.
-            for (var i = 0; i < _coalesceDrained.Count; i++)
+            if (sentBytes <= 0)
+                return;
+
+            committedBytes += sentBytes;
+            RedisTelemetry.BytesSent.Add(sentBytes);
+            _recordBytesSent?.Invoke(sentBytes);
+
+            while (enqueuedToPending < requestCommitOffsets.Length &&
+                   committedBytes >= requestCommitOffsets[enqueuedToPending])
             {
-                await _enqueuePendingOperation(_coalesceDrained[i].Op, ct).ConfigureAwait(false);
+                var op = _coalesceDrained[enqueuedToPending].Op;
+                op.AssignSequenceId(_nextPendingSequence());
+                await _enqueuePendingOperation(op, ct).ConfigureAwait(false);
                 enqueuedToPending++;
             }
+        }
 
+        try
+        {
             while (_coalescer.TryBuildBatch(_coalesceBatch))
             {
-                ct.ThrowIfCancellationRequested();
-                var totalBytes = 0;
-                for (var i = 0; i < _coalesceBatch.SegmentsToWrite.Count; i++)
-                    totalBytes += _coalesceBatch.SegmentsToWrite[i].Length;
-
-                if (totalBytes > 0)
+                try
                 {
-                    RedisTelemetry.CoalescedWriteBatches.Add(1);
-                    RedisTelemetry.CoalescedWriteBatchBytes.Record(totalBytes);
-                    RedisTelemetry.CoalescedWriteBatchSegments.Record(_coalesceBatch.SegmentsToWrite.Count);
+                    ct.ThrowIfCancellationRequested();
+                    var totalBytes = 0;
+                    for (var i = 0; i < _coalesceBatch.SegmentsToWrite.Count; i++)
+                        totalBytes += _coalesceBatch.SegmentsToWrite[i].Length;
 
-                    if (!await TrySendVectoredAsync(socket, _coalesceBatch.SegmentsToWrite, ct).ConfigureAwait(false))
+                    if (totalBytes > 0)
                     {
-                        var rented = ArrayPool<byte>.Shared.Rent(totalBytes);
-                        try
-                        {
-                            var offset = 0;
-                            for (var i = 0; i < _coalesceBatch.SegmentsToWrite.Count; i++)
-                            {
-                                var segment = _coalesceBatch.SegmentsToWrite[i];
-                                segment.CopyTo(rented.AsMemory(offset, segment.Length));
-                                offset += segment.Length;
-                            }
+                        RedisTelemetry.CoalescedWriteBatches.Add(1);
+                        RedisTelemetry.CoalescedWriteBatchBytes.Record(totalBytes);
+                        RedisTelemetry.CoalescedWriteBatchSegments.Record(_coalesceBatch.SegmentsToWrite.Count);
 
-                            await SendAllAsync(socket, rented.AsMemory(0, totalBytes), ct).ConfigureAwait(false);
-                        }
-                        finally
+                        if (!await TrySendVectoredAsync(socket, _coalesceBatch.SegmentsToWrite, CommitSentBytesAsync, ct).ConfigureAwait(false))
                         {
-                            ArrayPool<byte>.Shared.Return(rented);
+                            var rented = ArrayPool<byte>.Shared.Rent(totalBytes);
+                            try
+                            {
+                                var offset = 0;
+                                for (var i = 0; i < _coalesceBatch.SegmentsToWrite.Count; i++)
+                                {
+                                    var segment = _coalesceBatch.SegmentsToWrite[i];
+                                    segment.CopyTo(rented.AsMemory(offset, segment.Length));
+                                    offset += segment.Length;
+                                }
+
+                                await SendAllAsync(socket, rented.AsMemory(0, totalBytes), CommitSentBytesAsync, ct).ConfigureAwait(false);
+                            }
+                            finally
+                            {
+                                ArrayPool<byte>.Shared.Return(rented);
+                            }
                         }
                     }
-
-                    RedisTelemetry.BytesSent.Add(totalBytes);
                 }
-
-                _coalesceBatch.RecycleAfterSend();
+                finally
+                {
+                    _coalesceBatch.RecycleAfterSend();
+                }
             }
         }
         catch (Exception ex)
@@ -166,6 +190,19 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             for (var i = 0; i < _coalesceCaptured.Count; i++)
                 ReturnCoalesceSegments(_coalesceCaptured[i].Segments);
         }
+    }
+
+    private long[] BuildRequestCommitOffsets(List<PendingRequest> requests)
+    {
+        var offsets = new long[requests.Count];
+        long running = 0;
+        for (var i = 0; i < requests.Count; i++)
+        {
+            running += GetRequestWireLength(requests[i]);
+            offsets[i] = running;
+        }
+
+        return offsets;
     }
 
     /// <summary>
@@ -244,13 +281,43 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         _coalesceSegmentArrayPool.Return(segments, clearArray: true);
     }
 
-    private static async ValueTask SendAllAsync(Socket socket, ReadOnlyMemory<byte> buffer, CancellationToken ct)
+    private long GetRequestWireLength(PendingRequest request)
+    {
+        long total = request.Command.Length;
+
+        if (!request.Payload.IsEmpty)
+        {
+            total += request.Payload.Length;
+            if (request.AppendCrlf)
+                total += _crlfMemory.Length;
+            return total;
+        }
+
+        if (request.PayloadCount <= 0 || request.Payloads is null)
+            return total;
+
+        for (var i = 0; i < request.PayloadCount; i++)
+        {
+            total += request.Payloads[i].Length;
+            if (request.AppendCrlfPerPayload)
+                total += _crlfMemory.Length;
+        }
+
+        return total;
+    }
+
+    private static async ValueTask SendAllAsync(
+        Socket socket,
+        ReadOnlyMemory<byte> buffer,
+        Func<int, ValueTask> onBytesCommitted,
+        CancellationToken ct)
     {
         while (!buffer.IsEmpty)
         {
             var sent = await socket.SendAsync(buffer, SocketFlags.None, ct).ConfigureAwait(false);
             if (sent <= 0)
                 throw new IOException("Socket send returned 0.");
+            await onBytesCommitted(sent).ConfigureAwait(false);
             buffer = buffer.Slice(sent);
         }
     }
@@ -259,6 +326,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     private static async ValueTask<bool> TrySendVectoredAsync(
         Socket socket,
         List<ReadOnlyMemory<byte>> segments,
+        Func<int, ValueTask> onBytesCommitted,
         CancellationToken ct)
     {
         if (segments.Count == 0)
@@ -283,6 +351,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             var sent = await socket.SendAsync(sendList, SocketFlags.None).ConfigureAwait(false);
             if (sent <= 0)
                 throw new IOException("Socket send returned 0.");
+            await onBytesCommitted(sent).ConfigureAwait(false);
 
             ConsumeSent(sendList, sent);
         }
