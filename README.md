@@ -4,19 +4,61 @@
 
 # VapeCache
 
-**Enterprise-grade Redis caching library for .NET 10** with hybrid fallback, circuit breaker, and production observability.
+VapeCache is a Redis-first cache runtime for .NET 10. It is built for applications that need fast cache paths, bounded behavior during Redis trouble, and production telemetry that explains what the cache layer is doing.
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/haxxornulled/VapeCache)
-[![NuGet VapeCache](https://img.shields.io/badge/nuget-v1.0.1-blue)](https://github.com/haxxornulled/VapeCache/releases)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![.NET](https://img.shields.io/badge/.NET-10.0-purple)](https://dot.net)
+## What This Repo Is
 
----
+This repository is the OSS runtime.
 
-## 🚀 TL;DR Quick Start (For Impatient Humans)
+It contains the core Redis transport, cache APIs, telemetry, and framework integrations.
 
-If you just want it running now, do this in order.
-If you want the slower walkthrough for newer devs, use [docs/QUICKSTART.md](docs/QUICKSTART.md).
+If you need durable spill persistence, reconciliation, or enterprise control-plane features, use the enterprise repository:
+
+- `https://github.com/haxxornulled/VapeCache-Enterprise`
+
+## Why It Was Designed
+
+VapeCache was designed for cache-heavy systems where the main problems are:
+
+- hot-path latency
+- hot-key stampedes
+- cascading failures when Redis becomes slow or unavailable
+- poor visibility into queue pressure and transport behavior
+
+The goal is not to be everything Redis can do. The goal is to make cache behavior predictable and observable in real .NET applications.
+
+## What You Actually Get
+
+- cache-oriented Redis transport with multiplexing and ordered responses
+- coalesced socket writes on the write path
+- runtime guardrails for transport settings
+- RESP2/RESP3 negotiation and cluster MOVED/ASK handling on cache paths
+- circuit breaker and hybrid in-memory failover
+- stampede protection profiles
+- typed cache APIs plus low-level byte-oriented APIs
+- OpenTelemetry metrics and traces
+- Aspire integration and ASP.NET Core integration
+
+## What You Do Not Get In OSS
+
+The OSS repo does not include:
+
+- durable spill persistence
+- write reconciliation after Redis recovery
+- enterprise licensing and control-plane enforcement
+
+Those live in the enterprise repo.
+
+## Package Map
+
+| Package | Purpose |
+|---|---|
+| `VapeCache` | Core runtime, Redis transport, cache APIs, telemetry |
+| `VapeCache.Abstractions` | Contracts, options, value types |
+| `VapeCache.Extensions.Aspire` | Aspire wiring, endpoints, telemetry integration |
+| `VapeCache.Extensions.AspNetCore` | ASP.NET Core output cache integration |
+
+## Quick Start
 
 ### 1. Run Redis
 
@@ -24,13 +66,15 @@ If you want the slower walkthrough for newer devs, use [docs/QUICKSTART.md](docs
 docker run --name vapecache-redis -p 6379:6379 -d redis:7
 ```
 
-### 2. Install Package
+### 2. Install the Package
 
 ```bash
 dotnet add package VapeCache
 ```
 
-### 3. Add Minimal Config (`appsettings.json`)
+### 3. Configure Redis
+
+`appsettings.json`
 
 ```json
 {
@@ -42,7 +86,9 @@ dotnet add package VapeCache
 }
 ```
 
-### 4. Register VapeCache (`Program.cs`)
+### 4. Register Services
+
+`Program.cs`
 
 ```csharp
 using VapeCache.Abstractions.Caching;
@@ -51,33 +97,9 @@ using VapeCache.Infrastructure.Connections;
 
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
-
-builder.Services.AddOptions<CacheStampedeOptions>()
-    .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
-    .ConfigureCacheStampede(options =>
-    {
-        options.WithMaxKeys(50_000)
-            .WithLockWaitTimeout(TimeSpan.FromMilliseconds(750))
-            .WithFailureBackoff(TimeSpan.FromMilliseconds(500));
-    })
-    .Bind(builder.Configuration.GetSection("CacheStampede"));
 ```
 
-For the fluent "wire it all" path:
-
-```csharp
-builder.AddVapeCache()
-    .WithRedisFromAspire("redis")
-    .WithHealthChecks()
-    .WithAspireTelemetry()
-    .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
-    .WithAutoMappedEndpoints();
-
-var app = builder.Build();
-app.MapHealthChecks("/health");
-```
-
-### 5. Use It
+### 5. Use the Cache API
 
 ```csharp
 public sealed class PingService(ICacheService cache)
@@ -88,167 +110,36 @@ public sealed class PingService(ICacheService cache)
             _ => Task.FromResult("pong"),
             (writer, value) => JsonSerializer.Serialize(writer, value),
             bytes => JsonSerializer.Deserialize<string>(bytes),
-            new CacheEntryOptions(
-                Ttl: TimeSpan.FromMinutes(1),
-                Intent: new CacheIntent(CacheIntentKind.ReadThrough, Reason: "health ping")),
+            new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(1)),
             ct);
 }
 ```
 
-Need the full setup and tuning knobs? Jump to [📦 Quick Start](#-quick-start) below.
+## Documentation
 
----
+Start here:
 
-## ⚡ Why VapeCache Over StackExchange.Redis?
+- [docs/INDEX.md](docs/INDEX.md)
+- [docs/QUICKSTART.md](docs/QUICKSTART.md)
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+- [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
+- [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md)
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 
-VapeCache is a **from-scratch Redis client** tuned for **cache-heavy workloads** with measurable performance and reliability wins.
-
-### 🚀 Performance
-
-### Enterprise Benchmarking Standard
-
-Performance claims are validated with:
-- fixed environment and Redis target
-- Release-only builds
-- repeated runs (median-of-N)
-- fair and realworld mode comparisons
-- allocation and tail-latency analysis alongside throughput
-
-### Quick Commands
-
-```powershell
-$env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
-powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode fair
-powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode realworld
-```
-
-Payload scaling pass (client string set/get):
-
-```powershell
-$env:VAPECACHE_BENCH_CLIENT_OPERATIONS = "StringSetGet"
-$env:VAPECACHE_BENCH_CLIENT_PAYLOADS = "1024,4096,16384"
-powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite client -Job Short -Mode fair
-```
-
-See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for interpretation and [docs/BENCHMARKING.md](docs/BENCHMARKING.md) for full runbook.
-
----
-## 🔧 Development
+## Build And Test
 
 ### Build
+
 ```bash
 dotnet build VapeCache.sln -c Release
 ```
 
 ### Test
+
 ```bash
-dotnet test -c Release
+dotnet test VapeCache.Tests/VapeCache.Tests.csproj -c Release
 ```
 
-### Run Console Host (Live Demo)
-```bash
-# Set Redis connection string
-$env:VAPECACHE_REDIS_CONNECTIONSTRING = 'redis://localhost:6379/0'
+## License
 
-dotnet run --project VapeCache.Console -c Release
-```
-Console host runs demo workloads and logs cache activity (including GroceryStore dogfood and plugin examples). For HTTP wrappers, endpoints can be auto-mapped via `WithAutoMappedEndpoints(...)`.
-
-### Run Benchmarks
-```bash
-$env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
-dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisClientHeadToHeadBenchmarks*
-dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisEndToEndHeadToHeadBenchmarks*
-dotnet run -c Release --project VapeCache.Benchmarks -- --filter *RedisModuleHeadToHeadBenchmarks*
-
-# Or run all head-to-head suites in fair mode (instrumentation off):
-powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode fair
-
-# Run the same suites with packet capture + Wireshark summaries:
-powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-with-capture.ps1 -Job Short -ConnectionString "redis://localhost:6379/0" -Interface 1 -RedisPort 6379
-```
-
-### Analyzer + Profiling Workflow
-```bash
-powershell -ExecutionPolicy Bypass -File tools/run-dotnet10-analysis.ps1 -Configuration Release -TreatWarningsAsErrors -VerifyFormatting -RunTests
-powershell -ExecutionPolicy Bypass -File tools/profile-dotnet10.ps1 -Project "VapeCache.Console/VapeCache.Console.csproj" -Mode both -DurationSeconds 45 -Configuration Release
-```
-
-### GroceryStore Dogfood
-```bash
-powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-grocery-dogfood.ps1 -ConnectionString "redis://localhost:6379/0" -ConcurrentShoppers 200 -TotalShoppers 5000 -TargetDurationSeconds 30 -Profile FullTilt -EnablePluginDemo
-```
-
----
-
-## 📋 Roadmap
-
-### Current (v1.0)
-- ✅ Core caching commands and typed collections (List/Set/Hash/SortedSet)
-- ✅ Hybrid cache with circuit breaker + reconciliation (optional)
-- ✅ Ordered multiplexing + coalesced writes
-- ✅ OpenTelemetry metrics + tracing
-- ✅ Redis module commands (RedisJSON, RediSearch, RedisBloom, RedisTimeSeries)
-- ✅ .NET Aspire integration package
-
-### Backlog (Scoped)
-- [ ] Expand core command surface (INCR/DECR, EXISTS, etc.)
-- [ ] Backpressure metrics (queue depth, wait time)
-- [ ] Buffer pool accounting telemetry
-- [ ] Additional codec implementations
-
-See [docs/API_EXPANSION_PLAN.md](docs/API_EXPANSION_PLAN.md) for detailed roadmap.
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-**Areas we'd love help with:**
-- Expanding Redis command surface (see [docs/API_EXPANSION_PLAN.md](docs/API_EXPANSION_PLAN.md))
-- Additional codec implementations (`ICacheCodecProvider`)
-- Integration packages (Aspire, Serilog, OpenTelemetry)
-- Documentation improvements
-
----
-
-## 🎯 Use Cases
-
-### ✅ When to Use VapeCache
-- High-performance GET/SET caching
-- Need hybrid cache (Redis + in-memory fallback)
-- Want production observability out-of-the-box
-- Building cloud-native apps with .NET Aspire
-- Need predictable memory usage (no LOH spikes)
-
-### ❌ When NOT to Use VapeCache
-- Need full Redis command surface (200+ commands) → VapeCache focuses on caching use cases
-- Need Pub/Sub → Not currently supported (see roadmap)
-- Need Lua scripting → Not currently supported (see roadmap)
-- Need cluster mode → Single-instance and Sentinel support only
-
-See [docs/NON_GOALS.md](docs/NON_GOALS.md) for strategic positioning.
-
----
-
-## 📜 License
-
-MIT License - See [LICENSE](LICENSE) for details
-
----
-
-## 🙏 Acknowledgments
-
-- Built with ❤️ using .NET 10
-- Original architecture designed for high-performance caching workloads
-- OpenTelemetry for native observability
-
----
-
-## 📞 Support
-
-- **GitHub Issues**: [https://github.com/haxxornulled/VapeCache/issues](https://github.com/haxxornulled/VapeCache/issues)
-- **Documentation**: [docs/INDEX.md](docs/INDEX.md)
-- **Discussions**: [GitHub Discussions](https://github.com/haxxornulled/VapeCache/discussions) (coming soon)
-
+This repository is the OSS runtime for VapeCache.
