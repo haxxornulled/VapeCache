@@ -25,20 +25,21 @@ internal sealed class RedisSearchService : IRedisSearchService
     /// </summary>
     public async ValueTask<bool> IsAvailableAsync(CancellationToken ct = default)
     {
-        if (_available.HasValue)
-            return _available.Value;
+        if (_available == true)
+            return true;
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_available.HasValue)
-                return _available.Value;
+            if (_available == true)
+                return true;
 
             var modules = await _modules.GetInstalledModulesAsync(ct).ConfigureAwait(false);
             var available = modules.Any(m =>
                 string.Equals(m, "search", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(m, "ft", StringComparison.OrdinalIgnoreCase));
-            _available = available;
+            if (available)
+                _available = true;
             return available;
         }
         finally

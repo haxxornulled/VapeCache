@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Modules;
@@ -8,17 +7,20 @@ namespace VapeCache.Infrastructure.Modules;
 internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
 {
     private readonly IRedisCommandExecutor _redis;
+    private readonly IRedisFallbackCommandExecutor _fallback;
     private readonly IRedisModuleDetector _modules;
     private readonly ILogger<RedisTimeSeriesService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool? _available;
 
-    private readonly ConcurrentDictionary<string, SortedDictionary<long, double>> _series = new();
-    private readonly ConcurrentDictionary<string, System.Threading.Lock> _locks = new();
-
-    public RedisTimeSeriesService(IRedisCommandExecutor redis, IRedisModuleDetector modules, ILogger<RedisTimeSeriesService> logger)
+    public RedisTimeSeriesService(
+        IRedisCommandExecutor redis,
+        IRedisFallbackCommandExecutor fallback,
+        IRedisModuleDetector modules,
+        ILogger<RedisTimeSeriesService> logger)
     {
         _redis = redis;
+        _fallback = fallback;
         _modules = modules;
         _logger = logger;
     }
@@ -28,17 +30,18 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
     /// </summary>
     public async ValueTask<bool> IsAvailableAsync(CancellationToken ct = default)
     {
-        if (_available.HasValue)
-            return _available.Value;
+        if (_available == true)
+            return true;
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_available.HasValue)
-                return _available.Value;
+            if (_available == true)
+                return true;
 
             var available = await _modules.IsModuleInstalledAsync("timeseries", ct).ConfigureAwait(false);
-            _available = available;
+            if (available)
+                _available = true;
             return available;
         }
         finally
@@ -56,9 +59,7 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
             return await _redis.TsCreateAsync(key, ct).ConfigureAwait(false);
 
         _logger.LogDebug("RedisTimeSeries unavailable; using in-memory fallback for {Key}.", key);
-        _series.GetOrAdd(key, _ => new SortedDictionary<long, double>());
-        _locks.GetOrAdd(key, _ => new System.Threading.Lock());
-        return true;
+        return await _fallback.TsCreateAsync(key, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -70,13 +71,7 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
             return await _redis.TsAddAsync(key, timestamp, value, ct).ConfigureAwait(false);
 
         _logger.LogDebug("RedisTimeSeries unavailable; using in-memory fallback for {Key}.", key);
-        var series = _series.GetOrAdd(key, _ => new SortedDictionary<long, double>());
-        var gate = _locks.GetOrAdd(key, _ => new System.Threading.Lock());
-        lock (gate)
-        {
-            series[timestamp] = value;
-        }
-        return timestamp;
+        return await _fallback.TsAddAsync(key, timestamp, value, ct).ConfigureAwait(false);
     }
 
     public async ValueTask<(long Timestamp, double Value)[]> RangeAsync(string key, long from, long to, CancellationToken ct = default)
@@ -84,20 +79,7 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
         if (await IsAvailableAsync(ct).ConfigureAwait(false))
             return await _redis.TsRangeAsync(key, from, to, ct).ConfigureAwait(false);
 
-        if (!_series.TryGetValue(key, out var series))
-            return Array.Empty<(long Timestamp, double Value)>();
-
-        var gate = _locks.GetOrAdd(key, _ => new System.Threading.Lock());
-        var results = new List<(long Timestamp, double Value)>();
-        lock (gate)
-        {
-            foreach (var pair in series)
-            {
-                if (pair.Key < from || pair.Key > to)
-                    continue;
-                results.Add((pair.Key, pair.Value));
-            }
-        }
-        return results.ToArray();
+        _logger.LogDebug("RedisTimeSeries unavailable; using in-memory fallback for {Key}.", key);
+        return await _fallback.TsRangeAsync(key, from, to, ct).ConfigureAwait(false);
     }
 }
