@@ -11,6 +11,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 {
     private readonly Channel<PooledConnection> _idle;
     private readonly SemaphoreSlim _connectionSlots;
+    private readonly SemaphoreSlim _availabilitySignals;
     private readonly IRedisConnectionFactory _factory;
     private readonly IOptionsMonitor<RedisConnectionOptions> _options;
     private readonly ILogger<RedisConnectionPool> _logger;
@@ -42,6 +43,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
                 maxIdle);
         }
         _connectionSlots = new SemaphoreSlim(maxConnections, maxConnections);
+        _availabilitySignals = new SemaphoreSlim(0, maxConnections);
 
         _idle = Channel.CreateBounded<PooledConnection>(new BoundedChannelOptions(maxIdle)
         {
@@ -76,6 +78,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
             {
                 if (_idle.Reader.TryRead(out var pc))
                 {
+                    DrainAvailabilitySignal();
                     Interlocked.Decrement(ref _idleCount);
 
                     if (TryGetDropReason(pc, o, out var dropReason))
@@ -105,7 +108,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
                     return new Result<IRedisConnectionLease>(new Lease(this, pc));
                 }
 
-                if (_connectionSlots.Wait(0))
+                if (TryAcquireConnectionSlot())
                 {
                     var created = await _factory.CreateAsync(cts.Token).ConfigureAwait(false);
                     if (created.IsSuccess)
@@ -123,54 +126,17 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
                             },
                             fail =>
                             {
-                                _connectionSlots.Release();
+                                ReleaseConnectionSlot();
                                 return new Result<IRedisConnectionLease>(fail);
                             });
                     }
 
                     created.IfFail(_ => { });
-                    _connectionSlots.Release();
+                    ReleaseConnectionSlot();
+                    continue;
                 }
 
-                // Wait for someone to return a connection (until timeout)
-                while (await _idle.Reader.WaitToReadAsync(cts.Token).ConfigureAwait(false))
-                {
-                    if (_idle.Reader.TryRead(out var waited))
-                    {
-                        Interlocked.Decrement(ref _idleCount);
-
-                        if (TryGetDropReason(waited, o, out var dropReason))
-                        {
-                            TrackDrop(dropReason);
-                            TryLogDrop("borrow", dropReason, waited);
-                            await DisposeAndReleaseAsync(waited).ConfigureAwait(false);
-                            break;
-                        }
-
-                        if (ShouldValidateOnBorrow(waited, o))
-                        {
-                            RedisTelemetry.PoolValidations.Add(1);
-                            var ok = await TryValidateAsync(waited, o, cts.Token).ConfigureAwait(false);
-                            if (!ok)
-                            {
-                                TrackDrop("validate-failed");
-                                TryLogDrop("borrow", "validate-failed", waited);
-                                await DisposeAndReleaseAsync(waited).ConfigureAwait(false);
-                                break;
-                            }
-                        }
-
-                        sw.Stop();
-                        RedisTelemetry.PoolWaitMs.Record(sw.Elapsed.TotalMilliseconds);
-                        TryLogLease("wait-reuse", waited);
-                        return new Result<IRedisConnectionLease>(new Lease(this, waited));
-                    }
-                }
-
-                sw.Stop();
-                RedisTelemetry.PoolWaitMs.Record(sw.Elapsed.TotalMilliseconds);
-                RedisTelemetry.PoolTimeouts.Add(1);
-                return new Result<IRedisConnectionLease>(new TimeoutException("Acquire timed out."));
+                await _availabilitySignals.WaitAsync(cts.Token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException oce) when (!ct.IsCancellationRequested)
@@ -269,7 +235,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
         while (Volatile.Read(ref _disposed) == 0 &&
                Volatile.Read(ref _idleCount) < warmTarget &&
-               _connectionSlots.Wait(0))
+               TryAcquireConnectionSlot())
         {
             totalAttempts++;
             if (totalAttempts > maxTotalAttempts)
@@ -279,14 +245,14 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
                     maxTotalAttempts,
                     warmTarget,
                     Volatile.Read(ref _idleCount));
-                _connectionSlots.Release();
+                ReleaseConnectionSlot();
                 return;
             }
 
             var created = await _factory.CreateAsync(ct).ConfigureAwait(false);
             if (!created.IsSuccess)
             {
-                _connectionSlots.Release();
+                ReleaseConnectionSlot();
                 retryCount++;
 
                 if (retryCount >= MaxWarmupRetries)
@@ -314,13 +280,14 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
                         return;
                     }
 
+                    SignalAvailability();
                     Interlocked.Increment(ref _idleCount);
                     Interlocked.Increment(ref _returned);
                     TryLogReturn("warm", pc);
                 },
                 _ =>
                 {
-                    _connectionSlots.Release();
+                    ReleaseConnectionSlot();
                     return Task.CompletedTask;
                 }).ConfigureAwait(false);
         }
@@ -349,6 +316,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
         if (_idle.Writer.TryWrite(pc))
         {
+            SignalAvailability();
             Interlocked.Increment(ref _idleCount);
             Interlocked.Increment(ref _returned);
             TryLogReturn("return", pc);
@@ -363,7 +331,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
     private async Task DisposeAndReleaseAsync(PooledConnection pc)
     {
         try { await pc.DisposeAsync().ConfigureAwait(false); } catch { }
-        _connectionSlots.Release();
+        ReleaseConnectionSlot();
         Interlocked.Increment(ref _disposedConnections);
     }
 
@@ -378,11 +346,13 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
         while (_idle.Reader.TryRead(out var pc))
         {
+            DrainAvailabilitySignal();
             Interlocked.Decrement(ref _idleCount);
             await DisposeAndReleaseAsync(pc).ConfigureAwait(false);
         }
 
         await _factory.DisposeAsync().ConfigureAwait(false);
+        _availabilitySignals.Dispose();
         _logger.LogInformation("Redis pool disposed: Created={Created} Returned={Returned} Idle={Idle} Disposed={Disposed}", _created, _returned, _idleCount, _disposedConnections);
     }
 
@@ -429,6 +399,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
         while (_idle.Reader.TryRead(out var pc))
         {
+            DrainAvailabilitySignal();
             Interlocked.Decrement(ref _idleCount);
 
             if (TryGetDropReason(pc, o, out var dropReason))
@@ -453,6 +424,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
                 disposed++;
                 continue;
             }
+            SignalAvailability();
             Interlocked.Increment(ref _idleCount);
         }
 
@@ -470,10 +442,51 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
         // Cap idle to MaxIdle (in case config changed downward)
         while (Volatile.Read(ref _idleCount) > maxIdle && _idle.Reader.TryRead(out var extra))
         {
+            DrainAvailabilitySignal();
             Interlocked.Decrement(ref _idleCount);
             TrackDrop("max-idle");
             TryLogDrop("reap", "max-idle", extra);
             await DisposeAndReleaseAsync(extra).ConfigureAwait(false);
+        }
+    }
+
+    private bool TryAcquireConnectionSlot()
+    {
+        if (!_connectionSlots.Wait(0))
+            return false;
+
+        DrainAvailabilitySignal();
+        return true;
+    }
+
+    private void ReleaseConnectionSlot()
+    {
+        _connectionSlots.Release();
+        SignalAvailability();
+    }
+
+    private void SignalAvailability()
+    {
+        try
+        {
+            _availabilitySignals.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private void DrainAvailabilitySignal()
+    {
+        try
+        {
+            _availabilitySignals.Wait(0);
+        }
+        catch (ObjectDisposedException)
+        {
         }
     }
 

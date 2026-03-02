@@ -95,6 +95,35 @@ public sealed class InMemoryCacheSpillTests
     }
 
     [Fact]
+    public async Task InMemoryCache_IsolatesStoredBuffers_FromCallerAndReaderMutations()
+    {
+        var options = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions
+        {
+            EnableSpillToDisk = false
+        });
+
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var current = new CurrentCacheService();
+        var stats = new CacheStatsRegistry();
+        var service = new InMemoryCacheService(cache, current, stats, options, new NoopSpillStore());
+
+        var source = new byte[] { 1, 2, 3, 4 };
+        await service.SetAsync("copy:key", source, default, CancellationToken.None);
+
+        source[0] = 99;
+
+        var firstRead = await service.GetAsync("copy:key", CancellationToken.None);
+        Assert.NotNull(firstRead);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, firstRead);
+
+        firstRead![1] = 88;
+
+        var secondRead = await service.GetAsync("copy:key", CancellationToken.None);
+        Assert.NotNull(secondRead);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, secondRead);
+    }
+
+    [Fact]
     public async Task OverwritingSpilledEntry_LeavesSingleSpillFile()
     {
         var root = Path.Combine(Path.GetTempPath(), "vapecache-spill-overwrite", Guid.NewGuid().ToString("n"));

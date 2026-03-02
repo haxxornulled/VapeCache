@@ -29,6 +29,18 @@ public class RedisRespProtocolTests
     }
 
     [Fact]
+    public void ZRangeByScoreWithLimit_UsesEightParts()
+    {
+        var len = RedisRespProtocol.GetZRangeByScoreWithScoresCommandLength("scores", "0", "10", descending: false, offset: 1, count: 2);
+        var buffer = new byte[len];
+        _ = RedisRespProtocol.WriteZRangeByScoreWithScoresCommand(buffer, "scores", "0", "10", descending: false, offset: 1, count: 2);
+
+        var text = Encoding.ASCII.GetString(buffer);
+        Assert.StartsWith("*8\r\n", text);
+        Assert.Contains("$5\r\nLIMIT\r\n", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RPushMany_LengthMatchesWriter()
     {
         var values = new ReadOnlyMemory<byte>[]

@@ -65,12 +65,15 @@ Cluster + RESP3 (optional):
 Use this when wiring services directly:
 
 ```csharp
+using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddOptions<RedisConnectionOptions>()
+    .Bind(builder.Configuration.GetSection("RedisConnection"));
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
 
@@ -93,7 +96,10 @@ builder.AddVapeCache()
     .WithHealthChecks()
     .WithAspireTelemetry()
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
-    .WithAutoMappedEndpoints();
+    .WithAutoMappedEndpoints(options =>
+    {
+        options.Enabled = true;
+    });
 ```
 
 ## 5. Add a Typed Cache Service
@@ -191,6 +197,7 @@ With hybrid cache enabled, this stream path automatically reads from in-memory f
 
 - Redis is not running, or wrong host/port in config.
 - Registered `AddVapecacheCaching()` but forgot `AddVapecacheRedisConnections()`.
+- Forgot to bind `RedisConnection` from configuration (or set `VAPECACHE_REDIS_CONNECTIONSTRING`).
 - Invalid `CacheStampede` values (out of allowed ranges).
 - Breaker control endpoints exposed publicly without auth.
 

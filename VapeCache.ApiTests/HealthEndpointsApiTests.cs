@@ -1,39 +1,60 @@
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Configuration;
-using Microsoft.AspNetCore.Hosting;
-using Xunit;
+using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace VapeCache.ApiTests;
 
-public sealed class HealthEndpointsApiTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class HealthEndpointsApiTests
 {
-    private readonly WebApplicationFactory<Program> _factory;
-
-    public HealthEndpointsApiTests(WebApplicationFactory<Program> factory)
+    [Theory]
+    [InlineData("/health")]
+    [InlineData("/alive")]
+    public async Task Health_endpoints_return_ok(string path)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseEnvironment("Development");
-            builder.ConfigureAppConfiguration((_, config) =>
-            {
-                config.AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: false);
-            });
-        });
-    }
-
-    [Fact]
-    public async Task Health_endpoints_return_ok()
-    {
-        using var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        using var factory = new ControlPlaneApiFactory(requireApiKey: true);
+        using var client = factory.CreateClient(new()
         {
             BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
 
-        var health = await client.GetAsync("/health");
-        Assert.True(health.IsSuccessStatusCode, $"Health failed with {(int)health.StatusCode}.");
-
-        var alive = await client.GetAsync("/alive");
-        Assert.True(alive.IsSuccessStatusCode, $"Alive failed with {(int)alive.StatusCode}.");
+        var response = await client.GetAsync(path);
+        Assert.True(response.IsSuccessStatusCode, $"{path} failed with {(int)response.StatusCode}.");
     }
+
+    [Fact]
+    public async Task Root_endpoint_returns_service_status()
+    {
+        using var factory = new ControlPlaneApiFactory(requireApiKey: true);
+        using var client = factory.CreateClient(new()
+        {
+            BaseAddress = new Uri("https://localhost"),
+            AllowAutoRedirect = false
+        });
+
+        var payload = await client.GetFromJsonAsync<RootStatusResponse>("/");
+
+        Assert.NotNull(payload);
+        Assert.Equal("VapeCache.Licensing.ControlPlane", payload.Service);
+        Assert.Equal("ok", payload.Status);
+    }
+
+    [Fact]
+    public async Task Health_service_includes_revocation_registry_readiness_check()
+    {
+        using var factory = new ControlPlaneApiFactory(requireApiKey: true);
+        using var client = factory.CreateClient(new()
+        {
+            BaseAddress = new Uri("https://localhost"),
+            AllowAutoRedirect = false
+        });
+
+        var healthService = factory.Services.GetRequiredService<HealthCheckService>();
+        var report = await healthService.CheckHealthAsync();
+
+        Assert.Equal(HealthStatus.Healthy, report.Status);
+        Assert.Contains("revocation-registry", report.Entries.Keys);
+    }
+
+    private sealed record RootStatusResponse(string? Service, string? Status);
 }

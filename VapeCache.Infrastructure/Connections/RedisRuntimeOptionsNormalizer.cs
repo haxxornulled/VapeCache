@@ -1,5 +1,4 @@
 using VapeCache.Abstractions.Connections;
-using VapeCache.Application.Guards;
 
 namespace VapeCache.Infrastructure.Connections;
 
@@ -213,36 +212,16 @@ internal static class RedisRuntimeOptionsNormalizer
 
     private static RedisTransportProfile NormalizeTransportProfile(RedisTransportProfile profile)
     {
-        try
-        {
-            return Guard.Against.ValidEnumValue(profile);
-        }
-        catch (ArgumentException)
-        {
-            return RedisTransportProfile.FullTilt;
-        }
+        return Enum.IsDefined(profile)
+            ? profile
+            : RedisTransportProfile.FullTilt;
     }
 
-    private static bool HasText(string? value)
-    {
-        try
-        {
-            Guard.Against.NotNullOrWhiteSpace(value);
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
+    private static bool HasText(string? value) => !string.IsNullOrWhiteSpace(value);
 
     private static int NormalizeInt(int value, int min, int max, int fallbackWhenInvalid, int? fallbackWhenNonPositive = null)
     {
-        try
-        {
-            return Guard.Against.NotOutOfRange(value, min, max);
-        }
-        catch (ArgumentOutOfRangeException)
+        if (value < min || value > max)
         {
             if (value <= 0)
             {
@@ -252,6 +231,8 @@ internal static class RedisRuntimeOptionsNormalizer
 
             return Math.Clamp(value, min, max);
         }
+
+        return value;
     }
 
     private static int NormalizeTcpBufferBytes(int configuredBytes)

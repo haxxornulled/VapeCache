@@ -5,7 +5,6 @@ using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Exporters.Csv;
 using BenchmarkDotNet.Exporters.Json;
-using BenchmarkDotNet.Exporters.OpenMetrics;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Reports;
@@ -55,7 +54,6 @@ public sealed class EnterpriseBenchmarkConfig : ManualConfig
             HtmlExporter.Default,
             MarkdownExporter.GitHub,
             JsonExporter.FullCompressed,
-            OpenMetricsExporter.Default,
             ComparisonMarkdownExporter.Default);
 
         AddColumnProvider(DefaultColumnProviders.Instance);

@@ -1567,7 +1567,7 @@ internal static class RedisRespProtocol
         var command = descending ? "ZREVRANGEBYSCORE" : "ZRANGEBYSCORE";
         var parts = 5;
         if (offset.HasValue && count.HasValue)
-            parts += 2;
+            parts += 3;
 
         var len = GetHeaderLen(parts)
                   + GetBulkStringLen(command) + 2
@@ -1602,7 +1602,7 @@ internal static class RedisRespProtocol
     {
         var parts = 5;
         if (offset.HasValue && count.HasValue)
-            parts += 2;
+            parts += 3;
 
         var idx = 0;
         idx += WriteArrayHeader(destination.Slice(idx), parts);

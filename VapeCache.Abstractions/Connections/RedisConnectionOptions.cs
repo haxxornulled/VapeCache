@@ -62,7 +62,7 @@ public sealed record RedisConnectionOptions
     public TimeSpan TcpKeepAliveTime { get; init; } = TimeSpan.FromSeconds(30);
     public TimeSpan TcpKeepAliveInterval { get; init; } = TimeSpan.FromSeconds(10);
 
-    public bool AllowAuthFallbackToPasswordOnly { get; init; } = true;
+    public bool AllowAuthFallbackToPasswordOnly { get; init; } = false;
     public bool LogWhoAmIOnConnect { get; init; } = false;
 
     /// <summary>

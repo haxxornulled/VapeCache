@@ -142,6 +142,64 @@ public sealed class RedisReconciliationServiceTests
     }
 
     [Fact]
+    public async Task TrackWrite_Reconciles_WhenPendingEstimateInitializationFails()
+    {
+        var time = new ManualTimeProvider(new DateTimeOffset(2025, 12, 31, 0, 0, 0, TimeSpan.Zero));
+        var executor = new FakeExecutor();
+        var options = new TestOptionsMonitor<RedisReconciliationOptions>(new RedisReconciliationOptions
+        {
+            MaxPendingOperations = 1,
+            MaxOperationAge = TimeSpan.FromMinutes(5),
+            MaxRunDuration = TimeSpan.FromSeconds(30),
+            BatchSize = 16,
+            MaxOperationsPerRun = 0,
+            InitialBackoff = TimeSpan.Zero,
+            MaxBackoff = TimeSpan.Zero,
+            BackoffMultiplier = 1.0
+        });
+        var store = new CountFailingStore();
+        var service = new RedisReconciliationService(executor, options, NullLogger<RedisReconciliationService>.Instance, time, store);
+
+        var exception = Record.Exception(() => service.TrackWrite("k", new byte[] { 1, 2, 3 }, null));
+
+        Assert.Null(exception);
+
+        await service.ReconcileAsync();
+
+        var call = Assert.Single(executor.SetCalls);
+        Assert.Equal("k", call.Key);
+        Assert.Equal(new byte[] { 1, 2, 3 }, call.Value);
+    }
+
+    [Fact]
+    public async Task TrackDelete_Reconciles_WhenPendingEstimateInitializationFails()
+    {
+        var time = new ManualTimeProvider(new DateTimeOffset(2025, 12, 31, 0, 0, 0, TimeSpan.Zero));
+        var executor = new FakeExecutor();
+        var options = new TestOptionsMonitor<RedisReconciliationOptions>(new RedisReconciliationOptions
+        {
+            MaxPendingOperations = 1,
+            MaxOperationAge = TimeSpan.FromMinutes(5),
+            MaxRunDuration = TimeSpan.FromSeconds(30),
+            BatchSize = 16,
+            MaxOperationsPerRun = 0,
+            InitialBackoff = TimeSpan.Zero,
+            MaxBackoff = TimeSpan.Zero,
+            BackoffMultiplier = 1.0
+        });
+        var store = new CountFailingStore();
+        var service = new RedisReconciliationService(executor, options, NullLogger<RedisReconciliationService>.Instance, time, store);
+
+        var exception = Record.Exception(() => service.TrackDelete("k"));
+
+        Assert.Null(exception);
+
+        await service.ReconcileAsync();
+
+        Assert.Equal(["k"], executor.DeleteCalls);
+    }
+
+    [Fact]
     public async Task TrackWrite_DoesNotOvercount_WhenUpdatingExistingKey()
     {
         var time = new ManualTimeProvider(new DateTimeOffset(2025, 12, 31, 0, 0, 0, TimeSpan.Zero));
@@ -306,6 +364,29 @@ public sealed class RedisReconciliationServiceTests
             DeleteCalls.Add(key);
             return ValueTask.FromResult(true);
         }
+    }
+
+    private sealed class CountFailingStore : IRedisReconciliationStore
+    {
+        private readonly InMemoryReconciliationStore _inner = new();
+
+        public ValueTask<int> CountAsync(CancellationToken ct)
+            => ValueTask.FromException<int>(new InvalidOperationException("count failed"));
+
+        public ValueTask<bool> TryUpsertWriteAsync(string key, ReadOnlyMemory<byte> value, DateTimeOffset trackedAt, DateTimeOffset? expiresAt, CancellationToken ct)
+            => _inner.TryUpsertWriteAsync(key, value, trackedAt, expiresAt, ct);
+
+        public ValueTask<bool> TryUpsertDeleteAsync(string key, DateTimeOffset trackedAt, CancellationToken ct)
+            => _inner.TryUpsertDeleteAsync(key, trackedAt, ct);
+
+        public ValueTask<IReadOnlyList<TrackedOperation>> SnapshotAsync(int maxOperations, CancellationToken ct)
+            => _inner.SnapshotAsync(maxOperations, ct);
+
+        public ValueTask RemoveAsync(IReadOnlyList<string> keys, CancellationToken ct)
+            => _inner.RemoveAsync(keys, ct);
+
+        public ValueTask ClearAsync(CancellationToken ct)
+            => _inner.ClearAsync(ct);
     }
 
     private sealed class ManualTimeProvider : TimeProvider

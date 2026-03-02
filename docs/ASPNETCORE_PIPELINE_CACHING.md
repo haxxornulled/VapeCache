@@ -18,8 +18,11 @@ dotnet add package VapeCache.Extensions.AspNetCore
 
 ```csharp
 using Microsoft.AspNetCore.OutputCaching;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Extensions.AspNetCore;
 
+builder.Services.AddOptions<RedisConnectionOptions>()
+    .Bind(builder.Configuration.GetSection("RedisConnection"));
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
 
@@ -64,7 +67,7 @@ MVC / Razor / Blazor Web App:
 - `DefaultTtl`:
   - Used when middleware requests non-positive duration.
 - `EnableTagIndexing`:
-  - Enables in-memory tag index for `EvictByTag` support.
+  - Enables shared tag-version metadata in VapeCache so `EvictByTag` works across nodes and survives restarts.
 
 ## Aspire Fluent Hook
 

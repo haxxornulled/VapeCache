@@ -13,7 +13,7 @@ No service locator patterns and no route clutter in `Program.cs`.
 
 ## Minimal API Endpoints (Wrapper Surface)
 
-When you enable endpoint mapping (`WithAutoMappedEndpoints(...)` or `MapVapeCacheEndpoints(...)`), the wrapper surface is:
+When you enable endpoint mapping (`WithAutoMappedEndpoints(...)` with `options.Enabled = true` or `MapVapeCacheEndpoints(...)`), the wrapper surface is:
 
 - `GET /vapecache/status`
 - `GET /vapecache/stats`
@@ -83,7 +83,8 @@ See:
 │     .WithFailoverAffinityHints()    // Cluster failover hint │
 │     .WithCacheStampedeProfile(      // Stampede defaults    │
 │         CacheStampedeProfile.Balanced)                      │
-│     .WithAutoMappedEndpoints();     // + status/stats/stream│
+│     .WithAutoMappedEndpoints(       // opt in to status/stats/stream
+│         options => options.Enabled = true)                 │
 │                                                              │
 │ var app = builder.Build();                                  │
 │ app.MapHealthChecks("/health");                             │
@@ -383,7 +384,10 @@ builder.AddVapeCache()
     .WithHealthChecks()             // Registers Redis + VapeCache health checks
     .WithAspireTelemetry()          // Sends to Aspire Dashboard
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
-    .WithAutoMappedEndpoints();     // /vapecache/status + /vapecache/stats + /vapecache/stream
+    .WithAutoMappedEndpoints(options =>
+    {
+        options.Enabled = true;
+    });     // /vapecache/status + /vapecache/stats + /vapecache/stream
 
 var app = builder.Build();
 

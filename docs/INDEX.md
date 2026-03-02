@@ -45,6 +45,7 @@ This index tracks the current feature set and supported APIs.
 - [LICENSE_OPERATIONS_RUNBOOK.md](LICENSE_OPERATIONS_RUNBOOK.md) - Key rotation, revocation, and incident flow
 - [LICENSE_CONTROL_PLANE.md](LICENSE_CONTROL_PLANE.md) - Online revocation/kill-switch service
 - [LICENSE_GENERATOR_EXTERNALIZATION.md](LICENSE_GENERATOR_EXTERNALIZATION.md) - Moving issuance/signing out of this repo
+- [UPGRADE_NOTES.md](UPGRADE_NOTES.md) - Release-critical behavior changes and migration notes
 
 ## Roadmap & Risk
 - [FUTURE_PROOFING.md](FUTURE_PROOFING.md) - Hardening notes and risk assessment
@@ -67,6 +68,11 @@ dotnet add package VapeCache.Extensions.Aspire
 
 ### Basic Registration (Microsoft DI)
 ```csharp
+using VapeCache.Abstractions.Connections;
+
+builder.Services.AddOptions<RedisConnectionOptions>()
+    .Bind(builder.Configuration.GetSection("RedisConnection"));
+
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
 

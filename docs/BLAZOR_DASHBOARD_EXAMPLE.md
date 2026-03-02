@@ -24,6 +24,7 @@ builder.AddVapeCache()
     .WithAspireTelemetry()
     .WithAutoMappedEndpoints(options =>
     {
+        options.Enabled = true;
         options.Prefix = "/vapecache";
         options.EnableLiveStream = true;
         options.LiveSampleInterval = TimeSpan.FromMilliseconds(500);

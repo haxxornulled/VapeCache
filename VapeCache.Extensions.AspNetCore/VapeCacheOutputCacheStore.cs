@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Text.Json;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -13,13 +15,39 @@ public sealed class VapeCacheOutputCacheStore(
     IOptionsMonitor<VapeCacheOutputCacheStoreOptions> optionsMonitor,
     ILogger<VapeCacheOutputCacheStore> logger) : IOutputCacheStore
 {
-    private readonly Lock _indexGate = new();
-    private readonly Dictionary<string, HashSet<string>> _keysByTag = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, HashSet<string>> _tagsByKey = new(StringComparer.Ordinal);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly byte[] EnvelopePrefix = "VCOUT1:"u8.ToArray();
 
     /// <inheritdoc />
-    public ValueTask<byte[]?> GetAsync(string key, CancellationToken cancellationToken)
-        => cache.GetAsync(BuildCacheKey(key), cancellationToken);
+    public async ValueTask<byte[]?> GetAsync(string key, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+
+        var normalizedKey = BuildCacheKey(key);
+        var stored = await cache.GetAsync(normalizedKey, cancellationToken).ConfigureAwait(false);
+        if (stored is null)
+            return null;
+
+        if (!HasEnvelopePrefix(stored))
+            return stored;
+
+        if (!TryDeserializeEnvelope(stored, out var envelope))
+        {
+            logger.LogWarning("Discarding malformed output-cache envelope for key {Key}.", normalizedKey);
+            await cache.RemoveAsync(normalizedKey, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+
+        if (envelope.TagVersions.Count == 0)
+            return envelope.Payload;
+
+        if (await AreTagVersionsCurrentAsync(envelope.TagVersions, cancellationToken).ConfigureAwait(false))
+            return envelope.Payload;
+
+        await cache.RemoveAsync(normalizedKey, cancellationToken).ConfigureAwait(false);
+        logger.LogDebug("Discarded stale output-cache entry for key {Key} after tag invalidation.", normalizedKey);
+        return null;
+    }
 
     /// <inheritdoc />
     public async ValueTask SetAsync(
@@ -45,10 +73,20 @@ public sealed class VapeCacheOutputCacheStore(
                 Owner: "aspnetcore-output-cache-store",
                 Tags: normalizedTags));
 
-        await cache.SetAsync(normalizedKey, value, entryOptions, cancellationToken).ConfigureAwait(false);
+        if (!options.EnableTagIndexing || normalizedTags.Length == 0)
+        {
+            await cache.SetAsync(normalizedKey, value, entryOptions, cancellationToken).ConfigureAwait(false);
+            return;
+        }
 
-        if (options.EnableTagIndexing)
-            UpdateTagIndexes(normalizedKey, normalizedTags);
+        var tagVersions = await CaptureTagVersionsAsync(normalizedTags, cancellationToken).ConfigureAwait(false);
+        var wrappedPayload = SerializeEnvelope(new OutputCacheEnvelope
+        {
+            Payload = value,
+            TagVersions = tagVersions
+        });
+
+        await cache.SetAsync(normalizedKey, wrappedPayload, entryOptions, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -61,82 +99,117 @@ public sealed class VapeCacheOutputCacheStore(
             return;
 
         var normalizedTag = tag.Trim();
-        string[] keys;
-        lock (_indexGate)
-        {
-            if (!_keysByTag.TryGetValue(normalizedTag, out var keySet) || keySet.Count == 0)
-                return;
-            keys = keySet.ToArray();
-        }
+        var currentVersion = await GetTagVersionAsync(normalizedTag, cancellationToken).ConfigureAwait(false);
+        var nextVersion = currentVersion == long.MaxValue ? 1 : currentVersion + 1;
 
-        foreach (var cacheKey in keys)
-        {
-            await cache.RemoveAsync(cacheKey, cancellationToken).ConfigureAwait(false);
-            RemoveKeyFromIndexes(cacheKey);
-        }
+        await cache.SetAsync(
+            BuildTagVersionKey(normalizedTag),
+            SerializeTagVersion(nextVersion),
+            new CacheEntryOptions(
+                Intent: new CacheIntent(
+                    CacheIntentKind.ComputedView,
+                    Reason: "aspnetcore-output-cache-tag-version",
+                    Owner: "aspnetcore-output-cache-store",
+                    Tags: [normalizedTag])),
+            cancellationToken).ConfigureAwait(false);
 
-        logger.LogInformation("Output-cache eviction by tag completed. Tag={Tag} EvictedKeys={Count}", normalizedTag, keys.Length);
+        logger.LogInformation("Output-cache eviction by tag completed. Tag={Tag} Version={Version}", normalizedTag, nextVersion);
     }
 
-    private void UpdateTagIndexes(string cacheKey, string[] tags)
+    private async ValueTask<Dictionary<string, long>> CaptureTagVersionsAsync(string[] normalizedTags, CancellationToken cancellationToken)
     {
-        lock (_indexGate)
-        {
-            if (_tagsByKey.TryGetValue(cacheKey, out var existingTags))
-            {
-                foreach (var existingTag in existingTags)
-                {
-                    if (_keysByTag.TryGetValue(existingTag, out var keysForTag))
-                    {
-                        keysForTag.Remove(cacheKey);
-                        if (keysForTag.Count == 0)
-                            _keysByTag.Remove(existingTag);
-                    }
-                }
-            }
+        var result = new Dictionary<string, long>(normalizedTags.Length, StringComparer.Ordinal);
+        foreach (var tag in normalizedTags)
+            result[tag] = await GetTagVersionAsync(tag, cancellationToken).ConfigureAwait(false);
 
-            var newTagSet = new HashSet<string>(tags, StringComparer.Ordinal);
-            _tagsByKey[cacheKey] = newTagSet;
-
-            foreach (var tag in newTagSet)
-            {
-                if (!_keysByTag.TryGetValue(tag, out var keysForTag))
-                {
-                    keysForTag = new HashSet<string>(StringComparer.Ordinal);
-                    _keysByTag[tag] = keysForTag;
-                }
-
-                keysForTag.Add(cacheKey);
-            }
-        }
+        return result;
     }
 
-    private void RemoveKeyFromIndexes(string cacheKey)
+    private async ValueTask<bool> AreTagVersionsCurrentAsync(
+        IReadOnlyDictionary<string, long> expectedVersions,
+        CancellationToken cancellationToken)
     {
-        lock (_indexGate)
+        foreach (var entry in expectedVersions)
         {
-            if (!_tagsByKey.TryGetValue(cacheKey, out var tags))
-                return;
+            var current = await GetTagVersionAsync(entry.Key, cancellationToken).ConfigureAwait(false);
+            if (current != entry.Value)
+                return false;
+        }
 
-            foreach (var tag in tags)
-            {
-                if (_keysByTag.TryGetValue(tag, out var keysForTag))
-                {
-                    keysForTag.Remove(cacheKey);
-                    if (keysForTag.Count == 0)
-                        _keysByTag.Remove(tag);
-                }
-            }
+        return true;
+    }
 
-            _tagsByKey.Remove(cacheKey);
+    private async ValueTask<long> GetTagVersionAsync(string tag, CancellationToken cancellationToken)
+    {
+        var payload = await cache.GetAsync(BuildTagVersionKey(tag), cancellationToken).ConfigureAwait(false);
+        return TryDeserializeTagVersion(payload, out var version)
+            ? version
+            : 0;
+    }
+
+    private string BuildTagVersionKey(string tag) => $"{ResolveKeyPrefix()}:tag-version:{tag}";
+
+    private static byte[] SerializeTagVersion(long version)
+    {
+        var bytes = GC.AllocateUninitializedArray<byte>(sizeof(long));
+        BinaryPrimitives.WriteInt64LittleEndian(bytes, version);
+        return bytes;
+    }
+
+    private static bool TryDeserializeTagVersion(byte[]? payload, out long version)
+    {
+        version = 0;
+        if (payload is null || payload.Length != sizeof(long))
+            return false;
+
+        version = BinaryPrimitives.ReadInt64LittleEndian(payload);
+        return true;
+    }
+
+    private static byte[] SerializeEnvelope(OutputCacheEnvelope envelope)
+    {
+        var json = JsonSerializer.SerializeToUtf8Bytes(envelope, JsonOptions);
+        var buffer = GC.AllocateUninitializedArray<byte>(EnvelopePrefix.Length + json.Length);
+        EnvelopePrefix.AsSpan().CopyTo(buffer);
+        json.AsSpan().CopyTo(buffer.AsSpan(EnvelopePrefix.Length));
+        return buffer;
+    }
+
+    private static bool HasEnvelopePrefix(byte[] payload)
+        => payload.AsSpan().StartsWith(EnvelopePrefix);
+
+    private static bool TryDeserializeEnvelope(byte[] payload, out OutputCacheEnvelope envelope)
+    {
+        envelope = default!;
+        if (!HasEnvelopePrefix(payload))
+            return false;
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<OutputCacheEnvelope>(
+                payload.AsSpan(EnvelopePrefix.Length),
+                JsonOptions);
+            if (parsed is null || parsed.Payload is null)
+                return false;
+
+            envelope = parsed;
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 
     private string BuildCacheKey(string key)
     {
+        return $"{ResolveKeyPrefix()}:{key}";
+    }
+
+    private string ResolveKeyPrefix()
+    {
         var options = optionsMonitor.CurrentValue;
-        var prefix = string.IsNullOrWhiteSpace(options.KeyPrefix) ? "vapecache:output" : options.KeyPrefix.Trim();
-        return $"{prefix}:{key}";
+        return string.IsNullOrWhiteSpace(options.KeyPrefix) ? "vapecache:output" : options.KeyPrefix.Trim();
     }
 
     private static string[] NormalizeTags(string[]? tags)
@@ -158,5 +231,11 @@ public sealed class VapeCacheOutputCacheStore(
         }
 
         return result.ToArray();
+    }
+
+    private sealed class OutputCacheEnvelope
+    {
+        public byte[] Payload { get; init; } = Array.Empty<byte>();
+        public Dictionary<string, long> TagVersions { get; init; } = new(StringComparer.Ordinal);
     }
 }

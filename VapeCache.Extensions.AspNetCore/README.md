@@ -12,8 +12,11 @@ dotnet add package VapeCache.Extensions.AspNetCore
 
 ```csharp
 using Microsoft.AspNetCore.OutputCaching;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Extensions.AspNetCore;
 
+builder.Services.AddOptions<RedisConnectionOptions>()
+    .Bind(builder.Configuration.GetSection("RedisConnection"));
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
 
@@ -37,6 +40,7 @@ app.MapGet("/products/{id:int}", async (int id) => $"product:{id}")
 
 For MVC/Blazor endpoints, use ASP.NET Core output cache policies/attributes as usual.  
 This package replaces the default output-cache store with `VapeCacheOutputCacheStore`.
+When `EnableTagIndexing = true`, tag invalidation metadata is stored in VapeCache so tag evictions work across nodes and survive process restarts.
 
 ## Sticky Failover Hints (Cluster/Web-Garden)
 

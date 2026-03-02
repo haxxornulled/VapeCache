@@ -46,5 +46,10 @@ dotnet add package VapeCache.Reconciliation
 ```
 
 ## Notes
+- First-party package install/restore is smoke-tested in both CI and release workflows against the built `.nupkg` artifacts.
+- For direct DI registration, bind `RedisConnection` before calling `AddVapecacheRedisConnections()` / `AddVapecacheCaching()`, or set `VAPECACHE_REDIS_CONNECTIONSTRING`.
+- `WithAutoMappedEndpoints(...)` only maps wrapper routes when `VapeCacheEndpointOptions.Enabled = true`.
+- Use `tools/publish-release-packages.ps1` to push the built packages in dependency-safe order when publishing to a NuGet feed.
 - Logging is via `ILogger<T>` only; you choose Serilog/NLog/console in your host project.
 - OpenTelemetry exporters are configured by the host; VapeCache emits metrics/traces via standard `Meter`/`ActivitySource`.
+- [UPGRADE_NOTES.md](UPGRADE_NOTES.md) tracks release-critical behavior changes.

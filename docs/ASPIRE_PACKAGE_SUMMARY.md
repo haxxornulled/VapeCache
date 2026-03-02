@@ -76,10 +76,10 @@ public static AspireVapeCacheBuilder WithRedisFromAspire(
 
 **Implementation:**
 - Documents Aspire's automatic connection string injection
-- Users configure via environment variables or appsettings.json
 - Aspire injects `ConnectionStrings:{connectionName}` automatically
+- Hosts still bind `RedisConnection` explicitly or set `VAPECACHE_REDIS_CONNECTIONSTRING`
 
-**Note:** Simplified to documentation-only because `RedisConnectionOptions` uses init-only properties.
+**Note:** This method is intentionally light-touch today; it documents the Aspire hookup and leaves host binding explicit.
 
 ### 5. [Extensions/AspireTelemetryExtensions.cs](../VapeCache.Extensions.Aspire/Extensions/AspireTelemetryExtensions.cs) ⭐ **KEY FILE**
 **Purpose:** Registers VapeCache metrics with OpenTelemetry for Aspire Dashboard
@@ -116,55 +116,22 @@ public static AspireVapeCacheBuilder WithHealthChecks(
 - Leaves endpoint mapping to the host (e.g., map `/health`, `/health/ready`, `/health/live` if desired)
 
 ### 7. [HealthChecks/RedisHealthCheck.cs](../VapeCache.Extensions.Aspire/HealthChecks/RedisHealthCheck.cs)
-**Purpose:** Validates Redis connection pool health
-
-**Implementation:**
-```csharp
-public sealed class RedisHealthCheck : IHealthCheck
-{
-    private readonly IRedisConnectionPool _pool;
-
-    public async Task<HealthCheckResult> CheckHealthAsync(
-        HealthCheckContext context,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await _pool.RentAsync(cancellationToken);
-        return await result.Match(
-            async lease => /* Healthy */,
-            error => /* Unhealthy */);
-    }
-}
-```
+**Purpose:** Validates Redis health with a real `PING` over a leased pooled connection
 
 **Key Features:**
 - Uses public interface `IRedisConnectionPool` (no internal type coupling)
+- Sends RESP `PING` and verifies `PONG` before reporting healthy
 - Handles LanguageExt `Result<T>` monad with `.Match()`
-- Returns `Degraded` on timeout, `Unhealthy` on connection failure
+- Returns `Degraded` on timeout, `Unhealthy` on connection or protocol failure
 
 ### 8. [HealthChecks/VapeCacheHealthCheck.cs](../VapeCache.Extensions.Aspire/HealthChecks/VapeCacheHealthCheck.cs)
-**Purpose:** Validates cache service is operational
-
-**Implementation:**
-```csharp
-public sealed class VapeCacheHealthCheck : IHealthCheck
-{
-    private readonly ICacheService _cache;
-
-    public async Task<HealthCheckResult> CheckHealthAsync(
-        HealthCheckContext context,
-        CancellationToken cancellationToken = default)
-    {
-        var healthCheckKey = "__health__:vapecache";
-        _ = await _cache.GetAsync(healthCheckKey, cancellationToken);
-        return HealthCheckResult.Healthy("VapeCache is operational.");
-    }
-}
-```
+**Purpose:** Validates cache service is operational and reports fallback mode truthfully
 
 **Key Features:**
-- Uses public interface `ICacheService` (no internal type coupling)
-- Simple GET operation to verify cache responsiveness
-- Returns detailed error information on failure
+- Uses public interfaces for cache access, current backend, breaker state, and forced failover state
+- Performs a lightweight GET operation to verify cache responsiveness
+- Returns `Degraded` when the service is operating through fallback
+- Returns detailed `Unhealthy` data when the probe itself fails
 
 ### 9. [README.md](../VapeCache.Extensions.Aspire/README.md)
 **Purpose:** Package documentation and usage examples
@@ -274,7 +241,7 @@ Navigate to **`http://localhost:15888`** to see:
 ### Cache Metrics (`VapeCache.Cache` meter)
 | Metric | Type | Description | Tags |
 |--------|------|-------------|------|
-| `cache.current.backend` | ObservableGauge | **Current active backend** (1=redis, 0=in-memory) | `backend="redis"` or `backend="in-memory"` |
+| `cache.current.backend` | ObservableGauge | **Current active backend** (1=redis, 0=in-memory, -1=unknown) | `backend="redis"` or `backend="in-memory"` |
 | `cache.get.calls` | Counter | Total GET operations | - |
 | `cache.get.hits` | Counter | Cache hits | `backend="redis"` or `backend="in-memory"` |
 | `cache.get.misses` | Counter | Cache misses | `backend="redis"` or `backend="in-memory"` |

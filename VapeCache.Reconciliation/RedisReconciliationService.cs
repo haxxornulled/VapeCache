@@ -96,7 +96,19 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         var limit = _options.MaxPendingOperations;
         if (limit <= 0) return true;
 
-        var count = EnsurePendingEstimate();
+        int count;
+        try
+        {
+            count = EnsurePendingEstimate();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to load reconciliation pending estimate. Bypassing MaxPendingOperations enforcement for this operation.");
+            return true;
+        }
+
         if (count >= limit)
         {
             RedisReconciliationTelemetry.Dropped.Add(1);

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
@@ -23,6 +24,13 @@ public static class CacheRegistration
         services.AddMemoryCache();
         services.AddOptions<InMemorySpillOptions>();
         services.AddOptions<HybridFailoverOptions>();
+        services.AddOptions<RedisMultiplexerOptions>()
+            .ValidateOnStart();
+        services.TryAddSingleton<RedisMultiplexerOptionsValidator>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<RedisMultiplexerOptions>, RedisMultiplexerOptionsValidator>());
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, RedisMultiplexerOptionsStartupHostedService>());
 
         services.AddSingleton<ICurrentCacheService>(sp =>
         {
@@ -110,7 +118,8 @@ public static class CacheRegistration
         services.AddSingleton<ICacheCollectionFactory, CacheCollectionFactory>();
 
         // Redis module detection (for RedisJSON, RediSearch, etc.)
-        services.AddSingleton<IRedisModuleDetector, RedisModuleDetector>();
+        services.AddSingleton<IRedisModuleDetector>(sp =>
+            new RedisModuleDetector(sp.GetRequiredService<RedisCommandExecutor>()));
         services.AddSingleton<IRedisSearchService, RedisSearchService>();
         services.AddSingleton<IRedisBloomService, RedisBloomService>();
         services.AddSingleton<IRedisTimeSeriesService, RedisTimeSeriesService>();

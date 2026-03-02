@@ -19,6 +19,7 @@ builder.AddVapeCache()
     .WithAspireTelemetry(options => options.UseSeq("http://localhost:5341"))
     .WithAutoMappedEndpoints(options =>
     {
+        options.Enabled = true;
         options.Prefix = "/vapecache";
         options.IncludeBreakerControlEndpoints = false;
     });

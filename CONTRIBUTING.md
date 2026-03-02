@@ -35,3 +35,11 @@ $env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
 - Keep changes scoped and explain rationale.
 - Add/adjust tests for behavior changes.
 - Avoid large formatting-only diffs unless required.
+
+## Commit Notifications
+- Pushes to `main`, `master`, and release tags matching `v*` trigger `.github/workflows/commit-notify.yml`.
+- Branch pushes are posted as comments on the repo's `Commit Notifications` issue, and release tag pushes are posted on `Release Notifications`.
+- The workflow `@mention`s subscribed contributors on each notification comment.
+- Keep GitHub Issues enabled for the repository; the notification feed is issue-comment based.
+- Keep your git author email set to your GitHub noreply address if you want automatic handle discovery from commit history.
+- If your commits use a non-GitHub email, add your handle to `.github/commit-notify-subscribers.txt`.

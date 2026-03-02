@@ -51,6 +51,43 @@ public sealed class VapeCacheOutputCacheStoreTests
     }
 
     [Fact]
+    public async Task EvictByTagAsync_PropagatesAcrossStoreInstances()
+    {
+        var cache = new InMemoryRawCacheService();
+        var options = new StaticOptionsMonitor<VapeCacheOutputCacheStoreOptions>(new VapeCacheOutputCacheStoreOptions
+        {
+            KeyPrefix = "test:output",
+            EnableTagIndexing = true
+        });
+        var writer = new VapeCacheOutputCacheStore(cache, options, NullLogger<VapeCacheOutputCacheStore>.Instance);
+        var evictor = new VapeCacheOutputCacheStore(cache, options, NullLogger<VapeCacheOutputCacheStore>.Instance);
+
+        await writer.SetAsync("shared-key", new byte[] { 0x2A }, new[] { "home" }, TimeSpan.FromSeconds(30), CancellationToken.None);
+        await evictor.EvictByTagAsync("home", CancellationToken.None);
+
+        Assert.Null(await writer.GetAsync("shared-key", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetAsync_ReturnsLegacyRawPayload_WhenEntryIsNotWrapped()
+    {
+        var cache = new InMemoryRawCacheService();
+        var options = new StaticOptionsMonitor<VapeCacheOutputCacheStoreOptions>(new VapeCacheOutputCacheStoreOptions
+        {
+            KeyPrefix = "test:output",
+            EnableTagIndexing = true
+        });
+        var store = new VapeCacheOutputCacheStore(cache, options, NullLogger<VapeCacheOutputCacheStore>.Instance);
+        var payload = new byte[] { 0x10, 0x20, 0x30 };
+
+        cache.SeedRaw("test:output:legacy", payload);
+
+        var result = await store.GetAsync("legacy", CancellationToken.None);
+
+        Assert.Equal(payload, result);
+    }
+
+    [Fact]
     public void AddVapeCacheOutputCaching_BindsStoreOptionsFromConfiguration()
     {
         var configuration = new ConfigurationBuilder()
@@ -118,6 +155,14 @@ public sealed class VapeCacheOutputCacheStoreTests
             lock (_gate)
             {
                 return _store.ContainsKey(key);
+            }
+        }
+
+        public void SeedRaw(string key, byte[] payload)
+        {
+            lock (_gate)
+            {
+                _store[key] = payload;
             }
         }
     }

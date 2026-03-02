@@ -71,15 +71,16 @@ flowchart TB
     classDef gate fill:transparent,stroke:#f08c00,stroke-width:2px,stroke-dasharray: 6 4
     classDef done fill:transparent,stroke:#2b8a3e,stroke-width:2px
 
-    A[Trigger<br/>push tag v* or manual dispatch]:::gate --> B[Checkout + .NET 10 setup]:::step
-    B --> C[Restore + Build Release]:::step
-    C --> D[Run unit tests + perf-gate tests]:::step
-    D --> E[Vulnerability scan]:::step
-    E --> F[Pack NuGet artifacts]:::step
-    F --> G[Collect .nupkg files]:::step
-    G --> H[Generate SHA256SUMS.txt]:::step
-    H --> I[Upload workflow artifact]:::step
-    I --> J[Create GitHub Release<br/>attach packages + checksums]:::done
+    A[Trigger<br/>push tag v* or manual dispatch with release_tag]:::gate --> B[Resolve release tag + package version]:::step
+    B --> C[Checkout + .NET 10 setup]:::step
+    C --> D[Restore + Build Release]:::step
+    D --> E[Run unit tests + perf-gate tests]:::step
+    E --> F[Vulnerability scan]:::step
+    F --> G[Pack NuGet artifacts<br/>using tag-derived version]:::step
+    G --> H[Smoke-install built package]:::step
+    H --> I[Generate SHA256SUMS.txt]:::step
+    I --> J[Upload workflow artifact]:::step
+    J --> K[Create GitHub Release<br/>attach packages + checksums]:::done
 ```
 
 ## 4. PR Auto-Approve Policy
@@ -99,3 +100,19 @@ flowchart TB
     D -->|renovate[bot]| E
     D -->|No match| F[No auto-approval]:::fail
 ```
+
+## 5. Commit Notification Feed
+
+- Workflow: `.github/workflows/commit-notify.yml`
+- Trigger: `push` to `main`, `master`, or tags matching `v*`, plus manual dispatch for verification.
+- Delivery: branch pushes go to the `Commit Notifications` issue; release tags go to `Release Notifications`.
+- Each run adds a comment summarizing the push or tag event.
+- Recipients: handles from `.github/commit-notify-subscribers.txt` plus contributors whose git author email uses GitHub's noreply format.
+- Result: contributors receive standard GitHub notifications from issue comment mentions without requiring external mail or chat infrastructure.
+
+## 6. Release Notes
+
+- Release workflow manual dispatch now requires a `release_tag` input (for example `v1.1.0` or `v1.1.0-rc1`).
+- Package artifacts are versioned from the resolved tag, so prerelease tags generate matching prerelease `.nupkg` versions.
+- `tools/pack-release-packages.ps1` validates that all packable projects share the same base version before packing.
+- `tools/publish-release-packages.ps1` pushes packages in dependency-safe order when you are ready to publish to a NuGet feed.

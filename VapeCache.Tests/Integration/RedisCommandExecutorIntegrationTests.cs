@@ -143,4 +143,42 @@ public sealed class RedisCommandExecutorIntegrationTests
 
         await Task.WhenAll(tasks);
     }
+
+    [SkippableFact]
+    public async Task Executor_supports_paginated_sorted_set_ranges_by_score()
+    {
+        var options = RedisIntegrationConfig.TryLoad(out var skipReason);
+        Skip.If(options is null, skipReason);
+
+        await using var factory = new RedisConnectionFactory(
+            RedisIntegrationConfig.Monitor(options),
+            NullLogger<RedisConnectionFactory>.Instance,
+            Array.Empty<IRedisConnectionObserver>());
+
+        await using var exec = new RedisCommandExecutor(
+            factory,
+            Options.Create(new RedisMultiplexerOptions { Connections = 1, MaxInFlightPerConnection = 1024 }));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var ct = cts.Token;
+
+        var key = "vapecache:zrange:" + Guid.NewGuid().ToString("N");
+
+        try
+        {
+            Assert.Equal(1, await exec.ZAddAsync(key, 1, "m1"u8.ToArray(), ct));
+            Assert.Equal(1, await exec.ZAddAsync(key, 2, "m2"u8.ToArray(), ct));
+            Assert.Equal(1, await exec.ZAddAsync(key, 3, "m3"u8.ToArray(), ct));
+
+            var page = await exec.ZRangeByScoreWithScoresAsync(key, 1, 3, descending: false, offset: 1, count: 1, ct);
+
+            Assert.Single(page);
+            Assert.Equal("m2", System.Text.Encoding.UTF8.GetString(page[0].Member));
+            Assert.Equal(2d, page[0].Score);
+        }
+        finally
+        {
+            await exec.UnlinkAsync(key, ct);
+        }
+    }
 }

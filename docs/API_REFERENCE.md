@@ -309,7 +309,10 @@ builder.AddVapeCache()
     .WithHealthChecks()
     .WithAspireTelemetry()
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
-    .WithAutoMappedEndpoints();
+    .WithAutoMappedEndpoints(options =>
+    {
+        options.Enabled = true;
+    });
 ```
 
 ### Endpoint mapping

@@ -34,6 +34,8 @@ public sealed class VapeCacheCachingModule : Module
         RegisterStaticOptions(builder, new CacheStampedeOptions());
         RegisterStaticOptions(builder, new RedisCircuitBreakerOptions());
         RegisterStaticOptions(builder, new RedisMultiplexerOptions());
+        builder.RegisterType<RedisMultiplexerOptionsValidator>().AsSelf().SingleInstance();
+        builder.RegisterType<RedisMultiplexerOptionsStartupValidator>().As<IStartable>().SingleInstance();
         builder.RegisterType<MemoryCache>().As<IMemoryCache>().SingleInstance();
 
         builder.RegisterType<RedisCommandExecutor>().AsSelf().SingleInstance();
@@ -91,7 +93,9 @@ public sealed class VapeCacheCachingModule : Module
         builder.RegisterType<JsonCacheService>().As<IJsonCache>().SingleInstance();
         builder.RegisterType<ChunkedCacheStreamService>().As<ICacheChunkStreamService>().SingleInstance();
         builder.RegisterType<CacheCollectionFactory>().As<ICacheCollectionFactory>().SingleInstance();
-        builder.RegisterType<RedisModuleDetector>().As<IRedisModuleDetector>().SingleInstance();
+        builder.Register(ctx => new RedisModuleDetector(ctx.Resolve<RedisCommandExecutor>()))
+            .As<IRedisModuleDetector>()
+            .SingleInstance();
         builder.RegisterType<RedisSearchService>().As<IRedisSearchService>().SingleInstance();
         builder.RegisterType<RedisBloomService>().As<IRedisBloomService>().SingleInstance();
         builder.RegisterType<RedisTimeSeriesService>().As<IRedisTimeSeriesService>().SingleInstance();

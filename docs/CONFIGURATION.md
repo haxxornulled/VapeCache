@@ -19,6 +19,18 @@ Or provide a connection string:
 $env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
 ```
 
+Bind the section before you register the core services:
+
+```csharp
+using VapeCache.Abstractions.Connections;
+
+builder.Services.AddOptions<RedisConnectionOptions>()
+    .Bind(builder.Configuration.GetSection("RedisConnection"));
+
+builder.Services.AddVapecacheRedisConnections();
+builder.Services.AddVapecacheCaching();
+```
+
 ## RedisConnection (RedisConnectionOptions)
 
 Controls connection pooling and socket behavior.
@@ -51,7 +63,7 @@ Controls connection pooling and socket behavior.
     "EnableTcpKeepAlive": true,
     "TcpKeepAliveTime": "00:00:30",
     "TcpKeepAliveInterval": "00:00:10",
-    "AllowAuthFallbackToPasswordOnly": true,
+    "AllowAuthFallbackToPasswordOnly": false,
     "LogWhoAmIOnConnect": false,
     "MaxBulkStringBytes": 16777216,
     "MaxArrayDepth": 64,
@@ -72,6 +84,7 @@ Controls connection pooling and socket behavior.
 - `RespProtocolVersion` supports `2` or `3`; default negotiation is `RESP2` unless configured.
 - `EnableClusterRedirection=true` enables MOVED/ASK retries on cache-path commands.
 - `MaxClusterRedirects` bounds redirect hops per command (default `3`, clamped `0..16`).
+- `AllowAuthFallbackToPasswordOnly=false` is the safe default; only enable it when you intentionally want legacy password-only fallback after ACL auth fails.
 
 ## RedisMultiplexer (RedisMultiplexerOptions)
 
@@ -341,10 +354,11 @@ Optional online revocation/kill-switch checks:
 $env:VAPECACHE_LICENSE_REVOCATION_ENABLED = "true"
 $env:VAPECACHE_LICENSE_REVOCATION_ENDPOINT = "https://license-control-plane.internal"
 $env:VAPECACHE_LICENSE_REVOCATION_API_KEY = "<secret>"
-$env:VAPECACHE_LICENSE_REVOCATION_FAIL_OPEN = "true"
 $env:VAPECACHE_LICENSE_REVOCATION_TIMEOUT_MS = "2000"
 $env:VAPECACHE_LICENSE_REVOCATION_CACHE_SECONDS = "60"
 ```
+
+Online revocation now fails closed by default. Only set `VAPECACHE_LICENSE_REVOCATION_FAIL_OPEN=true` if you explicitly want legacy fail-open behavior during revocation endpoint failures.
 
 Verifier override hardening:
 

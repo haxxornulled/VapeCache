@@ -50,6 +50,24 @@ public sealed class CacheSortedSetTests
         Assert.Contains(2, seen);
     }
 
+    [Fact]
+    public async Task SortedSet_RangeByScore_RespectsOffsetAndCount()
+    {
+        var executor = new InMemoryCommandExecutor();
+        var codec = new Int32Codec();
+        var set = new CacheSortedSet<int>("scores", executor, codec);
+
+        await set.AddAsync(1, 1);
+        await set.AddAsync(2, 2);
+        await set.AddAsync(3, 3);
+
+        var page = await set.RangeByScoreAsync(1, 3, offset: 1, count: 1);
+
+        Assert.Single(page);
+        Assert.Equal(2, page[0].Member);
+        Assert.Equal(2d, page[0].Score);
+    }
+
     private sealed class Int32Codec : ICacheCodec<int>
     {
         public void Serialize(IBufferWriter<byte> buffer, int value)

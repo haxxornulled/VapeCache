@@ -46,6 +46,7 @@
   <ItemGroup>
     <PackageReference Include="Autofac" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
     <PackageReference Include="Polly" Version="8.6.5" />
     <!--
@@ -57,7 +58,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\VapeCache.Application\VapeCache.Application.csproj" />
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
   </ItemGroup>
 

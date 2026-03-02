@@ -5,8 +5,10 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Extensions.Aspire;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
@@ -181,8 +183,14 @@ public sealed class AspireEndpointExtensionsTests
             EnvironmentName = "Development"
         });
         builder.WebHost.UseTestServer();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal"
+        });
         builder.Services.AddVapecacheRedisConnections();
         builder.Services.AddVapecacheCaching();
+        builder.Services.AddOptions<RedisConnectionOptions>()
+            .Bind(builder.Configuration.GetSection("RedisConnection"));
 
         var app = builder.Build();
         app.MapPost("/seed-intent", (ICacheIntentRegistry intentRegistry) =>
@@ -205,14 +213,22 @@ public sealed class AspireEndpointExtensionsTests
             EnvironmentName = "Development"
         });
         builder.WebHost.UseTestServer();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal"
+        });
         builder.AddVapeCache()
             .WithAutoMappedEndpoints(options =>
             {
                 options.Enabled = enabled;
                 options.Prefix = "/vapecache";
                 options.IncludeBreakerControlEndpoints = false;
+                options.IncludeIntentEndpoints = true;
+                options.EnableLiveStream = true;
                 options.LiveSampleInterval = TimeSpan.FromMilliseconds(50);
             });
+        builder.Services.AddOptions<RedisConnectionOptions>()
+            .Bind(builder.Configuration.GetSection("RedisConnection"));
 
         var app = builder.Build();
         await app.StartAsync();

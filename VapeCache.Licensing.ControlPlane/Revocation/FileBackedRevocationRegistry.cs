@@ -137,14 +137,27 @@ public sealed class FileBackedRevocationRegistry : IRevocationRegistry
             var changed = !map.TryGetValue(normalizedIdentity, out var existing) ||
                           !string.Equals(existing.Reason, normalizedReason, StringComparison.Ordinal) ||
                           !string.Equals(existing.Actor, normalizedActor, StringComparison.Ordinal);
-
-            map[normalizedIdentity] = new RevocationRecord(
+            var hadExisting = existing is not null;
+            var nextRecord = new RevocationRecord(
                 Identity: normalizedIdentity,
                 Reason: normalizedReason,
                 Actor: normalizedActor,
                 UpdatedAtUtc: utcNow);
 
-            SaveStateUnsafe();
+            map[normalizedIdentity] = nextRecord;
+            try
+            {
+                SaveStateUnsafe();
+            }
+            catch
+            {
+                if (hadExisting)
+                    map[normalizedIdentity] = existing!;
+                else
+                    map.Remove(normalizedIdentity);
+                throw;
+            }
+
             return new RevocationMutationResult(
                 Scope: scope,
                 Identity: normalizedIdentity,
@@ -171,9 +184,19 @@ public sealed class FileBackedRevocationRegistry : IRevocationRegistry
 
         lock (_gate)
         {
-            var changed = map.Remove(normalizedIdentity);
+            var changed = map.Remove(normalizedIdentity, out var removedRecord);
             if (changed)
-                SaveStateUnsafe();
+            {
+                try
+                {
+                    SaveStateUnsafe();
+                }
+                catch
+                {
+                    map[normalizedIdentity] = removedRecord!;
+                    throw;
+                }
+            }
 
             return new RevocationMutationResult(
                 Scope: scope,
@@ -217,10 +240,8 @@ public sealed class FileBackedRevocationRegistry : IRevocationRegistry
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to read revocation state file. Starting with empty state. Path={Path}", _stateFilePath);
-            _revokedLicenses.Clear();
-            _organizationKillSwitches.Clear();
-            _revokedKeyIds.Clear();
+            _logger.LogError(ex, "Failed to read revocation state file. Startup aborted. Path={Path}", _stateFilePath);
+            throw new InvalidOperationException("Failed to load revocation state file.", ex);
         }
     }
 

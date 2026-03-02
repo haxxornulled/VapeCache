@@ -163,6 +163,33 @@ public sealed class OrphanCleanupTests : IDisposable
     }
 
     [Fact]
+    public async Task TryReadAsync_RefreshesTimestamp_AndPreventsLiveFileCleanup()
+    {
+        var options = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions
+        {
+            SpillDirectory = _testRoot,
+            EnableOrphanCleanup = true,
+            OrphanMaxAge = TimeSpan.FromSeconds(1),
+            OrphanCleanupInterval = TimeSpan.FromMilliseconds(100)
+        });
+        var store = new FileSpillStore(options, new NoopSpillEncryptionProvider());
+
+        var spillRef = Guid.NewGuid();
+        await store.WriteAsync(spillRef, new byte[] { 1, 2, 3 }, CancellationToken.None);
+
+        await Task.Delay(TimeSpan.FromSeconds(1.2));
+
+        var refreshed = await store.TryReadAsync(spillRef, CancellationToken.None);
+        Assert.NotNull(refreshed);
+
+        await store.WriteAsync(Guid.NewGuid(), new byte[] { 9 }, CancellationToken.None);
+        await Task.Delay(TimeSpan.FromMilliseconds(300));
+
+        var result = await store.TryReadAsync(spillRef, CancellationToken.None);
+        Assert.NotNull(result);
+    }
+
+    [Fact]
     public async Task CleanupInterval_PreventsTooFrequentCleanup()
     {
         // Arrange

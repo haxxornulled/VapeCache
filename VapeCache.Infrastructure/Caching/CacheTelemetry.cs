@@ -60,6 +60,12 @@ public static class CacheTelemetry
         _spillStoreDiagnostics = spillStoreDiagnostics;
     }
 
+    internal static void ResetForTesting()
+    {
+        _currentCacheService = null;
+        _spillStoreDiagnostics = null;
+    }
+
     internal static string GetPayloadBucket(int bytes) => bytes switch
     {
         <= 1024 => "lte_1kb",
@@ -70,22 +76,24 @@ public static class CacheTelemetry
         _ => "gt_256kb"
     };
 
+    internal static Measurement<int> GetCurrentBackendMeasurement()
+    {
+        if (_currentCacheService is null)
+            return new Measurement<int>(-1, new TagList { { "backend", "unknown" } });
+
+        var current = _currentCacheService.CurrentName;
+        var value = MapBackendName(current);
+
+        return new Measurement<int>(value, new TagList { { "backend", current } });
+    }
+
     /// <summary>
     /// Observable gauge that reports the current active backend (1=redis, 0=in-memory).
     /// This allows real-time monitoring of which cache backend is actively serving requests.
     /// </summary>
     public static readonly ObservableGauge<int> CurrentBackend = Meter.CreateObservableGauge(
         "cache.current.backend",
-        observeValue: () =>
-        {
-            if (_currentCacheService is null)
-                return new Measurement<int>(0, new TagList { { "backend", "unknown" } });
-
-            var current = _currentCacheService.CurrentName;
-            var value = MapBackendName(current);
-
-            return new Measurement<int>(value, new TagList { { "backend", current } });
-        },
+        observeValue: static () => GetCurrentBackendMeasurement(),
         unit: "backend",
         description: "Current active cache backend (1=redis, 0=in-memory, -1=unknown)");
 

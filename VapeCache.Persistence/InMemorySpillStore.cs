@@ -76,36 +76,45 @@ public sealed class FileSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics
     public async ValueTask<byte[]?> TryReadAsync(Guid spillRef, CancellationToken ct)
     {
         var path = GetPath(spillRef);
-        if (!File.Exists(path))
-            return null;
-
-        await using var stream = new FileStream(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            bufferSize: 81920,
-            options: FileOptions.Asynchronous | FileOptions.SequentialScan);
-
-        if (stream.Length > int.MaxValue)
-            throw new InvalidOperationException("Spill payload exceeds supported size.");
-
-        var buffer = new byte[stream.Length];
-        var read = 0;
-        while (read < buffer.Length)
+        try
         {
-            var n = await stream.ReadAsync(buffer.AsMemory(read, buffer.Length - read), ct).ConfigureAwait(false);
-            if (n == 0)
-                throw new EndOfStreamException();
-            read += n;
-        }
+            await using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 81920,
+                options: FileOptions.Asynchronous | FileOptions.SequentialScan);
 
-        var decrypted = await _encryption.DecryptAsync(buffer, ct).ConfigureAwait(false);
-        var result = EnsureArray(decrypted);
-        CacheTelemetry.SpillReadCount.Add(1);
-        CacheTelemetry.SpillReadBytes.Add(result.Length);
-        TryScheduleOrphanCleanup();
-        return result;
+            if (stream.Length > int.MaxValue)
+                throw new InvalidOperationException("Spill payload exceeds supported size.");
+
+            var buffer = new byte[stream.Length];
+            var read = 0;
+            while (read < buffer.Length)
+            {
+                var n = await stream.ReadAsync(buffer.AsMemory(read, buffer.Length - read), ct).ConfigureAwait(false);
+                if (n == 0)
+                    throw new EndOfStreamException();
+                read += n;
+            }
+
+            var decrypted = await _encryption.DecryptAsync(buffer, ct).ConfigureAwait(false);
+            var result = EnsureArray(decrypted);
+            TryRefreshActivityTimestamp(path);
+            CacheTelemetry.SpillReadCount.Add(1);
+            CacheTelemetry.SpillReadBytes.Add(result.Length);
+            TryScheduleOrphanCleanup();
+            return result;
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -201,6 +210,18 @@ public sealed class FileSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics
         }
 
         return data.ToArray();
+    }
+
+    private static void TryRefreshActivityTimestamp(string path)
+    {
+        try
+        {
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
+        }
+        catch
+        {
+            // Best-effort touch to keep active spill files from looking orphaned.
+        }
     }
 
     private void EnsureInventoryInitialized()
@@ -329,8 +350,15 @@ public sealed class FileSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics
                 var info = new FileInfo(file);
                 if (info.LastWriteTimeUtc <= cutoffUtc)
                 {
+                    var spillName = Path.GetFileNameWithoutExtension(file);
                     deletedBytes += info.Length;
                     File.Delete(file);
+                    if (!string.IsNullOrWhiteSpace(spillName))
+                    {
+                        var shardKey = ParseShard(spillName);
+                        if (shardKey >= 0)
+                            DecrementShard(shardKey);
+                    }
                     deleted++;
                 }
             }

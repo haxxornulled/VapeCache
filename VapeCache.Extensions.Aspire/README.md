@@ -53,7 +53,10 @@ builder.AddVapeCache()
     .WithAspNetCoreOutputCaching()     // Replace output-cache store with VapeCache
     .WithFailoverAffinityHints()       // Emit sticky-session hints during failover
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
-    .WithAutoMappedEndpoints();        // Auto-maps /vapecache/status + /vapecache/stats + /vapecache/stream
+    .WithAutoMappedEndpoints(options =>
+    {
+        options.Enabled = true;        // Explicitly opt in to wrapper endpoint mapping
+    });
 
 var app = builder.Build();
 
@@ -94,7 +97,7 @@ Navigate to `http://localhost:15888` to view:
 
 ### Metrics
 
-- `cache.current.backend` - **Current active backend** (1=redis, 0=in-memory) - Real-time visibility
+- `cache.current.backend` - **Current active backend** (1=redis, 0=in-memory, -1=unknown) - Real-time visibility
 - `cache.get.hits` - Cache hits (by backend: redis, in-memory, hybrid)
 - `cache.get.misses` - Cache misses
 - `cache.fallback.to_memory` - Circuit breaker fallback events
@@ -349,11 +352,13 @@ Example payload:
 ### `WithAutoMappedEndpoints(options => ...)`
 
 Registers a startup filter that maps VapeCache endpoints automatically so you don't need to wire them in `Program.cs`.
+Endpoint mapping is disabled until `options.Enabled = true`.
 
 ```csharp
 builder.AddVapeCache()
     .WithAutoMappedEndpoints(options =>
     {
+        options.Enabled = true;
         options.Prefix = "/cache";
         options.IncludeBreakerControlEndpoints = false;
         options.EnableLiveStream = true;
@@ -394,9 +399,9 @@ builder.AddVapeCache()
 
 ### VapeCache Health Check (`vapecache`)
 
-- **Healthy**: Circuit breaker closed, no failures
-- **Degraded**: Circuit breaker open (using in-memory fallback) OR consecutive failures
-- **Unhealthy**: N/A (degraded is worst case)
+- **Healthy**: Redis is the active backend and the circuit breaker is closed
+- **Degraded**: Manual failover is enabled, the breaker is open, or the current backend is not Redis
+- **Unhealthy**: The health probe itself failed while reading cache state or dependencies
 
 **Diagnostic Data:**
 ```json

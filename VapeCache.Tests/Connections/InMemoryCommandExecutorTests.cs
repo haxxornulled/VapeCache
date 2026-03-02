@@ -180,4 +180,40 @@ public sealed class InMemoryCommandExecutorTests
         var stored = await executor.JsonGetAsync(targetKey, ".", default);
         Assert.Equal(payload, stored);
     }
+
+    [Fact]
+    public async Task NonDestructiveReads_ReturnCopies_OfStoredBuffers()
+    {
+        var executor = new InMemoryCommandExecutor();
+
+        var stringValue = new byte[] { 1, 2, 3 };
+        await executor.SetAsync("copy:string", stringValue, null, default);
+        stringValue[0] = 99;
+
+        var firstStringRead = await executor.GetAsync("copy:string", default);
+        Assert.Equal(new byte[] { 1, 2, 3 }, firstStringRead);
+
+        firstStringRead![1] = 77;
+        var secondStringRead = await executor.GetAsync("copy:string", default);
+        Assert.Equal(new byte[] { 1, 2, 3 }, secondStringRead);
+
+        var hashValue = new byte[] { 4, 5, 6 };
+        await executor.HSetAsync("copy:hash", "field", hashValue, default);
+        hashValue[0] = 55;
+
+        var firstHashRead = await executor.HGetAsync("copy:hash", "field", default);
+        Assert.Equal(new byte[] { 4, 5, 6 }, firstHashRead);
+
+        firstHashRead![2] = 88;
+        var secondHashRead = await executor.HGetAsync("copy:hash", "field", default);
+        Assert.Equal(new byte[] { 4, 5, 6 }, secondHashRead);
+
+        await executor.SAddAsync("copy:set", new byte[] { 7, 8 }, default);
+        var firstMembers = await executor.SMembersAsync("copy:set", default);
+        Assert.Single(firstMembers);
+        firstMembers[0]![0] = 42;
+
+        var secondMembers = await executor.SMembersAsync("copy:set", default);
+        Assert.Equal(new byte[] { 7, 8 }, secondMembers[0]);
+    }
 }

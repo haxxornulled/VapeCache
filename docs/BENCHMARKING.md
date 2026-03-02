@@ -54,6 +54,9 @@ Run both for a complete story.
 ### Head-to-head suites
 
 ```powershell
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- list-suites compare
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare all --job Short
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare client --job Short
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode fair
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode realworld
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Medium -Mode fair -Profile aggressive
@@ -103,13 +106,14 @@ Use median-of-N gating, not single-run gating:
 
 The repo uses:
 - `BenchmarkDotNet` package in `VapeCache.Benchmarks/VapeCache.Benchmarks.csproj`
+- `VapeCache.Benchmarks.Runner.csproj` as the suite-oriented launcher
 - `EnterpriseBenchmarkConfig` in `VapeCache.Benchmarks/EnterpriseBenchmarkConfig.cs`
 
 `EnterpriseBenchmarkConfig` currently includes:
 - net10 jobs
 - memory diagnoser
 - p50/p90/p95 percentile columns
-- markdown/html/csv/json/openmetrics exporters
+- markdown/html/csv/json exporters
 - compact results logger
 - configurable launch/warmup/iteration counts via env:
   - `VAPECACHE_BENCH_LAUNCH_COUNT`

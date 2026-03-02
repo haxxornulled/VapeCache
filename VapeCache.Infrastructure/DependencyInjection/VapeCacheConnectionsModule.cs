@@ -12,6 +12,8 @@ public sealed class VapeCacheConnectionsModule : Module
     {
         RegisterStaticOptions(builder, new RedisConnectionOptions());
         RegisterStaticOptions(builder, new RedisCircuitBreakerOptions());
+        builder.RegisterType<RedisConnectionOptionsValidator>().AsSelf().SingleInstance();
+        builder.RegisterType<RedisConnectionOptionsStartupValidator>().As<IStartable>().SingleInstance();
 
         builder.RegisterType<RedisConnectionFactory>().AsSelf().SingleInstance();
         builder.RegisterType<CircuitBreakerRedisConnectionFactory>().As<IRedisConnectionFactory>().SingleInstance();

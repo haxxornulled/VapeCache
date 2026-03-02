@@ -1,0 +1,41 @@
+param(
+    [string]$OutputDir = "artifacts/packages",
+    [string]$PackageVersion = ""
+)
+
+$ErrorActionPreference = "Stop"
+
+. (Join-Path $PSScriptRoot "release-package-manifest.ps1")
+
+$repoRoot = Get-ReleaseRepoRoot
+if (-not [System.IO.Path]::IsPathRooted($OutputDir))
+{
+    $OutputDir = Join-Path $repoRoot $OutputDir
+}
+
+$projects = Get-ReleasePackageProjects
+$resolvedPackageVersion = Resolve-ReleasePackageVersion -PackageVersion $PackageVersion
+
+if (Test-Path -LiteralPath $OutputDir)
+{
+    Remove-Item -LiteralPath $OutputDir -Recurse -Force
+}
+
+New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+
+Write-Host "Packing release packages with version $resolvedPackageVersion"
+
+foreach ($project in $projects)
+{
+    $projectPath = Join-Path $repoRoot $project
+    Write-Host "Packing $project"
+    dotnet pack $projectPath -c Release --no-restore -p:Version=$resolvedPackageVersion -o $OutputDir
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "dotnet pack failed for $project"
+    }
+}
+
+Get-ChildItem -LiteralPath $OutputDir -Filter *.nupkg |
+    Sort-Object Name |
+    ForEach-Object { Write-Host $_.Name }

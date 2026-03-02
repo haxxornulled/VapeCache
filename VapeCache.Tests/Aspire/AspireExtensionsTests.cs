@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.OutputCaching;
 using VapeCache.Abstractions.Caching;
@@ -36,6 +37,17 @@ public sealed class AspireExtensionsTests
 
         Assert.Contains(options.Value.Registrations, r => r.Name == "redis" && r.Factory is not null);
         Assert.Contains(options.Value.Registrations, r => r.Name == "vapecache" && r.Factory is not null);
+    }
+
+    [Fact]
+    public void VapeCacheEndpointOptions_DefaultsToSecureOptInSurface()
+    {
+        var options = new VapeCacheEndpointOptions();
+
+        Assert.False(options.Enabled);
+        Assert.False(options.IncludeIntentEndpoints);
+        Assert.False(options.EnableLiveStream);
+        Assert.False(options.IncludeBreakerControlEndpoints);
     }
 
     [Fact]
@@ -113,6 +125,10 @@ public sealed class AspireExtensionsTests
     public async Task WithAspNetCoreOutputCaching_RegistersVapeCacheStore()
     {
         var hostBuilder = new HostApplicationBuilder();
+        hostBuilder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal"
+        });
         var builder = hostBuilder.AddVapeCache()
             .WithAspNetCoreOutputCaching(
                 configureStore: store =>
@@ -120,6 +136,8 @@ public sealed class AspireExtensionsTests
                     store.DefaultTtl = TimeSpan.FromSeconds(45);
                     store.KeyPrefix = "test:output";
                 });
+        hostBuilder.Services.AddOptions<RedisConnectionOptions>()
+            .Bind(hostBuilder.Configuration.GetSection("RedisConnection"));
 
         Assert.NotNull(builder);
 

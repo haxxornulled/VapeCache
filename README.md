@@ -107,13 +107,18 @@ dotnet add package VapeCache
 `Program.cs`
 
 ```csharp
+using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 
+builder.Services.AddOptions<RedisConnectionOptions>()
+    .Bind(builder.Configuration.GetSection("RedisConnection"));
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
 ```
+
+If you do not bind `RedisConnection` from configuration, set `VAPECACHE_REDIS_CONNECTIONSTRING` before first cache use.
 
 ### 5. Use the Cache API
 
@@ -141,6 +146,7 @@ Start here:
 - [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
 - [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md)
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+- [docs/UPGRADE_NOTES.md](docs/UPGRADE_NOTES.md)
 
 ## Build And Test
 

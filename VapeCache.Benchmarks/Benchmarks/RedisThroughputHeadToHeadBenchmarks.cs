@@ -31,8 +31,8 @@ public class RedisThroughputHeadToHeadBenchmarks
         RedisThroughputOperation.StringGetHot
     ];
 
-    private static readonly int[] FullPayloadSizes = [256, 2048, 16384];
-    private static readonly int[] QuickPayloadSizes = [256, 2048];
+    private static readonly int[] FullPayloadSizes = [256, 1024, 4096, 16384];
+    private static readonly int[] QuickPayloadSizes = [256, 4096];
     private static readonly int[] FullConcurrency = [32, 64, 128];
     private static readonly int[] QuickConcurrency = [32, 64];
     private static readonly int[] FullPipelineDepth = [4, 8, 16, 32];

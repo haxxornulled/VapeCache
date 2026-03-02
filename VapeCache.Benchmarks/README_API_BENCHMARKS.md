@@ -18,6 +18,15 @@ Benchmark suite for the VapeCache public API using BenchmarkDotNet.
 
 ```powershell
 dotnet run -c Release --project VapeCache.Benchmarks -- --filter "*RedisClientHeadToHeadBenchmarks*"
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare client --job Short
+```
+
+### Organized suite runner
+
+```powershell
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- list-suites
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- featuresets cache --job Short
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare all --job Short
 ```
 
 ### All head-to-head suites (recommended)
@@ -94,7 +103,7 @@ Look under `BenchmarkDotNet.Artifacts/`.
 - net10 jobs
 - memory diagnoser
 - p50/p90/p95 percentile columns
-- markdown/html/csv/json/openmetrics exporters
+- markdown/html/csv/json exporters
 - compact console logger for signal-focused output
 - optional env-tuned run controls:
   - `VAPECACHE_BENCH_LAUNCH_COUNT`

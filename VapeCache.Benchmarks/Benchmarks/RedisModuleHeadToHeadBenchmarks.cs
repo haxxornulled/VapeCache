@@ -37,8 +37,8 @@ public class RedisModuleHeadToHeadBenchmarks
         RedisModuleOperation.BfExists
     ];
 
-    private static readonly int[] FullJsonPayloadChars = [128, 1024];
-    private static readonly int[] QuickJsonPayloadChars = [128];
+    private static readonly int[] FullJsonPayloadChars = [256, 1024, 4096];
+    private static readonly int[] QuickJsonPayloadChars = [256, 1024];
 
     [ParamsSource(nameof(Operations))]
     public RedisModuleOperation Operation { get; set; }

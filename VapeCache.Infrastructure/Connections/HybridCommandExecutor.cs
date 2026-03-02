@@ -2123,27 +2123,21 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
     /// </summary>
     public async ValueTask<string[]> ModuleListAsync(CancellationToken ct)
     {
-        if (_breaker.Enabled && _breakerState.IsOpen)
-        {
-            _stats.IncFallbackToMemory();
-            _current.SetCurrent(_fallback.Name);
-            return await _fallback.ModuleListAsync(ct).ConfigureAwait(false);
-        }
-
         try
         {
-            var result = await _redis.ModuleListAsync(ct).ConfigureAwait(false);
-            _breakerController.MarkRedisSuccess();
-            _current.SetCurrent("redis");
-            return result;
+            if (_breaker.Enabled && _breakerState.IsOpen)
+                _logger.LogDebug("Circuit breaker open. Executing {Command} directly against Redis for capability discovery", "MODULE LIST");
+
+            return await _redis.ModuleListAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            _breakerController.MarkRedisFailure();
-            _stats.IncFallbackToMemory();
-            _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis MODULE LIST failed; falling back to fallback");
-            return await _fallback.ModuleListAsync(ct).ConfigureAwait(false);
+            _logger.LogWarning(ex, "Redis MODULE LIST failed; fallback backend does not provide Redis module metadata");
+            throw;
         }
     }
 

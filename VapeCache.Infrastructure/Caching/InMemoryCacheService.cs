@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -68,7 +67,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
                     _stats.IncHit();
                     CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
                     CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
-                    return value;
+                    return CopyBuffer(value);
                 }
 
                 if (cached is SpillEntry spill)
@@ -244,16 +243,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
                 CacheTelemetry.Evictions.Add(1, new TagList { { "backend", "memory" }, { "reason", reason.ToString().ToLowerInvariant() } });
             });
 
-            if (MemoryMarshal.TryGetArray(value, out ArraySegment<byte> segment) &&
-                segment.Array is not null &&
-                segment.Offset == 0 &&
-                segment.Count == segment.Array.Length)
-            {
-                entry.Value = segment.Array;
-                return;
-            }
-
-            entry.Value = value.ToArray();
+            entry.Value = CopyBuffer(value.Span);
         }
         finally
         {
@@ -339,6 +329,16 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         {
             // Best-effort cleanup only; never fail cache operations on spill delete.
         }
+    }
+
+    private static byte[] CopyBuffer(ReadOnlySpan<byte> source)
+    {
+        if (source.IsEmpty)
+            return Array.Empty<byte>();
+
+        var buffer = GC.AllocateUninitializedArray<byte>(source.Length);
+        source.CopyTo(buffer);
+        return buffer;
     }
 
     private sealed class SpillEntry

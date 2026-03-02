@@ -1,8 +1,10 @@
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Serilog;
 using VapeCache.Licensing.ControlPlane.DependencyInjection;
+using VapeCache.Licensing.ControlPlane.Health;
 using VapeCache.Licensing.ControlPlane.Revocation;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,7 +19,11 @@ builder.Host.UseSerilog(static (context, services, loggerConfiguration) =>
 });
 
 builder.Services.AddOpenApi();
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks()
+    .AddCheck<RevocationRegistryHealthCheck>(
+        name: "revocation-registry",
+        failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+        tags: new[] { "ready", "revocation", "control-plane" });
 builder.Services
     .AddOptions<RevocationControlPlaneOptions>()
     .Bind(builder.Configuration.GetSection(RevocationControlPlaneOptions.SectionName))
@@ -176,6 +182,10 @@ revocations.MapPost("/keyids/{keyId}/activate", static Results<Ok<RevocationMuta
 .WithSummary("Reactivates a previously revoked key id.");
 
 app.MapHealthChecks("/health");
+app.MapHealthChecks("/alive", new HealthCheckOptions
+{
+    Predicate = static _ => false
+});
 
 app.Run();
 
@@ -193,3 +203,5 @@ static string ResolveActor(string? actor, HttpContext context)
 
 static string ResolveReason(string? reason, string fallback)
     => string.IsNullOrWhiteSpace(reason) ? fallback : reason.Trim();
+
+public partial class Program;

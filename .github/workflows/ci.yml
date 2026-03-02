@@ -23,7 +23,10 @@ jobs:
         run: dotnet build -c Release --no-restore VapeCache.sln
 
       - name: Unit tests
-        run: dotnet test -c Release --no-build VapeCache.sln
+        run: dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj
+
+      - name: API integration tests
+        run: dotnet test -c Release --no-build VapeCache.ApiTests/VapeCache.ApiTests.csproj
 
       - name: Transport regression checks
         run: |
@@ -34,6 +37,12 @@ jobs:
         run: |
           dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj
           pwsh -File tools/perf-gate.ps1
+
+      - name: Pack release packages
+        run: pwsh -File tools/pack-release-packages.ps1 -OutputDir artifacts/packages
+
+      - name: Package smoke test
+        run: pwsh -File tools/package-smoke.ps1 -PackageOutput artifacts/packages -PackageId VapeCache
 
   perf-contention-gate:
     runs-on: ubuntu-latest

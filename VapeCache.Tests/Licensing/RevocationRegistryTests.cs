@@ -78,6 +78,69 @@ public sealed class RevocationRegistryTests
         }
     }
 
+    [Fact]
+    public void RevokeLicense_WhenPersistenceFails_RollsBackInMemoryState()
+    {
+        var statePath = CreateTempStatePath();
+        try
+        {
+            Directory.CreateDirectory(statePath);
+            var registry = CreateRegistry(statePath);
+
+            Assert.ThrowsAny<Exception>(() => registry.RevokeLicense("lic-rollback", "fraud-detected", "ops"));
+
+            var decision = registry.Evaluate("lic-rollback", organizationId: null, keyId: null);
+            Assert.False(decision.Revoked);
+            Assert.Equal("active", decision.Reason);
+        }
+        finally
+        {
+            CleanupTempStatePath(statePath);
+        }
+    }
+
+    [Fact]
+    public void ActivateLicense_WhenPersistenceFails_RestoresRevokedState()
+    {
+        var statePath = CreateTempStatePath();
+        try
+        {
+            var registry = CreateRegistry(statePath);
+            registry.RevokeLicense("lic-rollback", "fraud-detected", "ops");
+
+            File.Delete(statePath);
+            Directory.CreateDirectory(statePath);
+
+            Assert.ThrowsAny<Exception>(() => registry.ActivateLicense("lic-rollback", "manual-restore", "ops"));
+
+            var decision = registry.Evaluate("lic-rollback", organizationId: null, keyId: null);
+            Assert.True(decision.Revoked);
+            Assert.Equal("license", decision.Source);
+        }
+        finally
+        {
+            CleanupTempStatePath(statePath);
+        }
+    }
+
+    [Fact]
+    public void Constructor_WhenStateFileIsCorrupt_Throws()
+    {
+        var statePath = CreateTempStatePath();
+        try
+        {
+            File.WriteAllText(statePath, "{ this-is-not-json");
+
+            var ex = Assert.Throws<InvalidOperationException>(() => CreateRegistry(statePath));
+
+            Assert.Contains("Failed to load revocation state file", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CleanupTempStatePath(statePath);
+        }
+    }
+
     private static FileBackedRevocationRegistry CreateRegistry(string statePath)
     {
         var options = new RevocationControlPlaneOptions

@@ -29,7 +29,7 @@ public static class LicenseRevocationRuntimeOptions
     }
 
     public static bool ResolveFailOpen()
-        => ParseBool(Environment.GetEnvironmentVariable(RevocationFailOpenEnvironmentVariable), fallback: true);
+        => ParseBool(Environment.GetEnvironmentVariable(RevocationFailOpenEnvironmentVariable), fallback: false);
 
     public static TimeSpan ResolveTimeout()
     {

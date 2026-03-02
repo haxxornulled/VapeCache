@@ -31,8 +31,8 @@ public class RedisEndToEndHeadToHeadBenchmarks
         RedisEndToEndOperation.HashGet
     ];
 
-    private static readonly int[] FullPayloadSizes = [32, 256, 4096];
-    private static readonly int[] QuickPayloadSizes = [256];
+    private static readonly int[] FullPayloadSizes = [256, 1024, 4096, 16384];
+    private static readonly int[] QuickPayloadSizes = [256, 4096];
 
     [ParamsSource(nameof(Operations))]
     public RedisEndToEndOperation Operation { get; set; }

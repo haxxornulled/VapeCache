@@ -1,0 +1,4 @@
+# One GitHub handle per line. Leading @ is optional.
+# This list is merged with any contributor identities that can be inferred
+# from GitHub noreply commit emails in git history.
+haxxornulled
