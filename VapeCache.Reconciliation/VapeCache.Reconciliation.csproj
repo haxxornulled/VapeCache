@@ -8,6 +8,7 @@
     <PackageId>VapeCache.Reconciliation</PackageId>
     <Title>VapeCache Reconciliation</Title>
     <Version>1.1.0</Version>
+    <VapeCacheLicensingVersion Condition="'$(VapeCacheLicensingVersion)' == ''">$(Version)</VapeCacheLicensingVersion>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache.Reconciliation</Product>
@@ -39,6 +40,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="VapeCache.Licensing" Version="$(VapeCacheLicensingVersion)" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.1" />
@@ -51,7 +53,6 @@
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
-    <ProjectReference Include="..\VapeCache.Licensing\VapeCache.Licensing.csproj" />
   </ItemGroup>
 
 </Project>

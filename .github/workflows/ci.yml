@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   build-test:
     runs-on: windows-latest
@@ -16,8 +20,27 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Authenticate GitHub Packages
+        shell: pwsh
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_USER: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_USER }}
+          FALLBACK_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $token = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_TOKEN)) { $env:FALLBACK_GITHUB_TOKEN } else { $env:GITHUB_PACKAGES_TOKEN }
+          $user = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_USER)) { "${{ github.actor }}" } else { $env:GITHUB_PACKAGES_USER }
+          dotnet nuget update source GitHubPackages `
+            --configfile NuGet.config `
+            --username $user `
+            --password $token `
+            --store-password-in-clear-text
+          if ($LASTEXITCODE -ne 0)
+          {
+              throw "Failed to authenticate GitHubPackages source."
+          }
+
       - name: Restore
-        run: dotnet restore VapeCache.sln
+        run: dotnet restore VapeCache.sln --configfile NuGet.config
 
       - name: Build
         run: dotnet build -c Release --no-restore VapeCache.sln
@@ -67,8 +90,27 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Authenticate GitHub Packages
+        shell: pwsh
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_USER: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_USER }}
+          FALLBACK_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $token = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_TOKEN)) { $env:FALLBACK_GITHUB_TOKEN } else { $env:GITHUB_PACKAGES_TOKEN }
+          $user = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_USER)) { "${{ github.actor }}" } else { $env:GITHUB_PACKAGES_USER }
+          dotnet nuget update source GitHubPackages `
+            --configfile NuGet.config `
+            --username $user `
+            --password $token `
+            --store-password-in-clear-text
+          if ($LASTEXITCODE -ne 0)
+          {
+              throw "Failed to authenticate GitHubPackages source."
+          }
+
       - name: Restore
-        run: dotnet restore VapeCache.sln
+        run: dotnet restore VapeCache.sln --configfile NuGet.config
 
       - name: Contention Perf Gate
         run: |

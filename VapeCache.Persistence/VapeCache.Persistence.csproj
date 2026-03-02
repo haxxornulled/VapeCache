@@ -8,6 +8,7 @@
     <PackageId>VapeCache.Persistence</PackageId>
     <Title>VapeCache Persistence</Title>
     <Version>1.1.0</Version>
+    <VapeCacheLicensingVersion Condition="'$(VapeCacheLicensingVersion)' == ''">$(Version)</VapeCacheLicensingVersion>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache.Persistence</Product>
@@ -31,10 +32,10 @@
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
-    <ProjectReference Include="..\VapeCache.Licensing\VapeCache.Licensing.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="VapeCache.Licensing" Version="$(VapeCacheLicensingVersion)" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.1" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.1" />
   </ItemGroup>
