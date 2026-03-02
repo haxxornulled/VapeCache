@@ -117,11 +117,24 @@ internal static class BenchmarkRedisConfig
         int maxInFlight = 2048,
         bool enableInstrumentation = true,
         bool enableCoalescedWrites = true,
-        bool useDedicatedLaneWorkers = false)
+        bool useDedicatedLaneWorkers = false,
+        bool enableSocketRespReader = false)
     {
         var envInstrument = TryGetBool("VAPECACHE_BENCH_INSTRUMENT");
         if (envInstrument.HasValue)
             enableInstrumentation = envInstrument.Value;
+
+        var envCoalescedWrites = TryGetBool("VAPECACHE_BENCH_COALESCED_WRITES");
+        if (envCoalescedWrites.HasValue)
+            enableCoalescedWrites = envCoalescedWrites.Value;
+
+        var envDedicatedWorkers = TryGetBool("VAPECACHE_BENCH_DEDICATED_LANE_WORKERS");
+        if (envDedicatedWorkers.HasValue)
+            useDedicatedLaneWorkers = envDedicatedWorkers.Value;
+
+        var envSocketRespReader = TryGetBool("VAPECACHE_BENCH_SOCKET_RESP_READER");
+        if (envSocketRespReader.HasValue)
+            enableSocketRespReader = envSocketRespReader.Value;
 
         var monitor = new SimpleOptionsMonitor(options);
         var factory = new RedisConnectionFactory(
@@ -137,7 +150,8 @@ internal static class BenchmarkRedisConfig
                 MaxInFlightPerConnection = maxInFlight,
                 EnableCommandInstrumentation = enableInstrumentation,
                 EnableCoalescedSocketWrites = enableCoalescedWrites,
-                UseDedicatedLaneWorkers = useDedicatedLaneWorkers
+                UseDedicatedLaneWorkers = useDedicatedLaneWorkers,
+                EnableSocketRespReader = enableSocketRespReader
             }));
     }
 

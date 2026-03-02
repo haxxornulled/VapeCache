@@ -1,6 +1,6 @@
 param(
     [string]$Job = "Short",
-    [ValidateSet("all", "client", "throughput", "endtoend", "modules")]
+    [ValidateSet("all", "client", "throughput", "endtoend", "modules", "datatypes")]
     [string]$Suite = "all",
     [ValidateSet("fair", "realworld")]
     [string]$Mode = "fair",
@@ -47,6 +47,7 @@ switch ($Profile) {
         Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_CONNECTIONS" "2,4,8,16"
         Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_TOTAL_OPS" "16384"
         Set-EnvIfEmpty "VAPECACHE_BENCH_E2E_PAYLOADS" "256,1024,4096,16384,65536"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_DATATYPE_PAYLOADS" "256,1024,4096,16384,65536"
         Set-EnvIfEmpty "VAPECACHE_BENCH_MODULE_JSON_CHARS" "256,1024,4096,16384"
     }
     "extreme" {
@@ -60,6 +61,7 @@ switch ($Profile) {
         Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_CONNECTIONS" "4,8,16,32"
         Set-EnvIfEmpty "VAPECACHE_BENCH_THROUGHPUT_TOTAL_OPS" "32768"
         Set-EnvIfEmpty "VAPECACHE_BENCH_E2E_PAYLOADS" "256,1024,4096,16384,65536"
+        Set-EnvIfEmpty "VAPECACHE_BENCH_DATATYPE_PAYLOADS" "256,1024,4096,16384,65536"
         Set-EnvIfEmpty "VAPECACHE_BENCH_MODULE_JSON_CHARS" "256,1024,4096,16384,65536"
     }
 }
@@ -76,13 +78,16 @@ else {
 
 $env:VAPECACHE_BENCH_TEXT_PAYLOAD = if ($TextPayload.IsPresent) { "true" } else { "false" }
 $env:VAPECACHE_BENCH_INSTRUMENT = if ($Mode -eq "realworld") { "true" } else { "false" }
+$env:VAPECACHE_BENCH_DEDICATED_LANE_WORKERS = "true"
+$env:VAPECACHE_BENCH_SOCKET_RESP_READER = "true"
 
 switch ($Suite) {
     "client"   { $filters = @("*RedisClientHeadToHeadBenchmarks*") }
     "throughput" { $filters = @("*RedisThroughputHeadToHeadBenchmarks*") }
     "endtoend" { $filters = @("*RedisEndToEndHeadToHeadBenchmarks*") }
     "modules"  { $filters = @("*RedisModuleHeadToHeadBenchmarks*") }
-    default    { $filters = @("*RedisClientHeadToHeadBenchmarks*", "*RedisThroughputHeadToHeadBenchmarks*", "*RedisEndToEndHeadToHeadBenchmarks*", "*RedisModuleHeadToHeadBenchmarks*") }
+    "datatypes" { $filters = @("*RedisDatatypeParityHeadToHeadBenchmarks*") }
+    default    { $filters = @("*RedisClientHeadToHeadBenchmarks*", "*RedisThroughputHeadToHeadBenchmarks*", "*RedisEndToEndHeadToHeadBenchmarks*", "*RedisModuleHeadToHeadBenchmarks*", "*RedisDatatypeParityHeadToHeadBenchmarks*") }
 }
 
 if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {

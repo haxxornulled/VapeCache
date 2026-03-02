@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Buffers;
 using System.IO;
 using System.Net.Sockets;
@@ -20,9 +21,11 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     private readonly List<CoalescedPendingRequest> _coalesceCaptured = new(8);
     private readonly Coalescer _coalescer;
     private readonly CoalescedWriteBatch _coalesceBatch = new();
+    private readonly SocketSendSegmentWindow _socketSendWindow = new();
     private readonly ReadOnlyMemory<byte>[][] _coalesceSegmentsPool8 = new ReadOnlyMemory<byte>[8][];
     private int _coalesceSegmentsPool8Count;
     private readonly ArrayPool<ReadOnlyMemory<byte>> _coalesceSegmentArrayPool = ArrayPool<ReadOnlyMemory<byte>>.Shared;
+    private readonly ArrayPool<ArraySegment<byte>> _socketSendSegmentArrayPool = ArrayPool<ArraySegment<byte>>.Shared;
     private readonly ReadOnlyMemory<byte> _crlfMemory;
 
     private readonly TryDequeuePendingRequestDelegate _tryDequeueWrite;
@@ -323,7 +326,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     }
 
     // Uses vectored socket sends when all segments are array-backed. Falls back to copy-send otherwise.
-    private static async ValueTask<bool> TrySendVectoredAsync(
+    private async ValueTask<bool> TrySendVectoredAsync(
         Socket socket,
         List<ReadOnlyMemory<byte>> segments,
         Func<int, ValueTask> onBytesCommitted,
@@ -332,7 +335,8 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         if (segments.Count == 0)
             return true;
 
-        var sendList = new List<ArraySegment<byte>>(segments.Count);
+        var sendSegments = _socketSendSegmentArrayPool.Rent(segments.Count);
+        var sendCount = 0;
         for (var i = 0; i < segments.Count; i++)
         {
             var seg = segments[i];
@@ -340,39 +344,41 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
                 continue;
 
             if (!MemoryMarshal.TryGetArray(seg, out ArraySegment<byte> arraySegment))
-                return false;
-
-            sendList.Add(arraySegment);
-        }
-
-        while (sendList.Count > 0)
-        {
-            ct.ThrowIfCancellationRequested();
-            var sent = await socket.SendAsync(sendList, SocketFlags.None).ConfigureAwait(false);
-            if (sent <= 0)
-                throw new IOException("Socket send returned 0.");
-            await onBytesCommitted(sent).ConfigureAwait(false);
-
-            ConsumeSent(sendList, sent);
-        }
-
-        return true;
-    }
-
-    private static void ConsumeSent(List<ArraySegment<byte>> sendList, int sent)
-    {
-        while (sent > 0 && sendList.Count > 0)
-        {
-            var head = sendList[0];
-            if (sent >= head.Count)
             {
-                sent -= head.Count;
-                sendList.RemoveAt(0);
-                continue;
+                Array.Clear(sendSegments, 0, sendCount);
+                _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
+                return false;
             }
 
-            sendList[0] = new ArraySegment<byte>(head.Array!, head.Offset + sent, head.Count - sent);
-            sent = 0;
+            sendSegments[sendCount++] = arraySegment;
+        }
+
+        if (sendCount == 0)
+        {
+            _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
+            return true;
+        }
+
+        try
+        {
+            _socketSendWindow.Reset(sendSegments, sendCount);
+            while (_socketSendWindow.Count > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                var sent = await socket.SendAsync(_socketSendWindow, SocketFlags.None).ConfigureAwait(false);
+                if (sent <= 0)
+                    throw new IOException("Socket send returned 0.");
+                await onBytesCommitted(sent).ConfigureAwait(false);
+                _socketSendWindow.Consume(sent);
+            }
+
+            return true;
+        }
+        finally
+        {
+            _socketSendWindow.Reset();
+            Array.Clear(sendSegments, 0, sendCount);
+            _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
         }
     }
 
@@ -385,5 +391,101 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         if (writeQueueDepth >= 64) return 5;
         if (writeQueueDepth >= 32) return 6;
         return 7;
+    }
+
+    private sealed class SocketSendSegmentWindow : IList<ArraySegment<byte>>
+    {
+        private ArraySegment<byte>[]? _segments;
+        private int _head;
+        private int _count;
+
+        public int Count => _count;
+
+        public bool IsReadOnly => true;
+
+        public ArraySegment<byte> this[int index]
+        {
+            get
+            {
+                if ((uint)index >= (uint)_count || _segments is null)
+                    throw new ArgumentOutOfRangeException(nameof(index));
+
+                return _segments[_head + index];
+            }
+            set => throw new NotSupportedException();
+        }
+
+        public void Reset(ArraySegment<byte>[]? segments = null, int count = 0)
+        {
+            _segments = segments;
+            _head = 0;
+            _count = count;
+        }
+
+        public void Consume(int sent)
+        {
+            while (sent > 0 && _count > 0)
+            {
+                ref var headSegment = ref _segments![_head];
+                if (sent >= headSegment.Count)
+                {
+                    sent -= headSegment.Count;
+                    headSegment = default;
+                    _head++;
+                    _count--;
+                    continue;
+                }
+
+                headSegment = new ArraySegment<byte>(headSegment.Array!, headSegment.Offset + sent, headSegment.Count - sent);
+                sent = 0;
+            }
+
+            if (_count == 0)
+                _head = 0;
+        }
+
+        public IEnumerator<ArraySegment<byte>> GetEnumerator()
+        {
+            for (var i = 0; i < _count; i++)
+                yield return _segments![_head + i];
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public bool Contains(ArraySegment<byte> item)
+        {
+            for (var i = 0; i < _count; i++)
+            {
+                if (_segments![_head + i].Equals(item))
+                    return true;
+            }
+
+            return false;
+        }
+
+        public int IndexOf(ArraySegment<byte> item)
+        {
+            for (var i = 0; i < _count; i++)
+            {
+                if (_segments![_head + i].Equals(item))
+                    return i;
+            }
+
+            return -1;
+        }
+
+        public void CopyTo(ArraySegment<byte>[] array, int arrayIndex)
+        {
+            if (_count == 0)
+                return;
+
+            Array.Copy(_segments!, _head, array, arrayIndex, _count);
+        }
+
+        public void Add(ArraySegment<byte> item) => throw new NotSupportedException();
+        public void Clear() => throw new NotSupportedException();
+        public void Insert(int index, ArraySegment<byte> item) => throw new NotSupportedException();
+        public bool Remove(ArraySegment<byte> item) => throw new NotSupportedException();
+        public void RemoveAt(int index) => throw new NotSupportedException();
     }
 }

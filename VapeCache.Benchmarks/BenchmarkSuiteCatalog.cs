@@ -64,7 +64,17 @@ public static class BenchmarkSuiteCatalog
             BenchmarkSuiteAudience.Comparison,
             "Redis module command comparisons (JSON, Search, Bloom, TimeSeries)",
             ["*RedisModuleHeadToHeadBenchmarks*"],
-            [new("VAPECACHE_BENCH_MODULE_JSON_CHARS", "256,1024,4096")])
+            [new("VAPECACHE_BENCH_MODULE_JSON_CHARS", "256,1024,4096")]),
+        new(
+            "datatypes",
+            BenchmarkSuiteAudience.Comparison,
+            "Strict string/hash/list/set/sorted-set parity on the tuned mux path",
+            ["*RedisDatatypeParityHeadToHeadBenchmarks*"],
+            [
+                new("VAPECACHE_BENCH_DATATYPE_PAYLOADS", "256,1024,4096,16384"),
+                new("VAPECACHE_BENCH_DEDICATED_LANE_WORKERS", "true"),
+                new("VAPECACHE_BENCH_SOCKET_RESP_READER", "true")
+            ])
     ];
 
     private static readonly FrozenDictionary<string, BenchmarkSuiteDefinition> FeatureLookup = CreateLookup(FeatureSuites);
