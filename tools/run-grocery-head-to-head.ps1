@@ -64,11 +64,12 @@ function Get-Median([double[]]$values) {
 
     $sorted = $values | Sort-Object
     $count = $sorted.Count
+    $middle = [int][Math]::Floor($count / 2.0)
     if (($count % 2) -eq 1) {
-        return [double]$sorted[[int]($count / 2)]
+        return [double]$sorted[$middle]
     }
 
-    return ([double]$sorted[$count / 2 - 1] + [double]$sorted[$count / 2]) / 2.0
+    return ([double]$sorted[$middle - 1] + [double]$sorted[$middle]) / 2.0
 }
 
 $results = New-Object System.Collections.Generic.List[object]

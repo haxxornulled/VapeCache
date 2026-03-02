@@ -36,11 +36,12 @@ function Get-Median([double[]]$values) {
     if ($values.Count -eq 0) { return 0.0 }
     $sorted = $values | Sort-Object
     $count = $sorted.Count
+    $middle = [int][Math]::Floor($count / 2.0)
     if (($count % 2) -eq 1) {
-        return [double]$sorted[[int]($count / 2)]
+        return [double]$sorted[$middle]
     }
 
-    return ([double]$sorted[$count / 2 - 1] + [double]$sorted[$count / 2]) / 2.0
+    return ([double]$sorted[$middle - 1] + [double]$sorted[$middle]) / 2.0
 }
 
 function Parse-ResultLine([string]$line) {
