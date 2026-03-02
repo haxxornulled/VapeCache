@@ -34,7 +34,31 @@ public sealed class ResultExtensionsTests
     public void HandleSuccess_Throws_OnFailure()
     {
         var result = new Result<int>(new InvalidOperationException("boom"));
-        Assert.Throws<InvalidOperationException>(() => result.HandleSuccess(_ => { }));
+
+        var ex = Assert.Throws<InvalidOperationException>(() => result.HandleSuccess(_ => { }));
+
+        Assert.IsType<InvalidOperationException>(ex.InnerException);
+        Assert.Equal("boom", ex.InnerException!.Message);
+    }
+
+    [Fact]
+    public void HandleError_GenericHandler_ReturnsMappedValue()
+    {
+        var result = new Result<int>(new InvalidOperationException("boom"));
+
+        var value = result.HandleError<int, string>(error => error.Message);
+
+        Assert.Equal("boom", value);
+    }
+
+    [Fact]
+    public void HandleError_GenericHandler_ReturnsDefault_OnSuccess()
+    {
+        var result = new Result<int>(5);
+
+        var value = result.HandleError<int, string>(error => error.Message);
+
+        Assert.Null(value);
     }
 
     [Fact]
@@ -65,5 +89,13 @@ public sealed class ResultExtensionsTests
 
         Assert.True(called);
         Assert.Equal("ok", value);
+    }
+
+    [Fact]
+    public void HandleError_Throws_OnNullHandler()
+    {
+        var result = new Result<int>(5);
+
+        Assert.Throws<ArgumentNullException>(() => result.HandleError(null!));
     }
 }
