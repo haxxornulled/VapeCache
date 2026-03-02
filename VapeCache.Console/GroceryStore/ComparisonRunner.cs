@@ -349,12 +349,13 @@ public static class ComparisonRunner
                 typeof(VapeCache.Abstractions.Connections.RedisConnectionOptions)
                     .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.Port))!
                     .SetValue(options, 6379);
+                var useAuth = !string.IsNullOrWhiteSpace(redisPassword);
                 typeof(VapeCache.Abstractions.Connections.RedisConnectionOptions)
                     .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.Username))!
-                    .SetValue(options, "admin");
+                    .SetValue(options, useAuth ? "admin" : null);
                 typeof(VapeCache.Abstractions.Connections.RedisConnectionOptions)
                     .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.Password))!
-                    .SetValue(options, redisPassword);
+                    .SetValue(options, useAuth ? redisPassword : null);
                 typeof(VapeCache.Abstractions.Connections.RedisConnectionOptions)
                     .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.AllowAuthFallbackToPasswordOnly))!
                     .SetValue(options, false);
