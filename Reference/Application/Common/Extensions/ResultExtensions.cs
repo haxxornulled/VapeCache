@@ -7,12 +7,18 @@ namespace Application.Common.Extensions;
 
 public static class ResultExtensions
 {
+    private const string HandleSuccessFailureMessage = "HandleSuccess was called on a failed Result.";
+    private const string HandleSuccessWithLoggingFailureMessage = "HandleSuccessWithLogging was called on a failed Result.";
+    private const string ErrorHandlingFailureMessage = "An error occurred while handling or logging another exception.";
+
     public static Option<Exception> HandleError<T>(
         this Result<T> result,
         Action<Exception> errorHandler)
     {
+        ArgumentNullException.ThrowIfNull(errorHandler);
+
         return result.Match(
-            success => Option<Exception>.None,
+            _ => Option<Exception>.None,
             error =>
             {
                 errorHandler(error);
@@ -24,8 +30,10 @@ public static class ResultExtensions
         this Result<T> result,
         Func<Exception, TE> errorHandler)
     {
+        ArgumentNullException.ThrowIfNull(errorHandler);
+
         return result.Match(
-            success => Option<TE>.None,
+            _ => Option<TE>.None,
             error => Some(errorHandler(error)));
     }
 
@@ -33,22 +41,26 @@ public static class ResultExtensions
         this Result<T> result,
         Action<T> successHandler)
     {
+        ArgumentNullException.ThrowIfNull(successHandler);
+
         return result.Match(
             success =>
             {
                 successHandler(success);
                 return success;
             },
-            error => throw new InvalidOperationException("HandleSuccess was called on a failed Result."));
+            ThrowHandleSuccessFailure<T>);
     }
 
     public static T HandleSuccess<T>(
         this Result<T> result,
         Func<T, T> successHandler)
     {
+        ArgumentNullException.ThrowIfNull(successHandler);
+
         return result.Match(
             successHandler,
-            error => throw new InvalidOperationException("HandleSuccess was called on a failed Result."));
+            ThrowHandleSuccessFailure<T>);
     }
 
     public static Option<Exception> HandleErrorWithLogging<T>(
@@ -57,8 +69,12 @@ public static class ResultExtensions
         Action<ILogger, Exception> logAction,
         ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(errorHandler);
+        ArgumentNullException.ThrowIfNull(logAction);
+        ArgumentNullException.ThrowIfNull(logger);
+
         return result.Match(
-            success => Option<Exception>.None,
+            _ => Option<Exception>.None,
             error =>
             {
                 try
@@ -68,7 +84,7 @@ public static class ResultExtensions
                 }
                 catch (Exception loggingException)
                 {
-                    logger.LogError(loggingException, "An error occurred while handling or logging another exception.");
+                    logger.LogError(loggingException, ErrorHandlingFailureMessage);
                 }
 
                 return Some(error);
@@ -81,6 +97,10 @@ public static class ResultExtensions
         Action<ILogger, T> logAction,
         ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(successHandler);
+        ArgumentNullException.ThrowIfNull(logAction);
+        ArgumentNullException.ThrowIfNull(logger);
+
         return result.Match(
             success =>
             {
@@ -88,7 +108,7 @@ public static class ResultExtensions
                 successHandler(success);
                 return success;
             },
-            error => throw new InvalidOperationException("HandleSuccessWithLogging was called on a failed Result."));
+            ThrowHandleSuccessWithLoggingFailure<T>);
     }
 
     public static Result<T> LogFailure<T>(
@@ -163,4 +183,10 @@ public static class ResultExtensions
         value = match.Value;
         return match.HasValue;
     }
+
+    private static T ThrowHandleSuccessFailure<T>(Exception error) =>
+        throw new InvalidOperationException(HandleSuccessFailureMessage, error);
+
+    private static T ThrowHandleSuccessWithLoggingFailure<T>(Exception error) =>
+        throw new InvalidOperationException(HandleSuccessWithLoggingFailureMessage, error);
 }
