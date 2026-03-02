@@ -44,11 +44,15 @@ Commits containing the secret:
 **Repository**: `github.com/haxxornulled/VapeCache-Enterprise` (keep private)
 
 **Contains**:
-- ✅ Everything (full codebase)
-- ✅ Enterprise projects (Licensing, Persistence, Reconciliation)
-- ✅ License generation tools
+- ✅ OSS runtime plus enterprise cache packages
+- ✅ Enterprise projects (Persistence, Reconciliation)
+- ✅ Business and release tooling for the enterprise distribution
 - ✅ ENTERPRISE_STRATEGY.md
 - ✅ Customer data, licenses, business docs
+
+**Licensing Domain**:
+- ✅ `github.com/haxxornulled/VapeCache.Licensing` (keep private)
+- ✅ `VapeCache.Licensing`, `VapeCache.LicenseGenerator`, and `VapeCache.Licensing.ControlPlane`
 
 ---
 
@@ -305,7 +309,7 @@ dotnet nuget push nupkg/VapeCache.Persistence.1.0.0.nupkg --api-key YOUR_API_KEY
 dotnet nuget push nupkg/VapeCache.Reconciliation.1.0.0.nupkg --api-key YOUR_API_KEY --source https://api.nuget.org/v3/index.json
 ```
 
-**Note**: Enterprise packages contain `VapeCache.Licensing.dll` embedded as a dependency. With ES256 licensing, only the public verification key is in code; private signing keys stay outside source control.
+**Note**: Enterprise packages consume `VapeCache.Licensing` as a private package dependency. With ES256 licensing, only the public verification key is in code; private signing keys stay outside source control.
 
 ---
 

@@ -48,9 +48,6 @@ jobs:
       - name: Unit tests
         run: dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj
 
-      - name: API integration tests
-        run: dotnet test -c Release --no-build VapeCache.ApiTests/VapeCache.ApiTests.csproj
-
       - name: Transport regression checks
         run: |
           dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj --filter "FullyQualifiedName~RedisCommandExecutorScriptedTests.Executes_and_parses_core_command_surfaces"

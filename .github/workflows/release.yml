@@ -84,9 +84,6 @@ jobs:
       - name: Unit tests
         run: dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj
 
-      - name: API integration tests
-        run: dotnet test -c Release --no-build VapeCache.ApiTests/VapeCache.ApiTests.csproj
-
       - name: Perf gates tests
         run: dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj
 

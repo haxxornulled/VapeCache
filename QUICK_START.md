@@ -109,13 +109,20 @@ VapeCache-Public/
 ```
 VapeCache/
 ├── [All public repo contents]
-├── VapeCache.Licensing/          # License validation (PRIVATE)
-├── VapeCache.LicenseGenerator/   # Key generation (PRIVATE)
 ├── VapeCache.Persistence/        # Enterprise package (PRIVATE source)
 ├── VapeCache.Reconciliation/     # Enterprise package (PRIVATE source)
 ├── VapeCache.Application/        # Internal utilities
 ├── ENTERPRISE_STRATEGY.md        # Business model (PRIVATE)
 └── [Full solution]
+```
+
+### Private Licensing Repo: `github.com/haxxornulled/VapeCache.Licensing` (PRIVATE)
+```
+VapeCache.Licensing/
+├── VapeCache.Licensing/              # License validation runtime package
+├── VapeCache.LicenseGenerator/       # Key generation tool
+├── VapeCache.Licensing.ControlPlane/ # Revocation control-plane service
+└── VapeCache.ApiTests/               # Licensing API integration tests
 ```
 
 ---

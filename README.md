@@ -14,7 +14,7 @@ It includes the open-source runtime plus the enterprise packages that add:
 
 - durable spill persistence during Redis outages
 - reconciliation to replay persisted writes after Redis recovers
-- licensing and control-plane enforcement for enterprise-only features
+- enterprise feature gating through the dedicated `VapeCache.Licensing` package
 
 If you only need the runtime, use the OSS repository:
 
@@ -51,8 +51,8 @@ This project exists to make those behaviors first-class instead of treating them
 
 - durable spill persistence for fallback writes
 - reconciliation pipeline to drain persisted writes back to Redis
-- license validation and enterprise feature gates
-- control-plane support for activation and revocation workflows
+- license validation and enterprise feature gates via `VapeCache.Licensing`
+- control-plane support for activation and revocation workflows in the dedicated `VapeCache.Licensing` repository
 
 ### What It Is Not
 
@@ -72,7 +72,8 @@ Benchmarks are included in this repo because transport regressions matter. Read 
 | `VapeCache.Extensions.AspNetCore` | ASP.NET Core output cache integration | No |
 | `VapeCache.Persistence` | Durable spill persistence | No |
 | `VapeCache.Reconciliation` | Replay persisted writes after recovery | No |
-| `VapeCache.Licensing.ControlPlane` | Enterprise control-plane service | No |
+| `VapeCache.Licensing` | Enterprise license validation/runtime package (published from `haxxornulled/VapeCache.Licensing`) | No |
+| `VapeCache.Licensing.ControlPlane` | Enterprise control-plane service (published from `haxxornulled/VapeCache.Licensing`) | No |
 
 ## Quick Start
 

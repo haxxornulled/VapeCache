@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <DefineConstants>VAPECACHE_TESTING</DefineConstants>
+    <VapeCacheLicensingVersion Condition="'$(VapeCacheLicensingVersion)' == ''">1.1.0</VapeCacheLicensingVersion>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
@@ -14,6 +15,7 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.1" />
+    <PackageReference Include="VapeCache.Licensing" Version="$(VapeCacheLicensingVersion)" />
     <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
@@ -34,6 +36,5 @@
     <ProjectReference Include="..\VapeCache.Reconciliation\VapeCache.Reconciliation.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.AspNetCore\VapeCache.Extensions.AspNetCore.csproj" />
-    <ProjectReference Include="..\VapeCache.Licensing.ControlPlane\VapeCache.Licensing.ControlPlane.csproj" />
   </ItemGroup>
 </Project>

@@ -31,9 +31,9 @@ The codebase has been prepared for the open-core business model with two reposit
 - VapeCache.Persistence (spill-to-disk with encryption)
 - VapeCache.Reconciliation (zero data loss)
 
-**Internal Tools** (NOT published):
-- VapeCache.Licensing (license validation library)
-- VapeCache.LicenseGenerator (key generation tool)
+**Private Dependencies / Tools**:
+- VapeCache.Licensing (published from `github.com/haxxornulled/VapeCache.Licensing`)
+- VapeCache.LicenseGenerator (hosted in `github.com/haxxornulled/VapeCache.Licensing`)
 - ENTERPRISE_STRATEGY.md (business model)
 
 ---
