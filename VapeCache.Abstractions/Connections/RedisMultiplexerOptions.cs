@@ -23,7 +23,7 @@ public sealed record RedisMultiplexerOptions
 
     /// <summary>
     /// Enables scatter/gather coalesced writes via SocketAsyncEventArgs when available.
-    /// Falls back to the legacy stream writer when false.
+    /// Uses direct non-coalesced sends when false.
     /// </summary>
     public bool EnableCoalescedSocketWrites { get; init; } = true;
 

@@ -99,8 +99,8 @@ For a high-throughput Redis workload processing 100,000 ops/sec:
 │                │                       │                   │        │
 │                ▼                       ▼                   ▼        │
 │    ┌────────────────────┐  ┌────────────────────┐  ┌──────────┐   │
-│    │ SendCoalescedAsync │  │  SendLegacyAsync   │  │ (Future) │   │
-│    │  (HOT PATH)        │  │  (Fallback)        │  │  Paths   │   │
+│    │ SendCoalescedAsync │  │  SendDirectAsync   │  │ (Future) │   │
+│    │  (HOT PATH)        │  │  (Direct path)     │  │  Paths   │   │
 │    └─────────┬──────────┘  └────────────────────┘  └──────────┘   │
 │              │                                                       │
 │              ▼                                                       │
@@ -146,11 +146,11 @@ For a high-throughput Redis workload processing 100,000 ops/sec:
 - `ExecuteAsync()`: Enqueues requests to `_writes` queue
 - `WriterLoopAsync()`: Background loop that dequeues and sends requests
 - `SendCoalescedAsync()`: Batches multiple requests into single socket send
-- `SendLegacyAsync()`: Fallback for non-coalesced sends
+- `SendDirectAsync()`: Direct non-coalesced send path
 
 **Coalescing Decision (line 203):**
 ```csharp
-var shouldCoalesce = _coalesceWrites;
+var useCoalescedPath = _coalesceWrites;
 ```
 
 Originally disabled for payload operations due to bugs. **Now works for ALL Redis operations** after critical fixes.
@@ -270,13 +270,13 @@ BufferList = subset;
 │    [Background Task: WriterLoopAsync()]                               │
 │      │                                                                │
 │      ├─▶ Dequeue request from _writes                                │
-│      ├─▶ Check: shouldCoalesce = _coalesceWrites                     │
+│      ├─▶ Check: useCoalescedPath = _coalesceWrites                   │
 │      │                                                                │
-│      ├─▶ if (shouldCoalesce):                                        │
+│      ├─▶ if (useCoalescedPath):                                      │
 │      │     SendCoalescedAsync(request)  ◀─── HOT PATH (99% of ops)   │
 │      │                                                                │
 │      └─▶ else:                                                        │
-│            SendLegacyAsync(request)     ◀─── Fallback (disabled)     │
+│            SendDirectAsync(request)     ◀─── Direct path             │
 │                                                                        │
 └────────────────────────────┬───────────────────────────────────────────┘
                              │
