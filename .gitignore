@@ -4,6 +4,7 @@
 
 # User / IDE
 .vs/
+.claude/
 *.user
 *.suo
 *.userosscache

@@ -399,7 +399,7 @@ If companies can't run production without paying, they won't adopt at all.
 ### Why $20/month for Pro?
 - **JetBrains ReSharper:** $16.90/month ($169/year first year)
 - **JetBrains Rider:** $16.58/month ($166/year first year)
-- **GitHub Copilot:** $10/month
+- **Developer tooling subscriptions:** $10-$20/month
 - **Raygun APM:** $49/month (application monitoring)
 
 **VapeCache Pro at $20/month is priced competitively** for individual developers who want better Redis caching.

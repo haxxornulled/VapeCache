@@ -1,4 +1,4 @@
-Codex Result + VapeCache Quick Guide
+Implementation Result + VapeCache Quick Guide
 
 Purpose
 - Show a clean pattern for Result<T>/Option<T> and HybridCacheService usage.
