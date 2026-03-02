@@ -48,9 +48,8 @@ dotnet add package VapeCache.Reconciliation
 
 ## Notes
 - First-party package install/restore is smoke-tested in both CI and release workflows against the built `.nupkg` artifacts.
-- The enterprise repo includes [NuGet.config](../NuGet.config) so `VapeCache.Persistence` and `VapeCache.Reconciliation` restore `VapeCache.Licensing` from GitHub Packages.
-- In GitHub Actions, set `VAPECACHE_LICENSING_PACKAGES_TOKEN` (and `VAPECACHE_LICENSING_PACKAGES_USER` if needed) to read the private licensing package; workflows fall back to `GITHUB_TOKEN` when package permissions are already granted.
-- For local restores, authenticate the `GitHubPackages` source with a GitHub PAT that has `read:packages`.
+- The enterprise repo still vendors the licensing source for in-repo builds, but published `VapeCache.Persistence` and `VapeCache.Reconciliation` packages depend on `VapeCache.Licensing`.
+- External consumers of those enterprise packages must add the GitHub Packages source and authenticate with a GitHub token that can read `VapeCache.Licensing`.
 - For direct DI registration, bind `RedisConnection` before calling `AddVapecacheRedisConnections()` / `AddVapecacheCaching()`, or set `VAPECACHE_REDIS_CONNECTIONSTRING`.
 - `WithAutoMappedEndpoints(...)` only maps wrapper routes when `VapeCacheEndpointOptions.Enabled = true`.
 - Use `tools/publish-release-packages.ps1` to push the built packages in dependency-safe order when publishing to a NuGet feed.
