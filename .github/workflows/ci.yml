@@ -77,7 +77,6 @@ jobs:
       - name: Grocery Tail Perf Gate
         run: |
           pwsh -File tools/run-grocery-perf-gate.ps1 \
-            -Profiles LowLatency FullTilt \
             -Trials 2 \
             -ShopperCount 15000 \
             -MaxCartSize 35 \
