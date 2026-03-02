@@ -7,7 +7,6 @@ function Get-ReleasePackageProjects
 {
     @(
         "VapeCache.Abstractions/VapeCache.Abstractions.csproj",
-        "VapeCache.Licensing/VapeCache.Licensing.csproj",
         "VapeCache.Infrastructure/VapeCache.Infrastructure.csproj",
         "VapeCache.Extensions.AspNetCore/VapeCache.Extensions.AspNetCore.csproj",
         "VapeCache.Persistence/VapeCache.Persistence.csproj",

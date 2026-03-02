@@ -6,7 +6,8 @@ VapeCache ships a small set of packages to keep dependencies clean and optional.
 
 - Community license: non-commercial only (`LICENSE.md`)
 - Commercial/production use: requires paid Enterprise licensing
-- Enterprise packages (`VapeCache.Persistence`, `VapeCache.Reconciliation`, `VapeCache.Licensing`) are distributed under `LICENSE-ENTERPRISE.txt`
+- Enterprise packages (`VapeCache.Persistence`, `VapeCache.Reconciliation`) are distributed from this repo under `LICENSE-ENTERPRISE.txt`
+- `VapeCache.Licensing` is now owned by the dedicated `VapeCache.Licensing` repository
 
 ## Packages
 
