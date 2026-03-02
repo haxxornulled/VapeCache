@@ -39,6 +39,8 @@ if ($MuxInFlight -le 0) {
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $projectPath = Join-Path $repoRoot "VapeCache.Console\VapeCache.Console.csproj"
 
+$env:VAPECACHE_RUN_COMPARISON = "true"
+$env:VAPECACHE_BENCH_SHOPPERS = "$ShopperCount"
 $env:VAPECACHE_MAX_CART_SIZE = "$MaxCartSize"
 $env:VAPECACHE_BENCH_TRACK = $Track
 $env:VAPECACHE_BENCH_MUX_PROFILE = $MuxProfile
@@ -69,35 +71,31 @@ function Get-Median([double[]]$values) {
     return ([double]$sorted[$count / 2 - 1] + [double]$sorted[$count / 2]) / 2.0
 }
 
-function Get-InputLines([int]$shopperCount) {
-    # Menu now accepts a direct shopper count (no preset selector).
-    return @("$shopperCount")
-}
-
 $results = New-Object System.Collections.Generic.List[object]
 
 for ($trial = 1; $trial -le $Trials; $trial++) {
     Write-Host "Run $trial/$Trials..."
-    $inputLines = Get-InputLines -shopperCount $ShopperCount
-    $inputFile = [System.IO.Path]::GetTempFileName()
-    try {
-        Set-Content -Path $inputFile -Value $inputLines -Encoding ascii
-        $cmd = "dotnet run --project ""$projectPath"" -c Release --no-build -- --compare < ""$inputFile"""
-        $output = cmd /c $cmd
-    }
-    finally {
-        Remove-Item -Path $inputFile -Force -ErrorAction SilentlyContinue
-    }
+    $output = dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1
 
-    $throughputLines = $output | Select-String -Pattern "Throughput:\s+([0-9,]+)\s+shoppers/sec"
-    if ($throughputLines.Count -lt 2) {
+    $throughputLine = $output | Where-Object { $_ -match '^Throughput \(shoppers/sec\)\s+' } | Select-Object -Last 1
+    if ([string]::IsNullOrWhiteSpace($throughputLine)) {
         Write-Host "Unable to parse throughput output on run $trial."
         $output | ForEach-Object { Write-Host $_ }
         exit 2
     }
 
-    $vape = [double](($throughputLines[0].Matches[0].Groups[1].Value) -replace ",", "")
-    $ser = [double](($throughputLines[1].Matches[0].Groups[1].Value) -replace ",", "")
+    $throughputMatch = [regex]::Match(
+        $throughputLine,
+        '^Throughput \(shoppers/sec\)\s+([0-9,]+(?:\.[0-9]+)?)\s+([0-9,]+(?:\.[0-9]+)?)\b')
+
+    if (-not $throughputMatch.Success) {
+        Write-Host "Unable to parse aggregated throughput values on run $trial."
+        $output | ForEach-Object { Write-Host $_ }
+        exit 2
+    }
+
+    $vape = [double](($throughputMatch.Groups[1].Value) -replace ",", "")
+    $ser = [double](($throughputMatch.Groups[2].Value) -replace ",", "")
     $ratio = if ($ser -gt 0) { $vape / $ser } else { [double]::PositiveInfinity }
 
     $results.Add([pscustomobject]@{
