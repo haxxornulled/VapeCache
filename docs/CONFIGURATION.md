@@ -214,42 +214,6 @@ Controls large-payload spill behavior for the in-memory fallback cache.
 - Register a custom `ISpillEncryptionProvider` to encrypt spill files.
 - Orphan cleanup is best-effort and only runs when enabled.
 
-## Redis Reconciliation (Optional)
-
-Reconciliation lives in the `VapeCache.Reconciliation` package. It tracks in-memory writes during outages and replays them when Redis recovers.
-
-```json
-{
-  "RedisReconciliation": {
-    "Enabled": true,
-    "MaxOperationAge": "00:05:00",
-    "MaxPendingOperations": 100000,
-    "MaxOperationsPerRun": 10000,
-    "BatchSize": 256,
-    "MaxRunDuration": "00:00:30",
-    "InitialBackoff": "00:00:00.025",
-    "MaxBackoff": "00:00:02",
-    "BackoffMultiplier": 2.0
-  },
-  "RedisReconciliationStore": {
-    "UseSqlite": true,
-    "StorePath": "%LOCALAPPDATA%/VapeCache/persistence/reconciliation.db",
-    "BusyTimeoutMs": 1000,
-    "EnablePragmaOptimizations": true,
-    "VacuumOnClear": false
-  }
-}
-```
-
-Enable in code:
-
-```csharp
-builder.Services.AddVapeCacheRedisReconciliation(options =>
-{
-    options.MaxOperationAge = TimeSpan.FromMinutes(5);
-});
-```
-
 ## Environment Variables
 
 Every option can be overridden via environment variables using `__` as the separator:

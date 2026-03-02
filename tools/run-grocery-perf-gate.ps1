@@ -100,6 +100,8 @@ $env:RedisConnection__Host = $RedisHost
 $env:RedisConnection__Port = "$RedisPort"
 $env:RedisConnection__Username = $RedisUsername
 $env:RedisConnection__Password = $RedisPassword
+$env:VAPECACHE_RUN_COMPARISON = "true"
+$env:VAPECACHE_BENCH_SHOPPERS = "$ShopperCount"
 $env:VAPECACHE_BENCH_TRACK = $Track
 $env:VAPECACHE_MAX_CART_SIZE = "$MaxCartSize"
 $env:VAPECACHE_BENCH_MUX_CONNECTIONS = "$MuxConnections"
@@ -119,7 +121,7 @@ foreach ($profile in $Profiles) {
     Write-Host "Running grocery perf gate for profile '$profile'..."
     for ($trial = 1; $trial -le $Trials; $trial++) {
         Write-Host "  Trial $trial/$Trials..."
-        $output = "$ShopperCount" | dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1
+        $output = dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1
         $outFile = Join-Path $artifactsRoot ("{0}-trial-{1}.log" -f $profile.ToLowerInvariant(), $trial)
         $output | Out-File -FilePath $outFile -Encoding utf8
 

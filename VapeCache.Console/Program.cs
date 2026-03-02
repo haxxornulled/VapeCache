@@ -19,7 +19,6 @@ using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.DependencyInjection;
 using VapeCache.Console.Stress;
 using VapeCache.Console.Secrets;
-using VapeCache.Reconciliation;
 
 var hostBuilder = Host.CreateDefaultBuilder(args)
     .UseServiceProviderFactory(new AutofacServiceProviderFactory())
@@ -227,12 +226,6 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.BreakDuration >= TimeSpan.Zero, "RedisCircuitBreaker:BreakDuration must be >= 0.")
             .Validate(static o => o.HalfOpenProbeTimeout >= TimeSpan.Zero, "RedisCircuitBreaker:HalfOpenProbeTimeout must be >= 0.")
             .ValidateOnStart();
-
-        if (context.HostingEnvironment.IsDevelopment())
-        {
-            services.AddVapeCacheRedisReconciliation(context.Configuration);
-        }
-
 
         // Grocery Store Demo Services
         services.AddSingleton<VapeCache.Console.GroceryStore.GroceryStoreService>();

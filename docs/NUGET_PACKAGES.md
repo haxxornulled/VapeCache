@@ -25,13 +25,6 @@ Aspire integration helpers.
 dotnet add package VapeCache.Extensions.Aspire
 ```
 
-### VapeCache.Reconciliation
-Optional reconciliation service to sync in-memory writes after Redis recovery.
-
-```bash
-dotnet add package VapeCache.Reconciliation
-```
-
 ## Notes
 - Logging is via `ILogger<T>` only; you choose Serilog/NLog/console in your host project.
 - OpenTelemetry exporters are configured by the host; VapeCache emits metrics/traces via standard `Meter`/`ActivitySource`.

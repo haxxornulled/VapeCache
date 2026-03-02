@@ -30,7 +30,6 @@
     <ProjectReference Include="..\VapeCache.Benchmarks\VapeCache.Benchmarks.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
     <ProjectReference Include="..\VapeCache.Console\VapeCache.Console.csproj" />
-    <ProjectReference Include="..\VapeCache.Reconciliation\VapeCache.Reconciliation.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj" />
   </ItemGroup>
 </Project>

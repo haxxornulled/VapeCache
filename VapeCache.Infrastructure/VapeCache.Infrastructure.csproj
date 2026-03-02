@@ -38,7 +38,6 @@
     <InternalsVisibleTo Include="VapeCache.Benchmarks" />
     <InternalsVisibleTo Include="VapeCache.Benchmarks.Runner" />
     <InternalsVisibleTo Include="VapeCache.PerfGates.Tests" />
-    <InternalsVisibleTo Include="VapeCache.Reconciliation" />
   </ItemGroup>
 
   <ItemGroup>

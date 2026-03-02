@@ -15,7 +15,6 @@
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
-    <ProjectReference Include="..\VapeCache.Reconciliation\VapeCache.Reconciliation.csproj" />
   </ItemGroup>
 
   <ItemGroup>

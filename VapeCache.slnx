@@ -4,7 +4,8 @@
   <Project Path="VapeCache.Benchmarks/VapeCache.Benchmarks.csproj" />
   <Project Path="VapeCache.Console/VapeCache.Console.csproj" />
   <Project Path="VapeCache.Infrastructure/VapeCache.Infrastructure.csproj" />
-  <Project Path="VapeCache.Reconciliation/VapeCache.Reconciliation.csproj" />
   <Project Path="VapeCahe.Core/VapeCahe.Core.csproj" />
+  <Project Path="VapeCache.Extensions.Aspire/VapeCache.Extensions.Aspire.csproj" />
+  <Project Path="samples/VapeCache.Sample/VapeCache.Sample.csproj" />
   <Project Path="VapeCache.Tests/VapeCache.Tests.csproj" />
 </Solution>

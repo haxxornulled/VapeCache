@@ -14,10 +14,10 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore VapeCache.sln
 
       - name: Unit tests
         run: dotnet test -c Release VapeCache.sln
@@ -51,7 +51,7 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore VapeCache.sln
 
       - name: Contention Perf Gate
         run: |
@@ -60,7 +60,6 @@ jobs:
       - name: Grocery Tail Perf Gate
         run: |
           pwsh -File tools/run-grocery-perf-gate.ps1 \
-            -Profiles LowLatency FullTilt \
             -Trials 2 \
             -ShopperCount 15000 \
             -MaxCartSize 35 \
