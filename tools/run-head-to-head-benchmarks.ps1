@@ -1,6 +1,6 @@
 param(
     [string]$Job = "Short",
-    [ValidateSet("all", "client", "throughput", "endtoend", "modules", "datatypes")]
+    [ValidateSet("all", "hotpath", "client", "throughput", "endtoend", "modules", "datatypes")]
     [string]$Suite = "all",
     [ValidateSet("fair", "realworld")]
     [string]$Mode = "fair",
@@ -82,6 +82,7 @@ $env:VAPECACHE_BENCH_DEDICATED_LANE_WORKERS = "true"
 $env:VAPECACHE_BENCH_SOCKET_RESP_READER = "true"
 
 switch ($Suite) {
+    "hotpath" { $filters = @("*RedisClientHeadToHeadBenchmarks*", "*RedisThroughputHeadToHeadBenchmarks*", "*RedisEndToEndHeadToHeadBenchmarks*") }
     "client"   { $filters = @("*RedisClientHeadToHeadBenchmarks*") }
     "throughput" { $filters = @("*RedisThroughputHeadToHeadBenchmarks*") }
     "endtoend" { $filters = @("*RedisEndToEndHeadToHeadBenchmarks*") }
@@ -89,6 +90,17 @@ switch ($Suite) {
     "datatypes" { $filters = @("*RedisDatatypeParityHeadToHeadBenchmarks*") }
     default    { $filters = @("*RedisClientHeadToHeadBenchmarks*", "*RedisThroughputHeadToHeadBenchmarks*", "*RedisEndToEndHeadToHeadBenchmarks*", "*RedisModuleHeadToHeadBenchmarks*", "*RedisDatatypeParityHeadToHeadBenchmarks*") }
 }
+
+$reportAudience = switch ($Suite) {
+    "hotpath" { "hot-path comparison" }
+    "client" { "hot-path comparison" }
+    "throughput" { "hot-path comparison" }
+    "endtoend" { "hot-path comparison" }
+    "modules" { "extended parity comparison" }
+    "datatypes" { "extended parity comparison" }
+    default { "mixed comparison coverage" }
+}
+$env:VAPECACHE_BENCH_REPORT_AUDIENCE = $reportAudience
 
 if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
     $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -103,6 +115,7 @@ New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
 Write-Host "Running head-to-head benchmarks..."
 Write-Host "Artifacts: $artifacts"
 Write-Host "Suite: $Suite"
+Write-Host "Reporting audience: $reportAudience"
 Write-Host "Job: $Job"
 Write-Host "Mode: $Mode (VAPECACHE_BENCH_INSTRUMENT=$env:VAPECACHE_BENCH_INSTRUMENT)"
 Write-Host "Profile: $Profile"

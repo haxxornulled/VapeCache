@@ -5,6 +5,11 @@ namespace VapeCache.Benchmarks;
 
 public static class BenchmarkSuiteCatalog
 {
+    private const string HotPathComparisonAlias = "hotpath";
+    private const string ReportAudienceEnvironmentVariable = "VAPECACHE_BENCH_REPORT_AUDIENCE";
+    private static readonly FrozenSet<string> HotPathComparisonSuites =
+        new[] { "client", "throughput", "endtoend" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
     private static readonly BenchmarkSuiteDefinition[] FeatureSuites =
     [
         new(
@@ -95,7 +100,13 @@ public static class BenchmarkSuiteCatalog
             .AppendLine("Benchmark suites")
             .AppendLine("  featuresets <suite|all> [BenchmarkDotNet args]")
             .AppendLine("  compare <suite|all> [BenchmarkDotNet args]")
+            .AppendLine("    compare hotpath = compare client + throughput + endtoend")
             .AppendLine("  list-suites [featuresets|compare]");
+
+        builder.AppendLine()
+            .AppendLine("Reporting audiences")
+            .AppendLine("  hot-path comparison: compare hotpath (or compare client|throughput|endtoend)")
+            .AppendLine("  feature/fallback behavior: featuresets cache");
 
         if (!string.IsNullOrWhiteSpace(scope) && TryParseAudience(scope, out var scopedAudience))
         {
@@ -146,15 +157,19 @@ public static class BenchmarkSuiteCatalog
 
         var environmentDefaults = selectedSuites
             .SelectMany(static suite => suite.EnvironmentDefaults)
+            .Append(new KeyValuePair<string, string>(ReportAudienceEnvironmentVariable, ResolveReportAudience(audience, selectedSuites)))
             .GroupBy(static entry => entry.Key, StringComparer.OrdinalIgnoreCase)
             .Select(static group => group.First())
             .ToArray();
 
         var displayName = string.Equals(suiteKey, "all", StringComparison.OrdinalIgnoreCase)
             ? $"{GetAudienceDisplayName(audience)} (all)"
+            : string.Equals(suiteKey, HotPathComparisonAlias, StringComparison.OrdinalIgnoreCase)
+                ? "Comparison: hotpath"
             : selectedSuites[0].DisplayName;
 
-        plan = new BenchmarkInvocationPlan(displayName, arguments.ToArray(), environmentDefaults);
+        var reportAudience = ResolveReportAudience(audience, selectedSuites);
+        plan = new BenchmarkInvocationPlan(displayName, reportAudience, arguments.ToArray(), environmentDefaults);
         return true;
     }
 
@@ -167,7 +182,14 @@ public static class BenchmarkSuiteCatalog
             .AppendLine($"{GetAudienceDisplayName(audience)}:");
 
         foreach (var suite in GetSuites(audience))
+        {
             builder.AppendLine($"  {suite.Key,-11} {suite.Description}");
+        }
+
+        if (audience == BenchmarkSuiteAudience.Comparison)
+        {
+            builder.AppendLine($"  {HotPathComparisonAlias,-11} Hot-path comparison bundle (client + throughput + endtoend)");
+        }
     }
 
     private static BenchmarkSuiteDefinition[]? ResolveSuites(
@@ -178,6 +200,17 @@ public static class BenchmarkSuiteCatalog
         error = string.Empty;
         if (string.Equals(suiteKey, "all", StringComparison.OrdinalIgnoreCase))
             return GetSuites(audience).ToArray();
+
+        if (audience == BenchmarkSuiteAudience.Comparison &&
+            string.Equals(suiteKey, HotPathComparisonAlias, StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                ComparisonLookup["client"],
+                ComparisonLookup["throughput"],
+                ComparisonLookup["endtoend"]
+            ];
+        }
 
         if (TryGetSuite(audience, suiteKey, out var suite))
             return [suite];
@@ -197,6 +230,30 @@ public static class BenchmarkSuiteCatalog
 
     private static string GetAudienceDisplayName(BenchmarkSuiteAudience audience)
         => audience == BenchmarkSuiteAudience.FeatureSet ? "Feature sets" : "Comparisons";
+
+    private static string ResolveReportAudience(BenchmarkSuiteAudience audience, IReadOnlyList<BenchmarkSuiteDefinition> suites)
+    {
+        if (audience == BenchmarkSuiteAudience.FeatureSet)
+        {
+            var includesCache = suites.Any(static suite => string.Equals(suite.Key, "cache", StringComparison.OrdinalIgnoreCase));
+            if (includesCache && suites.Count == 1)
+                return "feature/fallback behavior";
+
+            return includesCache
+                ? "mixed feature/fallback + internal feature behavior"
+                : "feature behavior";
+        }
+
+        var includesHotPath = suites.Any(suite => HotPathComparisonSuites.Contains(suite.Key));
+        var includesNonHotPath = suites.Any(suite => !HotPathComparisonSuites.Contains(suite.Key));
+
+        if (includesHotPath && !includesNonHotPath)
+            return "hot-path comparison";
+        if (includesHotPath)
+            return "mixed comparison coverage";
+
+        return "extended parity comparison";
+    }
 
     private static bool TryParseAudience(string value, out BenchmarkSuiteAudience audience)
     {
@@ -240,5 +297,6 @@ public sealed record BenchmarkSuiteDefinition(
 
 public sealed record BenchmarkInvocationPlan(
     string DisplayName,
+    string ReportAudience,
     string[] Arguments,
     KeyValuePair<string, string>[] EnvironmentDefaults);

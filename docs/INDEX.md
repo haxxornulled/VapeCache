@@ -29,12 +29,14 @@ This index tracks the current feature set and supported APIs.
 
 ## Architecture & Performance
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System design and data flow
+- [MUX_FAST_PATH_ARCHITECTURE.md](MUX_FAST_PATH_ARCHITECTURE.md) - Fast-path mux flowcharts, lane management, and tuning playbook
 - [COALESCED_WRITES.md](COALESCED_WRITES.md) - Coalesced write strategy
 - [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md) - Multiplexed lanes + autoscaler architecture and tuning
 - [INMEMORY_PERSISTENCE.md](INMEMORY_PERSISTENCE.md) - In-memory fallback spill design
 - [PERFORMANCE.md](PERFORMANCE.md) - Benchmark methodology and results
 - [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) - Current benchmark snapshot (environment + latest comparison)
 - [BENCHMARKING.md](BENCHMARKING.md) - How to run benchmarks
+- [HOT_PATH_BENCHMARK_CHECKLIST.md](HOT_PATH_BENCHMARK_CHECKLIST.md) - Hot-path benchmark audience split, tuning checklist, and gate criteria
 - [ENGINEERING_PLAYBOOK.md](ENGINEERING_PLAYBOOK.md) - Analyzer, profiling, and capture workflow
 
 ## Observability & Operations

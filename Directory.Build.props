@@ -1,0 +1,34 @@
+<Project>
+  <PropertyGroup>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <LangVersion>14.0</LangVersion>
+    <VapeCacheAnalyzerAudience>runtime</VapeCacheAnalyzerAudience>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="
+    '$(MSBuildProjectName)' == 'VapeCache.Tests' or
+    '$(MSBuildProjectName)' == 'VapeCache.PerfGates.Tests' or
+    '$(MSBuildProjectName)' == 'VapeCache.Benchmarks' or
+    '$(MSBuildProjectName)' == 'VapeCache.Benchmarks.Runner' or
+    '$(MSBuildProjectName)' == 'VapeCache.Console' or
+    '$(MSBuildProjectName)' == 'VapeCache.Sample' or
+    '$(MSBuildProjectName)' == 'VapeCache.DocCommenter'">
+    <VapeCacheAnalyzerAudience>nonruntime</VapeCacheAnalyzerAudience>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(VapeCacheAnalyzerAudience)' == 'runtime'">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!--
+      Temporary runtime analyzer baseline.
+      Rules listed here stay as warnings until debt is burned down; all other analyzer warnings fail runtime builds.
+    -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CA1848;CA1873;CA2012;CA1805;CA1068;CA1512;CA1716;CA1822;CA1001;CA1861;CA1513;CA2016;CA1806;CA2208;CA1865;CA5359;CA1836;CA2263;CA1510;CA1305;CA1859;CA1000</WarningsNotAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(VapeCacheAnalyzerAudience)' == 'nonruntime'">
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

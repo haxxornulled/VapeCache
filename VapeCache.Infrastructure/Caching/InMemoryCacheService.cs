@@ -266,7 +266,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
                 if (value is SpillEntry spill)
                 {
                     var store = (IInMemorySpillStore)state!;
-                    _ = store.DeleteAsync(spill.SpillRef, CancellationToken.None);
+                    _ = DeleteSpillRefBestEffortAsync(store, spill.SpillRef);
                 }
             }, _spillStore);
         }
@@ -328,6 +328,18 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         catch
         {
             // Best-effort cleanup only; never fail cache operations on spill delete.
+        }
+    }
+
+    private static async Task DeleteSpillRefBestEffortAsync(IInMemorySpillStore store, Guid spillRef)
+    {
+        try
+        {
+            await store.DeleteAsync(spillRef, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best-effort cleanup only; this runs from an eviction callback.
         }
     }
 

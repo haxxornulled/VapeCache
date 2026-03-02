@@ -1,0 +1,28 @@
+flowchart LR
+    A[App Command] --> B[HybridCommandExecutor]
+    B --> C[RedisCommandExecutor]
+    C --> D{Read or Write Command}
+    D -->|Read| E[NextRead]
+    D -->|Write| F[NextWrite]
+    E --> G[Power-of-two lane pick<br/>lower lane score wins]
+    F --> G
+    G --> H[RedisMultiplexedConnection]
+    H --> I{In-flight slot available}
+    I -->|Yes| J[Try enqueue to writes ring]
+    I -->|No| K[Wait for slot then enqueue]
+    J --> L[WriterLoopAsync]
+    K --> L
+    L --> M{EnableCoalescedSocketWrites}
+    M -->|true| N[CoalescedWriteDispatcher<br/>build adaptive batch]
+    M -->|false| O[SendDirectAsync]
+    N --> P[Socket.SendAsync vectored/fallback]
+    O --> P
+    P --> Q[Assign response sequence ids<br/>enqueue pending ops]
+    Q --> R[ReaderLoopAsync]
+    R --> S{EnableSocketRespReader}
+    S -->|true| T[RedisRespSocketReaderState]
+    S -->|false| U[RedisRespReaderState]
+    T --> V[ResponseReaderLoop]
+    U --> V
+    V --> W[Complete PendingOperation]
+    W --> X[Caller receives response]

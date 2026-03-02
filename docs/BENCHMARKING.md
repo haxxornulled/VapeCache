@@ -55,8 +55,10 @@ Run both for a complete story.
 
 ```powershell
 dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- list-suites compare
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare hotpath --job Short
 dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare all --job Short
 dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare client --job Short
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite hotpath -Job Short -Mode fair
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode fair
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode realworld
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Medium -Mode fair -Profile aggressive
@@ -65,10 +67,19 @@ powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -
 ### Focus one suite
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite hotpath -Job Short -Mode fair
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite client -Job Short -Mode fair
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite endtoend -Job Short -Mode fair
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite modules -Job Short -Mode fair
 ```
+
+## Audience-Labeled Reporting
+
+- Hot-path comparison claims: run `compare hotpath` (or `-Suite hotpath`).
+- Feature/fallback claims: run `featuresets cache`.
+- Keep these report streams separate in status docs and PR summaries.
+
+See [HOT_PATH_BENCHMARK_CHECKLIST.md](HOT_PATH_BENCHMARK_CHECKLIST.md) for the full tuning and gating checklist.
 
 ### Bigger payload pass (example)
 

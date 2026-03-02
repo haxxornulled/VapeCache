@@ -24,9 +24,9 @@ flowchart TB
         M3[Create PendingRequest]
         M4[_writes.EnqueueAsync]
         M5[WriterLoopAsync<br/>Background Task]
-        M6{shouldCoalesce?}
+        M6{useCoalescedPath?}
         M7[SendCoalescedAsync<br/>HOT PATH]
-        M8[SendLegacyAsync<br/>Disabled]
+        M8[SendDirectAsync<br/>Direct Path]
     end
 
     subgraph Coalescing["Coalescing Layer"]

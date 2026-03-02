@@ -26,6 +26,7 @@ public static class BenchmarkConsole
 
             ApplyEnvironmentDefaults(plan.EnvironmentDefaults);
             Console.Out.WriteLine($"Running benchmark suite: {plan.DisplayName}");
+            Console.Out.WriteLine($"Reporting audience: {plan.ReportAudience}");
             RunBenchmarks(plan.Arguments);
             return 0;
         }

@@ -538,18 +538,18 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 await EnsureConnectedAsync(_cts.Token).ConfigureAwait(false);
                 var conn = _conn!;
 
-                // Coalescing now works for ALL Redis command types, including payload operations.
-                // Fixed scratch buffer reuse bug that was causing protocol corruption for multi-segment commands.
-                var shouldCoalesce = _coalesceWrites;
+                // Coalescing path supports all Redis command shapes, including payload operations.
+                // When coalescing is disabled, use the direct non-coalesced send path.
+                var useCoalescedPath = _coalesceWrites;
 
-                if (shouldCoalesce)
+                if (useCoalescedPath)
                 {
                     usedCoalescedPath = true;
                     await _coalescedWriteDispatcher.SendAsync(req, conn.Socket, _cts.Token).ConfigureAwait(false);
                 }
                 else
                 {
-                    await SendLegacyAsync(req, conn, _cts.Token).ConfigureAwait(false);
+                    await SendDirectAsync(req, conn, _cts.Token).ConfigureAwait(false);
                     if (req.HeaderBuffer is not null)
                         ReturnHeaderBuffer(req.HeaderBuffer);
                     if (req.PayloadArrayBuffer is not null)
@@ -639,7 +639,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         }
     }
 
-    private async Task SendLegacyAsync(PendingRequest req, IRedisConnection conn, CancellationToken ct)
+    private async Task SendDirectAsync(PendingRequest req, IRedisConnection conn, CancellationToken ct)
     {
         var sendHeader = await conn.SendAsync(req.Command, ct).ConfigureAwait(false);
         if (!sendHeader.IsSuccess)

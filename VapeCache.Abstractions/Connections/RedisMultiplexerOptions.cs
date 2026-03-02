@@ -23,7 +23,7 @@ public sealed record RedisMultiplexerOptions
 
     /// <summary>
     /// Enables scatter/gather coalesced writes via SocketAsyncEventArgs when available.
-    /// Falls back to the legacy stream writer when false.
+    /// Uses direct non-coalesced sends when false.
     /// </summary>
     public bool EnableCoalescedSocketWrites { get; init; } = true;
 
@@ -41,21 +41,21 @@ public sealed record RedisMultiplexerOptions
 
     /// <summary>
     /// Maximum bytes to include in one coalesced socket write batch.
-    /// Defaults to a full-tilt profile (1MB). Decrease for lower single-command latency.
+    /// Defaults to a tuned full-tilt profile (512KB). Decrease for lower single-command latency.
     /// </summary>
-    public int CoalescedWriteMaxBytes { get; init; } = 1024 * 1024;
+    public int CoalescedWriteMaxBytes { get; init; } = 512 * 1024;
 
     /// <summary>
     /// Maximum segment count to include in one coalesced write batch.
-    /// Defaults to a full-tilt profile (256 segments).
+    /// Defaults to a tuned full-tilt profile (192 segments).
     /// </summary>
-    public int CoalescedWriteMaxSegments { get; init; } = 256;
+    public int CoalescedWriteMaxSegments { get; init; } = 192;
 
     /// <summary>
     /// Segments up to this size are copied into scratch buffers to reduce scatter/gather overhead.
-    /// Defaults to a full-tilt profile (2KB).
+    /// Defaults to a tuned full-tilt profile (1536B).
     /// </summary>
-    public int CoalescedWriteSmallCopyThresholdBytes { get; init; } = 2048;
+    public int CoalescedWriteSmallCopyThresholdBytes { get; init; } = 1536;
 
     /// <summary>
     /// Enables adaptive coalescing. Low queue depths bias for latency, high depths bias for throughput.
@@ -65,12 +65,12 @@ public sealed record RedisMultiplexerOptions
     /// <summary>
     /// Queue depth at or below this value uses the adaptive minimum limits.
     /// </summary>
-    public int AdaptiveCoalescingLowDepth { get; init; } = 4;
+    public int AdaptiveCoalescingLowDepth { get; init; } = 6;
 
     /// <summary>
     /// Queue depth at or above this value uses the configured max coalescing limits.
     /// </summary>
-    public int AdaptiveCoalescingHighDepth { get; init; } = 64;
+    public int AdaptiveCoalescingHighDepth { get; init; } = 56;
 
     /// <summary>
     /// Minimum bytes used when adaptive coalescing is in low-depth mode.
@@ -80,12 +80,12 @@ public sealed record RedisMultiplexerOptions
     /// <summary>
     /// Minimum segment count used when adaptive coalescing is in low-depth mode.
     /// </summary>
-    public int AdaptiveCoalescingMinSegments { get; init; } = 64;
+    public int AdaptiveCoalescingMinSegments { get; init; } = 48;
 
     /// <summary>
     /// Minimum scratch-copy threshold used when adaptive coalescing is in low-depth mode.
     /// </summary>
-    public int AdaptiveCoalescingMinSmallCopyThresholdBytes { get; init; } = 512;
+    public int AdaptiveCoalescingMinSmallCopyThresholdBytes { get; init; } = 384;
 
     /// <summary>
     /// Maximum time to wait for a Redis response before treating the connection as unhealthy.

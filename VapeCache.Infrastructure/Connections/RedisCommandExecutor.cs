@@ -134,6 +134,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
         var o = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(configuredMuxOptions);
         var connOpts = RedisRuntimeOptionsNormalizer.NormalizeConnection(configuredConnectionOptions);
+        ValidateTlsConfiguration(connOpts);
         _factory = factory;
         _connectionOptions = connOpts;
         _clusterRedirectsEnabled = connOpts.EnableClusterRedirection;
@@ -412,7 +413,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             var ssl = new SslStream(
                 stream,
                 leaveInnerStreamOpen: false,
-                _connectionOptions.AllowInvalidCert ? static (_, _, _, _) => true : null);
+                GetServerCertificateValidationCallback(_connectionOptions));
 
             await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
             {
@@ -433,6 +434,36 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             token,
             maxBulkStringBytes: _connectionOptions.MaxBulkStringBytes,
             maxArrayDepth: _connectionOptions.MaxArrayDepth).ConfigureAwait(false);
+    }
+
+    private static RemoteCertificateValidationCallback? GetServerCertificateValidationCallback(RedisConnectionOptions options)
+    {
+        if (!options.AllowInvalidCert)
+            return null;
+
+        if (options.UseTls && IsProductionEnvironment())
+        {
+            throw new InvalidOperationException(
+                "AllowInvalidCert=true is not permitted in production environments. " +
+                "This setting bypasses TLS certificate validation and creates a critical security vulnerability. " +
+                "Use proper CA-signed certificates or set ASPNETCORE_ENVIRONMENT/DOTNET_ENVIRONMENT to Development.");
+        }
+
+        return static (_, _, _, _) => true;
+    }
+
+    private static void ValidateTlsConfiguration(RedisConnectionOptions options)
+    {
+        _ = GetServerCertificateValidationCallback(options);
+    }
+
+    private static bool IsProductionEnvironment()
+    {
+        var aspNetEnv = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        var dotnetEnv = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var env = aspNetEnv ?? dotnetEnv ?? "Production";
+        return !string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(env, "Staging", StringComparison.OrdinalIgnoreCase);
     }
 
     private void TryConfigureSocket(Socket socket)

@@ -93,6 +93,39 @@ public sealed class RedisConnectionPoolIntegrationTests
         Assert.True(countingFactory.CreatedCount <= 2, $"Created={countingFactory.CreatedCount}");
     }
 
+    [SkippableFact]
+    public async Task Pool_reuses_connections_over_rapid_rent_return_cycles()
+    {
+        var options = RedisIntegrationConfig.TryLoad(out var skipReason);
+        Skip.If(options is null, skipReason);
+
+        options = options with
+        {
+            MaxConnections = 2,
+            MaxIdle = 2,
+            Warm = 1,
+            AcquireTimeout = TimeSpan.FromSeconds(5),
+            ConnectTimeout = TimeSpan.FromSeconds(3)
+        };
+
+        await using var realFactory = new RedisConnectionFactory(
+            RedisIntegrationConfig.Monitor(options),
+            NullLogger<RedisConnectionFactory>.Instance,
+            Array.Empty<IRedisConnectionObserver>());
+        var countingFactory = new CountingFactory(realFactory);
+        await using var pool = new RedisConnectionPool(countingFactory, RedisIntegrationConfig.Monitor(options), NullLogger<RedisConnectionPool>.Instance);
+
+        for (var i = 0; i < 50; i++)
+        {
+            var lease = await pool.RentAsync(CancellationToken.None);
+            Assert.True(lease.IsSuccess, $"Lease failed at iteration {i}.");
+            await PingAsync(lease, options);
+            await lease.Match(async l => await l.DisposeAsync(), ex => throw ex);
+        }
+
+        Assert.True(countingFactory.CreatedCount <= 2, $"Expected reuse within pool capacity. Created={countingFactory.CreatedCount}");
+    }
+
     private static async Task<Result<IRedisConnectionLease>> RentAndHoldAsync(
         RedisConnectionPool pool,
         RedisConnectionOptions options,

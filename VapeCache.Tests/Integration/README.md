@@ -52,6 +52,12 @@ dotnet test --filter "FullyQualifiedName~Integration"
 dotnet test --filter "FullyQualifiedName~CoalescedWritesIntegrationTests"
 ```
 
+Or use the repo runner script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File run_integration_tests.ps1
+```
+
 ## Environment Variables
 
 | Variable | Required | Default | Description |
@@ -72,6 +78,8 @@ Tests coalesced write functionality (batching multiple commands into single sock
 
 - `CoalescedWrites_SingleCommand`: Verifies basic SET/GET/DELETE with coalescing enabled
 - `CoalescedWrites_Concurrent`: Stress test with 100 concurrent operations
+- `DirectWrites_Path_RoundTrip_WhenCoalescingDisabled`: Verifies direct write path when coalescing is disabled
+- `CoalescedWrites_SocketReaderAndDedicatedWorkers_RoundTrip`: Verifies tuned hot-path knobs (`EnableSocketRespReader`, `UseDedicatedLaneWorkers`)
 - `CoalescedWrites_Hash_RoundTrip`: Validates coalesced write path for HASH commands
 - `CoalescedWrites_List_RoundTrip`: Validates coalesced write path for LIST commands
 - `CoalescedWrites_Set_RoundTrip`: Validates coalesced write path for SET commands
@@ -83,13 +91,22 @@ Tests core Redis commands against live server.
 
 - `Executor_can_set_get_del`: Basic key-value operations
 - `Executor_supports_getex_ttl_pttl_mget_mset_unlink`: Expiration and bulk commands
+- `Executor_supports_try_and_lease_paths`: Covers Try* command paths and lease-based reads
+- `Executor_supports_scan_streams`: Covers SCAN/SSCAN/HSCAN/ZSCAN streaming surfaces
 - Hash, List, and Set operations
 
 ### RedisConnectionFactoryIntegrationTests
 Tests connection establishment, pooling, and TLS.
 
+- `CreateAsync_connects_and_can_ping`
+- `CreateAsync_supports_parallel_connections`
+
 ### RedisConnectionPoolIntegrationTests
 Tests connection pool behavior, leasing, and cleanup.
+
+- `Pool_warms_and_reuses_connections`
+- `Pool_does_not_exceed_capacity_under_concurrency`
+- `Pool_reuses_connections_over_rapid_rent_return_cycles`
 
 ### RedisReconnectDrillIntegrationTests
 Controlled live reconnect/outage drill:

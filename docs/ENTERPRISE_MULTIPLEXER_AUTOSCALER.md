@@ -2,6 +2,8 @@
 
 This document explains VapeCache multiplexed connection internals and the autoscaler control loop.
 
+For a code-level fast-path flow and lane-management diagram set, see [MUX_FAST_PATH_ARCHITECTURE.md](MUX_FAST_PATH_ARCHITECTURE.md).
+
 ## Scope and Edition
 
 - Multiplexed connections (`RedisMultiplexerOptions`) are available in OSS.
@@ -42,8 +44,9 @@ flowchart TD
     B -->|GET/HGET/SCARD/...| C[Read Lanes]
     B -->|SET/HSET/SADD/...| D[Write Lanes]
     C --> E[Power-of-two choice]
-    E --> F[Pick lower WriteQueueDepth]
-    D --> G[Round-robin write lane]
+    D --> E
+    E --> F[Compute lane score<br/>queue depth + inflight weight]
+    F --> G[Pick lower-score lane]
 ```
 
 ## Autoscaler Control Loop (Enterprise)

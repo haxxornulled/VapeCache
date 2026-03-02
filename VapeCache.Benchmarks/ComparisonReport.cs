@@ -31,6 +31,8 @@ internal sealed record ComparisonRow(
 
 internal static class ComparisonReport
 {
+    private const string ReportAudienceEnvironmentVariable = "VAPECACHE_BENCH_REPORT_AUDIENCE";
+
     public static ComparisonClient DetectClient(string? methodName)
     {
         if (string.IsNullOrWhiteSpace(methodName))
@@ -73,11 +75,17 @@ internal static class ComparisonReport
     {
         var rows = BuildRows(samples);
         var sb = new StringBuilder();
+        var reportAudience = ResolveReportAudience();
 
         sb.AppendLine("# Redis Head-to-Head Comparison");
         sb.AppendLine();
         sb.AppendLine($"Generated: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
         sb.AppendLine();
+        if (!string.IsNullOrWhiteSpace(reportAudience))
+        {
+            sb.AppendLine($"Reporting audience: {reportAudience}");
+            sb.AppendLine();
+        }
 
         if (rows.Count == 0)
         {
@@ -163,6 +171,12 @@ internal static class ComparisonReport
 
     private static string EscapeCell(string value)
         => value.Replace("|", "\\|", StringComparison.Ordinal);
+
+    private static string? ResolveReportAudience()
+    {
+        var raw = Environment.GetEnvironmentVariable(ReportAudienceEnvironmentVariable);
+        return string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+    }
 
     private sealed class StringTupleComparer : IEqualityComparer<(string Suite, string Scenario, string Parameters)>
     {

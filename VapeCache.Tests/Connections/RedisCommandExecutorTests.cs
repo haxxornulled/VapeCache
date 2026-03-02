@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using System.Threading.Tasks;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Connections;
 using Xunit;
 
@@ -83,6 +84,58 @@ public sealed class RedisCommandExecutorTests
         Assert.False(ok);
     }
 
+    [Fact]
+    public void GetServerCertificateValidationCallbackThrowsInProductionWhenAllowInvalidCertEnabled()
+    {
+        var method = GetServerCertificateValidationCallbackMethod();
+        var options = new RedisConnectionOptions
+        {
+            UseTls = true,
+            AllowInvalidCert = true
+        };
+
+        var previousDotnet = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var previousAspNet = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Production");
+        Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Production");
+        try
+        {
+            var ex = Assert.Throws<TargetInvocationException>(() => method.Invoke(null, new object[] { options }));
+            Assert.IsType<InvalidOperationException>(ex.InnerException);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", previousDotnet);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previousAspNet);
+        }
+    }
+
+    [Fact]
+    public void GetServerCertificateValidationCallbackAllowsDevelopmentWhenAllowInvalidCertEnabled()
+    {
+        var method = GetServerCertificateValidationCallbackMethod();
+        var options = new RedisConnectionOptions
+        {
+            UseTls = true,
+            AllowInvalidCert = true
+        };
+
+        var previousDotnet = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var previousAspNet = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Development");
+        Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+        try
+        {
+            var callback = method.Invoke(null, new object[] { options });
+            Assert.NotNull(callback);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", previousDotnet);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previousAspNet);
+        }
+    }
+
     private static ValueTask<byte[]?> InvokeMapGetResponseAsync(RedisRespReader.RespValue resp)
     {
         var method = typeof(RedisCommandExecutor).GetMethod(
@@ -98,6 +151,15 @@ public sealed class RedisCommandExecutorTests
     {
         var method = typeof(RedisCommandExecutor).GetMethod(
             "TryParseClusterRedirectMessage",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        return method!;
+    }
+
+    private static MethodInfo GetServerCertificateValidationCallbackMethod()
+    {
+        var method = typeof(RedisCommandExecutor).GetMethod(
+            "GetServerCertificateValidationCallback",
             BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
         return method!;

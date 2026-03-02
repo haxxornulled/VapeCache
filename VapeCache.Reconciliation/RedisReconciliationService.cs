@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
@@ -15,7 +17,13 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
     private readonly RedisReconciliationOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly IRedisReconciliationStore _store;
+    private readonly Channel<TrackingWorkItem>? _trackingQueue;
+    private readonly Task? _trackingPumpTask;
+    private readonly ConcurrentDictionary<string, int> _queuedKeyCounts = new(StringComparer.Ordinal);
     private int _pendingEstimate = -1;
+    private int _queuedOperations;
+    private int _queuedDistinctKeys;
+    private int _queueFullWarningCount;
 
     public RedisReconciliationService(
         IRedisReconciliationExecutor redis,
@@ -29,6 +37,11 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         _logger = logger;
         _timeProvider = timeProvider;
         _store = store;
+        if (_options.Enabled)
+        {
+            _trackingQueue = CreateTrackingQueue(_options);
+            _trackingPumpTask = Task.Run(ProcessTrackingQueueAsync);
+        }
     }
 
     public int PendingOperations
@@ -36,8 +49,14 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         get
         {
             var estimate = Volatile.Read(ref _pendingEstimate);
-            // Return cached estimate or 0 if not yet initialized to avoid blocking I/O
-            return estimate >= 0 ? estimate : 0;
+            if (estimate < 0)
+                estimate = 0;
+
+            var queued = Volatile.Read(ref _queuedDistinctKeys);
+            if (queued < 0)
+                queued = 0;
+
+            return estimate + queued;
         }
     }
 
@@ -54,18 +73,11 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
             ? now + expiry.Value
             : (DateTimeOffset?)null;
 
-        try
-        {
-            var inserted = _store.TryUpsertWriteAsync(key, value, now, expiresAt, CancellationToken.None)
-                .GetAwaiter().GetResult();
-            if (inserted)
-                AdjustPendingEstimate(1);
-            RedisReconciliationTelemetry.Tracked.Add(1, new KeyValuePair<string, object?>("type", "write"));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to persist reconciliation write for key {Key}.", key);
-        }
+        var mutation = new TrackingMutation(OperationType.Write, key, value.ToArray(), now, expiresAt);
+        if (!TryQueueMutation(mutation, "write"))
+            return;
+
+        RedisReconciliationTelemetry.Tracked.Add(1, new KeyValuePair<string, object?>("type", "write"));
     }
 
     /// <summary>
@@ -77,18 +89,11 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         if (!TryReserveSlot()) return;
 
         var now = _timeProvider.GetUtcNow();
-        try
-        {
-            var inserted = _store.TryUpsertDeleteAsync(key, now, CancellationToken.None)
-                .GetAwaiter().GetResult();
-            if (inserted)
-                AdjustPendingEstimate(1);
-            RedisReconciliationTelemetry.Tracked.Add(1, new KeyValuePair<string, object?>("type", "delete"));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to persist reconciliation delete for key {Key}.", key);
-        }
+        var mutation = new TrackingMutation(OperationType.Delete, key, null, now, null);
+        if (!TryQueueMutation(mutation, "delete"))
+            return;
+
+        RedisReconciliationTelemetry.Tracked.Add(1, new KeyValuePair<string, object?>("type", "delete"));
     }
 
     private bool TryReserveSlot()
@@ -96,36 +101,21 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         var limit = _options.MaxPendingOperations;
         if (limit <= 0) return true;
 
-        int count;
-        try
-        {
-            count = EnsurePendingEstimate();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Failed to load reconciliation pending estimate. Bypassing MaxPendingOperations enforcement for this operation.");
-            return true;
-        }
+        var estimate = Volatile.Read(ref _pendingEstimate);
+        if (estimate < 0)
+            estimate = 0;
 
-        if (count >= limit)
+        var queuedDistinct = Volatile.Read(ref _queuedDistinctKeys);
+        if (queuedDistinct < 0)
+            queuedDistinct = 0;
+
+        if (Math.Max(estimate, queuedDistinct) >= limit)
         {
             RedisReconciliationTelemetry.Dropped.Add(1);
             return false;
         }
 
         return true;
-    }
-
-    private int EnsurePendingEstimate()
-    {
-        var estimate = Volatile.Read(ref _pendingEstimate);
-        if (estimate >= 0) return estimate;
-
-        var count = _store.CountAsync(CancellationToken.None).GetAwaiter().GetResult();
-        Interlocked.CompareExchange(ref _pendingEstimate, count, -1);
-        return Volatile.Read(ref _pendingEstimate);
     }
 
     private void AdjustPendingEstimate(int delta)
@@ -143,6 +133,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
     {
         if (!_options.Enabled) return;
 
+        await DrainTrackingQueueAsync(ct).ConfigureAwait(false);
         var start = _timeProvider.GetUtcNow();
         var snapshot = await _store.SnapshotAsync(_options.MaxOperationsPerRun, ct).ConfigureAwait(false);
         if (snapshot.Count == 0) return;
@@ -261,8 +252,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
     /// </summary>
     public void Clear()
     {
-        _store.ClearAsync(CancellationToken.None).GetAwaiter().GetResult();
-        Volatile.Write(ref _pendingEstimate, 0);
+        FlushAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
     }
 
     /// <summary>
@@ -270,7 +260,243 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
     /// </summary>
     public async ValueTask FlushAsync(CancellationToken ct = default)
     {
+        await DrainTrackingQueueAsync(ct).ConfigureAwait(false);
         await _store.ClearAsync(ct).ConfigureAwait(false);
         Volatile.Write(ref _pendingEstimate, 0);
     }
+
+    private static Channel<TrackingWorkItem> CreateTrackingQueue(RedisReconciliationOptions options)
+    {
+        var limit = options.MaxPendingOperations;
+        if (limit > 0)
+        {
+            return Channel.CreateBounded<TrackingWorkItem>(new BoundedChannelOptions(limit)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.Wait,
+                AllowSynchronousContinuations = false
+            });
+        }
+
+        return Channel.CreateUnbounded<TrackingWorkItem>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false
+        });
+    }
+
+    private bool TryQueueMutation(TrackingMutation mutation, string mutationType)
+    {
+        if (_trackingQueue is null || !_trackingQueue.Writer.TryWrite(new MutationWorkItem(mutation)))
+        {
+            RedisReconciliationTelemetry.Dropped.Add(1, new KeyValuePair<string, object?>("type", mutationType));
+            var warningCount = Interlocked.Increment(ref _queueFullWarningCount);
+            if (warningCount <= 3 || warningCount % 100 == 0)
+            {
+                _logger.LogWarning(
+                    "Reconciliation tracking queue is full; dropping {MutationType} for key {Key}. PendingOperations={PendingOperations}",
+                    mutationType,
+                    mutation.Key,
+                    PendingOperations);
+            }
+
+            return false;
+        }
+
+        Interlocked.Increment(ref _queuedOperations);
+        RegisterQueuedKey(mutation.Key);
+        return true;
+    }
+
+    private async Task ProcessTrackingQueueAsync()
+    {
+        if (_trackingQueue is null)
+            return;
+
+        await RefreshPendingEstimateAsync(CancellationToken.None).ConfigureAwait(false);
+
+        var batchSize = Math.Max(1, _options.BatchSize);
+        var pending = new List<TrackingMutation>(batchSize);
+        try
+        {
+            while (await _trackingQueue.Reader.WaitToReadAsync(CancellationToken.None).ConfigureAwait(false))
+            {
+                while (_trackingQueue.Reader.TryRead(out var workItem))
+                {
+                    switch (workItem)
+                    {
+                        case MutationWorkItem mutationWork:
+                            pending.Add(mutationWork.Mutation);
+                            if (pending.Count >= batchSize)
+                                await PersistPendingMutationsAsync(pending, CancellationToken.None).ConfigureAwait(false);
+                            break;
+
+                        case FlushWorkItem flushWork:
+                            try
+                            {
+                                await PersistPendingMutationsAsync(pending, CancellationToken.None).ConfigureAwait(false);
+                                flushWork.Completion.TrySetResult(true);
+                            }
+                            catch (Exception ex)
+                            {
+                                flushWork.Completion.TrySetException(ex);
+                            }
+                            break;
+                    }
+                }
+
+                if (pending.Count > 0)
+                    await PersistPendingMutationsAsync(pending, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Reconciliation tracking queue pump stopped unexpectedly.");
+        }
+        finally
+        {
+            while (_trackingQueue.Reader.TryRead(out var workItem))
+            {
+                switch (workItem)
+                {
+                    case MutationWorkItem mutationWork:
+                        pending.Add(mutationWork.Mutation);
+                        break;
+                    case FlushWorkItem flushWork:
+                        flushWork.Completion.TrySetCanceled();
+                        break;
+                }
+            }
+
+            if (pending.Count > 0)
+                await PersistPendingMutationsAsync(pending, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask PersistPendingMutationsAsync(List<TrackingMutation> pending, CancellationToken ct)
+    {
+        if (pending.Count == 0)
+            return;
+
+        foreach (var mutation in pending)
+        {
+            try
+            {
+                var inserted = mutation.Type switch
+                {
+                    OperationType.Write => await _store.TryUpsertWriteAsync(
+                        mutation.Key,
+                        mutation.Value!,
+                        mutation.TrackedAt,
+                        mutation.ExpiresAt,
+                        ct).ConfigureAwait(false),
+                    OperationType.Delete => await _store.TryUpsertDeleteAsync(
+                        mutation.Key,
+                        mutation.TrackedAt,
+                        ct).ConfigureAwait(false),
+                    _ => false
+                };
+
+                if (inserted)
+                    AdjustPendingEstimate(1);
+            }
+            catch (Exception ex)
+            {
+                RedisReconciliationTelemetry.Dropped.Add(1, new KeyValuePair<string, object?>("type", mutation.Type.ToString().ToLowerInvariant()));
+                _logger.LogWarning(
+                    ex,
+                    "Failed to persist reconciliation {MutationType} for key {Key}.",
+                    mutation.Type,
+                    mutation.Key);
+            }
+            finally
+            {
+                UnregisterQueuedKey(mutation.Key);
+                Interlocked.Decrement(ref _queuedOperations);
+            }
+        }
+
+        pending.Clear();
+    }
+
+    private async ValueTask RefreshPendingEstimateAsync(CancellationToken ct)
+    {
+        var estimate = Volatile.Read(ref _pendingEstimate);
+        if (estimate >= 0)
+            return;
+
+        try
+        {
+            var count = await _store.CountAsync(ct).ConfigureAwait(false);
+            Interlocked.CompareExchange(ref _pendingEstimate, count, -1);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to load reconciliation pending estimate asynchronously. Starting from zero.");
+            Interlocked.CompareExchange(ref _pendingEstimate, 0, -1);
+        }
+    }
+
+    private async ValueTask DrainTrackingQueueAsync(CancellationToken ct)
+    {
+        if (!_options.Enabled || _trackingQueue is null)
+            return;
+
+        if (_trackingPumpTask is { IsCompleted: true })
+            await _trackingPumpTask.ConfigureAwait(false);
+
+        if (Volatile.Read(ref _queuedOperations) == 0)
+            return;
+
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await _trackingQueue.Writer.WriteAsync(new FlushWorkItem(completion), ct).ConfigureAwait(false);
+        await completion.Task.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    private void RegisterQueuedKey(string key)
+    {
+        var count = _queuedKeyCounts.AddOrUpdate(key, 1, static (_, existing) => existing + 1);
+        if (count == 1)
+            Interlocked.Increment(ref _queuedDistinctKeys);
+    }
+
+    private void UnregisterQueuedKey(string key)
+    {
+        while (true)
+        {
+            if (!_queuedKeyCounts.TryGetValue(key, out var current))
+                return;
+
+            if (current <= 1)
+            {
+                if (_queuedKeyCounts.TryRemove(key, out _))
+                {
+                    Interlocked.Decrement(ref _queuedDistinctKeys);
+                    return;
+                }
+
+                continue;
+            }
+
+            if (_queuedKeyCounts.TryUpdate(key, current - 1, current))
+                return;
+        }
+    }
+
+    private abstract record TrackingWorkItem;
+
+    private sealed record MutationWorkItem(TrackingMutation Mutation) : TrackingWorkItem;
+
+    private sealed record FlushWorkItem(TaskCompletionSource<bool> Completion) : TrackingWorkItem;
+
+    private sealed record TrackingMutation(
+        OperationType Type,
+        string Key,
+        byte[]? Value,
+        DateTimeOffset TrackedAt,
+        DateTimeOffset? ExpiresAt);
 }

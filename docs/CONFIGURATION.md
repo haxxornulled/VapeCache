@@ -93,21 +93,22 @@ Controls multiplexed command execution.
 ```json
 {
   "RedisMultiplexer": {
+    "TransportProfile": "FullTilt",
     "Connections": 4,
     "MaxInFlightPerConnection": 4096,
     "ResponseTimeout": "00:00:02",
     "EnableCommandInstrumentation": true,
     "EnableCoalescedSocketWrites": true,
     "EnableSocketRespReader": false,
-    "CoalescedWriteMaxBytes": 1048576,
-    "CoalescedWriteMaxSegments": 256,
-    "CoalescedWriteSmallCopyThresholdBytes": 2048,
+    "CoalescedWriteMaxBytes": 524288,
+    "CoalescedWriteMaxSegments": 192,
+    "CoalescedWriteSmallCopyThresholdBytes": 1536,
     "EnableAdaptiveCoalescing": true,
-    "AdaptiveCoalescingLowDepth": 4,
-    "AdaptiveCoalescingHighDepth": 64,
+    "AdaptiveCoalescingLowDepth": 6,
+    "AdaptiveCoalescingHighDepth": 56,
     "AdaptiveCoalescingMinWriteBytes": 65536,
-    "AdaptiveCoalescingMinSegments": 64,
-    "AdaptiveCoalescingMinSmallCopyThresholdBytes": 512
+    "AdaptiveCoalescingMinSegments": 48,
+    "AdaptiveCoalescingMinSmallCopyThresholdBytes": 384
   }
 }
 ```
@@ -116,10 +117,12 @@ Controls multiplexed command execution.
 - `EnableAutoscaling` and autoscaler thresholds are **Enterprise-only** operational controls.
 - For OSS-only deployments, keep `EnableAutoscaling=false` (default).
 - `ResponseTimeout` applies per command response; set to `00:00:00` to disable.
-- Defaults are full-tilt (`CoalescedWriteMaxBytes=1MB`, `CoalescedWriteMaxSegments=256`, `CoalescedWriteSmallCopyThresholdBytes=2048`).
+- Effective FullTilt profile sizing defaults are `CoalescedWriteMaxBytes=524288`, `CoalescedWriteMaxSegments=192`, `CoalescedWriteSmallCopyThresholdBytes=1536`.
 - Coalesced write knobs control packet framing at the driver layer. Increase batch bytes/segments for throughput; reduce for lower tail latency.
 - `EnableAdaptiveCoalescing=true` automatically scales between the adaptive minimum limits and configured max limits based on queue depth.
 - `EnableSocketRespReader` is optional and defaults to `false`; enable only after validating in your environment.
+- Set `TransportProfile=Custom` when you want explicit coalescing byte/segment values to win over profile defaults.
+- Fast-path and lane-management diagrams: [MUX_FAST_PATH_ARCHITECTURE.md](MUX_FAST_PATH_ARCHITECTURE.md)
 
 ### Runtime Performance Guardrails
 
@@ -409,5 +412,6 @@ builder.Services.AddOptions<CacheStampedeOptions>()
 ## See Also
 - [QUICKSTART.md](QUICKSTART.md)
 - [ARCHITECTURE.md](ARCHITECTURE.md)
+- [MUX_FAST_PATH_ARCHITECTURE.md](MUX_FAST_PATH_ARCHITECTURE.md)
 - [OBSERVABILITY_ARCHITECTURE.md](OBSERVABILITY_ARCHITECTURE.md)
 - [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md)

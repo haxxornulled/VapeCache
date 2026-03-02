@@ -217,6 +217,76 @@ public sealed class CoalescedWritesIntegrationTests
     }
 
     [SkippableFact]
+    public async Task DirectWrites_Path_RoundTrip_WhenCoalescingDisabled()
+    {
+        var options = RedisIntegrationConfig.TryLoad(out var skipReason);
+        Skip.If(options is null, skipReason);
+
+        await using var factory = new RedisConnectionFactory(
+            RedisIntegrationConfig.Monitor(options),
+            NullLogger<RedisConnectionFactory>.Instance,
+            Array.Empty<IRedisConnectionObserver>());
+
+        await using var exec = new RedisCommandExecutor(
+            factory,
+            Options.Create(new RedisMultiplexerOptions
+            {
+                Connections = 1,
+                MaxInFlightPerConnection = 4096,
+                EnableCoalescedSocketWrites = false
+            }));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var ct = cts.Token;
+        var key = "vapecache:direct:" + Guid.NewGuid().ToString("N");
+
+        Assert.True(await exec.SetAsync(key, "direct"u8.ToArray(), TimeSpan.FromSeconds(30), ct));
+        var got = await exec.GetAsync(key, ct);
+        Assert.NotNull(got);
+        Assert.Equal("direct", Encoding.UTF8.GetString(got!));
+        Assert.True(await exec.DeleteAsync(key, ct));
+    }
+
+    [SkippableFact]
+    public async Task CoalescedWrites_SocketReaderAndDedicatedWorkers_RoundTrip()
+    {
+        var options = RedisIntegrationConfig.TryLoad(out var skipReason);
+        Skip.If(options is null, skipReason);
+
+        await using var factory = new RedisConnectionFactory(
+            RedisIntegrationConfig.Monitor(options),
+            NullLogger<RedisConnectionFactory>.Instance,
+            Array.Empty<IRedisConnectionObserver>());
+
+        await using var exec = new RedisCommandExecutor(
+            factory,
+            Options.Create(new RedisMultiplexerOptions
+            {
+                Connections = 2,
+                MaxInFlightPerConnection = 4096,
+                EnableCoalescedSocketWrites = true,
+                EnableSocketRespReader = true,
+                UseDedicatedLaneWorkers = true
+            }));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var ct = cts.Token;
+        var keyPrefix = "vapecache:tuned:" + Guid.NewGuid().ToString("N");
+
+        var tasks = Enumerable.Range(0, 32).Select(async i =>
+        {
+            var key = $"{keyPrefix}:{i}";
+            var value = Encoding.UTF8.GetBytes($"v:{i}");
+            Assert.True(await exec.SetAsync(key, value, TimeSpan.FromSeconds(30), ct));
+            var got = await exec.GetAsync(key, ct);
+            Assert.NotNull(got);
+            Assert.Equal(value, got);
+        });
+
+        await Task.WhenAll(tasks);
+    }
+
+    [SkippableFact]
     public async Task CoalescedWrites_Json_RoundTrip_WhenRedisJsonAvailable()
     {
         var options = RedisIntegrationConfig.TryLoad(out var skipReason);
