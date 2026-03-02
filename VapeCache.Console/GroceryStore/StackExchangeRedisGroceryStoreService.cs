@@ -56,15 +56,18 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
 
         var batch = _db.CreateBatch();
         var key = $"cart:{userId}";
-        var tasks = new Task<long>[items.Count];
+        var operations = new ValueTask<long>[items.Count];
         for (var i = 0; i < items.Count; i++)
         {
             var payload = JsonSerializer.SerializeToUtf8Bytes(items[i], JsonContext.CartItem);
-            tasks[i] = batch.ListRightPushAsync(key, payload);
+            operations[i] = new ValueTask<long>(batch.ListRightPushAsync(key, payload));
         }
 
         batch.Execute();
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+        foreach (var operation in operations)
+        {
+            await operation.ConfigureAwait(false);
+        }
     }
 
     /// <summary>
