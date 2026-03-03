@@ -22,6 +22,8 @@ This index tracks the current feature set and supported APIs.
 
 ## API Reference
 - [API_REFERENCE.md](API_REFERENCE.md) - Core APIs, intent model, stampede profiles, Aspire endpoints
+- [HYBRID_CACHING_API_SURFACE.md](HYBRID_CACHING_API_SURFACE.md) - Integration contract for hybrid caching APIs and behavior
+- [CACHE_TAGS_AND_ZONES.md](CACHE_TAGS_AND_ZONES.md) - Versioned tag invalidation and zone patterns (EF second-level cache)
 - [TYPED_COLLECTIONS.md](TYPED_COLLECTIONS.md) - Lists, sets, hashes, sorted sets
 - [REDIS_PROTOCOL_SUPPORT.md](REDIS_PROTOCOL_SUPPORT.md) - Supported Redis commands
 - [REDIS_MODULES.md](REDIS_MODULES.md) - Module detection + RedisJSON/RediSearch/Bloom/TimeSeries

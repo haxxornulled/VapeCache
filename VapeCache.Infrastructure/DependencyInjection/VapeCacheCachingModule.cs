@@ -82,7 +82,9 @@ public sealed class VapeCacheCachingModule : Module
                 ctx.Resolve<HybridCacheService>(),
                 ctx.Resolve<IOptionsMonitor<CacheStampedeOptions>>(),
                 ctx.Resolve<CacheStatsRegistry>().GetOrCreate(CacheStatsNames.Hybrid)))
+            .AsSelf()
             .As<ICacheService>()
+            .As<ICacheTagService>()
             .SingleInstance();
 
         builder.RegisterType<SystemTextJsonCodecProvider>()

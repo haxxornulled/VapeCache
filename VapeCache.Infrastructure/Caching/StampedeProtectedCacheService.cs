@@ -6,7 +6,7 @@ using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Infrastructure.Caching;
 
-internal sealed class StampedeProtectedCacheService : ICacheService
+internal sealed class StampedeProtectedCacheService : ICacheService, ICacheTagService
 {
     private sealed class FailureEntry
     {
@@ -58,6 +58,30 @@ internal sealed class StampedeProtectedCacheService : ICacheService
 
     public ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
         => _inner.SetAsync(key, value, serialize, options, ct);
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<long> InvalidateTagAsync(string tag, CancellationToken ct = default)
+        => RequireTagService().InvalidateTagAsync(tag, ct);
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public ValueTask<long> GetTagVersionAsync(string tag, CancellationToken ct = default)
+        => RequireTagService().GetTagVersionAsync(tag, ct);
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<long> InvalidateZoneAsync(string zone, CancellationToken ct = default)
+        => RequireTagService().InvalidateZoneAsync(zone, ct);
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public ValueTask<long> GetZoneVersionAsync(string zone, CancellationToken ct = default)
+        => RequireTagService().GetZoneVersionAsync(zone, ct);
 
     public async ValueTask<T> GetOrSetAsync<T>(
         string key,
@@ -247,5 +271,14 @@ internal sealed class StampedeProtectedCacheService : ICacheService
         var retryAfterTicks = DateTime.UtcNow.Add(options.FailureBackoff).Ticks;
         var entry = _failures.GetOrAdd(key, static _ => new FailureEntry());
         Volatile.Write(ref entry.RetryAfterUtcTicks, retryAfterTicks);
+    }
+
+    private ICacheTagService RequireTagService()
+    {
+        if (_inner is ICacheTagService tags)
+            return tags;
+
+        throw new NotSupportedException(
+            $"Inner cache service '{_inner.GetType().Name}' does not implement tag/zone invalidation.");
     }
 }

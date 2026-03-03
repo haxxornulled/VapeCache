@@ -365,6 +365,94 @@ public sealed class RedisCircuitBreakerHybridCacheTests
         Assert.Equal(payload, warmedFailoverRead);
     }
 
+    [Fact]
+    public async Task Tagged_entry_is_invalidated_after_tag_version_advance()
+    {
+        var time = new ManualTimeProvider();
+        var redisExec = new FlakyExecutor(failuresBeforeSuccess: 0);
+        await using var _ = redisExec.ConfigureAwait(false);
+
+        var current = new CurrentCacheService();
+        var statsRegistry = new CacheStatsRegistry();
+        var redis = new RedisCacheService(redisExec, current, statsRegistry);
+        var memory = CreateMemoryCacheService(current, statsRegistry);
+
+        var breaker = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
+        {
+            Enabled = true,
+            ConsecutiveFailuresToOpen = 1,
+            BreakDuration = TimeSpan.FromSeconds(5)
+        });
+
+        var hybrid = new HybridCacheService(
+            redis,
+            memory,
+            current,
+            time,
+            breaker,
+            statsRegistry,
+            NullLogger<HybridCacheService>.Instance);
+
+        var options = new CacheEntryOptions(TimeSpan.FromMinutes(5))
+            .WithTags("catalog", "products");
+        var payload = "sku-42"u8.ToArray();
+
+        await hybrid.SetAsync("product:42", payload, options, CancellationToken.None);
+        Assert.Equal(payload, await hybrid.GetAsync("product:42", CancellationToken.None));
+
+        var version = await hybrid.InvalidateTagAsync("catalog", CancellationToken.None);
+        Assert.Equal(1L, version);
+        Assert.Equal(1L, await hybrid.GetTagVersionAsync("catalog", CancellationToken.None));
+
+        Assert.Null(await hybrid.GetAsync("product:42", CancellationToken.None));
+        Assert.False(redisExec.TryGetValue("product:42", out var _ignored));
+    }
+
+    [Fact]
+    public async Task Zone_invalidation_clears_grouped_entries_for_second_level_cache_patterns()
+    {
+        var time = new ManualTimeProvider();
+        var redisExec = new FlakyExecutor(failuresBeforeSuccess: 0);
+        await using var _ = redisExec.ConfigureAwait(false);
+
+        var current = new CurrentCacheService();
+        var statsRegistry = new CacheStatsRegistry();
+        var redis = new RedisCacheService(redisExec, current, statsRegistry);
+        var memory = CreateMemoryCacheService(current, statsRegistry);
+
+        var breaker = new TestOptionsMonitor<RedisCircuitBreakerOptions>(new RedisCircuitBreakerOptions
+        {
+            Enabled = true,
+            ConsecutiveFailuresToOpen = 1,
+            BreakDuration = TimeSpan.FromSeconds(5)
+        });
+
+        var hybrid = new HybridCacheService(
+            redis,
+            memory,
+            current,
+            time,
+            breaker,
+            statsRegistry,
+            NullLogger<HybridCacheService>.Instance);
+
+        var options = new CacheEntryOptions(TimeSpan.FromMinutes(5))
+            .WithZone("ef:products");
+
+        await hybrid.SetAsync("ef:q:products:all", "all"u8.ToArray(), options, CancellationToken.None);
+        await hybrid.SetAsync("ef:q:products:featured", "featured"u8.ToArray(), options, CancellationToken.None);
+
+        Assert.NotNull(await hybrid.GetAsync("ef:q:products:all", CancellationToken.None));
+        Assert.NotNull(await hybrid.GetAsync("ef:q:products:featured", CancellationToken.None));
+
+        var zoneVersion = await hybrid.InvalidateZoneAsync("ef:products", CancellationToken.None);
+        Assert.Equal(1L, zoneVersion);
+        Assert.Equal(1L, await hybrid.GetZoneVersionAsync("ef:products", CancellationToken.None));
+
+        Assert.Null(await hybrid.GetAsync("ef:q:products:all", CancellationToken.None));
+        Assert.Null(await hybrid.GetAsync("ef:q:products:featured", CancellationToken.None));
+    }
+
     private sealed class ThrowingExecutor : IRedisCommandExecutor
     {
         public int GetCalls;

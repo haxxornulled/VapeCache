@@ -102,10 +102,12 @@ public static class CacheRegistration
             .Validate(o => o.MaxMirrorPayloadBytes >= 0, "MaxMirrorPayloadBytes must be greater than or equal to zero.")
             .ValidateOnStart();
         // Default cache service is the hybrid implementation with stampede protection applied directly.
-        services.AddSingleton<ICacheService>(sp => new StampedeProtectedCacheService(
+        services.AddSingleton<StampedeProtectedCacheService>(sp => new StampedeProtectedCacheService(
             sp.GetRequiredService<HybridCacheService>(),
             sp.GetRequiredService<IOptionsMonitor<CacheStampedeOptions>>(),
             sp.GetRequiredService<CacheStatsRegistry>().GetOrCreate(CacheStatsNames.Hybrid)));
+        services.AddSingleton<ICacheService>(sp => sp.GetRequiredService<StampedeProtectedCacheService>());
+        services.AddSingleton<ICacheTagService>(sp => sp.GetRequiredService<StampedeProtectedCacheService>());
 
         // Ergonomic typed caching API with codec-based serialization
         services.TryAddSingleton<ICacheCodecProvider>(sp =>

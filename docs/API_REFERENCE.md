@@ -7,6 +7,8 @@ This is the source of truth for the public API surface:
 
 Use this page for exact signatures and endpoint contracts.
 
+For runtime behavior guarantees and operational semantics across breaker/failover states, see [HYBRID_CACHING_API_SURFACE.md](HYBRID_CACHING_API_SURFACE.md).
+
 ## Core Cache APIs
 
 ### `ICacheService` (low-level bytes + delegates)
@@ -51,6 +53,24 @@ public interface IVapeCache
         CacheEntryOptions options = default,
         CancellationToken ct = default);
     ValueTask<bool> RemoveAsync(CacheKey key, CancellationToken ct = default);
+    ValueTask<long> InvalidateTagAsync(string tag, CancellationToken ct = default);
+    ValueTask<long> GetTagVersionAsync(string tag, CancellationToken ct = default);
+    ValueTask<long> InvalidateZoneAsync(string zone, CancellationToken ct = default);
+    ValueTask<long> GetZoneVersionAsync(string zone, CancellationToken ct = default);
+}
+```
+
+### `ICacheTagService` (tag/zone invalidation)
+
+Namespace: `VapeCache.Abstractions.Caching`
+
+```csharp
+public interface ICacheTagService
+{
+    ValueTask<long> InvalidateTagAsync(string tag, CancellationToken ct = default);
+    ValueTask<long> GetTagVersionAsync(string tag, CancellationToken ct = default);
+    ValueTask<long> InvalidateZoneAsync(string zone, CancellationToken ct = default);
+    ValueTask<long> GetZoneVersionAsync(string zone, CancellationToken ct = default);
 }
 ```
 
@@ -103,6 +123,13 @@ public readonly record struct CacheEntryOptions(
     TimeSpan? Ttl = null,
     CacheIntent? Intent = null);
 ```
+
+Tag and zone helpers:
+
+- `CacheEntryOptions.WithTag(string tag)`
+- `CacheEntryOptions.WithTags(params string[] tags)`
+- `CacheEntryOptions.WithZone(string zone)`
+- `CacheEntryOptions.WithZones(params string[] zones)`
 
 ### `CacheIntent`
 
