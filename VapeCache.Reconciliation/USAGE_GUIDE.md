@@ -2,11 +2,11 @@
 
 ## Overview
 
-VapeCache.Reconciliation provides **data loss mitigation** during Redis outages by tracking cache writes to a local SQLite database and automatically syncing them back to Redis when it recovers.
+VapeCache.Reconciliation provides **no-drop tracking semantics** during Redis outages by recording cache writes/deletes to a local store and automatically syncing them back to Redis when it recovers.
 
 **Enterprise Feature**: Requires Enterprise license ($499/month per organization)
 
-**Important**: This feature mitigates data loss but cannot guarantee zero data loss in all scenarios (e.g., application crashes, disk failures, or extreme edge cases).
+**Important**: No-drop behavior applies while the process is running: operations are not dropped under queue pressure and failed persistence is deferred for retry. End-to-end durability still depends on process lifetime and backing store health (for example, hard crash or disk failure).
 
 ---
 
@@ -31,7 +31,7 @@ builder.Services.AddVapeCacheRedisReconciliation(
     configure: options =>
     {
         options.Enabled = true;
-        options.MaxPendingOperations = 100_000;  // Max operations to track
+        options.MaxPendingOperations = 100_000;  // Advisory threshold; tracking continues in no-drop mode
         options.MaxOperationsPerRun = 1_000;     // Process 1K ops per reconciliation run
         options.BatchSize = 100;                 // Batch size for Redis operations
     },
@@ -62,7 +62,7 @@ app.Run();
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `Enabled` | `bool` | `true` | Enable/disable reconciliation |
-| `MaxPendingOperations` | `int` | `100000` | Max operations to track before dropping new ones |
+| `MaxPendingOperations` | `int` | `100000` | Advisory threshold for pending operations; tracking continues with warning logs (no-drop) |
 | `MaxOperationsPerRun` | `int` | `1000` | Max operations to process per reconciliation run |
 | `BatchSize` | `int` | `100` | Batch size for SQLite and Redis operations |
 | `MaxOperationAge` | `TimeSpan` | `1 hour` | Max age before operations are skipped |
@@ -262,7 +262,6 @@ Reconciliation exposes the following metrics:
 | Metric | Type | Description |
 |--------|------|-------------|
 | `vapecache.reconciliation.tracked` | Counter | Operations tracked (writes/deletes) |
-| `vapecache.reconciliation.dropped` | Counter | Operations dropped (MaxPendingOperations reached) |
 | `vapecache.reconciliation.runs` | Counter | Number of reconciliation runs |
 | `vapecache.reconciliation.synced` | Counter | Operations successfully synced to Redis |
 | `vapecache.reconciliation.skipped` | Counter | Operations skipped (expired or too old) |
@@ -274,8 +273,8 @@ Reconciliation exposes the following metrics:
 # Pending operations
 vapecache_reconciliation_tracked_total - vapecache_reconciliation_synced_total
 
-# Drop rate
-rate(vapecache_reconciliation_dropped_total[5m])
+# Reconciliation failures (should remain low/near zero)
+rate(vapecache_reconciliation_failed_total[5m])
 
 # Reconciliation success rate
 sum(rate(vapecache_reconciliation_synced_total[5m]))
@@ -288,7 +287,7 @@ sum(rate(vapecache_reconciliation_tracked_total[5m]))
 Reconciliation logs at the following levels:
 
 - **Information**: Reconciliation runs, operation counts
-- **Warning**: Failed operations, dropped operations, max pending reached
+- **Warning**: Failed operations, deferred persistence retries, advisory max pending threshold reached
 - **Error**: Reaper errors (caught and retried)
 
 **Example logs:**
@@ -377,7 +376,7 @@ builder.Services.AddReconciliationReaper(reaper =>
 
 Set up alerts for:
 - **High pending operations** (> 50,000)
-- **High drop rate** (> 100/min)
+- **Persistent reconciliation failures** (> 10/min)
 - **Reconciliation failures** (> 10/min)
 
 ---

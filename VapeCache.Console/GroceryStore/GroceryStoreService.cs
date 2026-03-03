@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using System.Buffers;
 using System.Collections.Concurrent;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
@@ -11,11 +12,12 @@ namespace VapeCache.Console.GroceryStore;
 /// Demonstrates LIST, SET, and HASH operations under heavy load.
 /// Implements IGroceryStoreService for head-to-head comparison with StackExchange.Redis.
 /// </summary>
-public class GroceryStoreService : IGroceryStoreService
+public class GroceryStoreService : IGroceryStoreService, ICartBatchWriter
 {
     private readonly ICacheCollectionFactory _collections;
     private readonly IVapeCache _cache;
     private readonly IRedisCommandExecutor _executor;
+    private readonly ICacheCodec<CartItem> _cartItemCodec;
     private readonly ILogger<GroceryStoreService> _logger;
     private readonly ICacheHash<UserSession> _sessions;
     private readonly ConcurrentDictionary<string, ICacheList<CartItem>> _cartLists = new(StringComparer.Ordinal);
@@ -30,11 +32,13 @@ public class GroceryStoreService : IGroceryStoreService
     public GroceryStoreService(
         ICacheCollectionFactory collections,
         IVapeCache cache,
+        ICacheCodecProvider codecProvider,
         IRedisCommandExecutor executor,
         ILogger<GroceryStoreService> logger)
     {
         _collections = collections;
         _cache = cache;
+        _cartItemCodec = codecProvider.Get<CartItem>();
         _executor = executor;
         _logger = logger;
         _sessions = _collections.Hash<UserSession>("sessions:active");
@@ -51,6 +55,63 @@ public class GroceryStoreService : IGroceryStoreService
         await cart.PushFrontAsync(item);  // Most recent items first
         if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("Added {Product} to cart for user {UserId}", item.ProductName, userId);
+    }
+
+    /// <summary>
+    /// Add multiple items to cart using one multi-value RPUSH to reduce round trips.
+    /// Preserves equivalent order to repeated LPUSH by reversing input payloads.
+    /// </summary>
+    public async ValueTask AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items)
+    {
+        if (items.Count == 0)
+            return;
+
+        var cartKey = $"cart:{userId}";
+        var payloads = ArrayPool<ReadOnlyMemory<byte>>.Shared.Rent(items.Count);
+        try
+        {
+            for (var i = 0; i < items.Count; i++)
+            {
+                var writer = new ArrayBufferWriter<byte>();
+                _cartItemCodec.Serialize(writer, items[items.Count - 1 - i]);
+                payloads[i] = writer.WrittenMemory;
+            }
+
+            try
+            {
+                await _executor.RPushManyAsync(cartKey, payloads, items.Count, CancellationToken.None).ConfigureAwait(false);
+                return;
+            }
+            catch (NotSupportedException)
+            {
+                // Fallback for executors without multi-value RPUSH.
+            }
+
+            var pending = ArrayPool<Task<long>>.Shared.Rent(items.Count);
+            try
+            {
+                for (var i = 0; i < items.Count; i++)
+                {
+                    var operation = _executor.RPushAsync(cartKey, payloads[i], CancellationToken.None);
+                    pending[i] = operation.IsCompletedSuccessfully
+                        ? Task.FromResult(operation.Result)
+                        : operation.AsTask();
+                }
+
+                for (var i = 0; i < items.Count; i++)
+                {
+                    await pending[i].ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                ArrayPool<Task<long>>.Shared.Return(pending, clearArray: true);
+            }
+        }
+        finally
+        {
+            ArrayPool<ReadOnlyMemory<byte>>.Shared.Return(payloads, clearArray: true);
+        }
     }
 
     /// <summary>

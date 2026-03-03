@@ -40,7 +40,7 @@ builder.Services.AddVapeCacheRedisReconciliation(
     {
         // Core reconciliation settings
         options.Enabled = true;
-        options.MaxPendingOperations = 100_000;  // Max ops before dropping new ones
+        options.MaxPendingOperations = 100_000;  // Advisory pending threshold (tracking continues in no-drop mode)
         options.MaxOperationsPerRun = 1_000;     // Process 1K ops per run
         options.BatchSize = 100;                 // Batch size for SQL/Redis ops
 
@@ -407,7 +407,7 @@ builder.Services.AddVapeCacheRedisReconciliation(licenseKey);
 1. **Set license key**: Get your Enterprise license at https://vapecache.com/enterprise
 2. **Configure reconciliation**: Start with the minimal setup and tune based on your traffic
 3. **Monitor metrics**: Set up OpenTelemetry/Prometheus dashboards
-4. **Set up alerts**: Alert on high pending operations or drop rates
+4. **Set up alerts**: Alert on high pending operations and any non-zero drop rate
 5. **Test failover**: Simulate Redis outages and verify reconciliation works
 
 **Support**: For Enterprise customers, reach out to support@vapecache.com for setup assistance.

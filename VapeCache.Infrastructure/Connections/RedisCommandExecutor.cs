@@ -282,6 +282,20 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         return parsed;
     }
 
+    private static bool IsRedisIndexAlreadyExists(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException!)
+        {
+            if (current.Message.Contains("index already exists", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (current.InnerException is null)
+                break;
+        }
+
+        return false;
+    }
+
     private readonly record struct RedisClusterRedirectTarget(bool IsAsk, int Slot, string Host, int Port)
     {
         public string Kind => IsAsk ? "ASK" : "MOVED";
@@ -5370,6 +5384,10 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
             return resp.Kind == RedisRespReader.RespKind.SimpleString;
         }
+        catch (Exception ex) when (IsRedisIndexAlreadyExists(ex))
+        {
+            return false;
+        }
         catch
         {
             if (_instrument) RedisTelemetry.CommandFailures.Add(1);
@@ -5419,30 +5437,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                     if (resp.Kind is not RedisRespReader.RespKind.Array || resp.ArrayItems is null)
                         throw new InvalidOperationException($"Unexpected FT.SEARCH response: {resp.Kind}");
 
-                    var items = resp.ArrayItems;
-                    var itemCount = resp.ArrayLength;
-                    if (itemCount <= 1)
-                        return Array.Empty<string>();
-
-                    var idCount = 0;
-                    for (var i = 1; i < itemCount; i++)
-                    {
-                        if (items[i].Kind == RedisRespReader.RespKind.BulkString)
-                            idCount++;
-                    }
-
-                    if (idCount == 0)
-                        return Array.Empty<string>();
-
-                    var ids = new string[idCount];
-                    var idx = 0;
-                    for (var i = 1; i < itemCount; i++)
-                    {
-                        if (items[i].Kind == RedisRespReader.RespKind.BulkString)
-                            ids[idx++] = Encoding.UTF8.GetString(items[i].Bulk ?? Array.Empty<byte>(), 0, GetBulkLength(items[i]));
-                    }
-
-                    return ids;
+                    return ParseFtSearchDocumentIds(resp);
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -5466,6 +5461,162 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
+    }
+
+    private static string[] ParseFtSearchDocumentIds(RedisRespReader.RespValue response)
+    {
+        if (response.Kind is RedisRespReader.RespKind.NullArray)
+            return Array.Empty<string>();
+
+        if (response.Kind is not RedisRespReader.RespKind.Array || response.ArrayItems is null)
+            throw new InvalidOperationException($"Unexpected FT.SEARCH response: {response.Kind}");
+
+        var ids = new List<string>(Math.Max(0, response.ArrayLength - 1));
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        ExtractFtSearchDocumentIds(response, ids, seen, depth: 0);
+        return ids.Count == 0 ? Array.Empty<string>() : ids.ToArray();
+    }
+
+    private static void ExtractFtSearchDocumentIds(
+        RedisRespReader.RespValue value,
+        List<string> ids,
+        HashSet<string> seen,
+        int depth)
+    {
+        if (depth >= 12 || value.Kind is not RedisRespReader.RespKind.Array || value.ArrayItems is null)
+            return;
+
+        var items = value.ArrayItems;
+        var length = value.ArrayLength;
+        if (length == 0)
+            return;
+
+        // RESP2 canonical shape: [total, docId, [fields...], docId, [fields...]]
+        if (items[0].Kind == RedisRespReader.RespKind.Integer)
+        {
+            for (var i = 1; i < length; i++)
+            {
+                if (TryReadRespText(items[i], out var docId))
+                {
+                    AddFtSearchDocumentId(docId, ids, seen);
+                    continue;
+                }
+
+                if (TryExtractDocumentIdFromTuple(items[i], out docId))
+                    AddFtSearchDocumentId(docId, ids, seen);
+            }
+        }
+
+        // RESP3 map-based payloads can appear as flattened key/value arrays.
+        for (var i = 0; i + 1 < length; i += 2)
+        {
+            if (!TryReadRespText(items[i], out var key))
+                continue;
+
+            var valueItem = items[i + 1];
+            if (key.Equals("id", StringComparison.OrdinalIgnoreCase))
+            {
+                if (TryReadRespText(valueItem, out var docId))
+                    AddFtSearchDocumentId(docId, ids, seen);
+                continue;
+            }
+
+            if (key.Equals("results", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("docs", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("documents", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("value", StringComparison.OrdinalIgnoreCase))
+            {
+                ExtractFtSearchDocumentIds(valueItem, ids, seen, depth + 1);
+                continue;
+            }
+
+            if (valueItem.Kind == RedisRespReader.RespKind.Array)
+                ExtractFtSearchDocumentIds(valueItem, ids, seen, depth + 1);
+        }
+
+        // RESP3 tuple-style entries may appear as [docId, [attrs...]] per result row.
+        if (TryExtractDocumentIdFromTuple(value, out var tupleDocId))
+            AddFtSearchDocumentId(tupleDocId, ids, seen);
+
+        for (var i = 0; i < length; i++)
+        {
+            var child = items[i];
+            if (child.Kind == RedisRespReader.RespKind.Array)
+                ExtractFtSearchDocumentIds(child, ids, seen, depth + 1);
+        }
+    }
+
+    private static bool TryExtractDocumentIdFromTuple(RedisRespReader.RespValue value, out string documentId)
+    {
+        documentId = string.Empty;
+
+        if (value.Kind is not RedisRespReader.RespKind.Array || value.ArrayItems is null || value.ArrayLength == 0)
+            return false;
+
+        var items = value.ArrayItems;
+        var hasAggregateTail = false;
+        for (var i = 1; i < value.ArrayLength; i++)
+        {
+            if (items[i].Kind == RedisRespReader.RespKind.Array)
+            {
+                hasAggregateTail = true;
+                break;
+            }
+        }
+
+        if (!hasAggregateTail)
+            return false;
+
+        if (!TryReadRespText(items[0], out var first))
+            return false;
+
+        if (IsFtSearchMetadataKey(first))
+            return false;
+
+        documentId = first;
+        return true;
+    }
+
+    private static void AddFtSearchDocumentId(string candidate, List<string> ids, HashSet<string> seen)
+    {
+        if (candidate.Length == 0 || IsFtSearchMetadataKey(candidate))
+            return;
+
+        if (seen.Add(candidate))
+            ids.Add(candidate);
+    }
+
+    private static bool IsFtSearchMetadataKey(string text)
+        => text.Equals("total_results", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("results", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("docs", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("documents", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("id", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("payload", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("score", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("scores", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("extra_attributes", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("attributes", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("sortkey", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("values", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("value", StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryReadRespText(RedisRespReader.RespValue value, out string text)
+    {
+        if (value.Kind == RedisRespReader.RespKind.SimpleString)
+        {
+            text = value.Text ?? string.Empty;
+            return true;
+        }
+
+        if (value.Kind == RedisRespReader.RespKind.BulkString)
+        {
+            text = Encoding.UTF8.GetString(value.Bulk ?? Array.Empty<byte>(), 0, GetBulkLength(value));
+            return true;
+        }
+
+        text = string.Empty;
+        return false;
     }
 
     /// <summary>

@@ -1,0 +1,426 @@
+{
+  "formatVersion": 1,
+  "generatedUtc": "2026-03-03T18:13:50.5181979+00:00",
+  "configuration": "Release",
+  "totals": {
+    "uniqueWarningLocations": 303,
+    "entryCount": 83
+  },
+  "entries": [
+    {
+      "file": "VapeCache.Abstractions/Caching/CacheKey.cs",
+      "rule": "CA1000",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Abstractions/Caching/ICacheCodec.cs",
+      "rule": "CA1716",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Abstractions/Caching/InMemorySpillOptions.cs",
+      "rule": "CA1805",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Abstractions/Caching/RedisCircuitBreakerOptions.cs",
+      "rule": "CA1805",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Abstractions/Collections/ICacheCollectionFactory.cs",
+      "rule": "CA1716",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Abstractions/Collections/ICacheList.cs",
+      "rule": "CA1716",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Abstractions/Collections/ICacheSortedSet.cs",
+      "rule": "CA1716",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Abstractions/Connections/IRedisCommandExecutor.cs",
+      "rule": "CA1716",
+      "count": 3
+    },
+    {
+      "file": "VapeCache.Abstractions/Connections/IRedisFallbackCommandExecutor.cs",
+      "rule": "CA1716",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Abstractions/Connections/RedisConnectionOptions.cs",
+      "rule": "CA1805",
+      "count": 5
+    },
+    {
+      "file": "VapeCache.Abstractions/Connections/RedisConnectionStringBuilder.cs",
+      "rule": "CA2208",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Abstractions/Connections/RedisMultiplexerOptions.cs",
+      "rule": "CA1805",
+      "count": 4
+    },
+    {
+      "file": "VapeCache.Abstractions/Modules/IRedisTimeSeriesService.cs",
+      "rule": "CA1716",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Application/Common/Extensions/ResultExtensions.cs",
+      "rule": "CA1848",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Extensions.Aspire/Extensions/AspireHealthCheckExtensions.cs",
+      "rule": "CA1861",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Extensions.Aspire/Extensions/AspireTelemetryExtensions.cs",
+      "rule": "CA1861",
+      "count": 3
+    },
+    {
+      "file": "VapeCache.Extensions.Aspire/VapeCacheEndpointOptions.cs",
+      "rule": "CA1805",
+      "count": 4
+    },
+    {
+      "file": "VapeCache.Extensions.AspNetCore/VapeCacheFailoverAffinityMiddleware.cs",
+      "rule": "CA1848",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Extensions.AspNetCore/VapeCacheFailoverAffinityMiddleware.cs",
+      "rule": "CA1873",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Extensions.AspNetCore/VapeCacheOutputCacheStore.cs",
+      "rule": "CA1848",
+      "count": 3
+    },
+    {
+      "file": "VapeCache.Extensions.AspNetCore/VapeCacheOutputCacheStore.cs",
+      "rule": "CA1873",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Infrastructure/Caching/Codecs/SystemTextJsonCodecProvider.cs",
+      "rule": "CA1510",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Caching/HybridCacheService.cs",
+      "rule": "CA1848",
+      "count": 12
+    },
+    {
+      "file": "VapeCache.Infrastructure/Caching/HybridCacheService.cs",
+      "rule": "CA1861",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Infrastructure/Caching/HybridCacheService.cs",
+      "rule": "CA1873",
+      "count": 4
+    },
+    {
+      "file": "VapeCache.Infrastructure/Caching/InMemoryCacheService.cs",
+      "rule": "CA1848",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Caching/JsonCacheService.cs",
+      "rule": "CA1001",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Caching/JsonCacheService.cs",
+      "rule": "CA1848",
+      "count": 5
+    },
+    {
+      "file": "VapeCache.Infrastructure/Caching/StampedeProtectedCacheService.cs",
+      "rule": "CA1001",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Collections/CacheList.cs",
+      "rule": "CA1512",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/CircuitBreakerRedisConnectionFactory.cs",
+      "rule": "CA1805",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/CircuitBreakerRedisConnectionFactory.cs",
+      "rule": "CA1848",
+      "count": 5
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/CircuitBreakerRedisConnectionFactory.cs",
+      "rule": "CA1859",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/CircuitBreakerRedisConnectionFactory.cs",
+      "rule": "CA1873",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/HybridCommandExecutor.cs",
+      "rule": "CA1068",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/HybridCommandExecutor.cs",
+      "rule": "CA1848",
+      "count": 62
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/HybridCommandExecutor.cs",
+      "rule": "CA1873",
+      "count": 6
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/InMemoryCommandExecutor.cs",
+      "rule": "CA1512",
+      "count": 5
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/InMemoryCommandExecutor.cs",
+      "rule": "CA1805",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/InMemoryCommandExecutor.cs",
+      "rule": "CA1822",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/InMemoryCommandExecutor.cs",
+      "rule": "CA1836",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/PendingOperationPool.cs",
+      "rule": "CA1068",
+      "count": 3
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/PollyRedisCircuitBreaker.cs",
+      "rule": "CA1848",
+      "count": 6
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisCommandExecutor.cs",
+      "rule": "CA1512",
+      "count": 4
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisCommandExecutor.cs",
+      "rule": "CA1822",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisCommandExecutor.cs",
+      "rule": "CA1848",
+      "count": 5
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisCommandExecutor.cs",
+      "rule": "CA1873",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisCommandExecutor.cs",
+      "rule": "CA2263",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisCommandExecutor.cs",
+      "rule": "CA5359",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisConnectionFactory.cs",
+      "rule": "CA1068",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisConnectionFactory.cs",
+      "rule": "CA1848",
+      "count": 10
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisConnectionFactory.cs",
+      "rule": "CA1873",
+      "count": 5
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisConnectionFactory.cs",
+      "rule": "CA5359",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisConnectionPool.cs",
+      "rule": "CA1822",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisConnectionPool.cs",
+      "rule": "CA1848",
+      "count": 15
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisConnectionPool.cs",
+      "rule": "CA1873",
+      "count": 11
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisMultiplexedBufferCaches.cs",
+      "rule": "CA1822",
+      "count": 4
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisMultiplexedConnection.cs",
+      "rule": "CA1512",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisMultiplexedConnection.cs",
+      "rule": "CA1513",
+      "count": 4
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisMultiplexedConnection.cs",
+      "rule": "CA1806",
+      "count": 5
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisMultiplexedConnection.cs",
+      "rule": "CA2016",
+      "count": 5
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisRespProtocol.cs",
+      "rule": "CA1512",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisRespProtocol.cs",
+      "rule": "CA1865",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisRespReader.cs",
+      "rule": "CA1068",
+      "count": 9
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisRespReaderState.cs",
+      "rule": "CA1513",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/RedisRespSocketReaderState.cs",
+      "rule": "CA1513",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Connections/ResponseReaderLoop.cs",
+      "rule": "CA1068",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Infrastructure/Modules/RedisBloomService.cs",
+      "rule": "CA1001",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Modules/RedisBloomService.cs",
+      "rule": "CA1848",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Modules/RedisBloomService.cs",
+      "rule": "CA1873",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Modules/RedisModuleDetector.cs",
+      "rule": "CA1001",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Modules/RedisSearchService.cs",
+      "rule": "CA1001",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Modules/RedisSearchService.cs",
+      "rule": "CA1848",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Modules/RedisTimeSeriesService.cs",
+      "rule": "CA1001",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Infrastructure/Modules/RedisTimeSeriesService.cs",
+      "rule": "CA1848",
+      "count": 3
+    },
+    {
+      "file": "VapeCache.Infrastructure/Modules/RedisTimeSeriesService.cs",
+      "rule": "CA1873",
+      "count": 3
+    },
+    {
+      "file": "VapeCache.Reconciliation/RedisReconciliationReaper.cs",
+      "rule": "CA1848",
+      "count": 10
+    },
+    {
+      "file": "VapeCache.Reconciliation/RedisReconciliationReaper.cs",
+      "rule": "CA1873",
+      "count": 3
+    },
+    {
+      "file": "VapeCache.Reconciliation/RedisReconciliationService.cs",
+      "rule": "CA1848",
+      "count": 12
+    },
+    {
+      "file": "VapeCache.Reconciliation/RedisReconciliationService.cs",
+      "rule": "CA1873",
+      "count": 2
+    },
+    {
+      "file": "VapeCache.Reconciliation/RedisReconciliationStoreOptions.cs",
+      "rule": "CA1805",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Reconciliation/SqliteReconciliationStore.cs",
+      "rule": "CA1001",
+      "count": 1
+    },
+    {
+      "file": "VapeCache.Reconciliation/SqliteReconciliationStore.cs",
+      "rule": "CA1305",
+      "count": 1
+    }
+  ]
+}

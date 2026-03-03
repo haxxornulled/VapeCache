@@ -45,6 +45,14 @@ jobs:
       - name: Build
         run: dotnet build -c Release --no-restore VapeCache.sln
 
+      - name: Runtime analyzer baseline gate
+        shell: pwsh
+        run: pwsh -File tools/verify-runtime-warning-baseline.ps1 -Configuration Release
+
+      - name: Vulnerability audit (public feeds)
+        shell: pwsh
+        run: pwsh -File tools/audit-vulnerabilities.ps1 -Solution VapeCache.sln
+
       - name: Unit tests
         run: dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj
 

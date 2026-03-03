@@ -4,12 +4,12 @@ using Autofac.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Serilog;
-using Serilog.Events;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Console.Hosting;
@@ -19,6 +19,7 @@ using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.DependencyInjection;
 using VapeCache.Console.Stress;
 using VapeCache.Console.Secrets;
+using VapeCache.Console.Pos;
 using VapeCache.Reconciliation;
 
 var hostBuilder = Host.CreateDefaultBuilder(args)
@@ -55,15 +56,12 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
     })
     .UseSerilog(static (context, services, loggerConfig) =>
     {
-        loggerConfig
-            .ReadFrom.Configuration(context.Configuration)
-            .ReadFrom.Services(services)
-            .Enrich.FromLogContext();
-
-        ConfigureGroceryStoreLogging(context.Configuration, loggerConfig);
+        loggerConfig.ConfigureVapeCacheLogging(context.Configuration, services);
     })
     .ConfigureServices(static (context, services) =>
     {
+        var otlpEndpoint = ResolveOtlpEndpoint(context.Configuration);
+
         services.AddOpenTelemetry()
             .ConfigureResource(r => r.AddService(serviceName: "VapeCache.Console"))
             .WithMetrics(m =>
@@ -74,10 +72,13 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
                 m.AddHttpClientInstrumentation();
                 m.AddAspNetCoreInstrumentation();
 
-                m.AddOtlpExporter(otlp =>
+                if (!string.IsNullOrWhiteSpace(otlpEndpoint))
                 {
-                    ConfigureOtlpForSignal(context.Configuration, otlp, signal: "metrics");
-                });
+                    m.AddOtlpExporter(otlp =>
+                    {
+                        ConfigureOtlpForSignal(otlpEndpoint, otlp, signal: "metrics");
+                    });
+                }
             })
             .WithTracing(t =>
             {
@@ -85,10 +86,13 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
                 t.AddHttpClientInstrumentation();
                 t.AddAspNetCoreInstrumentation();
 
-                t.AddOtlpExporter(otlp =>
+                if (!string.IsNullOrWhiteSpace(otlpEndpoint))
                 {
-                    ConfigureOtlpForSignal(context.Configuration, otlp, signal: "traces");
-                });
+                    t.AddOtlpExporter(otlp =>
+                    {
+                        ConfigureOtlpForSignal(otlpEndpoint, otlp, signal: "traces");
+                    });
+                }
             });
 
         services
@@ -128,6 +132,31 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.CheckoutChancePercent is >= 0 and <= 100, "GroceryStoreStress:CheckoutChancePercent must be 0..100.")
             .Validate(static o => o.RemoveFromCartChancePercent is >= 0 and <= 100, "GroceryStoreStress:RemoveFromCartChancePercent must be 0..100.")
             .Validate(static o => o.StatsIntervalSeconds > 0, "GroceryStoreStress:StatsIntervalSeconds must be > 0.")
+            .Validate(static o => o.HotProductBiasPercent is >= 0 and <= 100, "GroceryStoreStress:HotProductBiasPercent must be 0..100.")
+            .ValidateOnStart();
+        services.AddOptions<PosSearchDemoOptions>()
+            .Bind(context.Configuration.GetSection("PosSearchDemo"))
+            .Validate(static o => !o.Enabled || !string.IsNullOrWhiteSpace(o.SqlitePath), "PosSearchDemo:SqlitePath is required when enabled.")
+            .Validate(static o => !o.Enabled || !string.IsNullOrWhiteSpace(o.RedisIndexName), "PosSearchDemo:RedisIndexName is required when enabled.")
+            .Validate(static o => !o.Enabled || !string.IsNullOrWhiteSpace(o.RedisKeyPrefix), "PosSearchDemo:RedisKeyPrefix is required when enabled.")
+            .Validate(static o => o.TopResults > 0 && o.TopResults <= 100, "PosSearchDemo:TopResults must be in range 1..100.")
+            .Validate(static o => o.SeedProductCount >= 5, "PosSearchDemo:SeedProductCount must be >= 5.")
+            .ValidateOnStart();
+        services.AddOptions<PosSearchLoadOptions>()
+            .Bind(context.Configuration.GetSection("PosSearchLoad"))
+            .Validate(static o => !o.Enabled || o.Duration > TimeSpan.Zero, "PosSearchLoad:Duration must be > 0 when enabled.")
+            .Validate(static o => !o.Enabled || o.Concurrency > 0, "PosSearchLoad:Concurrency must be > 0 when enabled.")
+            .Validate(static o => !o.Enabled || o.LogEvery > TimeSpan.Zero, "PosSearchLoad:LogEvery must be > 0 when enabled.")
+            .Validate(static o => !o.Enabled || o.TargetShoppersPerSecond >= 0, "PosSearchLoad:TargetShoppersPerSecond must be >= 0 when enabled.")
+            .Validate(static o => !o.Enabled || !o.EnableAutoRamp || o.RampStepDuration > TimeSpan.Zero, "PosSearchLoad:RampStepDuration must be > 0 when auto ramp is enabled.")
+            .Validate(static o => !o.Enabled || !o.EnableAutoRamp || !string.IsNullOrWhiteSpace(o.RampSteps), "PosSearchLoad:RampSteps is required when auto ramp is enabled.")
+            .Validate(static o => !o.Enabled || o.MaxFailurePercent is >= 0 and <= 100, "PosSearchLoad:MaxFailurePercent must be in range 0..100 when enabled.")
+            .Validate(static o => !o.Enabled || o.MaxP95Ms >= 0, "PosSearchLoad:MaxP95Ms must be >= 0 when enabled.")
+            .Validate(static o => !o.Enabled || o.HotQueryPercent is >= 0 and <= 100, "PosSearchLoad:HotQueryPercent must be 0..100 when enabled.")
+            .Validate(static o => !o.Enabled || o.CashierQueryPercent is >= 0 and <= 100, "PosSearchLoad:CashierQueryPercent must be 0..100 when enabled.")
+            .Validate(static o => !o.Enabled || o.LookupUpcPercent is >= 0 and <= 100, "PosSearchLoad:LookupUpcPercent must be 0..100 when enabled.")
+            .Validate(static o => !o.Enabled || (o.HotQueryPercent + o.CashierQueryPercent + o.LookupUpcPercent) <= 100, "PosSearchLoad percentages must sum to <= 100 when enabled.")
+            .Validate(static o => !o.Enabled || o.LatencySampleSize >= 256, "PosSearchLoad:LatencySampleSize must be >= 256 when enabled.")
             .ValidateOnStart();
 
         services
@@ -247,6 +276,10 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
         // Grocery Store Demo Services
         services.AddSingleton<VapeCache.Console.GroceryStore.GroceryStoreService>();
         services.AddHostedService<VapeCache.Console.GroceryStore.GroceryStoreStressTest>();
+        services.AddSingleton<SqlitePosCatalogStore>();
+        services.AddSingleton<PosCatalogSearchService>();
+        services.AddHostedService<PosSearchDemoHostedService>();
+        services.AddHostedService<PosSearchLoadHostedService>();
         services.AddSingleton<IVapeCachePlugin, SampleCatalogPlugin>();
 
         services.AddHostedService<StartupPreflightHostedService>();
@@ -282,18 +315,22 @@ if (runComparison)
 
 using var host = hostBuilder.Build();
 
+var lifecycleLogger = host.Services
+    .GetRequiredService<ILoggerFactory>()
+    .CreateLogger("VapeCache.Console.Lifecycle");
+
 var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStarted.Register(() =>
 {
-    Log.Information("VapeCache.Console started. Press Ctrl+C to exit.");
+    lifecycleLogger.LogInformation("VapeCache.Console started. Press Ctrl+C to exit.");
 });
 lifetime.ApplicationStopping.Register(() =>
 {
-    Log.Information("VapeCache.Console stopping...");
+    lifecycleLogger.LogInformation("VapeCache.Console stopping...");
 });
 lifetime.ApplicationStopped.Register(() =>
 {
-    Log.Information("VapeCache.Console stopped.");
+    lifecycleLogger.LogInformation("VapeCache.Console stopped.");
 });
 
 try
@@ -304,20 +341,20 @@ try
 finally
 {
     try { await host.StopAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); } catch { }
-    Log.CloseAndFlush();
 }
 
-static void ConfigureOtlpForSignal(IConfiguration configuration, OtlpExporterOptions otlp, string signal)
+static string? ResolveOtlpEndpoint(IConfiguration configuration)
 {
     var endpoint = configuration["OpenTelemetry:Otlp:Endpoint"];
-    if (string.IsNullOrWhiteSpace(endpoint))
-    {
-        endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
-    }
+    if (!string.IsNullOrWhiteSpace(endpoint))
+        return endpoint;
 
-    // Default to Seq OTLP ingestion when no endpoint is configured.
-    endpoint ??= "http://localhost:5341/ingest/otlp";
+    endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+    return string.IsNullOrWhiteSpace(endpoint) ? null : endpoint;
+}
 
+static void ConfigureOtlpForSignal(string endpoint, OtlpExporterOptions otlp, string signal)
+{
     if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
         return;
 
@@ -335,27 +372,6 @@ static void ConfigureOtlpForSignal(IConfiguration configuration, OtlpExporterOpt
 
     otlp.Protocol = OtlpExportProtocol.Grpc;
     otlp.Endpoint = endpointUri;
-}
-
-static void ConfigureGroceryStoreLogging(IConfiguration configuration, LoggerConfiguration loggerConfig)
-{
-    var groceryStoreEnabled = configuration.GetValue<bool?>("GroceryStoreStress:Enabled") ?? false;
-    if (!groceryStoreEnabled)
-    {
-        return;
-    }
-
-    var verbose = string.Equals(
-        Environment.GetEnvironmentVariable("VAPECACHE_GROCERYSTORE_VERBOSE"),
-        "true",
-        StringComparison.OrdinalIgnoreCase);
-
-    loggerConfig
-        .MinimumLevel.Information()
-        .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
-        .MinimumLevel.Override("System", LogEventLevel.Warning)
-        .MinimumLevel.Override("VapeCache.Console.GroceryStore", verbose ? LogEventLevel.Debug : LogEventLevel.Information)
-        .MinimumLevel.Override("VapeCache.Infrastructure", verbose ? LogEventLevel.Information : LogEventLevel.Warning);
 }
 
 static Uri ResolveSignalEndpoint(Uri endpoint, string signal)

@@ -40,6 +40,7 @@ This index tracks the current feature set and supported APIs.
 - [ENGINEERING_PLAYBOOK.md](ENGINEERING_PLAYBOOK.md) - Analyzer, profiling, and capture workflow
 
 ## Observability & Operations
+- [LOGGING_TELEMETRY_CONFIGURATION.md](LOGGING_TELEMETRY_CONFIGURATION.md) - Exact Serilog/Seq/OTLP configuration, precedence, and fail-safe defaults
 - [OBSERVABILITY_ARCHITECTURE.md](OBSERVABILITY_ARCHITECTURE.md) - Metrics, traces, logging
 - [CURRENT_BACKEND_METRIC.md](CURRENT_BACKEND_METRIC.md) - Active backend metric
 - [FAILURE_SCENARIOS.md](FAILURE_SCENARIOS.md) - Redis outage behavior

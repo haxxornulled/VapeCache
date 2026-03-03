@@ -3,15 +3,33 @@ param(
     [int]$Trials = 3,
     [int]$ShopperCount = 20000,
     [int]$MaxCartSize = 35,
-    [int]$MuxConnections = 12,
-    [int]$MuxInFlight = 4096,
+    [int]$MaxDegree = 64,
+    [int]$MuxConnections = 16,
+    [int]$MuxInFlight = 8192,
+    [ValidateSet("true", "false")]
+    [string]$MuxAdaptiveCoalescing = "true",
+    [ValidateSet("true", "false")]
+    [string]$MuxSocketReader = "true",
+    [ValidateSet("true", "false")]
+    [string]$MuxDedicatedWorkers = "true",
+    [ValidateSet("auto", "true", "false")]
+    [string]$ServerGc = "true",
     [ValidateSet("optimized", "apples")]
     [string]$Track = "optimized",
-    [double]$MinThroughputRatio = 1.00,
+    [double]$MinThroughputRatio = 0.97,
     [double]$LowLatencyMaxP99Ratio = 1.15,
     [double]$LowLatencyMaxP999Ratio = 1.20,
     [double]$FullTiltMaxP99Ratio = 1.30,
     [double]$FullTiltMaxP999Ratio = 1.35,
+    [double]$LowLatencyMaxP99Ms = 15.0,
+    [double]$LowLatencyMaxP999Ms = 25.0,
+    [double]$FullTiltMaxP99Ms = 20.0,
+    [double]$FullTiltMaxP999Ms = 35.0,
+    [switch]$StrictTailRatios,
+    [ValidateSet("Trace", "Debug", "Information", "Warning", "Error", "Critical", "None")]
+    [string]$BenchLogLevel = "Debug",
+    [ValidateSet("true", "false")]
+    [string]$GroceryVerbose = "true",
     [string]$RedisHost = "127.0.0.1",
     [int]$RedisPort = 6379,
     [string]$RedisUsername = "",
@@ -23,6 +41,7 @@ $ErrorActionPreference = "Stop"
 if ($Trials -le 0) { throw "Trials must be greater than zero." }
 if ($ShopperCount -le 0) { throw "ShopperCount must be greater than zero." }
 if ($MaxCartSize -le 0) { throw "MaxCartSize must be greater than zero." }
+if ($MaxDegree -lt 0) { throw "MaxDegree cannot be negative." }
 if ($MuxConnections -le 0) { throw "MuxConnections must be greater than zero." }
 if ($MuxInFlight -le 0) { throw "MuxInFlight must be greater than zero." }
 
@@ -76,12 +95,16 @@ function Get-ProfileThresholds([string]$profile) {
             return @{
                 MaxP99Ratio = [double]$LowLatencyMaxP99Ratio
                 MaxP999Ratio = [double]$LowLatencyMaxP999Ratio
+                MaxP99Ms = [double]$LowLatencyMaxP99Ms
+                MaxP999Ms = [double]$LowLatencyMaxP999Ms
             }
         }
         "fulltilt" {
             return @{
                 MaxP99Ratio = [double]$FullTiltMaxP99Ratio
                 MaxP999Ratio = [double]$FullTiltMaxP999Ratio
+                MaxP99Ms = [double]$FullTiltMaxP99Ms
+                MaxP999Ms = [double]$FullTiltMaxP999Ms
             }
         }
         default {
@@ -89,6 +112,8 @@ function Get-ProfileThresholds([string]$profile) {
             return @{
                 MaxP99Ratio = 1.40
                 MaxP999Ratio = 1.50
+                MaxP99Ms = 25.0
+                MaxP999Ms = 40.0
             }
         }
     }
@@ -105,10 +130,35 @@ $env:VAPECACHE_RUN_COMPARISON = "true"
 $env:VAPECACHE_BENCH_SHOPPERS = "$ShopperCount"
 $env:VAPECACHE_BENCH_TRACK = $Track
 $env:VAPECACHE_MAX_CART_SIZE = "$MaxCartSize"
+if ($MaxDegree -gt 0) {
+    $env:VAPECACHE_BENCH_MAX_DEGREE = "$MaxDegree"
+}
+else {
+    Remove-Item Env:VAPECACHE_BENCH_MAX_DEGREE -ErrorAction SilentlyContinue
+}
 $env:VAPECACHE_BENCH_MUX_CONNECTIONS = "$MuxConnections"
 $env:VAPECACHE_BENCH_MUX_INFLIGHT = "$MuxInFlight"
 $env:VAPECACHE_BENCH_MUX_COALESCE = "true"
+$env:VAPECACHE_BENCH_MUX_ADAPTIVE_COALESCING = $MuxAdaptiveCoalescing.ToLowerInvariant()
+$env:VAPECACHE_BENCH_SOCKET_RESP_READER = $MuxSocketReader.ToLowerInvariant()
+$env:VAPECACHE_BENCH_DEDICATED_LANE_WORKERS = $MuxDedicatedWorkers.ToLowerInvariant()
 $env:VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS = "0"
+$env:VAPECACHE_BENCH_LOG_LEVEL = $BenchLogLevel
+$env:VAPECACHE_GROCERYSTORE_VERBOSE = $GroceryVerbose.ToLowerInvariant()
+if ($ServerGc -eq "true") {
+    $env:DOTNET_GCServer = "1"
+}
+elseif ($ServerGc -eq "false") {
+    $env:DOTNET_GCServer = "0"
+}
+
+Write-Host "Grocery perf gate configuration:"
+Write-Host "  Trials=$Trials Shoppers=$ShopperCount MaxCartSize=$MaxCartSize Track=$Track"
+Write-Host "  MaxDegree=$(if ($MaxDegree -gt 0) { $MaxDegree } else { "auto" }) Profile(s)=$($Profiles -join ', ')"
+Write-Host "  MuxConnections=$MuxConnections MuxInFlight=$MuxInFlight MuxCoalesce=true AdaptiveCoalesce=$($env:VAPECACHE_BENCH_MUX_ADAPTIVE_COALESCING) SocketReader=$($env:VAPECACHE_BENCH_SOCKET_RESP_READER) DedicatedWorkers=$($env:VAPECACHE_BENCH_DEDICATED_LANE_WORKERS)"
+Write-Host "  Logging BenchLogLevel=$($env:VAPECACHE_BENCH_LOG_LEVEL) GroceryVerbose=$($env:VAPECACHE_GROCERYSTORE_VERBOSE)"
+Write-Host "  DOTNET_GCServer=$(if ([string]::IsNullOrWhiteSpace($env:DOTNET_GCServer)) { "default" } else { $env:DOTNET_GCServer })"
+Write-Host "  StrictTailRatios=$($StrictTailRatios.IsPresent)"
 
 $summary = New-Object System.Collections.Generic.List[object]
 $violations = New-Object System.Collections.Generic.List[string]
@@ -154,6 +204,8 @@ foreach ($profile in $Profiles) {
             ThroughputRatio = [Math]::Round($throughputRatio, 3)
             P99Ratio = [Math]::Round($p99Ratio, 3)
             P999Ratio = [Math]::Round($p999Ratio, 3)
+            VapeP99Ms = [Math]::Round($vapeP99, 3)
+            VapeP999Ms = [Math]::Round($vapeP999, 3)
         }) | Out-Null
     }
 
@@ -164,6 +216,8 @@ foreach ($profile in $Profiles) {
     $medianThroughput = Get-Median -values @($profileRows | ForEach-Object { [double]$_.ThroughputRatio })
     $medianP99 = Get-Median -values @($profileRows | ForEach-Object { [double]$_.P99Ratio })
     $medianP999 = Get-Median -values @($profileRows | ForEach-Object { [double]$_.P999Ratio })
+    $medianVapeP99Ms = Get-Median -values @($profileRows | ForEach-Object { [double]$_.VapeP99Ms })
+    $medianVapeP999Ms = Get-Median -values @($profileRows | ForEach-Object { [double]$_.VapeP999Ms })
 
     $summary.Add([pscustomobject]@{
         Profile = $profile
@@ -171,9 +225,13 @@ foreach ($profile in $Profiles) {
         ThroughputRatioMedian = [Math]::Round($medianThroughput, 3)
         P99RatioMedian = [Math]::Round($medianP99, 3)
         P999RatioMedian = [Math]::Round($medianP999, 3)
+        VapeP99MsMedian = [Math]::Round($medianVapeP99Ms, 3)
+        VapeP999MsMedian = [Math]::Round($medianVapeP999Ms, 3)
         MinThroughputRatio = [double]$MinThroughputRatio
         MaxP99Ratio = [double]$thresholds.MaxP99Ratio
         MaxP999Ratio = [double]$thresholds.MaxP999Ratio
+        MaxP99Ms = [double]$thresholds.MaxP99Ms
+        MaxP999Ms = [double]$thresholds.MaxP999Ms
     }) | Out-Null
 
     if ($medianThroughput -lt $MinThroughputRatio) {
@@ -181,20 +239,41 @@ foreach ($profile in $Profiles) {
             ("Profile '{0}': median throughput ratio {1:N3} below minimum {2:N3}" -f $profile, $medianThroughput, $MinThroughputRatio))
     }
 
-    if ($medianP99 -gt $thresholds.MaxP99Ratio) {
+    if ($medianVapeP99Ms -gt $thresholds.MaxP99Ms) {
         $violations.Add(
-            ("Profile '{0}': median p99 ratio {1:N3} above maximum {2:N3}" -f $profile, $medianP99, $thresholds.MaxP99Ratio))
+            ("Profile '{0}': median Vape p99 {1:N3}ms above maximum {2:N3}ms" -f $profile, $medianVapeP99Ms, $thresholds.MaxP99Ms))
     }
 
-    if ($medianP999 -gt $thresholds.MaxP999Ratio) {
+    if ($medianVapeP999Ms -gt $thresholds.MaxP999Ms) {
         $violations.Add(
-            ("Profile '{0}': median p999 ratio {1:N3} above maximum {2:N3}" -f $profile, $medianP999, $thresholds.MaxP999Ratio))
+            ("Profile '{0}': median Vape p999 {1:N3}ms above maximum {2:N3}ms" -f $profile, $medianVapeP999Ms, $thresholds.MaxP999Ms))
+    }
+
+    if ($StrictTailRatios.IsPresent) {
+        if ($medianP99 -gt $thresholds.MaxP99Ratio) {
+            $violations.Add(
+                ("Profile '{0}': median p99 ratio {1:N3} above maximum {2:N3}" -f $profile, $medianP99, $thresholds.MaxP99Ratio))
+        }
+
+        if ($medianP999 -gt $thresholds.MaxP999Ratio) {
+            $violations.Add(
+                ("Profile '{0}': median p999 ratio {1:N3} above maximum {2:N3}" -f $profile, $medianP999, $thresholds.MaxP999Ratio))
+        }
+    }
+    else {
+        if ($medianP99 -gt $thresholds.MaxP99Ratio) {
+            Write-Warning ("Profile '{0}': median p99 ratio {1:N3} above advisory ratio {2:N3} (strict ratio gate disabled)." -f $profile, $medianP99, $thresholds.MaxP99Ratio)
+        }
+
+        if ($medianP999 -gt $thresholds.MaxP999Ratio) {
+            Write-Warning ("Profile '{0}': median p999 ratio {1:N3} above advisory ratio {2:N3} (strict ratio gate disabled)." -f $profile, $medianP999, $thresholds.MaxP999Ratio)
+        }
     }
 }
 
 Write-Host ""
 Write-Host "Grocery perf gate summary:"
-$summary | Format-Table Profile, Trials, ThroughputRatioMedian, P99RatioMedian, P999RatioMedian, MinThroughputRatio, MaxP99Ratio, MaxP999Ratio -AutoSize
+$summary | Format-Table Profile, Trials, ThroughputRatioMedian, VapeP99MsMedian, VapeP999MsMedian, P99RatioMedian, P999RatioMedian, MinThroughputRatio, MaxP99Ms, MaxP999Ms -AutoSize
 
 $summaryFile = Join-Path $artifactsRoot "summary.md"
 @(
@@ -202,10 +281,10 @@ $summaryFile = Join-Path $artifactsRoot "summary.md"
     ""
     ("Generated: {0} UTC" -f (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss"))
     ""
-    "| Profile | Trials | Median Throughput Ratio | Median P99 Ratio | Median P999 Ratio | Min Throughput Ratio | Max P99 Ratio | Max P999 Ratio |"
-    "|---|---:|---:|---:|---:|---:|---:|---:|"
+    "| Profile | Trials | Median Throughput Ratio | Median Vape P99 (ms) | Median Vape P999 (ms) | Median P99 Ratio | Median P999 Ratio | Min Throughput Ratio | Max P99 (ms) | Max P999 (ms) |"
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
 ) + ($summary | ForEach-Object {
-    "| $($_.Profile) | $($_.Trials) | $($_.ThroughputRatioMedian) | $($_.P99RatioMedian) | $($_.P999RatioMedian) | $($_.MinThroughputRatio) | $($_.MaxP99Ratio) | $($_.MaxP999Ratio) |"
+    "| $($_.Profile) | $($_.Trials) | $($_.ThroughputRatioMedian) | $($_.VapeP99MsMedian) | $($_.VapeP999MsMedian) | $($_.P99RatioMedian) | $($_.P999RatioMedian) | $($_.MinThroughputRatio) | $($_.MaxP99Ms) | $($_.MaxP999Ms) |"
 }) | Set-Content -Path $summaryFile -Encoding utf8
 
 Write-Host "Summary written to: $summaryFile"

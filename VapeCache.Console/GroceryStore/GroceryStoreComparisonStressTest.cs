@@ -75,168 +75,184 @@ public class GroceryStoreComparisonStressTest
         var maxDegree = GetMaxDegreeOfParallelism(_maxDegreeOfParallelism);
         var batchWriter = _service as ICartBatchWriter;
 
-        await Parallel.ForEachAsync(
-            Enumerable.Range(0, shopperCount),
-            new ParallelOptions { MaxDegreeOfParallelism = maxDegree },
-            async (shopperIndex, ct) =>
+        async Task ProcessShopperAsync(int shopperIndex)
+        {
+            try
             {
-                try
+                var deterministic = _deterministicSeed.HasValue;
+                var seed = _deterministicSeed.GetValueOrDefault();
+                var shopperSw = Stopwatch.StartNew();
+                var userId = $"user-{shopperIndex:D6}";
+                var saleId = deterministic
+                    ? $"sale-{DeterministicRange(seed, shopperIndex, salt: 1, minInclusive: 1, maxInclusive: 5)}"
+                    : $"sale-{Random.Shared.Next(1, 6)}";
+                var now = deterministic
+                    ? DeterministicTimestampUtc(shopperIndex)
+                    : DateTime.UtcNow;
+                double joinFlashSaleStep = 0;
+                double isInFlashSaleStep = 0;
+                double buildCartItemsStep = 0;
+                double addToCartStep = 0;
+                double cartReadPhaseStep = 0;
+                double sessionAndSalePhaseStep = 0;
+                double clearCartStep = 0;
+
+                // 1. Join flash sale
+                var stepStart = Stopwatch.GetTimestamp();
+                await _service.JoinFlashSaleAsync(saleId, userId);
+                joinFlashSaleStep = ElapsedMs(stepStart);
+
+                // 2. Check if in sale
+                stepStart = Stopwatch.GetTimestamp();
+                await _service.IsInFlashSaleAsync(saleId, userId);
+                isInFlashSaleStep = ElapsedMs(stepStart);
+
+                // 3. Add random items to cart (15-35 items)
+                stepStart = Stopwatch.GetTimestamp();
+                var cartSize = deterministic
+                    ? DeterministicRange(seed, shopperIndex, salt: 2, minInclusive: 15, maxInclusive: maxCartSize)
+                    : Random.Shared.Next(15, maxCartSize + 1);
+                var items = new CartItem[cartSize];
+                for (int i = 0; i < cartSize; i++)
                 {
-                    var deterministic = _deterministicSeed.HasValue;
-                    var seed = _deterministicSeed.GetValueOrDefault();
-                    var shopperSw = Stopwatch.StartNew();
-                    var userId = $"user-{shopperIndex:D6}";
-                    var saleId = deterministic
-                        ? $"sale-{DeterministicRange(seed, shopperIndex, salt: 1, minInclusive: 1, maxInclusive: 5)}"
-                        : $"sale-{Random.Shared.Next(1, 6)}";
-                    var now = deterministic
-                        ? DeterministicTimestampUtc(shopperIndex)
-                        : DateTime.UtcNow;
-                    double joinFlashSaleStep = 0;
-                    double isInFlashSaleStep = 0;
-                    double buildCartItemsStep = 0;
-                    double addToCartStep = 0;
-                    double cartReadPhaseStep = 0;
-                    double sessionAndSalePhaseStep = 0;
-                    double clearCartStep = 0;
-
-                    // 1. Join flash sale
-                    var stepStart = Stopwatch.GetTimestamp();
-                    await _service.JoinFlashSaleAsync(saleId, userId);
-                    joinFlashSaleStep = ElapsedMs(stepStart);
-
-                    // 2. Check if in sale
-                    stepStart = Stopwatch.GetTimestamp();
-                    await _service.IsInFlashSaleAsync(saleId, userId);
-                    isInFlashSaleStep = ElapsedMs(stepStart);
-
-                    // 3. Add random items to cart (15-35 items)
-                    stepStart = Stopwatch.GetTimestamp();
-                    var cartSize = deterministic
-                        ? DeterministicRange(seed, shopperIndex, salt: 2, minInclusive: 15, maxInclusive: maxCartSize)
-                        : Random.Shared.Next(15, maxCartSize + 1);
-                    var items = new CartItem[cartSize];
-                    for (int i = 0; i < cartSize; i++)
-                    {
-                        var productIndex = deterministic
-                            ? DeterministicRange(seed, shopperIndex, salt: 1000 + (i * 2), minInclusive: 0, maxInclusive: products.Length - 1)
-                            : Random.Shared.Next(products.Length);
-                        var quantity = deterministic
-                            ? DeterministicRange(seed, shopperIndex, salt: 1001 + (i * 2), minInclusive: 1, maxInclusive: 3)
-                            : Random.Shared.Next(1, 4);
-                        var product = products[productIndex];
-                        items[i] = new CartItem(
-                            product.Id,
-                            product.Name,
-                            product.Price,
-                            quantity,
-                            now);
-                    }
-                    buildCartItemsStep = ElapsedMs(stepStart);
-
-                    stepStart = Stopwatch.GetTimestamp();
-                    if (batchWriter is not null)
-                    {
-                        await batchWriter.AddToCartBatchAsync(userId, items).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        for (var i = 0; i < items.Length; i++)
-                        {
-                            await _service.AddToCartAsync(userId, items[i]).ConfigureAwait(false);
-                        }
-                    }
-                    addToCartStep = ElapsedMs(stepStart);
-
-                    // 4/5. Independent reads - issue together to reduce artificial serial latency.
-                    stepStart = Stopwatch.GetTimestamp();
-                    var cartCountTask = _service.GetCartCountAsync(userId);
-                    var cartTask = _service.GetCartAsync(userId);
-                    if (cartCountTask.IsCompletedSuccessfully)
-                    {
-                        _ = cartCountTask.Result;
-                    }
-                    else
-                    {
-                        await cartCountTask.ConfigureAwait(false);
-                    }
-
-                    if (cartTask.IsCompletedSuccessfully)
-                    {
-                        _ = cartTask.Result;
-                    }
-                    else
-                    {
-                        await cartTask.ConfigureAwait(false);
-                    }
-                    cartReadPhaseStep = ElapsedMs(stepStart);
-
-                    // 6. Save session
-                    stepStart = Stopwatch.GetTimestamp();
-                    var session = new UserSession(
-                        userId,
-                        $"session-{shopperIndex}",
-                        now,
-                        now,
-                        Array.Empty<string>(),
-                        null);
-                    var saveSessionTask = _service.SaveSessionAsync(userId, session);
-                    if (saveSessionTask.IsCompletedSuccessfully)
-                    {
-                        saveSessionTask.GetAwaiter().GetResult();
-                    }
-                    else
-                    {
-                        await saveSessionTask.ConfigureAwait(false);
-                    }
-
-                    // 7/8. After save is durable, issue independent reads together.
-                    var getSessionTask = _service.GetSessionAsync(userId);
-                    var participantCountTask = _service.GetFlashSaleParticipantCountAsync(saleId);
-
-                    if (getSessionTask.IsCompletedSuccessfully)
-                    {
-                        _ = getSessionTask.Result;
-                    }
-                    else
-                    {
-                        await getSessionTask.ConfigureAwait(false);
-                    }
-
-                    if (participantCountTask.IsCompletedSuccessfully)
-                    {
-                        _ = participantCountTask.Result;
-                    }
-                    else
-                    {
-                        await participantCountTask.ConfigureAwait(false);
-                    }
-                    sessionAndSalePhaseStep = ElapsedMs(stepStart);
-
-                    // 9. Clear cart (checkout)
-                    stepStart = Stopwatch.GetTimestamp();
-                    await _service.ClearCartAsync(userId);
-                    clearCartStep = ElapsedMs(stepStart);
-
-                    shopperSw.Stop();
-                    var slot = Interlocked.Increment(ref successCount) - 1;
-                    latencyMs[slot] = shopperSw.Elapsed.TotalMilliseconds;
-                    cartSizes[slot] = cartSize;
-                    joinFlashSaleMs[slot] = joinFlashSaleStep;
-                    isInFlashSaleMs[slot] = isInFlashSaleStep;
-                    buildCartItemsMs[slot] = buildCartItemsStep;
-                    addToCartMs[slot] = addToCartStep;
-                    cartReadPhaseMs[slot] = cartReadPhaseStep;
-                    sessionAndSalePhaseMs[slot] = sessionAndSalePhaseStep;
-                    clearCartMs[slot] = clearCartStep;
+                    var productIndex = deterministic
+                        ? DeterministicRange(seed, shopperIndex, salt: 1000 + (i * 2), minInclusive: 0, maxInclusive: products.Length - 1)
+                        : Random.Shared.Next(products.Length);
+                    var quantity = deterministic
+                        ? DeterministicRange(seed, shopperIndex, salt: 1001 + (i * 2), minInclusive: 1, maxInclusive: 3)
+                        : Random.Shared.Next(1, 4);
+                    var product = products[productIndex];
+                    items[i] = new CartItem(
+                        product.Id,
+                        product.Name,
+                        product.Price,
+                        quantity,
+                        now);
                 }
-                catch (Exception ex)
+                buildCartItemsStep = ElapsedMs(stepStart);
+
+                stepStart = Stopwatch.GetTimestamp();
+                if (batchWriter is not null)
                 {
-                    Interlocked.Increment(ref errorCount);
-                    Interlocked.CompareExchange(ref firstError, ex, comparand: null);
-                    _logger.LogError(ex, "Shopper {Index} failed", shopperIndex);
+                    await batchWriter.AddToCartBatchAsync(userId, items).ConfigureAwait(false);
+                }
+                else
+                {
+                    for (var i = 0; i < items.Length; i++)
+                    {
+                        await _service.AddToCartAsync(userId, items[i]).ConfigureAwait(false);
+                    }
+                }
+                addToCartStep = ElapsedMs(stepStart);
+
+                // 4/5. Independent reads - issue together to reduce artificial serial latency.
+                stepStart = Stopwatch.GetTimestamp();
+                var cartCountTask = _service.GetCartCountAsync(userId);
+                var cartTask = _service.GetCartAsync(userId);
+                if (cartCountTask.IsCompletedSuccessfully)
+                {
+                    _ = cartCountTask.Result;
+                }
+                else
+                {
+                    await cartCountTask.ConfigureAwait(false);
+                }
+
+                if (cartTask.IsCompletedSuccessfully)
+                {
+                    _ = cartTask.Result;
+                }
+                else
+                {
+                    await cartTask.ConfigureAwait(false);
+                }
+                cartReadPhaseStep = ElapsedMs(stepStart);
+
+                // 6. Save session
+                stepStart = Stopwatch.GetTimestamp();
+                var session = new UserSession(
+                    userId,
+                    $"session-{shopperIndex}",
+                    now,
+                    now,
+                    Array.Empty<string>(),
+                    null);
+                var saveSessionTask = _service.SaveSessionAsync(userId, session);
+                if (saveSessionTask.IsCompletedSuccessfully)
+                {
+                    saveSessionTask.GetAwaiter().GetResult();
+                }
+                else
+                {
+                    await saveSessionTask.ConfigureAwait(false);
+                }
+
+                // 7/8. After save is durable, issue independent reads together.
+                var getSessionTask = _service.GetSessionAsync(userId);
+                var participantCountTask = _service.GetFlashSaleParticipantCountAsync(saleId);
+
+                if (getSessionTask.IsCompletedSuccessfully)
+                {
+                    _ = getSessionTask.Result;
+                }
+                else
+                {
+                    await getSessionTask.ConfigureAwait(false);
+                }
+
+                if (participantCountTask.IsCompletedSuccessfully)
+                {
+                    _ = participantCountTask.Result;
+                }
+                else
+                {
+                    await participantCountTask.ConfigureAwait(false);
+                }
+                sessionAndSalePhaseStep = ElapsedMs(stepStart);
+
+                // 9. Clear cart (checkout)
+                stepStart = Stopwatch.GetTimestamp();
+                await _service.ClearCartAsync(userId);
+                clearCartStep = ElapsedMs(stepStart);
+
+                shopperSw.Stop();
+                var slot = Interlocked.Increment(ref successCount) - 1;
+                latencyMs[slot] = shopperSw.Elapsed.TotalMilliseconds;
+                cartSizes[slot] = cartSize;
+                joinFlashSaleMs[slot] = joinFlashSaleStep;
+                isInFlashSaleMs[slot] = isInFlashSaleStep;
+                buildCartItemsMs[slot] = buildCartItemsStep;
+                addToCartMs[slot] = addToCartStep;
+                cartReadPhaseMs[slot] = cartReadPhaseStep;
+                sessionAndSalePhaseMs[slot] = sessionAndSalePhaseStep;
+                clearCartMs[slot] = clearCartStep;
+            }
+            catch (Exception ex)
+            {
+                Interlocked.Increment(ref errorCount);
+                Interlocked.CompareExchange(ref firstError, ex, comparand: null);
+                _logger.LogError(ex, "Shopper {Index} failed", shopperIndex);
+            }
+        }
+
+        var nextShopper = -1;
+        var workers = new Task[maxDegree];
+        for (var worker = 0; worker < workers.Length; worker++)
+        {
+            workers[worker] = Task.Run(async () =>
+            {
+                while (true)
+                {
+                    var shopperIndex = Interlocked.Increment(ref nextShopper);
+                    if (shopperIndex >= shopperCount)
+                        break;
+
+                    await ProcessShopperAsync(shopperIndex).ConfigureAwait(false);
                 }
             });
+        }
+
+        await Task.WhenAll(workers).ConfigureAwait(false);
 
         shopperStart.Stop();
         sw.Stop();
@@ -390,7 +406,8 @@ public class GroceryStoreComparisonStressTest
         if (int.TryParse(env, out var configured) && configured > 0)
             return configured;
 
-        return Math.Max(32, Environment.ProcessorCount * 4);
+        // Default to a tuned window that avoids over-saturating scheduler/network queues on high-core hosts.
+        return Math.Clamp(Environment.ProcessorCount * 3, 32, 96);
     }
 
     private static double ElapsedMs(long startTicks)

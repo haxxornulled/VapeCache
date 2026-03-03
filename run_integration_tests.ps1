@@ -22,6 +22,9 @@
 .PARAMETER Password
     Optional Redis password.
 
+.PARAMETER Username
+    Optional Redis ACL username.
+
 .PARAMETER UseTls
     Enables TLS by setting VAPECACHE_REDIS_USE_TLS=true.
 
@@ -41,6 +44,7 @@ param(
     [Alias("Host")]
     [string]$RedisHost = "localhost",
     [int]$Port = 6379,
+    [string]$Username = "",
     [string]$Password = "",
     [switch]$UseTls,
     [string]$TestFilter = "FullyQualifiedName~VapeCache.Tests.Integration",
@@ -145,6 +149,14 @@ function Set-IntegrationEnvironment {
     Write-Host "VAPECACHE_REDIS_HOST=$env:VAPECACHE_REDIS_HOST"
     Write-Host "VAPECACHE_REDIS_PORT=$env:VAPECACHE_REDIS_PORT"
 
+    if (-not [string]::IsNullOrWhiteSpace($Username)) {
+        $env:VAPECACHE_REDIS_USERNAME = $Username
+        Write-Host "VAPECACHE_REDIS_USERNAME=$env:VAPECACHE_REDIS_USERNAME"
+    }
+    else {
+        Remove-Item Env:VAPECACHE_REDIS_USERNAME -ErrorAction SilentlyContinue
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($Password)) {
         $env:VAPECACHE_REDIS_PASSWORD = $Password
         Write-Host "VAPECACHE_REDIS_PASSWORD=********" -ForegroundColor Yellow
@@ -177,9 +189,23 @@ function Invoke-IntegrationTests {
         "--verbosity", "normal"
     )
 
-    & dotnet @testArgs
+    $testOutput = & dotnet @testArgs 2>&1
+    $testOutput | ForEach-Object { Write-Host $_ }
+
     if ($LASTEXITCODE -ne 0) {
         throw "Integration tests failed with exit code $LASTEXITCODE."
+    }
+
+    $noMatch = $false
+    foreach ($line in $testOutput) {
+        if ($line -match "No test matches the given testcase filter") {
+            $noMatch = $true
+            break
+        }
+    }
+
+    if ($noMatch) {
+        throw "Integration test filter matched zero tests. Adjust -TestFilter to include at least one integration test."
     }
 }
 

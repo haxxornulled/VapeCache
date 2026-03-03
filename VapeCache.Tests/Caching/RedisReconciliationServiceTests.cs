@@ -92,7 +92,7 @@ public sealed class RedisReconciliationServiceTests
     }
 
     [Fact]
-    public void TrackWrite_RespectsMaxPendingOperations()
+    public async Task TrackWrite_ContinuesTrackingPastMaxPendingThreshold()
     {
         var time = new ManualTimeProvider(new DateTimeOffset(2025, 12, 31, 0, 0, 0, TimeSpan.Zero));
         var executor = new FakeExecutor();
@@ -113,7 +113,10 @@ public sealed class RedisReconciliationServiceTests
         service.TrackWrite("k1", new byte[] { 1 }, null);
         service.TrackWrite("k2", new byte[] { 2 }, null);
 
-        Assert.Equal(1, service.PendingOperations);
+        await service.ReconcileAsync();
+
+        Assert.Equal(2, executor.SetCalls.Count);
+        Assert.Equal(0, service.PendingOperations);
     }
 
     [Fact]
@@ -257,6 +260,35 @@ public sealed class RedisReconciliationServiceTests
         await service.ReconcileAsync();
         Assert.Single(executor.SetCalls);
         Assert.Equal("k", executor.SetCalls[0].Key);
+    }
+
+    [Fact]
+    public async Task TrackWrite_Reconciles_WhenInitialStorePersistenceFails()
+    {
+        var time = new ManualTimeProvider(new DateTimeOffset(2025, 12, 31, 0, 0, 0, TimeSpan.Zero));
+        var executor = new FakeExecutor();
+        var options = new TestOptionsMonitor<RedisReconciliationOptions>(new RedisReconciliationOptions
+        {
+            MaxPendingOperations = 10,
+            MaxOperationAge = TimeSpan.FromMinutes(5),
+            MaxRunDuration = TimeSpan.FromSeconds(30),
+            BatchSize = 16,
+            MaxOperationsPerRun = 0,
+            InitialBackoff = TimeSpan.Zero,
+            MaxBackoff = TimeSpan.Zero,
+            BackoffMultiplier = 1.0
+        });
+        var store = new FailFirstUpsertStore();
+        var service = new RedisReconciliationService(executor, options, NullLogger<RedisReconciliationService>.Instance, time, store);
+
+        service.TrackWrite("k", new byte[] { 4, 2 }, null);
+
+        await service.ReconcileAsync();
+
+        var call = Assert.Single(executor.SetCalls);
+        Assert.Equal("k", call.Key);
+        Assert.Equal(new byte[] { 4, 2 }, call.Value);
+        Assert.Equal(0, service.PendingOperations);
     }
 
     [Fact]
@@ -437,6 +469,35 @@ public sealed class RedisReconciliationServiceTests
             await Task.Delay(delay, ct);
             return await _inner.TryUpsertDeleteAsync(key, trackedAt, ct);
         }
+
+        public ValueTask<IReadOnlyList<TrackedOperation>> SnapshotAsync(int maxOperations, CancellationToken ct)
+            => _inner.SnapshotAsync(maxOperations, ct);
+
+        public ValueTask RemoveAsync(IReadOnlyList<string> keys, CancellationToken ct)
+            => _inner.RemoveAsync(keys, ct);
+
+        public ValueTask ClearAsync(CancellationToken ct)
+            => _inner.ClearAsync(ct);
+    }
+
+    private sealed class FailFirstUpsertStore : IRedisReconciliationStore
+    {
+        private readonly InMemoryReconciliationStore _inner = new();
+        private int _remainingWriteFailures = 1;
+
+        public ValueTask<int> CountAsync(CancellationToken ct)
+            => _inner.CountAsync(ct);
+
+        public ValueTask<bool> TryUpsertWriteAsync(string key, ReadOnlyMemory<byte> value, DateTimeOffset trackedAt, DateTimeOffset? expiresAt, CancellationToken ct)
+        {
+            if (Interlocked.CompareExchange(ref _remainingWriteFailures, 0, 1) == 1)
+                return ValueTask.FromException<bool>(new InvalidOperationException("simulated write persistence failure"));
+
+            return _inner.TryUpsertWriteAsync(key, value, trackedAt, expiresAt, ct);
+        }
+
+        public ValueTask<bool> TryUpsertDeleteAsync(string key, DateTimeOffset trackedAt, CancellationToken ct)
+            => _inner.TryUpsertDeleteAsync(key, trackedAt, ct);
 
         public ValueTask<IReadOnlyList<TrackedOperation>> SnapshotAsync(int maxOperations, CancellationToken ct)
             => _inner.SnapshotAsync(maxOperations, ct);

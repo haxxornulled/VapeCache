@@ -5,6 +5,10 @@ param(
     [int]$TargetDurationSeconds = 30,
     [ValidateSet("FullTilt", "Balanced", "LowLatency")]
     [string]$Profile = "FullTilt",
+    [ValidateSet("Trace", "Debug", "Information", "Warning", "Error", "Critical", "None")]
+    [string]$BenchLogLevel = "Debug",
+    [ValidateSet("true", "false")]
+    [string]$GroceryVerbose = "true",
     [switch]$EnablePluginDemo
 )
 
@@ -16,11 +20,22 @@ if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
 }
 
 $env:GroceryStoreStress__Enabled = "true"
+$env:GroceryStoreStress__StopHostOnCompletion = "true"
 $env:GroceryStoreStress__ConcurrentShoppers = "$ConcurrentShoppers"
 $env:GroceryStoreStress__TotalShoppers = "$TotalShoppers"
 $env:GroceryStoreStress__TargetDurationSeconds = "$TargetDurationSeconds"
 $env:GroceryStoreStress__StartupDelaySeconds = "1"
 $env:GroceryStoreStress__CountdownSeconds = "1"
+$env:VAPECACHE_BENCH_LOG_LEVEL = $BenchLogLevel
+$env:VAPECACHE_GROCERYSTORE_VERBOSE = $GroceryVerbose.ToLowerInvariant()
+
+# Tuned multiplexer defaults for high-throughput console demos.
+$env:RedisMultiplexer__Connections = "12"
+$env:RedisMultiplexer__MaxInFlightPerConnection = "8192"
+$env:RedisMultiplexer__EnableCoalescedSocketWrites = "true"
+$env:RedisMultiplexer__EnableAutoscaling = "true"
+$env:RedisMultiplexer__MinConnections = "12"
+$env:RedisMultiplexer__MaxConnections = "24"
 
 switch ($Profile) {
     "FullTilt" {
@@ -77,6 +92,7 @@ Write-Host "Concurrent shoppers: $ConcurrentShoppers"
 Write-Host "Total shoppers: $TotalShoppers"
 Write-Host "Target duration: $TargetDurationSeconds seconds"
 Write-Host "Workload profile: $Profile"
+Write-Host "Logging: BenchLogLevel=$($env:VAPECACHE_BENCH_LOG_LEVEL) GroceryVerbose=$($env:VAPECACHE_GROCERYSTORE_VERBOSE)"
 Write-Host "Plugin demo enabled: $($EnablePluginDemo.IsPresent)"
 
 dotnet run --project "$PSScriptRoot\VapeCache.Console.csproj" -c Release

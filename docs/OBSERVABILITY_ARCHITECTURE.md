@@ -1,5 +1,7 @@
 # VapeCache Observability Architecture
 
+> Configuration authority: use [LOGGING_TELEMETRY_CONFIGURATION.md](LOGGING_TELEMETRY_CONFIGURATION.md) for current Serilog/Seq/OTLP keys, precedence, and fail-safe behavior.
+
 ## Executive Summary
 
 VapeCache has **production-grade observability built-in**, but with **zero lock-in** to any specific logging or monitoring platform. The library uses standard .NET abstractions (`ILogger<T>`, OpenTelemetry primitives) and provides optional integration packages for popular platforms like SEQ, .NET Aspire, Prometheus, etc.
@@ -16,10 +18,10 @@ VapeCache has **production-grade observability built-in**, but with **zero lock-
 - Metrics/traces always available via OpenTelemetry
 - Exporters (Prometheus, Zipkin, SEQ) configured by users
 
-### 3. **Zero Dependencies in Core**
-- VapeCache.Infrastructure has NO Serilog sink dependencies
-- VapeCache.Infrastructure has NO platform-specific code
-- Extension packages provide optional integrations
+### 3. **Core Runtime Stays Portable**
+- Hot-path runtime components use `ILogger<T>` abstractions
+- Platform sink decisions remain host-configured
+- Example host integration centralizes Serilog setup in infrastructure extensions
 
 ## Current State (✅ = Implemented)
 
@@ -59,14 +61,15 @@ VapeCache has **production-grade observability built-in**, but with **zero lock-
 
 ### Example Host: VapeCache.Console
 
-✅ **Serilog + SEQ Integration**
-- Serilog.Sinks.Seq configured in appsettings.json
+✅ **Serilog Integration with Resilient Defaults**
+- Console sink configured by default for local visibility
+- Seq sink is optional (`Serilog:Seq:Enabled`)
 - Trace correlation via `Serilog.Enrichers.Span`
 - Console output template: `[{Timestamp}] ({TraceId}:{SpanId}) {Message}`
-- SEQ sink: `http://localhost:5341` (default)
+- Fallback console guardrail remains available if external sinks are disabled/unavailable
 
 ✅ **OpenTelemetry OTLP Exporter**
-- Sends metrics/traces to `http://localhost:4317` (default)
+- Metrics/traces OTLP exporter is enabled only when endpoint is explicitly configured
 - Compatible with Grafana, Jaeger, Honeycomb, etc.
 
 ## Integration Options
@@ -80,7 +83,7 @@ VapeCache has **production-grade observability built-in**, but with **zero lock-
 # Run SEQ via Docker
 docker run -d --name seq -e ACCEPT_EULA=Y -p 5341:80 datalust/seq:latest
 
-# VapeCache.Console is already configured!
+# Enable Seq in config or environment, then run:
 dotnet run --project VapeCache.Console
 ```
 

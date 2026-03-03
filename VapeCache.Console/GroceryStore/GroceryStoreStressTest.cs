@@ -18,6 +18,7 @@ namespace VapeCache.Console.GroceryStore;
 /// </summary>
 public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
 {
+    private readonly IHostApplicationLifetime _hostLifetime;
     private readonly GroceryStoreService _store;
     private readonly ICacheStats _stats;
     private readonly IRedisModuleDetector _moduleDetector;
@@ -27,12 +28,14 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
     private readonly Product[] _products = GroceryStoreService.GetAllProducts();
 
     public GroceryStoreStressTest(
+        IHostApplicationLifetime hostLifetime,
         GroceryStoreService store,
         ICacheStats stats,
         IRedisModuleDetector moduleDetector,
         IOptionsMonitor<GroceryStoreStressOptions> optionsMonitor,
         ILogger<GroceryStoreStressTest> logger)
     {
+        _hostLifetime = hostLifetime;
         _store = store;
         _stats = stats;
         _moduleDetector = moduleDetector;
@@ -58,6 +61,23 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         }
 
         var workload = Normalize(configured);
+        var hotProduct = ResolveHotProduct(workload.HotProductId);
+        if (hotProduct is not null && workload.HotProductBiasPercent > 0)
+        {
+            _logger.LogInformation(
+                "Hot product stampede mode enabled: {ProductId} ({ProductName}), Bias={Bias}%, ForceHotFlashSale={ForceSale}",
+                hotProduct.Id,
+                hotProduct.Name,
+                workload.HotProductBiasPercent,
+                workload.ForceHotProductFlashSale);
+        }
+        else if (!string.IsNullOrWhiteSpace(workload.HotProductId))
+        {
+            _logger.LogWarning(
+                "HotProductId '{HotProductId}' not found in catalog. Falling back to random product distribution.",
+                workload.HotProductId);
+        }
+
         var workerCount = Math.Min(workload.ConcurrentShoppers, workload.TotalShoppers);
 
         // Wait for startup to complete
@@ -79,8 +99,10 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
             _logger.LogInformation("No Redis modules detected (vanilla Redis or in-memory mode)");
 
         // Create flash sales
-        var flashSales = await CreateFlashSalesAsync(stoppingToken).ConfigureAwait(false);
+        var flashSales = await CreateFlashSalesAsync(hotProduct, workload.ForceHotProductFlashSale, stoppingToken).ConfigureAwait(false);
         _logger.LogInformation("Created {Count} flash sales", flashSales.Length);
+        var hotFlashSale = hotProduct is null ? null : FindFlashSaleForProduct(flashSales, hotProduct.Id);
+        var cartBatchWriter = _store as ICartBatchWriter;
 
         _logger.LogInformation("Starting stress test in {Countdown} seconds...", workload.CountdownDelay.TotalSeconds);
         if (workload.CountdownDelay > TimeSpan.Zero)
@@ -106,7 +128,7 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
                         break;
                     }
 
-                    await SimulateShopperAsync(shopperId, flashSales, workload, stoppingToken).ConfigureAwait(false);
+                    await SimulateShopperAsync(shopperId, flashSales, hotProduct, hotFlashSale, cartBatchWriter, workload, stoppingToken).ConfigureAwait(false);
                     Interlocked.Increment(ref completedShoppers);
                 }
             }, stoppingToken);
@@ -128,9 +150,22 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
 
         // Final stats
         await ReportFinalStatsAsync(flashSales).ConfigureAwait(false);
+
+        if (workload.StopHostOnCompletion)
+        {
+            _logger.LogInformation("Stopping host after grocery stress completion (StopHostOnCompletion=true).");
+            _hostLifetime.StopApplication();
+        }
     }
 
-    private async Task SimulateShopperAsync(int shopperId, FlashSale[] flashSales, StressWorkload workload, CancellationToken ct)
+    private async Task SimulateShopperAsync(
+        int shopperId,
+        FlashSale[] flashSales,
+        Product? hotProduct,
+        FlashSale? hotFlashSale,
+        ICartBatchWriter? cartBatchWriter,
+        StressWorkload workload,
+        CancellationToken ct)
     {
         var userId = $"user-{shopperId:D6}";
         var sessionId = $"session-{shopperId:D6}";
@@ -157,7 +192,7 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
                 var browseCount = random.Next(workload.BrowseMinProducts, workload.BrowseMaxProducts + 1);
                 for (var i = 0; i < browseCount; i++)
                 {
-                    var product = _products[random.Next(_products.Length)];
+                    var product = SelectProduct(random, workload, hotProduct);
                     await _store.GetProductAsync(product.Id).ConfigureAwait(false);
                 }
             }
@@ -165,7 +200,9 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
             // 3. Join flash sale
             if (flashSales.Length > 0 && random.Next(100) < workload.FlashSaleJoinChancePercent)
             {
-                var sale = flashSales[random.Next(flashSales.Length)];
+                var sale = workload.ForceHotProductFlashSale && hotFlashSale is not null
+                    ? hotFlashSale
+                    : flashSales[random.Next(flashSales.Length)];
                 await _store.JoinFlashSaleAsync(sale.Id, userId).ConfigureAwait(false);
 
                 // Check if already in sale (test SISMEMBER)
@@ -177,17 +214,26 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
             {
                 var cartItems = random.Next(workload.CartItemsMin, workload.CartItemsMax + 1);
                 var addedAt = DateTime.UtcNow;
-                for (var i = 0; i < cartItems; i++)
+                var items = new CartItem[cartItems];
+                for (var i = 0; i < items.Length; i++)
                 {
-                    var product = _products[random.Next(_products.Length)];
-                    var item = new CartItem(
+                    var product = SelectProduct(random, workload, hotProduct);
+                    items[i] = new CartItem(
                         product.Id,
                         product.Name,
                         product.Price,
                         random.Next(workload.CartItemQuantityMin, workload.CartItemQuantityMax + 1),
                         addedAt);
+                }
 
-                    await _store.AddToCartAsync(userId, item).ConfigureAwait(false);
+                if (cartBatchWriter is not null)
+                    await cartBatchWriter.AddToCartBatchAsync(userId, items).ConfigureAwait(false);
+                else
+                {
+                    for (var i = 0; i < items.Length; i++)
+                    {
+                        await _store.AddToCartAsync(userId, items[i]).ConfigureAwait(false);
+                    }
                 }
 
                 // Get cart count
@@ -218,7 +264,7 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         }
     }
 
-    private async Task<FlashSale[]> CreateFlashSalesAsync(CancellationToken ct)
+    private async Task<FlashSale[]> CreateFlashSalesAsync(Product? hotProduct, bool forceHotProductFlashSale, CancellationToken ct)
     {
         var saleCount = Math.Min(5, _products.Length);
         if (saleCount == 0)
@@ -228,20 +274,57 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
 
         var random = Random.Shared;
         var selectedProductIndexes = SelectDistinctProductIndexes(_products.Length, saleCount);
-        var sales = new FlashSale[saleCount];
+        var sales = new List<FlashSale>(saleCount);
+
+        if (forceHotProductFlashSale && hotProduct is not null)
+        {
+            sales.Add(await _store.CreateFlashSaleAsync(
+                hotProduct.Id,
+                hotProduct.Price * 0.5m,
+                random.Next(50, 201),
+                TimeSpan.FromMinutes(10)).ConfigureAwait(false));
+        }
 
         for (var i = 0; i < saleCount; i++)
         {
             ct.ThrowIfCancellationRequested();
+            if (sales.Count >= saleCount)
+                break;
+
             var product = _products[selectedProductIndexes[i]];
-            sales[i] = await _store.CreateFlashSaleAsync(
+            if (forceHotProductFlashSale &&
+                hotProduct is not null &&
+                string.Equals(product.Id, hotProduct.Id, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            sales.Add(await _store.CreateFlashSaleAsync(
                 product.Id,
                 product.Price * 0.5m,  // 50% off
                 random.Next(50, 201),   // Limited quantity
-                TimeSpan.FromMinutes(10)).ConfigureAwait(false);
+                TimeSpan.FromMinutes(10)).ConfigureAwait(false));
         }
 
-        return sales;
+        while (sales.Count < saleCount)
+        {
+            ct.ThrowIfCancellationRequested();
+            var product = _products[random.Next(_products.Length)];
+            if (forceHotProductFlashSale &&
+                hotProduct is not null &&
+                string.Equals(product.Id, hotProduct.Id, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            sales.Add(await _store.CreateFlashSaleAsync(
+                product.Id,
+                product.Price * 0.5m,
+                random.Next(50, 201),
+                TimeSpan.FromMinutes(10)).ConfigureAwait(false));
+        }
+
+        return sales.ToArray();
     }
 
     private async Task ReportStatsAsync(Stopwatch sw, TimeSpan targetDuration, TimeSpan statsInterval, CancellationToken ct)
@@ -331,6 +414,44 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         return result;
     }
 
+    private static FlashSale? FindFlashSaleForProduct(FlashSale[] sales, string productId)
+    {
+        for (var i = 0; i < sales.Length; i++)
+        {
+            if (string.Equals(sales[i].ProductId, productId, StringComparison.Ordinal))
+                return sales[i];
+        }
+
+        return null;
+    }
+
+    private Product SelectProduct(Random random, StressWorkload workload, Product? hotProduct)
+    {
+        if (hotProduct is not null &&
+            workload.HotProductBiasPercent > 0 &&
+            random.Next(100) < workload.HotProductBiasPercent)
+        {
+            return hotProduct;
+        }
+
+        return _products[random.Next(_products.Length)];
+    }
+
+    private Product? ResolveHotProduct(string? hotProductId)
+    {
+        if (string.IsNullOrWhiteSpace(hotProductId))
+            return null;
+
+        for (var i = 0; i < _products.Length; i++)
+        {
+            var product = _products[i];
+            if (string.Equals(product.Id, hotProductId, StringComparison.OrdinalIgnoreCase))
+                return product;
+        }
+
+        return null;
+    }
+
     private static StressWorkload Normalize(GroceryStoreStressOptions options)
     {
         var browseMinProducts = Math.Max(0, options.BrowseMinProducts);
@@ -341,6 +462,7 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
 
         var cartQuantityMin = Math.Max(1, options.CartItemQuantityMin);
         var cartQuantityMax = Math.Max(cartQuantityMin, options.CartItemQuantityMax);
+        var hotProductId = string.IsNullOrWhiteSpace(options.HotProductId) ? null : options.HotProductId.Trim();
 
         return new StressWorkload(
             ConcurrentShoppers: Math.Max(1, options.ConcurrentShoppers),
@@ -360,7 +482,11 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
             ViewCartChancePercent: Math.Clamp(options.ViewCartChancePercent, 0, 100),
             CheckoutChancePercent: Math.Clamp(options.CheckoutChancePercent, 0, 100),
             RemoveFromCartChancePercent: Math.Clamp(options.RemoveFromCartChancePercent, 0, 100),
-            StatsInterval: TimeSpan.FromSeconds(Math.Max(1, options.StatsIntervalSeconds)));
+            StatsInterval: TimeSpan.FromSeconds(Math.Max(1, options.StatsIntervalSeconds)),
+            HotProductId: hotProductId,
+            HotProductBiasPercent: Math.Clamp(options.HotProductBiasPercent, 0, 100),
+            ForceHotProductFlashSale: options.ForceHotProductFlashSale,
+            StopHostOnCompletion: options.StopHostOnCompletion);
     }
 
     private readonly record struct StressWorkload(
@@ -381,5 +507,9 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         int ViewCartChancePercent,
         int CheckoutChancePercent,
         int RemoveFromCartChancePercent,
-        TimeSpan StatsInterval);
+        TimeSpan StatsInterval,
+        string? HotProductId,
+        int HotProductBiasPercent,
+        bool ForceHotProductFlashSale,
+        bool StopHostOnCompletion);
 }

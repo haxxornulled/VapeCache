@@ -48,6 +48,8 @@ public static class ComparisonRunner
     public static async Task RunComparisonAsync(
         IConfiguration configuration,
         string redisHost,
+        int redisPort,
+        string? redisUsername,
         string redisPassword,
         int shopperCount = 10_000,
         int maxCartSize = 35)
@@ -107,13 +109,16 @@ public static class ComparisonRunner
 
         if (cleanupBenchKeys)
         {
-            var deleted = await CleanupBenchmarkKeysAsync(redisHost, redisPassword, "cmp:*").ConfigureAwait(false);
+            var deleted = await CleanupBenchmarkKeysAsync(redisHost, redisPort, redisUsername, redisPassword, "cmp:*").ConfigureAwait(false);
             System.Console.WriteLine($"[BenchCleanup] Deleted {deleted:N0} stale comparison keys (pattern: cmp:*).");
             System.Console.WriteLine();
         }
 
         System.Console.WriteLine($"[BenchTrack] {benchTrack}");
-        PrintBenchmarkHeader(redisHost, shopperCount, maxCartSize, benchTrack, harness);
+        System.Console.WriteLine("Track Definitions:");
+        System.Console.WriteLine("  ApplesToApples: command/payload parity with StackExchange.Redis (JSON cart/session payloads).");
+        System.Console.WriteLine("  OptimizedProductPath: VapeCache optimized cart/session storage path.");
+        PrintBenchmarkHeader(redisHost, redisPort, shopperCount, maxCartSize, benchTrack, harness);
         System.Console.WriteLine();
 
         if (benchTrack == GroceryComparisonTrack.Both)
@@ -128,6 +133,8 @@ public static class ComparisonRunner
             var parity = await RunTrackComparisonAsync(
                 configuration,
                 redisHost,
+                redisPort,
+                redisUsername,
                 redisPassword,
                 shopperCount,
                 maxCartSize,
@@ -140,6 +147,8 @@ public static class ComparisonRunner
             var optimized = await RunTrackComparisonAsync(
                 configuration,
                 redisHost,
+                redisPort,
+                redisUsername,
                 redisPassword,
                 shopperCount,
                 maxCartSize,
@@ -153,6 +162,8 @@ public static class ComparisonRunner
         var result = await RunTrackComparisonAsync(
             configuration,
             redisHost,
+            redisPort,
+            redisUsername,
             redisPassword,
             shopperCount,
             maxCartSize,
@@ -171,6 +182,8 @@ public static class ComparisonRunner
     private static async Task<(StressTestResult VapeCache, StressTestResult StackExchange)> RunTrackComparisonAsync(
         IConfiguration configuration,
         string redisHost,
+        int redisPort,
+        string? redisUsername,
         string redisPassword,
         int shopperCount,
         int maxCartSize,
@@ -203,6 +216,8 @@ public static class ComparisonRunner
                         var result = await RunVapeCacheTestAsync(
                             configuration,
                             redisHost,
+                            redisPort,
+                            redisUsername,
                             redisPassword,
                             shopperCount,
                             maxCartSize,
@@ -220,6 +235,8 @@ public static class ComparisonRunner
                         iterationPrefixes.Add(prefix);
                         var result = await RunStackExchangeRedisTestAsync(
                             redisHost,
+                            redisPort,
+                            redisUsername,
                             redisPassword,
                             shopperCount,
                             maxCartSize,
@@ -238,7 +255,7 @@ public static class ComparisonRunner
                 {
                     foreach (var prefix in iterationPrefixes)
                     {
-                        await CleanupRunKeysSafelyAsync(redisHost, redisPassword, prefix).ConfigureAwait(false);
+                        await CleanupRunKeysSafelyAsync(redisHost, redisPort, redisUsername, redisPassword, prefix).ConfigureAwait(false);
                     }
                 }
             }
@@ -301,6 +318,8 @@ public static class ComparisonRunner
     private static async Task<StressTestResult> RunVapeCacheTestAsync(
         IConfiguration configuration,
         string redisHost,
+        int redisPort,
+        string? redisUsername,
         string redisPassword,
         int shopperCount,
         int maxCartSize,
@@ -327,13 +346,25 @@ public static class ComparisonRunner
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_MUX_COALESCE"),
             configuration["GroceryStoreComparison:MuxCoalesce"],
             true);
+        var muxAdaptiveCoalescing = GetBoolFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_MUX_ADAPTIVE_COALESCING"),
+            configuration["GroceryStoreComparison:MuxAdaptiveCoalescing"],
+            true);
+        var muxSocketRespReader = GetBoolFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SOCKET_RESP_READER"),
+            configuration["GroceryStoreComparison:MuxSocketRespReader"],
+            true);
+        var muxDedicatedLaneWorkers = GetBoolFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_DEDICATED_LANE_WORKERS"),
+            configuration["GroceryStoreComparison:MuxDedicatedLaneWorkers"],
+            true);
         var muxProfile = GetTransportProfileFromSources(
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_MUX_PROFILE"),
             configuration["GroceryStoreComparison:MuxProfile"],
             RedisTransportProfile.FullTilt);
 
         System.Console.WriteLine(
-            $"[VapeConfig] Mux.Profile={muxProfile}, Mux.Connections={muxConnections}, Mux.MaxInFlight={muxInFlight}, Mux.Coalesce={muxCoalesce}, Mux.ResponseTimeoutMs={muxResponseTimeoutMs}");
+            $"[VapeConfig] Mux.Profile={muxProfile}, Mux.Connections={muxConnections}, Mux.MaxInFlight={muxInFlight}, Mux.Coalesce={muxCoalesce}, Mux.AdaptiveCoalesce={muxAdaptiveCoalescing}, Mux.SocketReader={muxSocketRespReader}, Mux.DedicatedWorkers={muxDedicatedLaneWorkers}, Mux.ResponseTimeoutMs={muxResponseTimeoutMs}");
         System.Console.WriteLine($"[VapeConfig] KeyPrefix={keyPrefix}");
 
         // Logging
@@ -348,11 +379,11 @@ public static class ComparisonRunner
                     .SetValue(options, redisHost);
                 typeof(VapeCache.Abstractions.Connections.RedisConnectionOptions)
                     .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.Port))!
-                    .SetValue(options, 6379);
+                    .SetValue(options, redisPort);
                 var useAuth = !string.IsNullOrWhiteSpace(redisPassword);
                 typeof(VapeCache.Abstractions.Connections.RedisConnectionOptions)
                     .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.Username))!
-                    .SetValue(options, useAuth ? "admin" : null);
+                    .SetValue(options, useAuth ? redisUsername : null);
                 typeof(VapeCache.Abstractions.Connections.RedisConnectionOptions)
                     .GetProperty(nameof(VapeCache.Abstractions.Connections.RedisConnectionOptions.Password))!
                     .SetValue(options, useAuth ? redisPassword : null);
@@ -390,6 +421,15 @@ public static class ComparisonRunner
                 .GetProperty(nameof(RedisMultiplexerOptions.EnableCoalescedSocketWrites))!
                 .SetValue(options, muxCoalesce);
             typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.EnableAdaptiveCoalescing))!
+                .SetValue(options, muxAdaptiveCoalescing);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.EnableSocketRespReader))!
+                .SetValue(options, muxSocketRespReader);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.UseDedicatedLaneWorkers))!
+                .SetValue(options, muxDedicatedLaneWorkers);
+            typeof(RedisMultiplexerOptions)
                 .GetProperty(nameof(RedisMultiplexerOptions.ResponseTimeout))!
                 .SetValue(options, muxResponseTimeoutMs <= 0 ? TimeSpan.Zero : TimeSpan.FromMilliseconds(muxResponseTimeoutMs));
         });
@@ -424,7 +464,9 @@ public static class ComparisonRunner
             services.AddSingleton<IGroceryStoreService>(sp =>
                 new VapeCacheRawGroceryStoreService(
                     sp.GetRequiredService<IRedisCommandExecutor>(),
-                    keyPrefix));
+                    keyPrefix,
+                    optimizedCleanupOnly: true,
+                    useLocalFlashSaleCountCache: true));
 
         var provider = services.BuildServiceProvider();
         try
@@ -455,6 +497,7 @@ public static class ComparisonRunner
 
     private static void PrintBenchmarkHeader(
         string redisHost,
+        int redisPort,
         int shopperCount,
         int maxCartSize,
         GroceryComparisonTrack track,
@@ -474,7 +517,7 @@ public static class ComparisonRunner
         System.Console.WriteLine($"CPU Logical Cores: {cpuLogicalCores}");
         System.Console.WriteLine($"GC Mode: {(serverGc ? "Server" : "Workstation")}");
         System.Console.WriteLine($"GC Available Memory: {totalMemoryMb:N0} MB");
-        System.Console.WriteLine($"Redis Endpoint: {redisHost}:6379");
+        System.Console.WriteLine($"Redis Endpoint: {redisHost}:{redisPort}");
         System.Console.WriteLine($"Track: {track}");
         System.Console.WriteLine(
             $"Workload Unit: 1 shopper = JoinFlashSale + IsInFlashSale + BuildCartItems(15..{maxCartSize}) + AddToCart + CartReadPhase + SessionAndSalePhase + ClearCart");
@@ -483,13 +526,15 @@ public static class ComparisonRunner
             $"Harness: warmups={harness.WarmupRuns}, measured-runs={harness.Runs}, alternate-order={harness.AlternateOrder}, deterministic-seed={harness.DeterministicSeed}, cleanup-run-keys={harness.CleanupRunKeys}, timeout={harness.ProviderTimeout.TotalSeconds:N0}s, log-level={harness.BenchmarkLogLevel}, max-degree={(harness.MaxDegreeOfParallelism?.ToString(CultureInfo.InvariantCulture) ?? "auto")}");
         System.Console.WriteLine("Fairness: same shopper workload, same Redis endpoint/auth, same cart-size bounds, same shopper count.");
         System.Console.WriteLine(
-            $"ENV|Framework={framework}|OS={os}|Arch={arch}|CpuLogical={cpuLogicalCores}|ServerGC={serverGc}|RedisEndpoint={redisHost}:6379");
+            $"ENV|Framework={framework}|OS={os}|Arch={arch}|CpuLogical={cpuLogicalCores}|ServerGC={serverGc}|RedisEndpoint={redisHost}:{redisPort}");
         System.Console.WriteLine(
             $"WORKLOAD|Unit=ShopperFlow|Track={track}|ShopperCount={shopperCount}|CartItemsMin=15|CartItemsMax={maxCartSize}|Products=25|FlashSales=5|Warmups={harness.WarmupRuns}|Runs={harness.Runs}|AlternateOrder={harness.AlternateOrder}|Seed={harness.DeterministicSeed}");
     }
 
     private static async Task<StressTestResult> RunStackExchangeRedisTestAsync(
         string redisHost,
+        int redisPort,
+        string? redisUsername,
         string redisPassword,
         int shopperCount,
         int maxCartSize,
@@ -505,7 +550,7 @@ public static class ComparisonRunner
         // StackExchange.Redis setup
         var configOptions = new ConfigurationOptions
         {
-            EndPoints = { $"{redisHost}:6379" },
+            EndPoints = { $"{redisHost}:{redisPort}" },
             AbortOnConnectFail = false,
             ConnectTimeout = 5000,
             SyncTimeout = 5000,
@@ -513,7 +558,7 @@ public static class ComparisonRunner
         };
         if (!string.IsNullOrWhiteSpace(redisPassword))
         {
-            configOptions.User = "admin";
+            configOptions.User = redisUsername;
             configOptions.Password = redisPassword;
         }
 
@@ -732,8 +777,7 @@ public static class ComparisonRunner
     {
         builder.ClearProviders();
         builder.SetMinimumLevel(minLevel);
-        if (minLevel <= LogLevel.Information)
-            builder.AddConsole();
+        builder.AddConsole();
     }
 
     private static async Task<StressTestResult> RunWithOptionalTimeoutAsync(
@@ -812,11 +856,11 @@ public static class ComparisonRunner
         return fallback;
     }
 
-    private static async Task<long> CleanupBenchmarkKeysAsync(string redisHost, string redisPassword, string pattern)
+    private static async Task<long> CleanupBenchmarkKeysAsync(string redisHost, int redisPort, string? redisUsername, string redisPassword, string pattern)
     {
         var configOptions = new ConfigurationOptions
         {
-            EndPoints = { $"{redisHost}:6379" },
+            EndPoints = { $"{redisHost}:{redisPort}" },
             AbortOnConnectFail = false,
             ConnectTimeout = 5000,
             SyncTimeout = 5000,
@@ -824,7 +868,7 @@ public static class ComparisonRunner
         };
         if (!string.IsNullOrWhiteSpace(redisPassword))
         {
-            configOptions.User = "admin";
+            configOptions.User = redisUsername;
             configOptions.Password = redisPassword;
         }
 
@@ -856,12 +900,12 @@ public static class ComparisonRunner
         return deleted;
     }
 
-    private static async Task CleanupRunKeysSafelyAsync(string redisHost, string redisPassword, string keyPrefix)
+    private static async Task CleanupRunKeysSafelyAsync(string redisHost, int redisPort, string? redisUsername, string redisPassword, string keyPrefix)
     {
         try
         {
             var pattern = string.Concat(keyPrefix, "*");
-            var deleted = await CleanupBenchmarkKeysAsync(redisHost, redisPassword, pattern).ConfigureAwait(false);
+            var deleted = await CleanupBenchmarkKeysAsync(redisHost, redisPort, redisUsername, redisPassword, pattern).ConfigureAwait(false);
             if (deleted > 0)
                 System.Console.WriteLine($"[BenchCleanup] Removed {deleted:N0} keys for prefix {keyPrefix}");
         }

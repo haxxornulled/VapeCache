@@ -91,14 +91,8 @@ jobs:
         shell: pwsh
         run: |
           . ./tools/release-package-manifest.ps1
-          foreach ($project in Get-ReleasePackageProjects)
-          {
-              dotnet list $project package --vulnerable --include-transitive
-              if ($LASTEXITCODE -ne 0)
-              {
-                  throw "Vulnerability scan failed for $project"
-              }
-          }
+          $projects = Get-ReleasePackageProjects
+          pwsh -File tools/audit-vulnerabilities.ps1 -Projects $projects -IncludePrivateFeeds
 
       - name: Pack
         run: pwsh -File tools/pack-release-packages.ps1 -OutputDir artifacts/packages -PackageVersion "${{ steps.release_tag.outputs.package_version }}"

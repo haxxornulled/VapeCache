@@ -26,4 +26,11 @@ public sealed class GroceryStoreStressOptions
     public int RemoveFromCartChancePercent { get; init; } = 10;
 
     public int StatsIntervalSeconds { get; init; } = 10;
+    public bool StopHostOnCompletion { get; init; } = true;
+
+    // Optional hot-key stampede controls.
+    // When set, product selection can be biased toward a single product id.
+    public string? HotProductId { get; init; }
+    public int HotProductBiasPercent { get; init; } = 0;
+    public bool ForceHotProductFlashSale { get; init; } = false;
 }

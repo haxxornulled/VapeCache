@@ -2,22 +2,40 @@
 
 This page is the single "what happened last" checkpoint for head-to-head performance runs.
 
-- Snapshot date: **2026-02-26**
-- Artifact source: `BenchmarkDotNet.Artifacts/head-to-head/20260225-234119/20260225-234121/comparison.md`
+- Snapshot date: **2026-03-03**
+- Artifact sources:
+  - `artifacts/compare-both-50k-trials10-strict-20260303-093721.log`
+  - `BenchmarkDotNet.Artifacts/head-to-head/20260225-234119/20260225-234121/comparison.md` (latest full BDN client suite snapshot)
 - Host profile used for this run:
   - CPU: Intel i7-14700K
   - RAM: 64 GB
   - Runtime: .NET 10 (`Release`)
-  - Redis target: `redis://localhost:6379/0` (unless overridden by env/config)
+  - Redis target: `192.168.100.50:6379` (ACL auth for strict GroceryStore trials)
 
 ## Latest Summary
 
-- Comparisons: 4
-- VapeCache faster: 4
-- StackExchange.Redis faster: 0
-- Ties: 0
+- Strict GroceryStore `both` track run (50k shoppers, 10 trials):
+  - `OptimizedProductPath`: median ratio of medians `0.968` vs SER, ratio spread `0.891..1.009`, ratio CoV `3.6%`
+  - `ApplesToApples`: median ratio of medians `0.868` vs SER, ratio spread `0.782..0.916`, ratio CoV `4.2%`
+- Reporting split:
+  - Hot-path claims: `OptimizedProductPath`
+  - Feature/parity/fallback claims: `ApplesToApples`
+- Recommended production knobs for this workload:
+  - `MuxProfile=FullTilt`
+  - `MuxConnections=16`
+  - `MuxInFlight=8192`
+  - `MuxCoalesce=true`
+  - `MaxDegree=64`
+  - `DOTNET_GCServer=1`
 
-## GroceryStore Comparison Snapshot (2026-02-26)
+## GroceryStore Strict Vs SER (2026-03-03, 10 Trials)
+
+| Track | Trials | Vape Median (shoppers/sec) | SER Median (shoppers/sec) | Median Ratio | Ratio Of Medians | Ratio CoV | Ratio Spread |
+|---|---:|---:|---:|---:|---:|---:|---|
+| OptimizedProductPath | 10 | 24,532 | 25,351 | 0.980 | 0.968 | 3.6% | 0.891 .. 1.009 |
+| ApplesToApples | 10 | 22,021 | 25,374 | 0.876 | 0.868 | 4.2% | 0.782 .. 0.916 |
+
+## GroceryStore Historical Snapshot (2026-02-26)
 
 Detailed artifact:
 - `BenchmarkDotNet.Artifacts/docs/grocerystore-comparison-2026-02-26.md`

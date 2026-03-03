@@ -147,11 +147,26 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
     private static bool IsTransientError(Exception ex)
     {
         // Identify transient errors that are worth retrying
-        return ex.Message.Contains("Ring dequeue failed") ||
-               ex.Message.Contains("timeout") ||
-               ex.Message.Contains("temporarily unavailable") ||
+        var message = ex.Message;
+        return message.Contains("Ring dequeue failed", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("temporarily unavailable", StringComparison.OrdinalIgnoreCase) ||
                ex is TimeoutException ||
-               ex is OperationCanceledException && !ex.Message.Contains("user");
+               ex is OperationCanceledException && !message.Contains("user", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRedisIndexAlreadyExists(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException!)
+        {
+            if (current.Message.Contains("index already exists", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (current.InnerException is null)
+                break;
+        }
+
+        return false;
     }
 
     private ValueTask<T> FailOpenTryAsync<T>(
@@ -636,9 +651,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TryGetLeaseAsync(key, ct, out task))
+        if (_redis.TryGetLeaseAsync(key, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.GetLeaseAsync(key, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.GetLeaseAsync(key, ct), ct);
             return true;
         }
 
@@ -927,9 +942,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TryHGetAsync(key, field, ct, out task))
+        if (_redis.TryHGetAsync(key, field, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.HGetAsync(key, field, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.HGetAsync(key, field, ct), ct);
             return true;
         }
 
@@ -952,9 +967,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TryGetExLeaseAsync(key, ttl, ct, out task))
+        if (_redis.TryGetExLeaseAsync(key, ttl, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.GetExLeaseAsync(key, ttl, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.GetExLeaseAsync(key, ttl, ct), ct);
             return true;
         }
 
@@ -977,9 +992,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TrySetAsync(key, value, ttl, ct, out task))
+        if (_redis.TrySetAsync(key, value, ttl, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.SetAsync(key, value, ttl, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.SetAsync(key, value, ttl, ct), ct);
             return true;
         }
 
@@ -1002,9 +1017,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TryGetExAsync(key, ttl, ct, out task))
+        if (_redis.TryGetExAsync(key, ttl, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.GetExAsync(key, ttl, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.GetExAsync(key, ttl, ct), ct);
             return true;
         }
 
@@ -1027,9 +1042,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TryGetAsync(key, ct, out task))
+        if (_redis.TryGetAsync(key, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.GetAsync(key, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.GetAsync(key, ct), ct);
             return true;
         }
 
@@ -1052,9 +1067,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TryLPopAsync(key, ct, out task))
+        if (_redis.TryLPopAsync(key, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.LPopAsync(key, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.LPopAsync(key, ct), ct);
             return true;
         }
 
@@ -1106,9 +1121,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TryRPopAsync(key, ct, out task))
+        if (_redis.TryRPopAsync(key, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.RPopAsync(key, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.RPopAsync(key, ct), ct);
             return true;
         }
 
@@ -1218,9 +1233,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TryLPopLeaseAsync(key, ct, out task))
+        if (_redis.TryLPopLeaseAsync(key, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.LPopLeaseAsync(key, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.LPopLeaseAsync(key, ct), ct);
             return true;
         }
 
@@ -1272,9 +1287,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TryRPopLeaseAsync(key, ct, out task))
+        if (_redis.TryRPopLeaseAsync(key, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.RPopLeaseAsync(key, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.RPopLeaseAsync(key, ct), ct);
             return true;
         }
 
@@ -1386,9 +1401,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TrySIsMemberAsync(key, member, ct, out task))
+        if (_redis.TrySIsMemberAsync(key, member, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.SIsMemberAsync(key, member, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.SIsMemberAsync(key, member, ct), ct);
             return true;
         }
 
@@ -1764,9 +1779,9 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             return true;
         }
 
-        if (_redis.TryJsonGetLeaseAsync(key, path, ct, out task))
+        if (_redis.TryJsonGetLeaseAsync(key, path, ct, out var redisTask))
         {
-            task = FailOpenTryAsync(task, () => _fallback.JsonGetLeaseAsync(key, path, ct), ct);
+            task = FailOpenTryAsync(redisTask, () => _fallback.JsonGetLeaseAsync(key, path, ct), ct);
             return true;
         }
 
@@ -1885,6 +1900,13 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
             return result;
+        }
+        catch (Exception ex) when (IsRedisIndexAlreadyExists(ex))
+        {
+            _breakerController.MarkRedisSuccess();
+            _current.SetCurrent("redis");
+            _logger.LogDebug("Redis FT.CREATE index {Index} already exists; treating as ready.", index);
+            return false;
         }
         catch (Exception ex)
         {

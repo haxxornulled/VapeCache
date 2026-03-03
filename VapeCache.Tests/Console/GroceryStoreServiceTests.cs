@@ -147,7 +147,7 @@ public sealed class GroceryStoreServiceTests
             var cacheService = new InMemoryCacheService(memory, current, stats, spillOptions, new NoopSpillStore());
             var client = new VapeCacheClient(cacheService, codecs);
 
-            var service = new GroceryStoreService(collections, client, executor, NullLogger<GroceryStoreService>.Instance);
+            var service = new GroceryStoreService(collections, client, codecs, executor, NullLogger<GroceryStoreService>.Instance);
             return new GroceryHarness(service, executor, memory);
         }
 
