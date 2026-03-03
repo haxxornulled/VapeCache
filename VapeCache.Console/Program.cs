@@ -4,12 +4,12 @@ using Autofac.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Serilog;
-using Serilog.Events;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Console.Hosting;
@@ -54,15 +54,12 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
     })
     .UseSerilog(static (context, services, loggerConfig) =>
     {
-        loggerConfig
-            .ReadFrom.Configuration(context.Configuration)
-            .ReadFrom.Services(services)
-            .Enrich.FromLogContext();
-
-        ConfigureGroceryStoreLogging(context.Configuration, loggerConfig);
+        loggerConfig.ConfigureVapeCacheLogging(context.Configuration, services);
     })
     .ConfigureServices(static (context, services) =>
     {
+        var otlpEndpoint = ResolveOtlpEndpoint(context.Configuration);
+
         services.AddOpenTelemetry()
             .ConfigureResource(r => r.AddService(serviceName: "VapeCache.Console"))
             .WithMetrics(m =>
@@ -73,10 +70,13 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
                 m.AddHttpClientInstrumentation();
                 m.AddAspNetCoreInstrumentation();
 
-                m.AddOtlpExporter(otlp =>
+                if (!string.IsNullOrWhiteSpace(otlpEndpoint))
                 {
-                    ConfigureOtlpForSignal(context.Configuration, otlp, signal: "metrics");
-                });
+                    m.AddOtlpExporter(otlp =>
+                    {
+                        ConfigureOtlpForSignal(otlpEndpoint, otlp, signal: "metrics");
+                    });
+                }
             })
             .WithTracing(t =>
             {
@@ -84,10 +84,13 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
                 t.AddHttpClientInstrumentation();
                 t.AddAspNetCoreInstrumentation();
 
-                t.AddOtlpExporter(otlp =>
+                if (!string.IsNullOrWhiteSpace(otlpEndpoint))
                 {
-                    ConfigureOtlpForSignal(context.Configuration, otlp, signal: "traces");
-                });
+                    t.AddOtlpExporter(otlp =>
+                    {
+                        ConfigureOtlpForSignal(otlpEndpoint, otlp, signal: "traces");
+                    });
+                }
             });
 
         services
@@ -265,18 +268,22 @@ if (runComparison)
 
 using var host = hostBuilder.Build();
 
+var lifecycleLogger = host.Services
+    .GetRequiredService<ILoggerFactory>()
+    .CreateLogger("VapeCache.Console.Lifecycle");
+
 var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStarted.Register(() =>
 {
-    Log.Information("VapeCache.Console started. Press Ctrl+C to exit.");
+    lifecycleLogger.LogInformation("VapeCache.Console started. Press Ctrl+C to exit.");
 });
 lifetime.ApplicationStopping.Register(() =>
 {
-    Log.Information("VapeCache.Console stopping...");
+    lifecycleLogger.LogInformation("VapeCache.Console stopping...");
 });
 lifetime.ApplicationStopped.Register(() =>
 {
-    Log.Information("VapeCache.Console stopped.");
+    lifecycleLogger.LogInformation("VapeCache.Console stopped.");
 });
 
 try
@@ -287,20 +294,20 @@ try
 finally
 {
     try { await host.StopAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); } catch { }
-    Log.CloseAndFlush();
 }
 
-static void ConfigureOtlpForSignal(IConfiguration configuration, OtlpExporterOptions otlp, string signal)
+static string? ResolveOtlpEndpoint(IConfiguration configuration)
 {
     var endpoint = configuration["OpenTelemetry:Otlp:Endpoint"];
-    if (string.IsNullOrWhiteSpace(endpoint))
-    {
-        endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
-    }
+    if (!string.IsNullOrWhiteSpace(endpoint))
+        return endpoint;
 
-    // Default to Seq OTLP ingestion when no endpoint is configured.
-    endpoint ??= "http://localhost:5341/ingest/otlp";
+    endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+    return string.IsNullOrWhiteSpace(endpoint) ? null : endpoint;
+}
 
+static void ConfigureOtlpForSignal(string endpoint, OtlpExporterOptions otlp, string signal)
+{
     if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
         return;
 
@@ -318,27 +325,6 @@ static void ConfigureOtlpForSignal(IConfiguration configuration, OtlpExporterOpt
 
     otlp.Protocol = OtlpExportProtocol.Grpc;
     otlp.Endpoint = endpointUri;
-}
-
-static void ConfigureGroceryStoreLogging(IConfiguration configuration, LoggerConfiguration loggerConfig)
-{
-    var groceryStoreEnabled = configuration.GetValue<bool?>("GroceryStoreStress:Enabled") ?? false;
-    if (!groceryStoreEnabled)
-    {
-        return;
-    }
-
-    var verbose = string.Equals(
-        Environment.GetEnvironmentVariable("VAPECACHE_GROCERYSTORE_VERBOSE"),
-        "true",
-        StringComparison.OrdinalIgnoreCase);
-
-    loggerConfig
-        .MinimumLevel.Information()
-        .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
-        .MinimumLevel.Override("System", LogEventLevel.Warning)
-        .MinimumLevel.Override("VapeCache.Console.GroceryStore", verbose ? LogEventLevel.Debug : LogEventLevel.Information)
-        .MinimumLevel.Override("VapeCache.Infrastructure", verbose ? LogEventLevel.Information : LogEventLevel.Warning);
 }
 
 static Uri ResolveSignalEndpoint(Uri endpoint, string signal)

@@ -1,5 +1,7 @@
 # VapeCache Observability Architecture
 
+> Configuration authority: use [LOGGING_TELEMETRY_CONFIGURATION.md](LOGGING_TELEMETRY_CONFIGURATION.md) for current Serilog/Seq/OTLP keys, precedence, and fail-safe behavior.
+
 ## Executive Summary
 
 VapeCache has **production-grade observability built-in**, but with **zero lock-in** to any specific logging or monitoring platform. The library uses standard .NET abstractions (`ILogger<T>`, OpenTelemetry primitives) and provides optional integration packages for popular platforms like SEQ, .NET Aspire, Prometheus, etc.

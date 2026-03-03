@@ -2,6 +2,10 @@
 
 VapeCache uses the `IOptions<T>` pattern. Configuration is owned by the host (appsettings/environment variables), and VapeCache consumes options via DI.
 
+For logging/telemetry-specific keys and fallback behavior, use:
+
+- [LOGGING_TELEMETRY_CONFIGURATION.md](LOGGING_TELEMETRY_CONFIGURATION.md)
+
 ## Minimal Configuration
 
 ```json
