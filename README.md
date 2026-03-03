@@ -167,6 +167,10 @@ dotnet test VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj -c Releas
 
 ## License
 
-Community use is licensed under [LICENSE.md](LICENSE.md) for non-commercial use.
+Community use is licensed under [LICENSE.md](LICENSE.md) (PolyForm Noncommercial 1.0.0 with required notices).
 
 Commercial use requires an enterprise license.
+
+Enterprise package commercial terms are described in [LICENSE-ENTERPRISE.txt](LICENSE-ENTERPRISE.txt).
+
+Operational licensing guidance is in [COMMERCIAL-LICENSING.md](COMMERCIAL-LICENSING.md).
