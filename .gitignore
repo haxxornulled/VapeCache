@@ -50,3 +50,10 @@ run_comparison.ps1
 
 # Temporary files
 nul
+
+# Reference and sample scratch work (Grocery Store is the primary real example)
+/Reference/
+/Ref/
+/Samples/
+/samples/
+

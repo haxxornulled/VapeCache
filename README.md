@@ -142,4 +142,7 @@ dotnet test VapeCache.Tests/VapeCache.Tests.csproj -c Release
 
 ## License
 
-This repository is the OSS runtime for VapeCache.
+Community use is licensed under [LICENSE](LICENSE) (PolyForm Noncommercial 1.0.0 with required notices).
+
+Commercial use requires an enterprise license from the enterprise repository.
+
