@@ -4,92 +4,67 @@
 
 # VapeCache Enterprise
 
-VapeCache Enterprise is a Redis-first caching platform for .NET 10. It is built for teams that need predictable cache behavior under heavy load, clear operational visibility, and controlled failure handling when Redis is unhealthy.
+VapeCache Enterprise is a Redis-first caching platform for .NET 10 built for high-throughput APIs that need predictable behavior during Redis instability, strong observability, and practical operational control.
 
-## What This Repo Is
+## Why Teams Use VapeCache
 
-This repository is the enterprise distribution.
+- Fast cache-path Redis transport designed for caching workloads, not generic Redis admin use.
+- Hybrid failover with circuit breaker so Redis incidents do not take down the app path.
+- Stampede protection for hot keys with configurable lock and failure-backoff controls.
+- Strong telemetry surface (OpenTelemetry metrics/traces + structured logging).
+- Enterprise durability options for prolonged outages (spill + reconciliation).
 
-It includes the open-source runtime plus the enterprise packages that add:
+## What This Repository Contains
 
-- durable spill persistence during Redis outages
-- reconciliation to replay persisted writes after Redis recovers
-- enterprise feature gating through the dedicated `VapeCache.Licensing` package
+This repository is the **enterprise distribution**. It includes the OSS runtime plus enterprise packages.
 
-If you only need the runtime, use the OSS repository:
+If you only need the runtime, use OSS:
 
-- `https://github.com/haxxornulled/VapeCache`
+- https://github.com/haxxornulled/VapeCache
 
-## Why It Was Designed
-
-VapeCache was designed around a simple constraint: cache traffic is not the same thing as general Redis traffic.
-
-Most production applications do not just need a Redis client. They need a cache runtime that:
-
-- keeps hot-path cache operations fast
-- limits blast radius when Redis slows down or disconnects
-- prevents stampedes on hot keys
-- gives operators real telemetry about pressure, queueing, lanes, and failover state
-
-This project exists to make those behaviors first-class instead of treating them as application glue around a generic Redis client.
-
-## What You Actually Get
-
-### Core Runtime
-
-- cache-oriented Redis transport with multiplexing and ordered responses
-- coalesced socket writes for better write-path efficiency
-- transport guardrails and runtime option normalization
-- RESP2/RESP3 negotiation and cluster MOVED/ASK handling on cache paths
-- circuit breaker and hybrid in-memory failover when Redis is unhealthy
-- stampede protection profiles for hot-key workloads
-- typed cache APIs plus low-level byte-oriented APIs
-- OpenTelemetry metrics and traces
-- Aspire integration and ASP.NET Core integration
-
-### Enterprise Additions
-
-- durable spill persistence for fallback writes
-- reconciliation pipeline to drain persisted writes back to Redis
-- license validation and enterprise feature gates via `VapeCache.Licensing`
-- control-plane support for activation and revocation workflows in the dedicated `VapeCache.Licensing` repository
-
-### What It Is Not
-
-- not a general-purpose Redis administration client
-- not a promise that one benchmark result applies to every workload
-- not a replacement for application-level data modeling
-
-Benchmarks are included in this repo because transport regressions matter. Read them as workload-specific evidence, not universal claims.
-
-## Package Map
+### Package Map
 
 | Package / Service | Purpose | In OSS |
 |---|---|---|
-| `VapeCache` | Core runtime, Redis transport, cache APIs, telemetry | Yes |
+| `VapeCache` | Core runtime, transport, cache APIs, telemetry | Yes |
 | `VapeCache.Abstractions` | Contracts, options, value types | Yes |
-| `VapeCache.Extensions.Aspire` | Aspire wiring, endpoints, telemetry integration | Yes |
-| `VapeCache.Extensions.AspNetCore` | ASP.NET Core output cache integration | No |
-| `VapeCache.Persistence` | Durable spill persistence | No |
-| `VapeCache.Reconciliation` | Replay persisted writes after recovery | No |
-| `VapeCache.Licensing` | Enterprise license validation/runtime package (published from `haxxornulled/VapeCache.Licensing`) | No |
-| `VapeCache.Licensing.ControlPlane` | Enterprise control-plane service (published from `haxxornulled/VapeCache.Licensing`) | No |
+| `VapeCache.Extensions.Aspire` | Aspire integration + endpoint wiring | Yes |
+| `VapeCache.Extensions.AspNetCore` | ASP.NET Core output-cache store integration | No |
+| `VapeCache.Persistence` | Durable spill-to-disk for fallback cache path | No |
+| `VapeCache.Reconciliation` | Replay tracked writes/deletes after Redis recovery | No |
+| `VapeCache.Licensing` | Enterprise license validation runtime package | No |
+| `VapeCache.Licensing.ControlPlane` | Revocation/entitlement control-plane service | No |
 
 ## Quick Start
 
-### 1. Run Redis
+This is the shortest clean path from zero to a working endpoint.
 
-```bash
-docker run --name vapecache-redis -p 6379:6379 -d redis:7
-```
+### 1. Prerequisites
 
-### 2. Install the Core Package
+- .NET 10 SDK
+- Redis 7+
+- A Web API project
+
+### 2. Install Package
 
 ```bash
 dotnet add package VapeCache
 ```
 
-### 3. Configure Redis
+Optional:
+
+```bash
+dotnet add package VapeCache.Extensions.Aspire
+dotnet add package VapeCache.Extensions.AspNetCore
+```
+
+### 3. Run Redis
+
+```bash
+docker run --name vapecache-redis -p 6379:6379 -d redis:7
+```
+
+### 4. Add Configuration
 
 `appsettings.json`
 
@@ -99,42 +74,137 @@ dotnet add package VapeCache
     "Host": "localhost",
     "Port": 6379,
     "Database": 0
+  },
+  "CacheStampede": {
+    "Profile": "Balanced"
   }
 }
 ```
 
-### 4. Register Services
+Equivalent environment variable:
 
-`Program.cs`
+```bash
+setx VAPECACHE_REDIS_CONNECTIONSTRING "redis://localhost:6379/0"
+```
+
+### 5. Register Services (`Program.cs`)
 
 ```csharp
-using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 
+var builder = WebApplication.CreateBuilder(args);
+
 builder.Services.AddOptions<RedisConnectionOptions>()
     .Bind(builder.Configuration.GetSection("RedisConnection"));
+
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
+
+builder.Services.AddOptions<CacheStampedeOptions>()
+    .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
+    .Bind(builder.Configuration.GetSection("CacheStampede"));
 ```
 
-If you do not bind `RedisConnection` from configuration, set `VAPECACHE_REDIS_CONNECTIONSTRING` before first cache use.
-
-### 5. Use the Cache API
+### 6. Use Typed Cache API
 
 ```csharp
-public sealed class PingService(ICacheService cache)
+using VapeCache.Abstractions.Caching;
+
+public sealed class ProductCacheService(IVapeCache cache, IProductRepository repo)
 {
-    public Task<string?> GetAsync(CancellationToken ct) =>
-        cache.GetOrSetAsync(
-            "demo:ping",
-            _ => Task.FromResult("pong"),
-            (writer, value) => JsonSerializer.Serialize(writer, value),
-            bytes => JsonSerializer.Deserialize<string>(bytes),
-            new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(1)),
+    public ValueTask<ProductDto> GetAsync(int id, CancellationToken ct)
+    {
+        var key = CacheKey<ProductDto>.From($"products:{id}");
+        var options = new CacheEntryOptions(
+            Ttl: TimeSpan.FromMinutes(10),
+            Intent: new CacheIntent(
+                CacheIntentKind.ReadThrough,
+                Reason: "Product details"))
+            .WithZone("ef:products");
+
+        return cache.GetOrCreateAsync(
+            key,
+            token => new ValueTask<ProductDto>(repo.GetByIdAsync(id, token)),
+            options,
             ct);
+    }
 }
+```
+
+### 7. Expose One Endpoint
+
+```csharp
+var app = builder.Build();
+
+app.MapGet("/products/{id:int}", async (int id, ProductCacheService service, CancellationToken ct) =>
+{
+    var product = await service.GetAsync(id, ct);
+    return Results.Ok(product);
+});
+
+app.MapHealthChecks("/health");
+app.Run();
+```
+
+### 8. Smoke Test
+
+```bash
+curl http://localhost:5000/products/42
+curl http://localhost:5000/health
+```
+
+If wrapper endpoints are enabled in your host:
+
+```bash
+curl http://localhost:5000/vapecache/status
+curl http://localhost:5000/vapecache/stats
+```
+
+## Common Mistakes
+
+- Redis not reachable (wrong host/port/TLS).
+- Registered `AddVapecacheCaching()` but forgot `AddVapecacheRedisConnections()`.
+- `RedisConnection` not bound and no `VAPECACHE_REDIS_CONNECTIONSTRING` set.
+- Invalid `CacheStampede` values outside validated range.
+- Exposing operational endpoints publicly without auth.
+
+## Enterprise Add-Ons (Durability + Recovery)
+
+For enterprise-only packages (`VapeCache.Persistence`, `VapeCache.Reconciliation`):
+
+```bash
+setx VAPECACHE_LICENSE_KEY "VC2...."
+setx VAPECACHE_LICENSE_REVOCATION_ENABLED "true"
+setx VAPECACHE_LICENSE_REVOCATION_ENDPOINT "https://license-control-plane.internal"
+setx VAPECACHE_LICENSE_REVOCATION_API_KEY "<secret>"
+```
+
+These packages are intended for no-drop outage handling where in-memory-only fallback is insufficient.
+
+## ASP.NET Core Output Caching
+
+```csharp
+builder.Services.AddVapeCacheOutputCaching(options =>
+{
+    options.AddBasePolicy(policy => policy.Expire(TimeSpan.FromSeconds(30)));
+});
+
+var app = builder.Build();
+app.UseVapeCacheOutputCaching();
+```
+
+## Build and Test
+
+```bash
+dotnet build VapeCache.sln -c Release
+```
+
+```bash
+dotnet test VapeCache.Tests/VapeCache.Tests.csproj -c Release
+dotnet test VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj -c Release
 ```
 
 ## Documentation
@@ -144,26 +214,13 @@ Start here:
 - [docs/INDEX.md](docs/INDEX.md)
 - [docs/QUICKSTART.md](docs/QUICKSTART.md)
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
-- [docs/LOGGING_TELEMETRY_CONFIGURATION.md](docs/LOGGING_TELEMETRY_CONFIGURATION.md)
 - [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
+- [docs/HYBRID_CACHING_API_SURFACE.md](docs/HYBRID_CACHING_API_SURFACE.md)
+- [docs/CACHE_TAGS_AND_ZONES.md](docs/CACHE_TAGS_AND_ZONES.md)
+- [docs/LOGGING_TELEMETRY_CONFIGURATION.md](docs/LOGGING_TELEMETRY_CONFIGURATION.md)
 - [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md)
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 - [docs/UPGRADE_NOTES.md](docs/UPGRADE_NOTES.md)
-
-## Build And Test
-
-### Build
-
-```bash
-dotnet build VapeCache.sln -c Release
-```
-
-### Test
-
-```bash
-dotnet test VapeCache.Tests/VapeCache.Tests.csproj -c Release
-dotnet test VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj -c Release
-```
 
 ## License
 
@@ -171,6 +228,6 @@ Community use is licensed under [LICENSE](LICENSE) (PolyForm Noncommercial 1.0.0
 
 Commercial use requires an enterprise license.
 
-Enterprise package commercial terms are described in [LICENSE-ENTERPRISE.txt](LICENSE-ENTERPRISE.txt).
+Enterprise package commercial terms are in [LICENSE-ENTERPRISE.txt](LICENSE-ENTERPRISE.txt).
 
 Operational licensing guidance is in [COMMERCIAL-LICENSING.md](COMMERCIAL-LICENSING.md).

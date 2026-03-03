@@ -1,5 +1,4 @@
 <Solution>
-  <Project Path="samples/VapeCache.Sample/VapeCache.Sample.csproj" />
   <Project Path="VapeCache.Abstractions/VapeCache.Abstractions.csproj" />
   <Project Path="VapeCache.Application/VapeCache.Application.csproj" />
   <Project Path="VapeCache.Benchmarks/VapeCache.Benchmarks.csproj" />

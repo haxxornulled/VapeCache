@@ -30,7 +30,6 @@ These notes cover:
 - Rebuilt docs index and aligned API/config docs with current feature set.
 - Updated README examples to compile and match real options.
 - Replaced speculative API expansion claims with a scoped backlog.
-- Added a buildable sample (`samples/VapeCache.Sample`) to validate examples.
 
 ### Spill Support
 - Implemented async spill-to-disk for large fallback payloads with pluggable encryption.

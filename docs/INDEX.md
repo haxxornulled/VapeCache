@@ -18,7 +18,6 @@ This index tracks the current feature set and supported APIs.
 - [WRAPPER_PLUGIN_GUIDE.md](WRAPPER_PLUGIN_GUIDE.md) - Wrapper endpoints + plugin pattern
 - [BLAZOR_DASHBOARD_EXAMPLE.md](BLAZOR_DASHBOARD_EXAMPLE.md) - Realtime dashboard wiring from `/vapecache/stream`
 - [ASPNETCORE_PIPELINE_CACHING.md](ASPNETCORE_PIPELINE_CACHING.md) - Output-cache pipeline hooks for MVC/Minimal API/Blazor
-- [Sample app](../samples/VapeCache.Sample) - Buildable usage example
 
 ## API Reference
 - [API_REFERENCE.md](API_REFERENCE.md) - Core APIs, intent model, stampede profiles, Aspire endpoints

@@ -13,7 +13,6 @@
     '$(MSBuildProjectName)' == 'VapeCache.Benchmarks' or
     '$(MSBuildProjectName)' == 'VapeCache.Benchmarks.Runner' or
     '$(MSBuildProjectName)' == 'VapeCache.Console' or
-    '$(MSBuildProjectName)' == 'VapeCache.Sample' or
     '$(MSBuildProjectName)' == 'VapeCache.DocCommenter'">
     <VapeCacheAnalyzerAudience>nonruntime</VapeCacheAnalyzerAudience>
   </PropertyGroup>
