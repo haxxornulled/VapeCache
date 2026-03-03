@@ -6,12 +6,12 @@ It is operational guidance, not legal advice.
 
 ## Current Model
 
-- Community source: `LICENSE.md` (PolyForm Noncommercial 1.0.0 + required notices).
+- Community source: `LICENSE` (PolyForm Noncommercial 1.0.0 + required notices).
 - Enterprise packages: `LICENSE-ENTERPRISE.txt` + signed commercial agreement.
 
 ## Practical Boundary
 
-- Noncommercial/evaluation use is permitted under `LICENSE.md`.
+- Noncommercial/evaluation use is permitted under `LICENSE`.
 - Commercial and production-for-profit use requires a paid enterprise agreement.
 - Enterprise package rights exist only under written agreement or written trial terms.
 
@@ -27,7 +27,7 @@ It is operational guidance, not legal advice.
 
 ## Recommended Legal Stack
 
-1. Repo license: standard noncommercial license text (already in `LICENSE.md`).
+1. Repo license: standard noncommercial license text (already in `LICENSE`).
 2. Enterprise customer contract: MSA + Order Form + SLA + DPA (as applicable).
 3. Trial terms: separate written trial agreement with end date and usage limits.
 4. Trademark policy: explicitly restrict use of VapeCache marks outside factual attribution.
@@ -44,7 +44,7 @@ It is operational guidance, not legal advice.
 
 Have counsel review:
 
-- `LICENSE.md`
+- `LICENSE`
 - `LICENSE-ENTERPRISE.txt`
 - your enterprise order form / MSA template
 
