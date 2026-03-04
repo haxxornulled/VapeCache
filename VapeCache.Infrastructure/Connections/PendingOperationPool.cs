@@ -64,10 +64,12 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     private readonly Action<long>? _recordLatencyStopwatchTicks;
     private readonly Func<bool>? _shouldRecordLatency;
     private int _completed;
+    private int _registrationsDisposed;
     private int _responseProcessed;
     private int _awaiterObserved;
     private long _sequenceId;
     private long _generation;
+    private long _operationVersion;
     private long _startedStopwatchTicks;
 
     public PendingOperation(
@@ -101,11 +103,14 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     {
         PoolBulk = false;
         ValueTask = default;
+        _ctr = default;
+        _shutdownCtr = default;
         _ct = default;
         _holdsSlot = false;
         _core.RunContinuationsAsynchronously = true;
         _core.Reset();
         Volatile.Write(ref _completed, 0);
+        Volatile.Write(ref _registrationsDisposed, 0);
         Volatile.Write(ref _responseProcessed, 0);
         Volatile.Write(ref _awaiterObserved, 0);
         Volatile.Write(ref _sequenceId, 0);
@@ -118,6 +123,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     /// </summary>
     public void Start(bool poolBulk, CancellationToken ct, bool holdsSlot, long sequenceId)
     {
+        var operationVersion = Interlocked.Increment(ref _operationVersion);
         PoolBulk = poolBulk;
         _ct = ct;
         _holdsSlot = holdsSlot;
@@ -133,14 +139,14 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         {
             _ctr = ct.Register(static s =>
             {
-                var op = (PendingOperation)s!;
-                op.TrySetException(new OperationCanceledException(op._ct));
-            }, this);
+                var state = (CancellationCallbackState)s!;
+                state.Operation.TrySetCanceledFromCallback(state.OperationVersion, isShutdown: false);
+            }, new CancellationCallbackState(this, operationVersion));
             _shutdownCtr = _shutdownToken.Register(static s =>
             {
-                var op = (PendingOperation)s!;
-                op.TrySetException(new OperationCanceledException());
-            }, this);
+                var state = (CancellationCallbackState)s!;
+                state.Operation.TrySetCanceledFromCallback(state.OperationVersion, isShutdown: true);
+            }, new CancellationCallbackState(this, operationVersion));
         }
         else
         {
@@ -161,11 +167,10 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     /// </summary>
     public void TrySetResult(RedisRespReader.RespValue value)
     {
-        if (Interlocked.CompareExchange(ref _completed, 1, 0) != 0)
+        if (!TryBeginCompletion())
             return;
 
-        _ctr.Dispose();
-        _shutdownCtr.Dispose();
+        DisposeRegistrationsOnce();
         TryRecordLatency();
         _core.SetResult(value);
     }
@@ -175,13 +180,32 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     /// </summary>
     public void TrySetException(Exception ex)
     {
-        if (Interlocked.CompareExchange(ref _completed, 1, 0) != 0)
+        if (!TryBeginCompletion())
+            return;
+
+        DisposeRegistrationsOnce();
+        TryRecordLatency();
+        _core.SetException(ex);
+    }
+
+    private bool TryBeginCompletion()
+        => Interlocked.CompareExchange(ref _completed, 1, 0) == 0;
+
+    private void DisposeRegistrationsOnce()
+    {
+        if (Interlocked.Exchange(ref _registrationsDisposed, 1) != 0)
             return;
 
         _ctr.Dispose();
         _shutdownCtr.Dispose();
-        TryRecordLatency();
-        _core.SetException(ex);
+    }
+
+    private void TrySetCanceledFromCallback(long operationVersion, bool isShutdown)
+    {
+        if (Volatile.Read(ref _operationVersion) != operationVersion)
+            return;
+
+        TrySetException(isShutdown ? new OperationCanceledException() : new OperationCanceledException(_ct));
     }
 
     private void TryRecordLatency()
@@ -206,6 +230,8 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
             _holdsSlot = false;
             _inFlight.Release();
         }
+
+        TryReturnToPool();
     }
 
     /// <summary>
@@ -214,24 +240,21 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     public void AbortUnqueued(Exception ex)
     {
         TrySetException(ex);
-        Volatile.Write(ref _awaiterObserved, 1);
         MarkResponseProcessed();
     }
 
     /// <summary>
     /// Executes value.
     /// </summary>
-    public void AbortEnqueueFailure()
+    public void AbortEnqueueFailure(bool valueTaskWillBeObserved)
     {
         TrySetException(new InvalidOperationException("Enqueue failed"));
-        Volatile.Write(ref _responseProcessed, 1);
-        Volatile.Write(ref _awaiterObserved, 1);
-        if (_holdsSlot)
+        MarkResponseProcessed();
+        if (!valueTaskWillBeObserved)
         {
-            _holdsSlot = false;
-            _inFlight.Release();
+            Volatile.Write(ref _awaiterObserved, 1);
+            TryReturnToPool();
         }
-        _returnToPool(this);
     }
 
     private void MarkAwaiterObserved()
@@ -249,9 +272,14 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
 
     RedisRespReader.RespValue IValueTaskSource<RedisRespReader.RespValue>.GetResult(short token)
     {
-        var result = _core.GetResult(token);
-        MarkAwaiterObserved();
-        return result;
+        try
+        {
+            return _core.GetResult(token);
+        }
+        finally
+        {
+            MarkAwaiterObserved();
+        }
     }
 
     ValueTaskSourceStatus IValueTaskSource<RedisRespReader.RespValue>.GetStatus(short token)
@@ -277,5 +305,17 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
             }
             catch { }
         }
+    }
+
+    private sealed class CancellationCallbackState
+    {
+        public CancellationCallbackState(PendingOperation operation, long operationVersion)
+        {
+            Operation = operation;
+            OperationVersion = operationVersion;
+        }
+
+        public PendingOperation Operation { get; }
+        public long OperationVersion { get; }
     }
 }

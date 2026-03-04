@@ -369,7 +369,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             return true;
         }
 
-        op.AbortEnqueueFailure();
+        op.AbortEnqueueFailure(valueTaskWillBeObserved: false);
         task = default;
         return false;
     }
@@ -421,7 +421,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             return true;
         }
 
-        op.AbortEnqueueFailure();
+        op.AbortEnqueueFailure(valueTaskWillBeObserved: false);
         task = default;
         return false;
     }
