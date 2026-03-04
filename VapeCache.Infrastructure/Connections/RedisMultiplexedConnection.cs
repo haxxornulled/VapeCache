@@ -101,6 +101,10 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         int adaptiveCoalescingMinWriteBytes = 64 * 1024,
         int adaptiveCoalescingMinSegments = 64,
         int adaptiveCoalescingMinSmallCopyThresholdBytes = 512,
+        int coalescingEnterQueueDepth = 8,
+        int coalescingExitQueueDepth = 3,
+        int coalescedWriteMaxOperations = 128,
+        int coalescingSpinBudget = 8,
         int bulkMgetKeyThreshold = 32,
         int bulkPayloadBytesThreshold = 64 * 1024,
         int fastTimeoutResetThreshold = 3,
@@ -155,7 +159,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             ReturnHeaderBuffer,
             ReturnPayloadArray,
             static (req, ex) => req.Op.AbortUnqueued(ex),
-            RecordLaneBytesSent);
+            RecordLaneBytesSent,
+            coalescingEnterQueueDepth,
+            coalescingExitQueueDepth,
+            coalescedWriteMaxOperations,
+            coalescingSpinBudget);
 
         _connectionId = Interlocked.Increment(ref _nextConnectionId);
         _writeQueueWaitTags = RedisMetrics.CreateWriteQueueWaitTags(_connectionId);

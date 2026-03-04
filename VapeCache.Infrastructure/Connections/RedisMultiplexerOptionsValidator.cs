@@ -50,6 +50,21 @@ internal sealed class RedisMultiplexerOptionsValidator : IValidateOptions<RedisM
         if (options.AdaptiveCoalescingMinSmallCopyThresholdBytes <= 0)
             AddFailure(ref failures, "RedisMultiplexer:AdaptiveCoalescingMinSmallCopyThresholdBytes must be > 0.");
 
+        if (options.CoalescingEnterQueueDepth <= 0)
+            AddFailure(ref failures, "RedisMultiplexer:CoalescingEnterQueueDepth must be > 0.");
+
+        if (options.CoalescingExitQueueDepth <= 0)
+            AddFailure(ref failures, "RedisMultiplexer:CoalescingExitQueueDepth must be > 0.");
+
+        if (options.CoalescingExitQueueDepth > options.CoalescingEnterQueueDepth)
+            AddFailure(ref failures, "RedisMultiplexer:CoalescingExitQueueDepth must be <= CoalescingEnterQueueDepth.");
+
+        if (options.CoalescedWriteMaxOperations <= 0)
+            AddFailure(ref failures, "RedisMultiplexer:CoalescedWriteMaxOperations must be > 0.");
+
+        if (options.CoalescingSpinBudget < 0)
+            AddFailure(ref failures, "RedisMultiplexer:CoalescingSpinBudget must be >= 0.");
+
         if (options.MinConnections <= 0)
             AddFailure(ref failures, "RedisMultiplexer:MinConnections must be > 0.");
 

@@ -25,6 +25,10 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.Equal(64 * 1024, o.AdaptiveCoalescingMinWriteBytes);
         Assert.Equal(48, o.AdaptiveCoalescingMinSegments);
         Assert.Equal(384, o.AdaptiveCoalescingMinSmallCopyThresholdBytes);
+        Assert.Equal(8, o.CoalescingEnterQueueDepth);
+        Assert.Equal(3, o.CoalescingExitQueueDepth);
+        Assert.Equal(128, o.CoalescedWriteMaxOperations);
+        Assert.Equal(8, o.CoalescingSpinBudget);
         Assert.False(o.EnableAutoscaling);
         Assert.Equal(1, o.BulkLaneConnections);
         Assert.Equal(TimeSpan.FromSeconds(5), o.BulkLaneResponseTimeout);
@@ -56,6 +60,10 @@ public sealed class RedisMultiplexerOptionsBindingTests
             "AdaptiveCoalescingMinWriteBytes": 16384,
             "AdaptiveCoalescingMinSegments": 16,
             "AdaptiveCoalescingMinSmallCopyThresholdBytes": 256,
+            "CoalescingEnterQueueDepth": 12,
+            "CoalescingExitQueueDepth": 5,
+            "CoalescedWriteMaxOperations": 96,
+            "CoalescingSpinBudget": 10,
             "ResponseTimeout": "00:00:01.500",
             "BulkLaneConnections": 2,
             "BulkLaneResponseTimeout": "00:00:06",
@@ -95,6 +103,10 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.Equal(16384, o.AdaptiveCoalescingMinWriteBytes);
         Assert.Equal(16, o.AdaptiveCoalescingMinSegments);
         Assert.Equal(256, o.AdaptiveCoalescingMinSmallCopyThresholdBytes);
+        Assert.Equal(12, o.CoalescingEnterQueueDepth);
+        Assert.Equal(5, o.CoalescingExitQueueDepth);
+        Assert.Equal(96, o.CoalescedWriteMaxOperations);
+        Assert.Equal(10, o.CoalescingSpinBudget);
         Assert.Equal(TimeSpan.FromMilliseconds(1500), o.ResponseTimeout);
         Assert.Equal(2, o.BulkLaneConnections);
         Assert.Equal(TimeSpan.FromSeconds(6), o.BulkLaneResponseTimeout);

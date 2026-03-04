@@ -32,6 +32,10 @@ internal static class RedisRuntimeOptionsNormalizer
     private const int MaxAdaptiveDepth = 8192;
     private const int MinAdaptiveWriteBytes = 4 * 1024;
     private const int MinAdaptiveSegments = 1;
+    private const int MinCoalescedWriteOperations = 1;
+    private const int MaxCoalescedWriteOperations = 2048;
+    private const int MinCoalescingSpinBudget = 0;
+    private const int MaxCoalescingSpinBudget = 256;
     private const int MinAutoscaleConnections = 1;
     private const int MaxAutoscaleConnections = 256;
     private const int MinBulkLaneConnections = 0;
@@ -158,6 +162,27 @@ internal static class RedisRuntimeOptionsNormalizer
             MinSmallCopyThresholdBytes,
             coalescedWriteSmallCopyThresholdBytes,
             fallbackWhenInvalid: MinSmallCopyThresholdBytes);
+        var coalescingEnterQueueDepth = NormalizeInt(
+            profiled.CoalescingEnterQueueDepth,
+            MinAdaptiveDepth,
+            MaxAdaptiveDepth,
+            fallbackWhenInvalid: 8);
+        var coalescingExitQueueDepth = NormalizeInt(
+            profiled.CoalescingExitQueueDepth,
+            MinAdaptiveDepth,
+            coalescingEnterQueueDepth,
+            fallbackWhenInvalid: Math.Min(3, coalescingEnterQueueDepth));
+        var coalescedWriteMaxOperations = NormalizeInt(
+            profiled.CoalescedWriteMaxOperations,
+            MinCoalescedWriteOperations,
+            MaxCoalescedWriteOperations,
+            fallbackWhenInvalid: 128);
+        var coalescingSpinBudget = NormalizeInt(
+            profiled.CoalescingSpinBudget,
+            MinCoalescingSpinBudget,
+            MaxCoalescingSpinBudget,
+            fallbackWhenInvalid: 8,
+            fallbackWhenNonPositive: 0);
 
         var responseTimeout = NormalizeTimeout(profiled.ResponseTimeout);
         var bulkLaneConnections = NormalizeBulkLaneConnections(profiled.BulkLaneConnections);
@@ -192,6 +217,10 @@ internal static class RedisRuntimeOptionsNormalizer
             AdaptiveCoalescingMinWriteBytes = adaptiveCoalescingMinWriteBytes,
             AdaptiveCoalescingMinSegments = adaptiveCoalescingMinSegments,
             AdaptiveCoalescingMinSmallCopyThresholdBytes = adaptiveCoalescingMinSmallCopyThresholdBytes,
+            CoalescingEnterQueueDepth = coalescingEnterQueueDepth,
+            CoalescingExitQueueDepth = coalescingExitQueueDepth,
+            CoalescedWriteMaxOperations = coalescedWriteMaxOperations,
+            CoalescingSpinBudget = coalescingSpinBudget,
             ResponseTimeout = responseTimeout,
             BulkLaneConnections = bulkLaneConnections,
             BulkLaneResponseTimeout = bulkLaneResponseTimeout,

@@ -91,6 +91,10 @@ public sealed class RedisTransportRuntimeGuardrailsTests
             AdaptiveCoalescingMinWriteBytes = 1,
             AdaptiveCoalescingMinSegments = 0,
             AdaptiveCoalescingMinSmallCopyThresholdBytes = 0,
+            CoalescingEnterQueueDepth = 0,
+            CoalescingExitQueueDepth = 99,
+            CoalescedWriteMaxOperations = 0,
+            CoalescingSpinBudget = -4,
             ResponseTimeout = TimeSpan.FromMilliseconds(-1),
             BulkLaneConnections = -5,
             BulkLaneResponseTimeout = TimeSpan.Zero,
@@ -128,6 +132,10 @@ public sealed class RedisTransportRuntimeGuardrailsTests
         Assert.Equal(4 * 1024, effective.AdaptiveCoalescingMinWriteBytes);
         Assert.Equal(1, effective.AdaptiveCoalescingMinSegments);
         Assert.Equal(64, effective.AdaptiveCoalescingMinSmallCopyThresholdBytes);
+        Assert.Equal(8, effective.CoalescingEnterQueueDepth);
+        Assert.Equal(8, effective.CoalescingExitQueueDepth);
+        Assert.Equal(128, effective.CoalescedWriteMaxOperations);
+        Assert.Equal(0, effective.CoalescingSpinBudget);
         Assert.Equal(TimeSpan.Zero, effective.ResponseTimeout);
         Assert.Equal(1, effective.BulkLaneConnections);
         Assert.Equal(TimeSpan.FromSeconds(5), effective.BulkLaneResponseTimeout);
@@ -168,6 +176,10 @@ public sealed class RedisTransportRuntimeGuardrailsTests
             AdaptiveCoalescingMinWriteBytes = 32 * 1024,
             AdaptiveCoalescingMinSegments = 48,
             AdaptiveCoalescingMinSmallCopyThresholdBytes = 512,
+            CoalescingEnterQueueDepth = 10,
+            CoalescingExitQueueDepth = 4,
+            CoalescedWriteMaxOperations = 72,
+            CoalescingSpinBudget = 11,
             BulkLaneConnections = 2,
             BulkLaneResponseTimeout = TimeSpan.FromSeconds(9)
         };

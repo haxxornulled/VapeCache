@@ -2368,6 +2368,10 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             adaptiveCoalescingMinWriteBytes: _muxOptions.AdaptiveCoalescingMinWriteBytes,
             adaptiveCoalescingMinSegments: _muxOptions.AdaptiveCoalescingMinSegments,
             adaptiveCoalescingMinSmallCopyThresholdBytes: _muxOptions.AdaptiveCoalescingMinSmallCopyThresholdBytes,
+            coalescingEnterQueueDepth: _muxOptions.CoalescingEnterQueueDepth,
+            coalescingExitQueueDepth: _muxOptions.CoalescingExitQueueDepth,
+            coalescedWriteMaxOperations: _muxOptions.CoalescedWriteMaxOperations,
+            coalescingSpinBudget: _muxOptions.CoalescingSpinBudget,
             recordLatencyStopwatchTicks: RecordAutoscaleLatencyStopwatchTicks,
             shouldRecordLatency: ShouldRecordAutoscaleLatency);
 

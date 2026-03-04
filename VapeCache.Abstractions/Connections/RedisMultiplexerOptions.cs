@@ -88,6 +88,27 @@ public sealed record RedisMultiplexerOptions
     public int AdaptiveCoalescingMinSmallCopyThresholdBytes { get; init; } = 384;
 
     /// <summary>
+    /// Queue depth that enables burst coalescing mode.
+    /// </summary>
+    public int CoalescingEnterQueueDepth { get; init; } = 8;
+
+    /// <summary>
+    /// Queue depth that exits burst coalescing mode.
+    /// Must be less than or equal to <see cref="CoalescingEnterQueueDepth"/>.
+    /// </summary>
+    public int CoalescingExitQueueDepth { get; init; } = 3;
+
+    /// <summary>
+    /// Maximum pending operations included in a single coalesced write batch.
+    /// </summary>
+    public int CoalescedWriteMaxOperations { get; init; } = 128;
+
+    /// <summary>
+    /// Spin iterations used to catch burst followers after the first coalesced dequeue.
+    /// </summary>
+    public int CoalescingSpinBudget { get; init; } = 8;
+
+    /// <summary>
     /// Maximum time to wait for a Redis response before treating the connection as unhealthy.
     /// Set to TimeSpan.Zero to disable.
     /// </summary>

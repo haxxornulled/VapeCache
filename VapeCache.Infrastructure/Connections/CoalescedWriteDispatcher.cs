@@ -36,6 +36,10 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     private readonly ReturnPayloadArrayDelegate _returnPayloadArray;
     private readonly AbortPendingRequestDelegate _abortPendingRequest;
     private readonly Action<int>? _recordBytesSent;
+    private readonly int _coalescingEnterQueueDepth;
+    private readonly int _coalescingExitQueueDepth;
+    private readonly int _coalescingSpinBudget;
+    private bool _burstCoalescingActive;
 
     public CoalescedWriteDispatcher(
         int coalescedWriteMaxBytes,
@@ -55,7 +59,11 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         ReturnHeaderBufferDelegate returnHeaderBuffer,
         ReturnPayloadArrayDelegate returnPayloadArray,
         AbortPendingRequestDelegate abortPendingRequest,
-        Action<int>? recordBytesSent = null)
+        Action<int>? recordBytesSent = null,
+        int coalescingEnterQueueDepth = 8,
+        int coalescingExitQueueDepth = 3,
+        int coalescedWriteMaxOperations = 128,
+        int coalescingSpinBudget = 8)
     {
         _crlfMemory = crlfMemory;
         _tryDequeueWrite = tryDequeueWrite;
@@ -66,6 +74,9 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         _returnPayloadArray = returnPayloadArray;
         _abortPendingRequest = abortPendingRequest;
         _recordBytesSent = recordBytesSent;
+        _coalescingEnterQueueDepth = Math.Max(1, coalescingEnterQueueDepth);
+        _coalescingExitQueueDepth = Math.Clamp(coalescingExitQueueDepth, 1, _coalescingEnterQueueDepth);
+        _coalescingSpinBudget = Math.Max(0, coalescingSpinBudget);
         _coalescer = new Coalescer(
             _coalesceQueue,
             coalescedWriteMaxBytes,
@@ -77,6 +88,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             adaptiveCoalescingMinWriteBytes,
             adaptiveCoalescingMinSegments,
             adaptiveCoalescingMinSmallCopyThresholdBytes,
+            coalescedWriteMaxOperations,
             () => _getWriteQueueDepth());
     }
 
@@ -90,19 +102,36 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         _coalesceCaptured.Clear();
         _coalesceDrained.Add(first);
         var queuedDepth = _getWriteQueueDepth();
+        var burstMode = UpdateBurstCoalescingMode(queuedDepth);
         var drainLimit = GetTailAwareDrainLimit(queuedDepth);
 
         var firstCoalesced = ToCoalesced(first);
         _coalesceQueue.Enqueue(firstCoalesced);
         _coalesceCaptured.Add(firstCoalesced);
 
-        while (_tryDequeueWrite(out var nextReq))
+        var drainedFollower = false;
+        var spinAttempts = 0;
+        while (true)
         {
+            if (!_tryDequeueWrite(out var nextReq))
+            {
+                // Flush immediately when this was a lone request.
+                if (!burstMode || !drainedFollower || spinAttempts >= _coalescingSpinBudget)
+                    break;
+
+                Thread.SpinWait(64 << Math.Min(spinAttempts, 6));
+                spinAttempts++;
+                continue;
+            }
+
+            drainedFollower = true;
+            spinAttempts = 0;
             _coalesceDrained.Add(nextReq);
             var coalesced = ToCoalesced(nextReq);
             _coalesceQueue.Enqueue(coalesced);
             _coalesceCaptured.Add(coalesced);
-            if (_coalesceQueue.Count >= drainLimit) break;
+            if (_coalesceQueue.Count >= drainLimit)
+                break;
         }
 
         var requestCommitOffsets = BuildRequestCommitOffsets(_coalesceDrained);
@@ -392,6 +421,21 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         if (writeQueueDepth >= 64) return 5;
         if (writeQueueDepth >= 32) return 6;
         return 7;
+    }
+
+    private bool UpdateBurstCoalescingMode(int queueDepth)
+    {
+        if (_burstCoalescingActive)
+        {
+            if (queueDepth <= _coalescingExitQueueDepth)
+                _burstCoalescingActive = false;
+        }
+        else if (queueDepth >= _coalescingEnterQueueDepth)
+        {
+            _burstCoalescingActive = true;
+        }
+
+        return _burstCoalescingActive;
     }
 
     private sealed class SocketSendSegmentWindow : IList<ArraySegment<byte>>
