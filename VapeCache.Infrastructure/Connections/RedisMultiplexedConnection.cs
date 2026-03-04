@@ -1063,15 +1063,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 return false;
             }
 
-            if (TryDequeueCore(out item))
-            {
-                _slots.Release();
-                return true;
-            }
-
-            _items.Release();
-            item = default;
-            return false;
+            item = DequeueAfterWait();
+            return true;
         }
 
         /// <summary>
@@ -1105,23 +1098,17 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             var spinner = new SpinWait();
             while (true)
             {
-                if (TryDequeueCore(out var item))
+                if (TryDequeueCore(out var item, allowBailout: false))
                 {
                     _slots.Release();
                     return item!;
                 }
 
                 spinner.SpinOnce();
-
-                if (spinner.Count > 1000)
-                {
-                    _items.Release();
-                    throw new InvalidOperationException("Ring dequeue failed unexpectedly after 1000 spins.");
-                }
             }
         }
 
-        private bool TryDequeueCore(out T? item)
+        private bool TryDequeueCore(out T? item, bool allowBailout = true)
         {
             var pos = Volatile.Read(ref _tail);
             var spins = 0;
@@ -1151,9 +1138,10 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                     return false;
                 }
 
-                // Spin wait with limit to prevent infinite loops
+                // In non-guaranteed paths we allow a bounded bailout; after a successful _items.Wait
+                // the caller must continue until a slot is observable.
                 spins++;
-                if (spins > 100)
+                if (allowBailout && spins > 100)
                 {
                     // Too many spins, likely a race condition - bail out
                     item = default;
