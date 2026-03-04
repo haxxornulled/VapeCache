@@ -34,10 +34,11 @@ public sealed class PluginDemoHostedServiceTests
             NullLogger<PluginDemoHostedService>.Instance);
 
         await sut.StartAsync(CancellationToken.None);
-        var ran = await WaitUntilAsync(() => Volatile.Read(ref plugin.Calls) > 0, TimeSpan.FromSeconds(2));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await plugin.Completed.WaitAsync(timeout.Token);
         await sut.StopAsync(CancellationToken.None);
 
-        Assert.True(ran);
+        Assert.True(Volatile.Read(ref plugin.Calls) > 0);
         Assert.NotNull(await cache.GetAsync("plugin:test:key", CancellationToken.None));
     }
 
@@ -71,36 +72,27 @@ public sealed class PluginDemoHostedServiceTests
         Assert.Null(await cache.GetAsync("plugin:test:key", CancellationToken.None));
     }
 
-    private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
-    {
-        var stopAt = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < stopAt)
-        {
-            if (predicate())
-                return true;
-
-            await Task.Delay(15);
-        }
-
-        return predicate();
-    }
-
     private sealed class CountingPlugin : IVapeCachePlugin
     {
+        private readonly TaskCompletionSource<bool> _completed =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int Calls;
         public string Name => "counting-plugin";
+        public Task Completed => _completed.Task;
 
         public async ValueTask ExecuteAsync(
             ICacheService cache,
             ICurrentCacheService current,
             CancellationToken cancellationToken)
         {
-            Interlocked.Increment(ref Calls);
             await cache.SetAsync(
                 "plugin:test:key",
                 "ok"u8.ToArray(),
                 new CacheEntryOptions(TimeSpan.FromMinutes(1)),
                 cancellationToken).ConfigureAwait(false);
+            Interlocked.Increment(ref Calls);
+            _completed.TrySetResult(true);
         }
     }
 }
