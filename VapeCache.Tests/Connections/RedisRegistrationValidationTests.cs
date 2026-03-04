@@ -57,6 +57,42 @@ public sealed class RedisRegistrationValidationTests
     }
 
     [Fact]
+    public async Task ServiceRegistrations_FailHostStartup_WhenAutoscaleConnectionsAreOutOfRange()
+    {
+        using var provider = BuildServiceProvider(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal",
+            ["RedisMultiplexer:EnableAutoscaling"] = "true",
+            ["RedisMultiplexer:MinConnections"] = "4",
+            ["RedisMultiplexer:MaxConnections"] = "8",
+            ["RedisMultiplexer:Connections"] = "2"
+        });
+        var validator = GetStartupValidator(provider, "RedisMultiplexerOptionsStartupHostedService");
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => validator.StartAsync(CancellationToken.None));
+        var validation = AssertOptionsValidationFailure(ex);
+
+        Assert.Contains("RedisMultiplexer:Connections must be within [MinConnections, MaxConnections] when autoscaling is enabled.", validation.Failures);
+    }
+
+    [Fact]
+    public async Task ServiceRegistrations_FailHostStartup_WhenBulkLaneIsolationIsMisconfigured()
+    {
+        using var provider = BuildServiceProvider(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal",
+            ["RedisMultiplexer:Connections"] = "1",
+            ["RedisMultiplexer:BulkLaneConnections"] = "1"
+        });
+        var validator = GetStartupValidator(provider, "RedisMultiplexerOptionsStartupHostedService");
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => validator.StartAsync(CancellationToken.None));
+        var validation = AssertOptionsValidationFailure(ex);
+
+        Assert.Contains("RedisMultiplexer:BulkLaneConnections requires RedisMultiplexer:Connections > 1 for lane isolation.", validation.Failures);
+    }
+
+    [Fact]
     public void AutofacConnectionsModule_FailsContainerBuild_WhenRedisEndpointIsMissing()
     {
         var builder = new ContainerBuilder();

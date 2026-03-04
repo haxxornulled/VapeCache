@@ -31,13 +31,11 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private int _bulkRr;
     private int _bulkReadRr;
     private int _bulkWriteRr;
-    private readonly bool _instrument;
-    private readonly bool _coalesce;
+    private RuntimeConfig _runtimeConfig = RuntimeConfig.Empty;
     private readonly IRedisConnectionFactory _factory;
     private readonly RedisConnectionOptions _connectionOptions;
     private readonly bool _clusterRedirectsEnabled;
     private readonly int _maxClusterRedirects;
-    private RedisMultiplexerOptions _muxOptions;
     private bool _autoscaleEnabled;
     private int _minConnections;
     private int _maxConnections;
@@ -126,9 +124,10 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         _muxOptionsChangeRegistration = options.OnChange((updated, _) =>
         {
             var applied = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(updated);
-            _muxOptions = applied;
+            var runtime = BuildRuntimeConfig(applied);
+            Volatile.Write(ref _runtimeConfig, runtime);
             LogNormalizationIfChanged("RedisMultiplexer", updated, applied);
-            ApplyAutoscaleOptions(applied);
+            ApplyAutoscaleOptions(runtime.Multiplexer);
         });
     }
 
@@ -147,10 +146,11 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         _connectionOptions = connOpts;
         _clusterRedirectsEnabled = connOpts.EnableClusterRedirection;
         _maxClusterRedirects = Math.Max(0, connOpts.MaxClusterRedirects);
-        _muxOptions = o;
-        _bulkLaneConnections = ResolveBulkLaneConnections(o);
-        _bulkLaneResponseTimeout = ResolveBulkLaneResponseTimeout(o);
-        var count = Math.Max(1, o.Connections);
+        var runtime = BuildRuntimeConfig(o);
+        _runtimeConfig = runtime;
+        _bulkLaneConnections = runtime.BulkLaneConnections;
+        _bulkLaneResponseTimeout = runtime.BulkLaneResponseTimeout;
+        var count = Math.Max(1, runtime.Multiplexer.Connections);
         _conns = new RedisMultiplexedConnection[count];
         for (var i = 0; i < count; i++)
             _conns[i] = CreateFastConnection();
@@ -158,11 +158,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         for (var i = 0; i < _bulkConns.Length; i++)
             _bulkConns[i] = CreateBulkConnection();
         RebuildLanesUnsafe();
-        _instrument = o.EnableCommandInstrumentation;
-        _coalesce = o.EnableCoalescedSocketWrites;
         LogNormalizationIfChanged("RedisMultiplexer", configuredMuxOptions, o);
         LogNormalizationIfChanged("RedisConnection", configuredConnectionOptions, connOpts);
-        ApplyAutoscaleOptions(o);
+        ApplyAutoscaleOptions(runtime.Multiplexer);
         _autoscaleTask = Task.Run(AutoscaleLoopAsync);
     }
 
@@ -188,6 +186,21 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
         return TimeSpan.FromSeconds(5);
     }
+
+    private static RuntimeConfig BuildRuntimeConfig(RedisMultiplexerOptions options)
+        => new(
+            options,
+            options.EnableCommandInstrumentation,
+            ResolveBulkLaneConnections(options),
+            ResolveBulkLaneResponseTimeout(options));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private RuntimeConfig ReadRuntimeConfig()
+        => Volatile.Read(ref _runtimeConfig);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool IsCommandInstrumentationEnabled()
+        => ReadRuntimeConfig().EnableCommandInstrumentation;
 
     private void LogNormalizationIfChanged(
         string optionsName,
@@ -580,7 +593,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && !_clusterRedirectsEnabled && TryGetAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryGetAsync(key, ct, out var fastTask))
             return fastTask;
 
         return GetAsyncSlow(key, ct);
@@ -693,7 +706,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> GetLeaseAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && !_clusterRedirectsEnabled && TryGetLeaseAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryGetLeaseAsync(key, ct, out var fastTask))
             return fastTask;
 
         return GetLeaseAsyncSlow(key, ct);
@@ -791,7 +804,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> GetExAsync(string key, TimeSpan? ttl, CancellationToken ct)
     {
-        if (!_instrument)
+        if (!IsCommandInstrumentationEnabled())
         {
             int? ttlMs = null;
             if (ttl is not null)
@@ -906,7 +919,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> GetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct)
     {
-        if (!_instrument && TryGetExLeaseAsync(key, ttl, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryGetExLeaseAsync(key, ttl, ct, out var fastTask))
             return fastTask;
 
         return GetExLeaseAsyncSlow(key, ttl, ct);
@@ -1577,7 +1590,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> HGetLeaseAsync(string key, string field, CancellationToken ct)
     {
-        if (!_instrument && TryQueueHGetLeaseFast(key, field, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryQueueHGetLeaseFast(key, field, ct, out var fastTask))
             return fastTask;
 
         return HGetLeaseAsyncSlow(key, field, ct);
@@ -1648,7 +1661,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> HGetAsync(string key, string field, CancellationToken ct)
     {
-        if (!_instrument && TryHGetAsync(key, field, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryHGetAsync(key, field, ct, out var fastTask))
             return fastTask;
 
         return HGetAsyncSlow(key, field, ct);
@@ -1835,7 +1848,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && TryLPopAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryLPopAsync(key, ct, out var fastTask))
             return fastTask;
 
         return LPopAsyncSlow(key, ct);
@@ -2164,7 +2177,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> LPopLeaseAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && TryLPopLeaseAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryLPopLeaseAsync(key, ct, out var fastTask))
             return fastTask;
 
         return LPopLeaseAsyncSlow(key, ct);
@@ -2211,7 +2224,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> LIndexAsync(string key, long index, CancellationToken ct)
     {
-        if (!_instrument && TryQueueLIndexFast(key, index, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryQueueLIndexFast(key, index, ct, out var fastTask))
             return fastTask;
 
         return LIndexAsyncSlow(key, index, ct);
@@ -2349,37 +2362,46 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             await c.DisposeAsync().ConfigureAwait(false);
     }
 
-    private RedisMultiplexedConnection CreateConnection(TimeSpan responseTimeout)
-        => new(
+    private RedisMultiplexedConnection CreateConnection(RuntimeConfig runtime, TimeSpan responseTimeout)
+    {
+        var mux = runtime.Multiplexer;
+        return new(
             _factory,
-            maxInFlight: _muxOptions.MaxInFlightPerConnection,
-            coalesceWrites: _muxOptions.EnableCoalescedSocketWrites,
-            enableSocketRespReader: _muxOptions.EnableSocketRespReader,
-            useDedicatedLaneWorkers: _muxOptions.UseDedicatedLaneWorkers,
+            maxInFlight: mux.MaxInFlightPerConnection,
+            coalesceWrites: mux.EnableCoalescedSocketWrites,
+            enableSocketRespReader: mux.EnableSocketRespReader,
+            useDedicatedLaneWorkers: mux.UseDedicatedLaneWorkers,
             maxBulkStringBytes: _connectionOptions.MaxBulkStringBytes,
             maxArrayDepth: _connectionOptions.MaxArrayDepth,
             responseTimeout: responseTimeout,
-            coalescedWriteMaxBytes: _muxOptions.CoalescedWriteMaxBytes,
-            coalescedWriteMaxSegments: _muxOptions.CoalescedWriteMaxSegments,
-            coalescedWriteSmallCopyThresholdBytes: _muxOptions.CoalescedWriteSmallCopyThresholdBytes,
-            enableAdaptiveCoalescing: _muxOptions.EnableAdaptiveCoalescing,
-            adaptiveCoalescingLowDepth: _muxOptions.AdaptiveCoalescingLowDepth,
-            adaptiveCoalescingHighDepth: _muxOptions.AdaptiveCoalescingHighDepth,
-            adaptiveCoalescingMinWriteBytes: _muxOptions.AdaptiveCoalescingMinWriteBytes,
-            adaptiveCoalescingMinSegments: _muxOptions.AdaptiveCoalescingMinSegments,
-            adaptiveCoalescingMinSmallCopyThresholdBytes: _muxOptions.AdaptiveCoalescingMinSmallCopyThresholdBytes,
-            coalescingEnterQueueDepth: _muxOptions.CoalescingEnterQueueDepth,
-            coalescingExitQueueDepth: _muxOptions.CoalescingExitQueueDepth,
-            coalescedWriteMaxOperations: _muxOptions.CoalescedWriteMaxOperations,
-            coalescingSpinBudget: _muxOptions.CoalescingSpinBudget,
+            coalescedWriteMaxBytes: mux.CoalescedWriteMaxBytes,
+            coalescedWriteMaxSegments: mux.CoalescedWriteMaxSegments,
+            coalescedWriteSmallCopyThresholdBytes: mux.CoalescedWriteSmallCopyThresholdBytes,
+            enableAdaptiveCoalescing: mux.EnableAdaptiveCoalescing,
+            adaptiveCoalescingLowDepth: mux.AdaptiveCoalescingLowDepth,
+            adaptiveCoalescingHighDepth: mux.AdaptiveCoalescingHighDepth,
+            adaptiveCoalescingMinWriteBytes: mux.AdaptiveCoalescingMinWriteBytes,
+            adaptiveCoalescingMinSegments: mux.AdaptiveCoalescingMinSegments,
+            adaptiveCoalescingMinSmallCopyThresholdBytes: mux.AdaptiveCoalescingMinSmallCopyThresholdBytes,
+            coalescingEnterQueueDepth: mux.CoalescingEnterQueueDepth,
+            coalescingExitQueueDepth: mux.CoalescingExitQueueDepth,
+            coalescedWriteMaxOperations: mux.CoalescedWriteMaxOperations,
+            coalescingSpinBudget: mux.CoalescingSpinBudget,
             recordLatencyStopwatchTicks: RecordAutoscaleLatencyStopwatchTicks,
             shouldRecordLatency: ShouldRecordAutoscaleLatency);
+    }
 
     private RedisMultiplexedConnection CreateFastConnection()
-        => CreateConnection(_muxOptions.ResponseTimeout);
+    {
+        var runtime = ReadRuntimeConfig();
+        return CreateConnection(runtime, runtime.Multiplexer.ResponseTimeout);
+    }
 
     private RedisMultiplexedConnection CreateBulkConnection()
-        => CreateConnection(_bulkLaneResponseTimeout);
+    {
+        var runtime = ReadRuntimeConfig();
+        return CreateConnection(runtime, runtime.BulkLaneResponseTimeout);
+    }
 
     private void RebuildLanesUnsafe()
     {
@@ -3474,7 +3496,10 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     }
 
     private Activity? StartCommandActivity(string op)
-        => RedisTracing.StartCommand(op, _instrument);
+    {
+        var runtime = ReadRuntimeConfig();
+        return RedisTracing.StartCommand(op, runtime.EnableCommandInstrumentation);
+    }
 
     private static bool TryGetJsonSetCachedHeader(
         JsonSetHeaderCacheEntry? cache,
@@ -4297,7 +4322,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && TryRPopAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryRPopAsync(key, ct, out var fastTask))
             return fastTask;
 
         return RPopAsyncSlow(key, ct);
@@ -4390,7 +4415,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> RPopLeaseAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && TryRPopLeaseAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryRPopLeaseAsync(key, ct, out var fastTask))
             return fastTask;
 
         return RPopLeaseAsyncSlow(key, ct);
@@ -5233,7 +5258,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> JsonGetAsync(string key, string? path, CancellationToken ct)
     {
-        if (!_instrument && TryQueueJsonGetFast(key, path, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryQueueJsonGetFast(key, path, ct, out var fastTask))
             return fastTask;
 
         return JsonGetAsyncSlow(key, path, ct);
@@ -5283,7 +5308,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> JsonGetLeaseAsync(string key, string? path, CancellationToken ct)
     {
-        if (!_instrument && TryJsonGetLeaseAsync(key, path, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryJsonGetLeaseAsync(key, path, ct, out var fastTask))
             return fastTask;
 
         return JsonGetLeaseAsyncSlow(key, path, ct);
@@ -6457,6 +6482,19 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
+    }
+
+    private sealed record RuntimeConfig(
+        RedisMultiplexerOptions Multiplexer,
+        bool EnableCommandInstrumentation,
+        int BulkLaneConnections,
+        TimeSpan BulkLaneResponseTimeout)
+    {
+        public static RuntimeConfig Empty { get; } = new(
+            new RedisMultiplexerOptions(),
+            EnableCommandInstrumentation: true,
+            BulkLaneConnections: 1,
+            BulkLaneResponseTimeout: TimeSpan.FromSeconds(5));
     }
 }
 

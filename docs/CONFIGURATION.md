@@ -112,7 +112,13 @@ Controls multiplexed command execution.
     "AdaptiveCoalescingHighDepth": 56,
     "AdaptiveCoalescingMinWriteBytes": 65536,
     "AdaptiveCoalescingMinSegments": 48,
-    "AdaptiveCoalescingMinSmallCopyThresholdBytes": 384
+    "AdaptiveCoalescingMinSmallCopyThresholdBytes": 384,
+    "CoalescingEnterQueueDepth": 8,
+    "CoalescingExitQueueDepth": 3,
+    "CoalescedWriteMaxOperations": 128,
+    "CoalescingSpinBudget": 8,
+    "BulkLaneConnections": 1,
+    "BulkLaneResponseTimeout": "00:00:05"
   }
 }
 ```
@@ -126,6 +132,10 @@ Controls multiplexed command execution.
 - `EnableAdaptiveCoalescing=true` automatically scales between the adaptive minimum limits and configured max limits based on queue depth.
 - `EnableSocketRespReader` is optional and defaults to `false`; enable only after validating in your environment.
 - Set `TransportProfile=Custom` when you want explicit coalescing byte/segment values to win over profile defaults.
+- `CoalescingEnterQueueDepth` / `CoalescingExitQueueDepth` provide burst hysteresis so short spikes batch well without holding lone requests.
+- `CoalescedWriteMaxOperations` limits per-batch op count for predictable p95/p99 behavior.
+- `CoalescingSpinBudget` controls brief follower capture during bursts; keep this small for stable tails.
+- `BulkLaneConnections` isolates pooled bulk paths from fast-lane p99 and autoscaler signals (`0..2`, effective only when fast connections > 1).
 - Fast-path and lane-management diagrams: [MUX_FAST_PATH_ARCHITECTURE.md](MUX_FAST_PATH_ARCHITECTURE.md)
 
 ### Runtime Performance Guardrails
@@ -139,6 +149,15 @@ This keeps baseline performance stable even when config values are invalid or ex
 - Negative/invalid time spans are normalized to safe defaults or `TimeSpan.Zero` where intended.
 
 If normalization occurs, `RedisCommandExecutor` logs a warning so teams can correct config drift.
+
+### Runtime Snapshot + Hot Reload Behavior
+
+`RedisCommandExecutor` applies multiplexer options through an immutable runtime snapshot that is swapped atomically on `IOptionsMonitor` updates.
+
+- Hot paths read a single snapshot reference per decision point to avoid mixed-config reads.
+- `EnableCommandInstrumentation` updates take effect immediately without transport restarts.
+- New lanes created during autoscale events use the latest snapshot defaults.
+- Existing long-lived transport loops keep their current socket/runtime state until naturally recycled.
 
 ### Autoscaler Knobs (Enterprise)
 

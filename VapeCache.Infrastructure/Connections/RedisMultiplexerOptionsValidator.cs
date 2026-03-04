@@ -65,6 +65,9 @@ internal sealed class RedisMultiplexerOptionsValidator : IValidateOptions<RedisM
         if (options.CoalescingSpinBudget < 0)
             AddFailure(ref failures, "RedisMultiplexer:CoalescingSpinBudget must be >= 0.");
 
+        if (options.ResponseTimeout < TimeSpan.Zero && options.ResponseTimeout != Timeout.InfiniteTimeSpan)
+            AddFailure(ref failures, "RedisMultiplexer:ResponseTimeout must be >= 0 or Timeout.InfiniteTimeSpan.");
+
         if (options.MinConnections <= 0)
             AddFailure(ref failures, "RedisMultiplexer:MinConnections must be > 0.");
 
@@ -73,6 +76,9 @@ internal sealed class RedisMultiplexerOptionsValidator : IValidateOptions<RedisM
 
         if (options.MaxConnections < options.MinConnections)
             AddFailure(ref failures, "RedisMultiplexer:MaxConnections must be >= MinConnections.");
+
+        if (options.EnableAutoscaling && (options.Connections < options.MinConnections || options.Connections > options.MaxConnections))
+            AddFailure(ref failures, "RedisMultiplexer:Connections must be within [MinConnections, MaxConnections] when autoscaling is enabled.");
 
         if (options.AutoscaleSampleInterval <= TimeSpan.Zero)
             AddFailure(ref failures, "RedisMultiplexer:AutoscaleSampleInterval must be > 0.");
@@ -110,8 +116,16 @@ internal sealed class RedisMultiplexerOptionsValidator : IValidateOptions<RedisM
         if (options.BulkLaneConnections < 0 || options.BulkLaneConnections > 2)
             AddFailure(ref failures, "RedisMultiplexer:BulkLaneConnections must be in [0,2].");
 
+        if (options.BulkLaneConnections > 0 && options.Connections <= 1)
+            AddFailure(ref failures, "RedisMultiplexer:BulkLaneConnections requires RedisMultiplexer:Connections > 1 for lane isolation.");
+
         if (options.BulkLaneResponseTimeout <= TimeSpan.Zero)
             AddFailure(ref failures, "RedisMultiplexer:BulkLaneResponseTimeout must be > 0.");
+
+        if (options.BulkLaneConnections > 0 &&
+            options.ResponseTimeout > TimeSpan.Zero &&
+            options.BulkLaneResponseTimeout < options.ResponseTimeout)
+            AddFailure(ref failures, "RedisMultiplexer:BulkLaneResponseTimeout must be >= RedisMultiplexer:ResponseTimeout when bulk lanes are enabled.");
 
         if (options.EmergencyScaleUpTimeoutRatePerSecThreshold <= 0)
             AddFailure(ref failures, "RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold must be > 0.");
