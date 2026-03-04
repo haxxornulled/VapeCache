@@ -92,6 +92,8 @@ public sealed class RedisTransportRuntimeGuardrailsTests
             AdaptiveCoalescingMinSegments = 0,
             AdaptiveCoalescingMinSmallCopyThresholdBytes = 0,
             ResponseTimeout = TimeSpan.FromMilliseconds(-1),
+            BulkLaneConnections = -5,
+            BulkLaneResponseTimeout = TimeSpan.Zero,
             MinConnections = 4,
             MaxConnections = 2,
             AutoscaleSampleInterval = TimeSpan.Zero,
@@ -127,6 +129,8 @@ public sealed class RedisTransportRuntimeGuardrailsTests
         Assert.Equal(1, effective.AdaptiveCoalescingMinSegments);
         Assert.Equal(64, effective.AdaptiveCoalescingMinSmallCopyThresholdBytes);
         Assert.Equal(TimeSpan.Zero, effective.ResponseTimeout);
+        Assert.Equal(1, effective.BulkLaneConnections);
+        Assert.Equal(TimeSpan.FromSeconds(5), effective.BulkLaneResponseTimeout);
         Assert.Equal(4, effective.MinConnections);
         Assert.Equal(4, effective.MaxConnections);
         Assert.Equal(TimeSpan.FromSeconds(1), effective.AutoscaleSampleInterval);
@@ -163,7 +167,9 @@ public sealed class RedisTransportRuntimeGuardrailsTests
             AdaptiveCoalescingHighDepth = 64,
             AdaptiveCoalescingMinWriteBytes = 32 * 1024,
             AdaptiveCoalescingMinSegments = 48,
-            AdaptiveCoalescingMinSmallCopyThresholdBytes = 512
+            AdaptiveCoalescingMinSmallCopyThresholdBytes = 512,
+            BulkLaneConnections = 2,
+            BulkLaneResponseTimeout = TimeSpan.FromSeconds(9)
         };
 
         var effective = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(options);

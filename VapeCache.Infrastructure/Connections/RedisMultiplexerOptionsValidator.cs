@@ -92,6 +92,12 @@ internal sealed class RedisMultiplexerOptionsValidator : IValidateOptions<RedisM
         if (options.ScaleDownP95LatencyMsThreshold <= 0)
             AddFailure(ref failures, "RedisMultiplexer:ScaleDownP95LatencyMsThreshold must be > 0.");
 
+        if (options.BulkLaneConnections < 0 || options.BulkLaneConnections > 2)
+            AddFailure(ref failures, "RedisMultiplexer:BulkLaneConnections must be in [0,2].");
+
+        if (options.BulkLaneResponseTimeout <= TimeSpan.Zero)
+            AddFailure(ref failures, "RedisMultiplexer:BulkLaneResponseTimeout must be > 0.");
+
         if (options.EmergencyScaleUpTimeoutRatePerSecThreshold <= 0)
             AddFailure(ref failures, "RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold must be > 0.");
 

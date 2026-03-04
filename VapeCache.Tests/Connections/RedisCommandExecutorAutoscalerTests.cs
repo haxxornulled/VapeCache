@@ -17,6 +17,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
         using var harness = CreateHarness(new RedisMultiplexerOptions
         {
             Connections = 2,
+            BulkLaneConnections = 0,
             EnableAutoscaling = false
         });
 
@@ -40,6 +41,42 @@ public sealed class RedisCommandExecutorAutoscalerTests
             Assert.Equal(0L, lane.ResponseSequenceMismatches);
             Assert.Equal(0L, lane.TransportResets);
         });
+    }
+
+    [Fact]
+    public void BulkLaneIsolation_RoutesSeparateLanes_AndFastAutoscalerSignalsStayClean()
+    {
+        using var harness = CreateHarness(new RedisMultiplexerOptions
+        {
+            Connections = 2,
+            BulkLaneConnections = 1,
+            BulkLaneResponseTimeout = TimeSpan.FromSeconds(8),
+            EnableAutoscaling = true,
+            MinConnections = 2,
+            MaxConnections = 4,
+            AutoscaleSampleInterval = TimeSpan.FromDays(1),
+            ScaleUpCooldown = TimeSpan.FromMilliseconds(1),
+            EmergencyScaleUpTimeoutRatePerSecThreshold = 0.5
+        });
+
+        var lanes = harness.Executor.GetMuxLaneSnapshots();
+        Assert.Equal(3, lanes.Count);
+        Assert.Contains(lanes, lane => lane.Role == "bulk-read-write");
+        Assert.Contains(lanes, lane => lane.Role == "read-write");
+
+        var bulkConns = GetConnectionArray(harness.Executor, "_bulkConns");
+        Assert.Equal(1, bulkConns.Length);
+        var bulkLane = bulkConns.GetValue(0);
+        Assert.NotNull(bulkLane);
+        SetLaneField(bulkLane!, "_responseTimeoutCount", 100L);
+
+        SetField(harness.Executor, "_lastTimeoutSampleCount", 0L);
+        SetField(harness.Executor, "_lastTimeoutSampleTicks", DateTime.UtcNow.AddSeconds(-1).Ticks);
+        InvokeEvaluateAutoscale(harness.Executor);
+
+        var snapshot = harness.Executor.GetAutoscalerSnapshot();
+        Assert.Equal(2, snapshot.CurrentConnections);
+        Assert.True(snapshot.TimeoutRatePerSec < 0.1, $"Expected fast-lane timeout rate near zero, got {snapshot.TimeoutRatePerSec:F3}/s.");
     }
 
     [Fact]
@@ -355,6 +392,22 @@ public sealed class RedisCommandExecutorAutoscalerTests
         var f = typeof(RedisCommandExecutor).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(f);
         f!.SetValue(executor, value);
+    }
+
+    private static Array GetConnectionArray(RedisCommandExecutor executor, string fieldName)
+    {
+        var f = typeof(RedisCommandExecutor).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(f);
+        var value = (Array?)f!.GetValue(executor);
+        Assert.NotNull(value);
+        return value!;
+    }
+
+    private static void SetLaneField(object lane, string fieldName, object value)
+    {
+        var f = lane.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(f);
+        f!.SetValue(lane, value);
     }
 
     private static void MarkFirstLaneUnhealthy(RedisCommandExecutor executor)

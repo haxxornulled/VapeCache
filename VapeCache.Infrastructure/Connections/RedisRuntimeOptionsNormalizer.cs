@@ -34,6 +34,8 @@ internal static class RedisRuntimeOptionsNormalizer
     private const int MinAdaptiveSegments = 1;
     private const int MinAutoscaleConnections = 1;
     private const int MaxAutoscaleConnections = 256;
+    private const int MinBulkLaneConnections = 0;
+    private const int MaxBulkLaneConnections = 2;
     private const double MinPositiveThreshold = 0.01d;
 
     private static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(2);
@@ -47,6 +49,7 @@ internal static class RedisRuntimeOptionsNormalizer
     private static readonly TimeSpan DefaultScaleDownCooldown = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan DefaultScaleDownDrainTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan DefaultAutoscaleFreezeDuration = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan DefaultBulkLaneResponseTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Normalizes value.
@@ -157,6 +160,8 @@ internal static class RedisRuntimeOptionsNormalizer
             fallbackWhenInvalid: MinSmallCopyThresholdBytes);
 
         var responseTimeout = NormalizeTimeout(profiled.ResponseTimeout);
+        var bulkLaneConnections = NormalizeBulkLaneConnections(profiled.BulkLaneConnections);
+        var bulkLaneResponseTimeout = NormalizePositive(profiled.BulkLaneResponseTimeout, DefaultBulkLaneResponseTimeout);
         var autoscaleSampleInterval = NormalizePositive(profiled.AutoscaleSampleInterval, DefaultAutoscaleSampleInterval);
         var scaleUpWindow = NormalizePositive(profiled.ScaleUpWindow, DefaultScaleUpWindow);
         var scaleDownWindow = NormalizePositive(profiled.ScaleDownWindow, DefaultScaleDownWindow);
@@ -188,6 +193,8 @@ internal static class RedisRuntimeOptionsNormalizer
             AdaptiveCoalescingMinSegments = adaptiveCoalescingMinSegments,
             AdaptiveCoalescingMinSmallCopyThresholdBytes = adaptiveCoalescingMinSmallCopyThresholdBytes,
             ResponseTimeout = responseTimeout,
+            BulkLaneConnections = bulkLaneConnections,
+            BulkLaneResponseTimeout = bulkLaneResponseTimeout,
             MinConnections = minConnections,
             MaxConnections = maxConnections,
             AutoscaleSampleInterval = autoscaleSampleInterval,
@@ -288,4 +295,12 @@ internal static class RedisRuntimeOptionsNormalizer
 
     private static TimeSpan NormalizeTimeout(TimeSpan value)
         => value == Timeout.InfiniteTimeSpan || value < TimeSpan.Zero ? TimeSpan.Zero : value;
+
+    private static int NormalizeBulkLaneConnections(int value)
+    {
+        if (value < MinBulkLaneConnections)
+            return 1;
+
+        return Math.Clamp(value, MinBulkLaneConnections, MaxBulkLaneConnections);
+    }
 }

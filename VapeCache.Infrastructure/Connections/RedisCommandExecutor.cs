@@ -21,10 +21,16 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private RedisMultiplexedConnection[] _conns = Array.Empty<RedisMultiplexedConnection>();
     private RedisMultiplexedConnection[] _readConns = Array.Empty<RedisMultiplexedConnection>();
     private RedisMultiplexedConnection[] _writeConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _bulkConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _bulkReadConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _bulkWriteConns = Array.Empty<RedisMultiplexedConnection>();
     private readonly System.Threading.Lock _connGate = new();
     private int _rr;
     private int _readRr;
     private int _writeRr;
+    private int _bulkRr;
+    private int _bulkReadRr;
+    private int _bulkWriteRr;
     private readonly bool _instrument;
     private readonly bool _coalesce;
     private readonly IRedisConnectionFactory _factory;
@@ -86,6 +92,8 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private bool _autoscaleAdvisorMode;
     private double _emergencyScaleUpTimeoutRatePerSecThreshold;
     private TimeSpan _scaleDownDrainTimeout;
+    private int _bulkLaneConnections;
+    private TimeSpan _bulkLaneResponseTimeout;
     private (string Key, int ValueLen)[]? _msetLengthsCache;
     private JsonSetHeaderCacheEntry? _jsonSetHeaderCache;
     private HGetHeaderCacheEntry? _hgetHeaderCache;
@@ -140,10 +148,15 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         _clusterRedirectsEnabled = connOpts.EnableClusterRedirection;
         _maxClusterRedirects = Math.Max(0, connOpts.MaxClusterRedirects);
         _muxOptions = o;
+        _bulkLaneConnections = ResolveBulkLaneConnections(o);
+        _bulkLaneResponseTimeout = ResolveBulkLaneResponseTimeout(o);
         var count = Math.Max(1, o.Connections);
         _conns = new RedisMultiplexedConnection[count];
         for (var i = 0; i < count; i++)
-            _conns[i] = CreateConnection();
+            _conns[i] = CreateFastConnection();
+        _bulkConns = new RedisMultiplexedConnection[_bulkLaneConnections];
+        for (var i = 0; i < _bulkConns.Length; i++)
+            _bulkConns[i] = CreateBulkConnection();
         RebuildLanesUnsafe();
         _instrument = o.EnableCommandInstrumentation;
         _coalesce = o.EnableCoalescedSocketWrites;
@@ -157,6 +170,24 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         => Enum.IsDefined(typeof(RedisTransportProfile), profile)
             ? profile
             : RedisTransportProfile.FullTilt;
+
+    private static int ResolveBulkLaneConnections(RedisMultiplexerOptions options)
+    {
+        var requested = Math.Clamp(options.BulkLaneConnections, 0, 2);
+        if (requested == 0)
+            return 0;
+
+        // Single-lane profiles stay on the fast lane to avoid creating extra transport loops.
+        return options.Connections <= 1 ? 0 : requested;
+    }
+
+    private static TimeSpan ResolveBulkLaneResponseTimeout(RedisMultiplexerOptions options)
+    {
+        if (options.BulkLaneResponseTimeout > TimeSpan.Zero)
+            return options.BulkLaneResponseTimeout;
+
+        return TimeSpan.FromSeconds(5);
+    }
 
     private void LogNormalizationIfChanged(
         string optionsName,
@@ -678,7 +709,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextRead();
+            conn = NextBulkRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
             var command = rented.AsMemory(0, written);
@@ -724,7 +755,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextRead();
+            conn = NextBulkRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
@@ -900,7 +931,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         try
         {
             var len = RedisRespProtocol.GetGetExCommandLength(key, ttlMs);
-            conn = Next();
+            conn = NextBulk();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetExCommand(rented.AsSpan(0, len), key, ttlMs);
             var resp = await conn.ExecuteAsync(
@@ -1562,7 +1593,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextRead();
+            conn = NextBulkRead();
             var cached = Volatile.Read(ref _hgetHeaderCache);
             byte[]? headerBuffer;
             ReadOnlyMemory<byte> header;
@@ -2054,7 +2085,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetExCommand(rented.AsSpan(0, len), key, ttlMs);
             if (!conn.TryExecuteAsync(
@@ -2149,7 +2180,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteLPopCommand(rented.AsSpan(0, len), key);
             var resp = await conn.ExecuteAsync(
@@ -2313,9 +2344,12 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
         foreach (var c in _conns)
             await c.DisposeAsync().ConfigureAwait(false);
+
+        foreach (var c in _bulkConns)
+            await c.DisposeAsync().ConfigureAwait(false);
     }
 
-    private RedisMultiplexedConnection CreateConnection()
+    private RedisMultiplexedConnection CreateConnection(TimeSpan responseTimeout)
         => new(
             _factory,
             maxInFlight: _muxOptions.MaxInFlightPerConnection,
@@ -2324,7 +2358,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             useDedicatedLaneWorkers: _muxOptions.UseDedicatedLaneWorkers,
             maxBulkStringBytes: _connectionOptions.MaxBulkStringBytes,
             maxArrayDepth: _connectionOptions.MaxArrayDepth,
-            responseTimeout: _muxOptions.ResponseTimeout,
+            responseTimeout: responseTimeout,
             coalescedWriteMaxBytes: _muxOptions.CoalescedWriteMaxBytes,
             coalescedWriteMaxSegments: _muxOptions.CoalescedWriteMaxSegments,
             coalescedWriteSmallCopyThresholdBytes: _muxOptions.CoalescedWriteSmallCopyThresholdBytes,
@@ -2337,13 +2371,21 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             recordLatencyStopwatchTicks: RecordAutoscaleLatencyStopwatchTicks,
             shouldRecordLatency: ShouldRecordAutoscaleLatency);
 
+    private RedisMultiplexedConnection CreateFastConnection()
+        => CreateConnection(_muxOptions.ResponseTimeout);
+
+    private RedisMultiplexedConnection CreateBulkConnection()
+        => CreateConnection(_bulkLaneResponseTimeout);
+
     private void RebuildLanesUnsafe()
     {
-        // Use a shared lane pool for reads and writes.
-        // Static read/write partitioning amplified tail latency on write-heavy workloads because
-        // half the lanes could sit underutilized while write lanes queued.
+        // Fast group remains shared read/write and is the only autoscaled group.
         _readConns = _conns;
         _writeConns = _conns;
+
+        // Bulk group is fixed-size and isolated from autoscaler pressure signals.
+        _bulkReadConns = _bulkConns;
+        _bulkWriteConns = _bulkConns;
     }
 
     private async Task AutoscaleLoopAsync()
@@ -2720,6 +2762,8 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             _autoscaleEnabled = o.EnableAutoscaling;
             _minConnections = Math.Max(1, Math.Min(o.MinConnections, o.MaxConnections));
             _maxConnections = Math.Max(_minConnections, o.MaxConnections);
+            _bulkLaneConnections = ResolveBulkLaneConnections(o);
+            _bulkLaneResponseTimeout = ResolveBulkLaneResponseTimeout(o);
             _autoscaleSampleInterval = o.AutoscaleSampleInterval <= TimeSpan.Zero ? TimeSpan.FromSeconds(1) : o.AutoscaleSampleInterval;
             _scaleUpWindow = o.ScaleUpWindow <= TimeSpan.Zero ? TimeSpan.FromSeconds(10) : o.ScaleUpWindow;
             _scaleDownWindow = o.ScaleDownWindow <= TimeSpan.Zero ? TimeSpan.FromMinutes(2) : o.ScaleDownWindow;
@@ -2893,8 +2937,17 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
             var next = new RedisMultiplexedConnection[_conns.Length + 1];
             Array.Copy(_conns, next, _conns.Length);
-            next[^1] = CreateConnection();
+            next[^1] = CreateFastConnection();
             _conns = next;
+
+            if (_bulkConns.Length == 0 && _bulkLaneConnections > 0 && _conns.Length > 1)
+            {
+                var newBulkConns = new RedisMultiplexedConnection[_bulkLaneConnections];
+                for (var i = 0; i < newBulkConns.Length; i++)
+                    newBulkConns[i] = CreateBulkConnection();
+                _bulkConns = newBulkConns;
+            }
+
             RebuildLanesUnsafe();
             Volatile.Write(ref _lastScaleEventTicks, DateTimeOffset.UtcNow.UtcTicks);
             _lastScaleDirection = "up";
@@ -2905,6 +2958,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private async Task ScaleDownAsync(string reason)
     {
         RedisMultiplexedConnection? removed = null;
+        RedisMultiplexedConnection[]? bulkRemoved = null;
         lock (_connGate)
         {
             if (_conns.Length <= _minConnections)
@@ -2914,6 +2968,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             Array.Copy(_conns, next, next.Length);
             removed = _conns[^1];
             _conns = next;
+
+            if (_conns.Length <= 1 && _bulkConns.Length > 0)
+            {
+                bulkRemoved = _bulkConns;
+                _bulkConns = Array.Empty<RedisMultiplexedConnection>();
+            }
+
             RebuildLanesUnsafe();
             Volatile.Write(ref _lastScaleEventTicks, DateTimeOffset.UtcNow.UtcTicks);
             _lastScaleDirection = "down";
@@ -2924,6 +2985,12 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         {
             await WaitForDrainAsync(removed, _scaleDownDrainTimeout, _autoscaleCts.Token).ConfigureAwait(false);
             await removed.DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (bulkRemoved is not null)
+        {
+            for (var i = 0; i < bulkRemoved.Length; i++)
+                await bulkRemoved[i].DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -3191,25 +3258,46 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public IReadOnlyList<RedisMuxLaneSnapshot> GetMuxLaneSnapshots()
     {
-        var conns = _conns;
-        if (conns.Length == 0)
+        var fastGroup = new LaneGroupSnapshot("fast", _conns, _readConns, _writeConns);
+        var bulkGroup = new LaneGroupSnapshot("bulk", _bulkConns, _bulkReadConns, _bulkWriteConns);
+        var total = fastGroup.Connections.Length + bulkGroup.Connections.Length;
+        if (total == 0)
             return Array.Empty<RedisMuxLaneSnapshot>();
 
-        var readConns = _readConns;
-        var writeConns = _writeConns;
-        var lanes = new RedisMuxLaneSnapshot[conns.Length];
+        var lanes = new RedisMuxLaneSnapshot[total];
+        var index = 0;
+        index = FillLaneGroupSnapshots(fastGroup, includeGroupPrefix: false, lanes, index);
+        _ = FillLaneGroupSnapshots(bulkGroup, includeGroupPrefix: true, lanes, index);
+        return lanes;
+    }
 
-        for (var i = 0; i < conns.Length; i++)
+    private readonly record struct LaneGroupSnapshot(
+        string Name,
+        RedisMultiplexedConnection[] Connections,
+        RedisMultiplexedConnection[] ReadConnections,
+        RedisMultiplexedConnection[] WriteConnections);
+
+    private static int FillLaneGroupSnapshots(
+        LaneGroupSnapshot group,
+        bool includeGroupPrefix,
+        RedisMuxLaneSnapshot[] destination,
+        int startIndex)
+    {
+        for (var i = 0; i < group.Connections.Length; i++)
         {
-            var conn = conns[i];
+            var conn = group.Connections[i];
             var usage = conn.CaptureMuxLaneUsageSnapshot();
             var maxInFlight = usage.MaxInFlight;
             var utilization = maxInFlight <= 0 ? 0d : (double)usage.InFlight / maxInFlight;
 
-            lanes[i] = new RedisMuxLaneSnapshot(
-                LaneIndex: i,
+            destination[startIndex + i] = new RedisMuxLaneSnapshot(
+                LaneIndex: startIndex + i,
                 ConnectionId: conn.ConnectionId,
-                Role: ResolveLaneRole(conn, readConns, writeConns),
+                Role: ResolveLaneRole(
+                    conn,
+                    group.ReadConnections,
+                    group.WriteConnections,
+                    includeGroupPrefix ? group.Name : null),
                 WriteQueueDepth: conn.WriteQueueDepth,
                 InFlight: usage.InFlight,
                 MaxInFlight: maxInFlight,
@@ -3225,24 +3313,29 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 Healthy: conn.IsHealthy);
         }
 
-        return lanes;
+        return startIndex + group.Connections.Length;
     }
 
     private static string ResolveLaneRole(
         RedisMultiplexedConnection lane,
         RedisMultiplexedConnection[] readConns,
-        RedisMultiplexedConnection[] writeConns)
+        RedisMultiplexedConnection[] writeConns,
+        string? groupPrefix = null)
     {
         var isRead = ContainsConnection(readConns, lane);
         var isWrite = ContainsConnection(writeConns, lane);
 
+        var role = "unassigned";
         if (isRead && isWrite)
-            return "read-write";
-        if (isRead)
-            return "read";
-        if (isWrite)
-            return "write";
-        return "unassigned";
+            role = "read-write";
+        else if (isRead)
+            role = "read";
+        else if (isWrite)
+            role = "write";
+
+        return string.IsNullOrEmpty(groupPrefix)
+            ? role
+            : $"{groupPrefix}-{role}";
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -3314,6 +3407,58 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
         // Power-of-two choices for writes to reduce queue hotspots and p99 tails.
         var idx = Interlocked.Increment(ref _writeRr) & int.MaxValue;
+        var aIndex = SelectLaneIndex(idx, laneCount);
+        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
+        var a = writeConns[aIndex];
+        var b = writeConns[bIndex];
+
+        var aScore = a.GetLaneSelectionScore();
+        var bScore = b.GetLaneSelectionScore();
+        return aScore <= bScore ? a : b;
+    }
+
+    private RedisMultiplexedConnection NextBulk()
+    {
+        var conns = _bulkConns;
+        if (conns.Length == 0)
+            return Next();
+        if (conns.Length == 1)
+            return conns[0];
+
+        var idx = Interlocked.Increment(ref _bulkRr) & int.MaxValue;
+        return conns[SelectLaneIndex(idx, conns.Length)];
+    }
+
+    private RedisMultiplexedConnection NextBulkRead()
+    {
+        var readConns = _bulkReadConns;
+        var laneCount = readConns.Length;
+        if (laneCount == 0)
+            return NextRead();
+        if (laneCount == 1)
+            return readConns[0];
+
+        var idx = Interlocked.Increment(ref _bulkReadRr) & int.MaxValue;
+        var aIndex = SelectLaneIndex(idx, laneCount);
+        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
+        var a = readConns[aIndex];
+        var b = readConns[bIndex];
+
+        var aScore = a.GetLaneSelectionScore();
+        var bScore = b.GetLaneSelectionScore();
+        return aScore <= bScore ? a : b;
+    }
+
+    private RedisMultiplexedConnection NextBulkWrite()
+    {
+        var writeConns = _bulkWriteConns;
+        var laneCount = writeConns.Length;
+        if (laneCount == 0)
+            return NextWrite();
+        if (laneCount == 1)
+            return writeConns[0];
+
+        var idx = Interlocked.Increment(ref _bulkWriteRr) & int.MaxValue;
         var aIndex = SelectLaneIndex(idx, laneCount);
         var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
         var a = writeConns[aIndex];
@@ -3399,7 +3544,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextRead();
+            conn = NextBulkRead();
             var cached = Volatile.Read(ref _hgetHeaderCache);
             byte[]? headerBuffer;
             ReadOnlyMemory<byte> header;
@@ -3934,7 +4079,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextRead();
+            conn = NextBulkRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteLPopCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
@@ -4174,7 +4319,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             var resp = await conn.ExecuteAsync(
@@ -4213,7 +4358,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
@@ -4267,7 +4412,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             var resp = await conn.ExecuteAsync(
@@ -4305,7 +4450,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
@@ -5160,7 +5305,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextBulk();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteJsonGetCommand(rented.AsSpan(0, len), key, path);
             var resp = await conn.ExecuteAsync(
@@ -5198,7 +5343,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextBulk();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteJsonGetCommand(rented.AsSpan(0, len), key, path);
             if (!conn.TryExecuteAsync(
@@ -6249,7 +6394,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextBulk();
             var cmd = RedisRespProtocol.ModuleListCommand;
             var resp = await conn.ExecuteAsync(
                 cmd,

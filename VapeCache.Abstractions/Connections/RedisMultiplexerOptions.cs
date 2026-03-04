@@ -94,6 +94,18 @@ public sealed record RedisMultiplexerOptions
     public TimeSpan ResponseTimeout { get; init; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
+    /// Number of dedicated bulk lanes used for pooled bulk responses (for example GET lease/MGET-style flows).
+    /// Set to 0 to disable isolation and share fast lanes.
+    /// </summary>
+    public int BulkLaneConnections { get; init; } = 1;
+
+    /// <summary>
+    /// Response timeout applied to dedicated bulk lanes.
+    /// This should generally be longer than fast-lane <see cref="ResponseTimeout"/>.
+    /// </summary>
+    public TimeSpan BulkLaneResponseTimeout { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Enables bounded autoscaling of long-lived multiplexed connections.
     /// Enterprise-only feature.
     /// </summary>

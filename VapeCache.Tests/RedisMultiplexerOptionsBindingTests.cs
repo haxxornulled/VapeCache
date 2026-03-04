@@ -26,6 +26,8 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.Equal(48, o.AdaptiveCoalescingMinSegments);
         Assert.Equal(384, o.AdaptiveCoalescingMinSmallCopyThresholdBytes);
         Assert.False(o.EnableAutoscaling);
+        Assert.Equal(1, o.BulkLaneConnections);
+        Assert.Equal(TimeSpan.FromSeconds(5), o.BulkLaneResponseTimeout);
         Assert.Equal(2, o.MaxScaleEventsPerMinute);
         Assert.Equal(4, o.FlapToggleThreshold);
         Assert.Equal(TimeSpan.FromMinutes(2), o.AutoscaleFreezeDuration);
@@ -55,6 +57,8 @@ public sealed class RedisMultiplexerOptionsBindingTests
             "AdaptiveCoalescingMinSegments": 16,
             "AdaptiveCoalescingMinSmallCopyThresholdBytes": 256,
             "ResponseTimeout": "00:00:01.500",
+            "BulkLaneConnections": 2,
+            "BulkLaneResponseTimeout": "00:00:06",
             "MaxScaleEventsPerMinute": 3,
             "FlapToggleThreshold": 5,
             "AutoscaleFreezeDuration": "00:03:00",
@@ -92,6 +96,8 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.Equal(16, o.AdaptiveCoalescingMinSegments);
         Assert.Equal(256, o.AdaptiveCoalescingMinSmallCopyThresholdBytes);
         Assert.Equal(TimeSpan.FromMilliseconds(1500), o.ResponseTimeout);
+        Assert.Equal(2, o.BulkLaneConnections);
+        Assert.Equal(TimeSpan.FromSeconds(6), o.BulkLaneResponseTimeout);
         Assert.Equal(3, o.MaxScaleEventsPerMinute);
         Assert.Equal(5, o.FlapToggleThreshold);
         Assert.Equal(TimeSpan.FromMinutes(3), o.AutoscaleFreezeDuration);
