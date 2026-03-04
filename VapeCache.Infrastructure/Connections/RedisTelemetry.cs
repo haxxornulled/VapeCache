@@ -6,7 +6,6 @@ namespace VapeCache.Infrastructure.Connections;
 
 public static class RedisTelemetry
 {
-    public static readonly ActivitySource ActivitySource = new("VapeCache.Redis");
     public static readonly Meter Meter = new("VapeCache.Redis");
 
     public static readonly Counter<long> ConnectAttempts = Meter.CreateCounter<long>("redis.connect.attempts");

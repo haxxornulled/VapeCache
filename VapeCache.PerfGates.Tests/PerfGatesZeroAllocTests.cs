@@ -73,6 +73,31 @@ public class PerfGatesZeroAllocTests
     }
 
     [Fact]
+    public void RedisMetrics_WithTracingDisabled_DoesNotAllocatePerOperation()
+    {
+        for (var i = 0; i < 1_000; i++)
+        {
+            RedisMetrics.CommandCalls.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
+            RedisMetrics.CommandMs.Record(0.25);
+            _ = RedisTracing.StartCommand("GET", instrumentationEnabled: false);
+        }
+
+        const int iterations = 200_000;
+        var baseline = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < iterations; i++)
+        {
+            RedisMetrics.CommandCalls.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
+            RedisMetrics.CommandMs.Record(0.25);
+            _ = RedisTracing.StartCommand("GET", instrumentationEnabled: false);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - baseline;
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
     public async Task AwaitableSocketArgs_SimulatedCompletion_ZeroAlloc()
     {
         var args = new SocketIoAwaitableEventArgs();

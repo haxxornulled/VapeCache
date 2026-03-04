@@ -28,6 +28,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private readonly int _maxArrayDepth;
     private readonly TimeSpan _responseTimeout;
     private readonly int _connectionId;
+    private readonly KeyValuePair<string, object?>[] _writeQueueWaitTags;
 
     private readonly MpscRingQueue<PendingRequest> _writes;
     private readonly SpscRingQueue<PendingOperation> _pending;
@@ -157,6 +158,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             RecordLaneBytesSent);
 
         _connectionId = Interlocked.Increment(ref _nextConnectionId);
+        _writeQueueWaitTags = RedisMetrics.CreateWriteQueueWaitTags(_connectionId);
         RedisTelemetry.RegisterQueueDepthProvider(_connectionId, GetQueueDepthSnapshot);
         RedisTelemetry.RegisterMuxLaneUsageProvider(_connectionId, GetMuxLaneUsageSnapshot);
 
@@ -507,7 +509,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             throw;
         }
         var elapsedMs = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
-        RedisTelemetry.QueueWaitMs.Record(elapsedMs, new TagList { { "queue", "writes" }, { "connection.id", _connectionId } });
+        RedisMetrics.QueueWaitMs.Record(elapsedMs, _writeQueueWaitTags);
         return await op.ValueTask.ConfigureAwait(false);
     }
 

@@ -55,8 +55,8 @@ internal sealed class RedisConnectionFactory(
             catch { }
         }
 
-        RedisTelemetry.ConnectAttempts.Add(1);
-        using var activity = RedisTelemetry.ActivitySource.StartActivity("redis.connect");
+        RedisMetrics.ConnectAttempts.Add(1);
+        using var activity = RedisTracing.StartConnect();
         var sw = Stopwatch.StartNew();
 
         Socket? socket = null;
@@ -103,7 +103,7 @@ internal sealed class RedisConnectionFactory(
             await AuthenticateAndSelectAsync(id, stream, effective, cts.Token).ConfigureAwait(false);
 
             sw.Stop();
-            RedisTelemetry.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
 
             var conn = (IRedisConnection)new RedisConnection(id, socket, stream);
 
@@ -132,8 +132,8 @@ internal sealed class RedisConnectionFactory(
         {
             // Likely ConnectTimeout/handshake timeout via the linked CTS. Don't spam stack traces for expected timeouts.
             sw.Stop();
-            RedisTelemetry.ConnectFailures.Add(1);
-            RedisTelemetry.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.ConnectFailures.Add(1);
+            RedisMetrics.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
 
             var timeout = new TimeoutException(
                 $"Redis connect timed out to {effective.Host}:{effective.Port} (Tls={effective.UseTls}).",
@@ -160,8 +160,8 @@ internal sealed class RedisConnectionFactory(
         {
             // Host/app shutdown: treat as a canceled attempt without noisy logging.
             sw.Stop();
-            RedisTelemetry.ConnectFailures.Add(1);
-            RedisTelemetry.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.ConnectFailures.Add(1);
+            RedisMetrics.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
             try { stream?.Dispose(); } catch { }
             try { socket?.Dispose(); } catch { }
             return new Result<IRedisConnection>(oce);
@@ -169,8 +169,8 @@ internal sealed class RedisConnectionFactory(
         catch (Exception ex)
         {
             sw.Stop();
-            RedisTelemetry.ConnectFailures.Add(1);
-            RedisTelemetry.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.ConnectFailures.Add(1);
+            RedisMetrics.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
             try
             {
                 logger.LogWarning(ex, "Redis connect failed to {Host}:{Port} Tls={Tls} after {Ms}ms", effective.Host, effective.Port, effective.UseTls, sw.Elapsed.TotalMilliseconds);
