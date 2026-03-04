@@ -83,7 +83,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     /// <summary>
     /// Executes value.
     /// </summary>
-    public async Task SendAsync(PendingRequest first, Socket socket, CancellationToken ct)
+    public async Task SendAsync(PendingRequest first, Socket socket, long generation, CancellationToken ct)
     {
         _coalesceQueue.Clear();
         _coalesceDrained.Clear();
@@ -122,6 +122,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
                    committedBytes >= requestCommitOffsets[enqueuedToPending])
             {
                 var op = _coalesceDrained[enqueuedToPending].Op;
+                op.AssignGeneration(generation);
                 op.AssignSequenceId(_nextPendingSequence());
                 await _enqueuePendingOperation(op, ct).ConfigureAwait(false);
                 enqueuedToPending++;

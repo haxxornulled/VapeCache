@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
@@ -55,6 +56,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private long _laneTransportResetCount;
     private long _laneExpectedResponseSequence;
     private long _lanePendingSequenceAssigned;
+    private long _generation;
 
 
     private static int RoundUpToPowerOfTwo(int value)
@@ -505,6 +507,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                     onBytesRead: RecordLaneBytesReceived);
             }
 
+            Interlocked.Increment(ref _generation);
+
             // Successful connect/reset path clears transient unhealthy state.
             Interlocked.Exchange(ref _consecutiveFailures, 0);
         }
@@ -537,6 +541,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 hasReq = true;
                 await EnsureConnectedAsync(_cts.Token).ConfigureAwait(false);
                 var conn = _conn!;
+                var generation = Volatile.Read(ref _generation);
 
                 // Coalescing path supports all Redis command shapes, including payload operations.
                 // When coalescing is disabled, use the direct non-coalesced send path.
@@ -545,11 +550,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 if (useCoalescedPath)
                 {
                     usedCoalescedPath = true;
-                    await _coalescedWriteDispatcher.SendAsync(req, conn.Socket, _cts.Token).ConfigureAwait(false);
+                    await _coalescedWriteDispatcher.SendAsync(req, conn.Socket, generation, _cts.Token).ConfigureAwait(false);
                 }
                 else
                 {
-                    await SendDirectAsync(req, conn, _cts.Token).ConfigureAwait(false);
+                    await SendDirectAsync(req, conn, generation, _cts.Token).ConfigureAwait(false);
                     if (req.HeaderBuffer is not null)
                         ReturnHeaderBuffer(req.HeaderBuffer);
                     if (req.PayloadArrayBuffer is not null)
@@ -599,7 +604,22 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             {
                 next = await _pending.DequeueAsync(_cts.Token).ConfigureAwait(false);
                 await EnsureConnectedAsync(_cts.Token).ConfigureAwait(false);
+                var readGeneration = Volatile.Read(ref _generation);
                 var (resp, ex) = await _responseReaderLoop.ReadAsync(next.PoolBulk).ConfigureAwait(false);
+                var currentGeneration = Volatile.Read(ref _generation);
+
+                if (next.Generation != currentGeneration || readGeneration != currentGeneration)
+                {
+                    if (resp is not null)
+                        RedisRespReader.ReturnBuffers(resp);
+
+                    next.TrySetException(
+                        new IOException(
+                            $"Stale transport generation response ignored. Operation generation {next.Generation}, current generation {currentGeneration}."));
+                    next.MarkResponseProcessed();
+                    continue;
+                }
+
                 if (resp is not null)
                     RecordLaneResponseObserved(next, resp);
 
@@ -639,7 +659,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         }
     }
 
-    private async Task SendDirectAsync(PendingRequest req, IRedisConnection conn, CancellationToken ct)
+    private async Task SendDirectAsync(PendingRequest req, IRedisConnection conn, long generation, CancellationToken ct)
     {
         var sendHeader = await conn.SendAsync(req.Command, ct).ConfigureAwait(false);
         if (!sendHeader.IsSuccess)
@@ -678,6 +698,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             }
         }
 
+        req.Op.AssignGeneration(generation);
         req.Op.AssignSequenceId(NextPendingResponseSequence());
         await _pending.EnqueueAsync(req.Op, ct).ConfigureAwait(false);
     }
@@ -686,6 +707,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         Interlocked.Increment(ref _failureCount);
         Interlocked.Increment(ref _consecutiveFailures);
+        Interlocked.Increment(ref _generation);
         Volatile.Write(ref _laneExpectedResponseSequence, 0);
         if (countTransportReset)
             Interlocked.Increment(ref _laneTransportResetCount);

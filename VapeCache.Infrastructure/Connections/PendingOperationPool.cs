@@ -67,6 +67,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     private int _responseProcessed;
     private int _awaiterObserved;
     private long _sequenceId;
+    private long _generation;
     private long _startedStopwatchTicks;
 
     public PendingOperation(
@@ -91,6 +92,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     public bool IsCompleted => Volatile.Read(ref _completed) != 0;
     public ValueTask<RedisRespReader.RespValue> ValueTask { get; private set; }
     public long SequenceId => Volatile.Read(ref _sequenceId);
+    public long Generation => Volatile.Read(ref _generation);
 
     /// <summary>
     /// Executes value.
@@ -107,6 +109,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         Volatile.Write(ref _responseProcessed, 0);
         Volatile.Write(ref _awaiterObserved, 0);
         Volatile.Write(ref _sequenceId, 0);
+        Volatile.Write(ref _generation, 0);
         Volatile.Write(ref _startedStopwatchTicks, 0);
     }
 
@@ -149,6 +152,9 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
 
     public void AssignSequenceId(long sequenceId)
         => Volatile.Write(ref _sequenceId, sequenceId);
+
+    public void AssignGeneration(long generation)
+        => Volatile.Write(ref _generation, generation);
 
     /// <summary>
     /// Attempts to value.
