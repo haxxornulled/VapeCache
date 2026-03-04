@@ -2,12 +2,12 @@ param(
     [int]$Trials = 5,
     [int]$ShopperCount = 50000,
     [int]$MaxCartSize = 40,
-    [int]$MaxDegree = 64,
+    [int]$MaxDegree = 72,
     [ValidateSet("optimized", "apples", "both")]
     [string]$Track = "both",
     [ValidateSet("FullTilt", "Balanced", "LowLatency", "Custom")]
     [string]$MuxProfile = "FullTilt",
-    [int]$MuxConnections = 16,
+    [int]$MuxConnections = 8,
     [int]$MuxInFlight = 8192,
     [ValidateSet("true", "false")]
     [string]$MuxCoalesce = "true",
@@ -18,6 +18,8 @@ param(
     [ValidateSet("true", "false")]
     [string]$MuxDedicatedWorkers = "true",
     [int]$MuxResponseTimeoutMs = 0,
+    [ValidateSet("true", "false")]
+    [string]$CleanupRunKeys = "true",
     [ValidateSet("auto", "true", "false")]
     [string]$ServerGc = "true",
     [string]$RedisConnectionString = "",
@@ -167,6 +169,7 @@ $env:VAPECACHE_BENCH_MUX_ADAPTIVE_COALESCING = $MuxAdaptiveCoalescing.ToLowerInv
 $env:VAPECACHE_BENCH_SOCKET_RESP_READER = $MuxSocketReader.ToLowerInvariant()
 $env:VAPECACHE_BENCH_DEDICATED_LANE_WORKERS = $MuxDedicatedWorkers.ToLowerInvariant()
 $env:VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS = "$MuxResponseTimeoutMs"
+$env:VAPECACHE_BENCH_CLEANUP_RUN_KEYS = $CleanupRunKeys.ToLowerInvariant()
 $env:VAPECACHE_BENCH_LOG_LEVEL = $BenchLogLevel
 $env:VAPECACHE_GROCERYSTORE_VERBOSE = $GroceryVerbose.ToLowerInvariant()
 if ($MaxDegree -gt 0) {
@@ -196,7 +199,11 @@ Write-Host "Shoppers: $ShopperCount"
 Write-Host "Max cart size: $MaxCartSize"
 Write-Host "Max degree: $(if ($MaxDegree -gt 0) { "$MaxDegree (override)" } else { "auto" })"
 Write-Host "Track: $Track"
+if ($Track -eq "both") {
+    Write-Host "Both-track isolation: enabled"
+}
 Write-Host "Mux: Profile=$MuxProfile Connections=$MuxConnections InFlight=$MuxInFlight Coalesce=$($env:VAPECACHE_BENCH_MUX_COALESCE) Adaptive=$($env:VAPECACHE_BENCH_MUX_ADAPTIVE_COALESCING) SocketReader=$($env:VAPECACHE_BENCH_SOCKET_RESP_READER) DedicatedWorkers=$($env:VAPECACHE_BENCH_DEDICATED_LANE_WORKERS) TimeoutMs=$MuxResponseTimeoutMs"
+Write-Host "Cleanup: RunKeys=$($env:VAPECACHE_BENCH_CLEANUP_RUN_KEYS)"
 Write-Host "Logging: BenchLogLevel=$($env:VAPECACHE_BENCH_LOG_LEVEL) GroceryVerbose=$($env:VAPECACHE_GROCERYSTORE_VERBOSE)"
 Write-Host "DOTNET_GCServer: $(if ([string]::IsNullOrWhiteSpace($env:DOTNET_GCServer)) { "default" } else { $env:DOTNET_GCServer })"
 if ($useConnectionString) {
@@ -285,33 +292,21 @@ function Get-TrackSummary([string]$trackName, [System.Collections.Generic.List[o
     }
 }
 
-$results = New-Object System.Collections.Generic.List[object]
-$trackResults = @{
-    ApplesToApples = New-Object System.Collections.Generic.List[object]
-    OptimizedProductPath = New-Object System.Collections.Generic.List[object]
-}
-
-for ($trial = 1; $trial -le $Trials; $trial++) {
-    if ($RequireHostIsolation) {
-        Wait-ForHostIsolation -MaxCpu $MaxHostCpuPercent -StableSamplesRequired $StableCpuSamples -MaxWaitSeconds $MaxHostIsolationWaitSeconds
-    }
-
-    Write-Host "Run $trial/$Trials..."
-    $output = dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1
-
+function Parse-BenchmarkOutput([object[]]$OutputLines) {
     $throughputPattern = '^Throughput \(shoppers/sec\)\s+([0-9,]+(?:\.[0-9]+)?)\s+([0-9,]+(?:\.[0-9]+)?)\b'
     $trackPattern = '^Track:\s*(.+)$'
     $parsedByTrack = @{}
     $currentTrack = "single"
 
-    foreach ($line in $output) {
-        $trackMatch = [regex]::Match($line, $trackPattern)
+    foreach ($line in $OutputLines) {
+        $text = "$line"
+        $trackMatch = [regex]::Match($text, $trackPattern)
         if ($trackMatch.Success) {
             $currentTrack = $trackMatch.Groups[1].Value.Trim()
             continue
         }
 
-        $throughputMatch = [regex]::Match($line, $throughputPattern)
+        $throughputMatch = [regex]::Match($text, $throughputPattern)
         if (-not $throughputMatch.Success) {
             continue
         }
@@ -322,15 +317,96 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
         }
     }
 
-    if ($parsedByTrack.Count -eq 0) {
-        Write-Host "Unable to parse throughput output on run $trial."
-        $output | ForEach-Object { Write-Host $_ }
-        exit 2
+    return $parsedByTrack
+}
+
+function Invoke-BenchmarkRun([string]$RunTrack) {
+    $hadTrack = Test-Path Env:VAPECACHE_BENCH_TRACK
+    $previousTrack = $env:VAPECACHE_BENCH_TRACK
+    $env:VAPECACHE_BENCH_TRACK = $RunTrack
+    try {
+        $runOutput = @(dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1)
+        $parsed = Parse-BenchmarkOutput -OutputLines $runOutput
+        return [pscustomobject]@{
+            Output = $runOutput
+            ParsedByTrack = $parsed
+        }
+    }
+    finally {
+        if ($hadTrack) {
+            $env:VAPECACHE_BENCH_TRACK = $previousTrack
+        }
+        else {
+            Remove-Item Env:VAPECACHE_BENCH_TRACK -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+$results = New-Object System.Collections.Generic.List[object]
+$trackResults = @{
+    ApplesToApples = New-Object System.Collections.Generic.List[object]
+    OptimizedProductPath = New-Object System.Collections.Generic.List[object]
+}
+$isolateBoth = $Track -eq "both"
+
+for ($trial = 1; $trial -le $Trials; $trial++) {
+    if ($RequireHostIsolation) {
+        Wait-ForHostIsolation -MaxCpu $MaxHostCpuPercent -StableSamplesRequired $StableCpuSamples -MaxWaitSeconds $MaxHostIsolationWaitSeconds
+    }
+
+    Write-Host "Run $trial/$Trials..."
+    $output = @()
+    $selected = $null
+    $apples = $null
+    $optimized = $null
+
+    if ($isolateBoth) {
+        $applesRun = Invoke-BenchmarkRun -RunTrack "apples"
+        $optimizedRun = Invoke-BenchmarkRun -RunTrack "optimized"
+        $output = @($applesRun.Output + $optimizedRun.Output)
+
+        if ($applesRun.ParsedByTrack.Count -eq 0 -or $optimizedRun.ParsedByTrack.Count -eq 0) {
+            Write-Host "Unable to parse isolated both-track throughput values on run $trial."
+            $output | ForEach-Object { Write-Host $_ }
+            exit 2
+        }
+
+        $apples = $applesRun.ParsedByTrack["ApplesToApples"]
+        if ($null -eq $apples) {
+            $apples = $applesRun.ParsedByTrack["single"]
+        }
+
+        $optimized = $optimizedRun.ParsedByTrack["OptimizedProductPath"]
+        if ($null -eq $optimized) {
+            $optimized = $optimizedRun.ParsedByTrack["single"]
+        }
+    }
+    else {
+        $run = Invoke-BenchmarkRun -RunTrack $Track
+        $output = $run.Output
+        $parsedByTrack = $run.ParsedByTrack
+
+        if ($parsedByTrack.Count -eq 0) {
+            Write-Host "Unable to parse throughput output on run $trial."
+            $output | ForEach-Object { Write-Host $_ }
+            exit 2
+        }
+
+        if ($Track -eq "apples") {
+            $selected = $parsedByTrack["ApplesToApples"]
+            if ($null -eq $selected) {
+                $selected = $parsedByTrack["single"]
+            }
+        }
+        else {
+            $selected = $parsedByTrack["OptimizedProductPath"]
+            if ($null -eq $selected) {
+                $selected = $parsedByTrack["single"]
+            }
+        }
     }
 
     if ($Track -eq "both") {
-        $apples = $parsedByTrack["ApplesToApples"]
-        $optimized = $parsedByTrack["OptimizedProductPath"]
         if ($null -ne $apples) {
             $applesRatio = if ($apples.Ser -gt 0) { $apples.Vape / $apples.Ser } else { [double]::PositiveInfinity }
             $trackResults["ApplesToApples"].Add([pscustomobject]@{
@@ -356,18 +432,6 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
             Write-Host "Unable to parse both-track throughput values on run $trial."
             $output | ForEach-Object { Write-Host $_ }
             exit 2
-        }
-    }
-    elseif ($Track -eq "apples") {
-        $selected = $parsedByTrack["ApplesToApples"]
-        if ($null -eq $selected) {
-            $selected = $parsedByTrack["single"]
-        }
-    }
-    else {
-        $selected = $parsedByTrack["OptimizedProductPath"]
-        if ($null -eq $selected) {
-            $selected = $parsedByTrack["single"]
         }
     }
 

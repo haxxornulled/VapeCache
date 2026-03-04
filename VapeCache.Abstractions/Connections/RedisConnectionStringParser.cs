@@ -18,7 +18,11 @@ public static class RedisConnectionStringParser
             return false;
         }
 
-        if (!Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
+        var text = connectionString.Trim();
+        if (!text.Contains("://", StringComparison.Ordinal))
+            return TryParseEndpointStyle(text, out parsed, out error);
+
+        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri))
         {
             error = "Invalid URI.";
             return false;
@@ -126,6 +130,156 @@ public static class RedisConnectionStringParser
         };
 
         return true;
+    }
+
+    private static bool TryParseEndpointStyle(string text, out RedisConnectionOptions parsed, out string? error)
+    {
+        parsed = new RedisConnectionOptions();
+        error = null;
+
+        var segments = text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+        {
+            error = "Connection string is empty.";
+            return false;
+        }
+
+        var endpoint = segments[0];
+        if (!TryParseEndpoint(endpoint, out var host, out var port))
+        {
+            error = "Invalid endpoint. Expected host[:port] as the first segment.";
+            return false;
+        }
+
+        string? username = null;
+        string? password = null;
+        var database = 0;
+        var useTls = false;
+        string? tlsHost = null;
+        var allowInvalidCert = false;
+
+        for (var i = 1; i < segments.Length; i++)
+        {
+            var segment = segments[i];
+            var kv = segment.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (kv.Length != 2)
+                continue;
+
+            var key = kv[0];
+            var value = kv[1];
+
+            if (key.Equals("user", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("username", StringComparison.OrdinalIgnoreCase))
+            {
+                username = value.Length == 0 ? null : value;
+                continue;
+            }
+
+            if (key.Equals("password", StringComparison.OrdinalIgnoreCase))
+            {
+                password = value.Length == 0 ? null : value;
+                continue;
+            }
+
+            if (key.Equals("defaultDatabase", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("db", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("database", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedDb) || parsedDb < 0)
+                {
+                    error = $"Invalid database '{value}'.";
+                    return false;
+                }
+                database = parsedDb;
+                continue;
+            }
+
+            if (key.Equals("ssl", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("tls", StringComparison.OrdinalIgnoreCase))
+            {
+                useTls = ParseBool(value) ?? useTls;
+                continue;
+            }
+
+            if (key.Equals("sni", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("tlshost", StringComparison.OrdinalIgnoreCase))
+            {
+                tlsHost = value.Length == 0 ? null : value;
+                continue;
+            }
+
+            if (key.Equals("allowInvalidCert", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("allowInvalidServerCertificate", StringComparison.OrdinalIgnoreCase))
+            {
+                allowInvalidCert = ParseBool(value) ?? allowInvalidCert;
+                continue;
+            }
+        }
+
+        parsed = new RedisConnectionOptions
+        {
+            Host = host,
+            Port = port,
+            Username = username,
+            Password = password,
+            Database = database,
+            UseTls = useTls,
+            TlsHost = tlsHost,
+            AllowInvalidCert = allowInvalidCert
+        };
+        return true;
+    }
+
+    private static bool TryParseEndpoint(string endpoint, out string host, out int port)
+    {
+        host = string.Empty;
+        port = 6379;
+
+        var trimmed = endpoint.Trim();
+        if (trimmed.Length == 0)
+            return false;
+        if (trimmed.Contains('='))
+            return false;
+
+        if (trimmed[0] == '[')
+        {
+            var endBracket = trimmed.IndexOf(']');
+            if (endBracket < 0)
+                return false;
+
+            host = trimmed[1..endBracket];
+            if (host.Length == 0)
+                return false;
+
+            if (endBracket + 1 == trimmed.Length)
+                return true;
+
+            if (endBracket + 2 > trimmed.Length || trimmed[endBracket + 1] != ':')
+                return false;
+
+            var portText = trimmed[(endBracket + 2)..];
+            return int.TryParse(portText, NumberStyles.Integer, CultureInfo.InvariantCulture, out port) &&
+                   port is > 0 and <= 65535;
+        }
+
+        var colonIndex = trimmed.LastIndexOf(':');
+        if (colonIndex <= 0)
+        {
+            host = trimmed;
+            return true;
+        }
+
+        var portTextSimple = trimmed[(colonIndex + 1)..];
+        if (!int.TryParse(portTextSimple, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedPort) ||
+            parsedPort is <= 0 or > 65535)
+        {
+            host = trimmed;
+            return true;
+        }
+
+        host = trimmed[..colonIndex];
+        port = parsedPort;
+        return host.Length > 0;
     }
 
     private static bool? ParseBool(string value)

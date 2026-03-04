@@ -81,9 +81,9 @@ dotnet run
 ```powershell
 $env:VAPECACHE_MAX_CART_SIZE = "40"
 $env:VAPECACHE_BENCH_TRACK = "both" # optimized | apples | both
-$env:VAPECACHE_BENCH_MAX_DEGREE = "64"
+$env:VAPECACHE_BENCH_MAX_DEGREE = "80"
 $env:VAPECACHE_BENCH_MUX_PROFILE = "FullTilt"
-$env:VAPECACHE_BENCH_MUX_CONNECTIONS = "16"
+$env:VAPECACHE_BENCH_MUX_CONNECTIONS = "8"
 $env:VAPECACHE_BENCH_MUX_INFLIGHT = "8192"
 $env:VAPECACHE_BENCH_MUX_COALESCE = "true"
 $env:VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS = "0"
@@ -107,10 +107,10 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -Trials 5 `
   -ShopperCount 50000 `
   -MaxCartSize 40 `
-  -MaxDegree 64 `
+  -MaxDegree 72 `
   -Track both `
   -MuxProfile FullTilt `
-  -MuxConnections 16 `
+  -MuxConnections 8 `
   -MuxInFlight 8192 `
   -ServerGc true `
   -RedisHost 127.0.0.1 `
@@ -119,11 +119,16 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
 ```
 `run-grocery-head-to-head.ps1` builds `Release` binaries before running trials unless `-SkipBuild` is provided.
 Benchmark defaults tuned for high-core hosts:
-- `MaxDegree=64` (strong default for 50k shopper runs on modern multi-core hosts).
-- `MuxProfile=FullTilt`, `MuxConnections=16`, `MuxInFlight=8192`, `MuxCoalesce=true`.
+- `MaxDegree=72` (stability-first default for 50k shopper runs on modern multi-core hosts).
+- `MuxProfile=FullTilt`, `MuxConnections=8`, `MuxInFlight=8192`, `MuxCoalesce=true`.
+- `CleanupRunKeys=true` to prevent key buildup and Redis memory-pressure drift across trials.
+- `Track=both` runs apples and optimized in isolated passes per trial (no shared-run coupling).
 - `ServerGc=true` (`DOTNET_GCServer=1`) for steadier throughput under load.
-- For a fixed 28-core box, `-MaxDegree 64..80` is the preferred tuning window for 500x40 runs.
+- For a fixed 28-core box, `-MaxDegree 68..80` is the preferred stability window for 50k x 40 runs.
+- For peak throughput sweeps, test `-MaxDegree 80` after stability is confirmed.
 To use the exact same Redis setting source as the Grocery Store host, pass the connection string directly:
+- URI style is supported: `redis://user:pass@host:port/db` (or `rediss://...`).
+- StackExchange style is also supported: `host:port,user=...,password=...,ssl=...`.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `

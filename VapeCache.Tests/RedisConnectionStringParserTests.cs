@@ -71,4 +71,39 @@ public sealed class RedisConnectionStringParserTests
         Assert.True(ok, err);
         Assert.True(parsed.UseTls);
     }
+
+    [Fact]
+    public void Parses_stackexchange_style_endpoint_with_acl()
+    {
+        const string cs = "192.168.100.50,user=admin,password=redis4me!!,ssl=false,abortConnect=false,connectTimeout=5000,syncTimeout=5000";
+        var ok = RedisConnectionStringParser.TryParse(cs, out var parsed, out var err);
+        Assert.True(ok, err);
+        Assert.Equal("192.168.100.50", parsed.Host);
+        Assert.Equal(6379, parsed.Port);
+        Assert.Equal("admin", parsed.Username);
+        Assert.Equal("redis4me!!", parsed.Password);
+        Assert.False(parsed.UseTls);
+        Assert.Equal(0, parsed.Database);
+    }
+
+    [Fact]
+    public void Parses_stackexchange_style_endpoint_with_port_database_and_ssl()
+    {
+        const string cs = "cache.local:6380,password=pw,defaultDatabase=2,ssl=true";
+        var ok = RedisConnectionStringParser.TryParse(cs, out var parsed, out var err);
+        Assert.True(ok, err);
+        Assert.Equal("cache.local", parsed.Host);
+        Assert.Equal(6380, parsed.Port);
+        Assert.Equal("pw", parsed.Password);
+        Assert.Equal(2, parsed.Database);
+        Assert.True(parsed.UseTls);
+    }
+
+    [Fact]
+    public void Rejects_stackexchange_style_with_missing_endpoint()
+    {
+        var ok = RedisConnectionStringParser.TryParse("user=admin,password=pw", out _, out var err);
+        Assert.False(ok);
+        Assert.NotNull(err);
+    }
 }

@@ -890,14 +890,39 @@ public static class ComparisonRunner
             if (batch.Count < 1024)
                 continue;
 
-            deleted += await db.KeyDeleteAsync(batch.ToArray()).ConfigureAwait(false);
+            deleted += await DeleteBatchAsync(db, batch).ConfigureAwait(false);
             batch.Clear();
         }
 
         if (batch.Count > 0)
-            deleted += await db.KeyDeleteAsync(batch.ToArray()).ConfigureAwait(false);
+            deleted += await DeleteBatchAsync(db, batch).ConfigureAwait(false);
 
         return deleted;
+    }
+
+    private static async Task<long> DeleteBatchAsync(IDatabase db, List<RedisKey> batch)
+    {
+        // Prefer UNLINK to avoid synchronous key free stalls between benchmark iterations.
+        var args = new object[batch.Count];
+        for (var i = 0; i < batch.Count; i++)
+            args[i] = batch[i];
+
+        try
+        {
+            var reply = await db.ExecuteAsync("UNLINK", args).ConfigureAwait(false);
+            if (long.TryParse(reply.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                return parsed;
+        }
+        catch (RedisServerException ex) when (ex.Message.Contains("unknown command", StringComparison.OrdinalIgnoreCase))
+        {
+            // Redis < 4.0 fallback.
+        }
+        catch (RedisServerException ex) when (ex.Message.Contains("NOPERM", StringComparison.OrdinalIgnoreCase))
+        {
+            // ACL does not allow UNLINK; fallback to DEL.
+        }
+
+        return await db.KeyDeleteAsync(batch.ToArray()).ConfigureAwait(false);
     }
 
     private static async Task CleanupRunKeysSafelyAsync(string redisHost, int redisPort, string? redisUsername, string redisPassword, string keyPrefix)
