@@ -2318,24 +2318,24 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private RedisMultiplexedConnection CreateConnection()
         => new(
             _factory,
-            _muxOptions.MaxInFlightPerConnection,
-            _muxOptions.EnableCoalescedSocketWrites,
-            _muxOptions.EnableSocketRespReader,
-            _muxOptions.UseDedicatedLaneWorkers,
-            _connectionOptions.MaxBulkStringBytes,
-            _connectionOptions.MaxArrayDepth,
-            _muxOptions.ResponseTimeout,
-            _muxOptions.CoalescedWriteMaxBytes,
-            _muxOptions.CoalescedWriteMaxSegments,
-            _muxOptions.CoalescedWriteSmallCopyThresholdBytes,
-            _muxOptions.EnableAdaptiveCoalescing,
-            _muxOptions.AdaptiveCoalescingLowDepth,
-            _muxOptions.AdaptiveCoalescingHighDepth,
-            _muxOptions.AdaptiveCoalescingMinWriteBytes,
-            _muxOptions.AdaptiveCoalescingMinSegments,
-            _muxOptions.AdaptiveCoalescingMinSmallCopyThresholdBytes,
-            RecordAutoscaleLatencyStopwatchTicks,
-            ShouldRecordAutoscaleLatency);
+            maxInFlight: _muxOptions.MaxInFlightPerConnection,
+            coalesceWrites: _muxOptions.EnableCoalescedSocketWrites,
+            enableSocketRespReader: _muxOptions.EnableSocketRespReader,
+            useDedicatedLaneWorkers: _muxOptions.UseDedicatedLaneWorkers,
+            maxBulkStringBytes: _connectionOptions.MaxBulkStringBytes,
+            maxArrayDepth: _connectionOptions.MaxArrayDepth,
+            responseTimeout: _muxOptions.ResponseTimeout,
+            coalescedWriteMaxBytes: _muxOptions.CoalescedWriteMaxBytes,
+            coalescedWriteMaxSegments: _muxOptions.CoalescedWriteMaxSegments,
+            coalescedWriteSmallCopyThresholdBytes: _muxOptions.CoalescedWriteSmallCopyThresholdBytes,
+            enableAdaptiveCoalescing: _muxOptions.EnableAdaptiveCoalescing,
+            adaptiveCoalescingLowDepth: _muxOptions.AdaptiveCoalescingLowDepth,
+            adaptiveCoalescingHighDepth: _muxOptions.AdaptiveCoalescingHighDepth,
+            adaptiveCoalescingMinWriteBytes: _muxOptions.AdaptiveCoalescingMinWriteBytes,
+            adaptiveCoalescingMinSegments: _muxOptions.AdaptiveCoalescingMinSegments,
+            adaptiveCoalescingMinSmallCopyThresholdBytes: _muxOptions.AdaptiveCoalescingMinSmallCopyThresholdBytes,
+            recordLatencyStopwatchTicks: RecordAutoscaleLatencyStopwatchTicks,
+            shouldRecordLatency: ShouldRecordAutoscaleLatency);
 
     private void RebuildLanesUnsafe()
     {

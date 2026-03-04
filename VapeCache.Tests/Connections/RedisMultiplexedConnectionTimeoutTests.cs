@@ -65,6 +65,78 @@ public class RedisMultiplexedConnectionTimeoutTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_BulkTimeout_DoesNotResetTransport()
+    {
+        var factory = new NeverRespondingFactory();
+        var mux = new RedisMultiplexedConnection(
+            factory,
+            maxInFlight: 1,
+            coalesceWrites: false,
+            responseTimeout: TimeSpan.FromMilliseconds(50),
+            bulkPayloadBytesThreshold: 4096,
+            fastTimeoutResetThreshold: 1,
+            fastTimeoutResetWindow: TimeSpan.FromSeconds(5));
+
+        try
+        {
+            var command = CreateLargeSetCommand(16 * 1024);
+            var task = mux.ExecuteAsync(command, CancellationToken.None).AsTask();
+            var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.Same(task, completed);
+            await Assert.ThrowsAsync<TimeoutException>(() => task);
+
+            Assert.Equal(1, mux.ResponseTimeoutCount);
+            Assert.Equal(0, mux.FailureCount);
+            Assert.Equal(1, factory.CreateCount);
+        }
+        finally
+        {
+            await mux.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FastTimeoutBurst_ResetsTransportAfterThreshold()
+    {
+        var factory = new NeverRespondingFactory();
+        var mux = new RedisMultiplexedConnection(
+            factory,
+            maxInFlight: 1,
+            coalesceWrites: false,
+            responseTimeout: TimeSpan.FromMilliseconds(40),
+            fastTimeoutResetThreshold: 2,
+            fastTimeoutResetWindow: TimeSpan.FromSeconds(2));
+
+        try
+        {
+            var first = mux.ExecuteAsync(RedisRespProtocol.PingCommand, CancellationToken.None).AsTask();
+            var firstDone = await Task.WhenAny(first, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.Same(first, firstDone);
+            await Assert.ThrowsAsync<TimeoutException>(() => first);
+            Assert.Equal(0, mux.FailureCount);
+
+            var second = mux.ExecuteAsync(RedisRespProtocol.PingCommand, CancellationToken.None).AsTask();
+            var secondDone = await Task.WhenAny(second, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.Same(second, secondDone);
+            await Assert.ThrowsAsync<TimeoutException>(() => second);
+
+            Assert.True(mux.FailureCount >= 1);
+            Assert.True(mux.ResponseTimeoutCount >= 2);
+
+            var third = mux.ExecuteAsync(RedisRespProtocol.PingCommand, CancellationToken.None).AsTask();
+            var thirdDone = await Task.WhenAny(third, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.Same(third, thirdDone);
+            await Assert.ThrowsAsync<TimeoutException>(() => third);
+
+            Assert.True(factory.CreateCount >= 2);
+        }
+        finally
+        {
+            await mux.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_FatalSocketError_CompletesWithException()
     {
         var mux = new RedisMultiplexedConnection(
@@ -88,8 +160,15 @@ public class RedisMultiplexedConnectionTimeoutTests
 
     private sealed class NeverRespondingFactory : IRedisConnectionFactory
     {
+        private int _creates;
+
+        public int CreateCount => Volatile.Read(ref _creates);
+
         public ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
-            => ValueTask.FromResult(new Result<IRedisConnection>(new FakeConn(new NeverRespondingStream())));
+        {
+            Interlocked.Increment(ref _creates);
+            return ValueTask.FromResult(new Result<IRedisConnection>(new FakeConn(new NeverRespondingStream())));
+        }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
@@ -203,5 +282,15 @@ public class RedisMultiplexedConnectionTimeoutTests
             var ex = new IOException("Simulated socket failure.", new SocketException((int)SocketError.ConnectionReset));
             return ValueTask.FromException<int>(ex);
         }
+    }
+
+    private static ReadOnlyMemory<byte> CreateLargeSetCommand(int valueBytes)
+    {
+        var value = GC.AllocateUninitializedArray<byte>(valueBytes);
+        value.AsSpan().Fill((byte)'x');
+        var len = RedisRespProtocol.GetSetCommandLength("timeout:bulk", valueBytes, ttlMs: null);
+        var command = GC.AllocateUninitializedArray<byte>(len);
+        var written = RedisRespProtocol.WriteSetCommand(command, "timeout:bulk", value, ttlMs: null);
+        return command.AsMemory(0, written);
     }
 }

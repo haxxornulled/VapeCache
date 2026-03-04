@@ -20,6 +20,10 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private readonly bool _coalesceWrites;
     private readonly bool _useSocketReader;
     private readonly bool _useDedicatedLaneWorkers;
+    private readonly int _bulkMgetKeyThreshold;
+    private readonly int _bulkPayloadBytesThreshold;
+    private readonly int _fastTimeoutResetThreshold;
+    private readonly long _fastTimeoutResetWindowStopwatchTicks;
     private readonly int _maxBulkStringBytes;
     private readonly int _maxArrayDepth;
     private readonly TimeSpan _responseTimeout;
@@ -57,6 +61,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private long _laneExpectedResponseSequence;
     private long _lanePendingSequenceAssigned;
     private long _generation;
+    private long _fastTimeoutWindowStartTimestamp;
+    private int _fastTimeoutsInWindow;
 
 
     private static int RoundUpToPowerOfTwo(int value)
@@ -94,6 +100,10 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         int adaptiveCoalescingMinWriteBytes = 64 * 1024,
         int adaptiveCoalescingMinSegments = 64,
         int adaptiveCoalescingMinSmallCopyThresholdBytes = 512,
+        int bulkMgetKeyThreshold = 32,
+        int bulkPayloadBytesThreshold = 64 * 1024,
+        int fastTimeoutResetThreshold = 3,
+        TimeSpan fastTimeoutResetWindow = default,
         Action<long>? recordLatencyStopwatchTicks = null,
         Func<bool>? shouldRecordLatency = null)
     {
@@ -102,6 +112,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         _coalesceWrites = coalesceWrites;
         _useSocketReader = enableSocketRespReader;
         _useDedicatedLaneWorkers = useDedicatedLaneWorkers;
+        _bulkMgetKeyThreshold = Math.Max(1, bulkMgetKeyThreshold);
+        _bulkPayloadBytesThreshold = Math.Max(1, bulkPayloadBytesThreshold);
+        _fastTimeoutResetThreshold = Math.Max(1, fastTimeoutResetThreshold);
+        var timeoutResetWindow = fastTimeoutResetWindow <= TimeSpan.Zero ? TimeSpan.FromSeconds(2) : fastTimeoutResetWindow;
+        _fastTimeoutResetWindowStopwatchTicks = (long)Math.Max(1, timeoutResetWindow.TotalSeconds * Stopwatch.Frequency);
         _maxBulkStringBytes = maxBulkStringBytes;
         _maxArrayDepth = maxArrayDepth;
         _responseTimeout = responseTimeout <= TimeSpan.Zero || responseTimeout == Timeout.InfiniteTimeSpan
@@ -342,8 +357,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         CancellationToken ct)
     {
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(command, ReadOnlyMemory<byte>.Empty, null, payloadCount: 0);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(command, op);
         if (_writes.TryEnqueue(req))
@@ -359,8 +377,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         out ValueTask<RedisRespReader.RespValue> task)
     {
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(command, ReadOnlyMemory<byte>.Empty, null, payloadCount: 0);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(command, op);
         if (_writes.TryEnqueue(req))
@@ -387,8 +408,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         CancellationToken ct)
     {
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(header, payload, payloads, payloadCount);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(header, op, payload, payloads, payloadCount, appendCrlf, appendCrlfPerPayload, headerBuffer, payloadArrayBuffer);
         if (_writes.TryEnqueue(req))
@@ -411,8 +435,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         out ValueTask<RedisRespReader.RespValue> task)
     {
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(header, payload, payloads, payloadCount);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(header, op, payload, payloads, payloadCount, appendCrlf, appendCrlfPerPayload, headerBuffer, payloadArrayBuffer);
         if (_writes.TryEnqueue(req))
@@ -433,8 +460,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         await _inFlight.WaitAsync(ct).ConfigureAwait(false);
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(command, ReadOnlyMemory<byte>.Empty, null, payloadCount: 0);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(command, op);
         return await EnqueueWithQueueWaitAsync(req, op, ct).ConfigureAwait(false);
@@ -454,8 +484,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         await _inFlight.WaitAsync(ct).ConfigureAwait(false);
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(header, payload, payloads, payloadCount);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(header, op, payload, payloads, payloadCount, appendCrlf, appendCrlfPerPayload, headerBuffer, payloadArrayBuffer);
         return await EnqueueWithQueueWaitAsync(req, op, ct).ConfigureAwait(false);
@@ -476,6 +509,116 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         var elapsedMs = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
         RedisTelemetry.QueueWaitMs.Record(elapsedMs, new TagList { { "queue", "writes" }, { "connection.id", _connectionId } });
         return await op.ValueTask.ConfigureAwait(false);
+    }
+
+    private OperationClass ClassifyOperation(
+        ReadOnlyMemory<byte> command,
+        ReadOnlyMemory<byte> payload,
+        ReadOnlyMemory<byte>[]? payloads,
+        int payloadCount)
+    {
+        var totalBytes = command.Length + payload.Length;
+        if (payloadCount > 0 && payloads is not null)
+        {
+            for (var i = 0; i < payloadCount; i++)
+            {
+                totalBytes += payloads[i].Length;
+                if (totalBytes > _bulkPayloadBytesThreshold)
+                    return OperationClass.Bulk;
+            }
+        }
+
+        if (totalBytes > _bulkPayloadBytesThreshold)
+            return OperationClass.Bulk;
+
+        return IsBulkMGetCommand(command)
+            ? OperationClass.Bulk
+            : OperationClass.Fast;
+    }
+
+    private bool IsBulkMGetCommand(ReadOnlyMemory<byte> command)
+    {
+        var span = command.Span;
+        if (span.Length < 16 || span[0] != (byte)'*')
+            return false;
+
+        if (!TryReadRespInteger(span, 1, out var idx, out var arrayLen))
+            return false;
+
+        if (arrayLen <= _bulkMgetKeyThreshold + 1)
+            return false;
+
+        if (idx >= span.Length || span[idx] != (byte)'$')
+            return false;
+
+        if (!TryReadRespInteger(span, idx + 1, out idx, out var tokenLen))
+            return false;
+
+        if (tokenLen != 4 || idx + tokenLen + 2 > span.Length)
+            return false;
+
+        var token = span.Slice(idx, tokenLen);
+        if (!IsMGetToken(token))
+            return false;
+
+        return span[idx + tokenLen] == (byte)'\r' && span[idx + tokenLen + 1] == (byte)'\n';
+    }
+
+    private static bool TryReadRespInteger(ReadOnlySpan<byte> span, int startIndex, out int nextIndex, out int value)
+    {
+        nextIndex = startIndex;
+        value = 0;
+        var sawDigit = false;
+
+        for (var i = startIndex; i < span.Length; i++)
+        {
+            var b = span[i];
+            if (b == (byte)'\r')
+            {
+                if (!sawDigit || i + 1 >= span.Length || span[i + 1] != (byte)'\n')
+                    return false;
+
+                nextIndex = i + 2;
+                return true;
+            }
+
+            if (b is < (byte)'0' or > (byte)'9')
+                return false;
+
+            sawDigit = true;
+            value = checked((value * 10) + (b - (byte)'0'));
+        }
+
+        return false;
+    }
+
+    private static bool IsMGetToken(ReadOnlySpan<byte> token)
+        => token.Length == 4
+            && ((token[0] | 0x20) == (byte)'m')
+            && ((token[1] | 0x20) == (byte)'g')
+            && ((token[2] | 0x20) == (byte)'e')
+            && ((token[3] | 0x20) == (byte)'t');
+
+    private bool ShouldResetTransportForTimeout(PendingOperation operation)
+    {
+        if (operation.OperationClass == OperationClass.Bulk)
+            return false;
+
+        return ShouldResetAfterFastTimeout();
+    }
+
+    private bool ShouldResetAfterFastTimeout()
+    {
+        var now = Stopwatch.GetTimestamp();
+        if (_fastTimeoutWindowStartTimestamp == 0
+            || now - _fastTimeoutWindowStartTimestamp > _fastTimeoutResetWindowStopwatchTicks)
+        {
+            _fastTimeoutWindowStartTimestamp = now;
+            _fastTimeoutsInWindow = 0;
+        }
+
+        _fastTimeoutsInWindow++;
+        return _fastTimeoutsInWindow >= _fastTimeoutResetThreshold;
     }
 
     private async Task EnsureConnectedAsync(CancellationToken ct)
@@ -616,8 +759,12 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 }
                 else if (ex is not null)
                 {
-                    if (ex is TimeoutException)
+                    if (ex is TimeoutException timeout)
+                    {
                         Interlocked.Increment(ref _responseTimeoutCount);
+                        if (ShouldResetTransportForTimeout(next))
+                            await FailTransportAsync(timeout).ConfigureAwait(false);
+                    }
                     if (resp is not null)
                         RedisRespReader.ReturnBuffers(resp);
                     next.TrySetException(ex);
@@ -706,6 +853,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         Interlocked.Increment(ref _failureCount);
         Interlocked.Increment(ref _consecutiveFailures);
         Interlocked.Increment(ref _generation);
+        _fastTimeoutWindowStartTimestamp = 0;
+        _fastTimeoutsInWindow = 0;
         Volatile.Write(ref _laneExpectedResponseSequence, 0);
         if (countTransportReset)
             Interlocked.Increment(ref _laneTransportResetCount);

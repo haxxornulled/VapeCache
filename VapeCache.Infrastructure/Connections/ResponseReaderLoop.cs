@@ -93,7 +93,6 @@ internal sealed class ResponseReaderLoop
         catch (OperationCanceledException oce)
         {
             var timeout = new TimeoutException($"Redis response timed out after {_responseTimeout}.", oce);
-            await _failTransportAsync(timeout).ConfigureAwait(false);
             return (null, timeout);
         }
         catch (IOException ioe) when (ioeFatalMap(ioe) is { } fatalIo)

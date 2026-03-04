@@ -51,6 +51,12 @@ internal sealed class PendingOperationPool
     public bool TryTake(out PendingOperation? operation) => _pool.TryTake(out operation);
 }
 
+internal enum OperationClass : byte
+{
+    Fast = 0,
+    Bulk = 1
+}
+
 internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespValue>
 {
     private ManualResetValueTaskSourceCore<RedisRespReader.RespValue> _core;
@@ -67,6 +73,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     private int _registrationsDisposed;
     private int _responseProcessed;
     private int _awaiterObserved;
+    private int _operationClass;
     private long _sequenceId;
     private long _generation;
     private long _operationVersion;
@@ -93,6 +100,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     public bool PoolBulk { get; private set; }
     public bool IsCompleted => Volatile.Read(ref _completed) != 0;
     public ValueTask<RedisRespReader.RespValue> ValueTask { get; private set; }
+    public OperationClass OperationClass => (OperationClass)Volatile.Read(ref _operationClass);
     public long SequenceId => Volatile.Read(ref _sequenceId);
     public long Generation => Volatile.Read(ref _generation);
 
@@ -113,6 +121,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         Volatile.Write(ref _registrationsDisposed, 0);
         Volatile.Write(ref _responseProcessed, 0);
         Volatile.Write(ref _awaiterObserved, 0);
+        Volatile.Write(ref _operationClass, (int)OperationClass.Fast);
         Volatile.Write(ref _sequenceId, 0);
         Volatile.Write(ref _generation, 0);
         Volatile.Write(ref _startedStopwatchTicks, 0);
@@ -121,12 +130,13 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     /// <summary>
     /// Executes value.
     /// </summary>
-    public void Start(bool poolBulk, CancellationToken ct, bool holdsSlot, long sequenceId)
+    public void Start(bool poolBulk, CancellationToken ct, bool holdsSlot, long sequenceId, OperationClass operationClass = OperationClass.Fast)
     {
         var operationVersion = Interlocked.Increment(ref _operationVersion);
         PoolBulk = poolBulk;
         _ct = ct;
         _holdsSlot = holdsSlot;
+        Volatile.Write(ref _operationClass, (int)operationClass);
         Volatile.Write(ref _sequenceId, sequenceId);
         Volatile.Write(
             ref _startedStopwatchTicks,
