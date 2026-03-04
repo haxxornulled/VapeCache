@@ -48,17 +48,17 @@ internal static class RedisRespReader
     internal static void ReturnArray(RespValue[] array, int length)
     {
         // Clear references to avoid holding onto nested pooled buffers.
-        Array.Clear(array, 0, Math.Min(length, array.Length));
+        Array.Clear(array, 0, array.Length);
 
         // PERFORMANCE FIX P2-2: Use ThreadStatic cache for lock-free fast path
         // Only cache one array per thread to keep TLS overhead minimal
-        if (length <= MaxCachedArrayLength && _tlsCachedArray is null)
+        if (array.Length <= MaxCachedArrayLength && _tlsCachedArray is null)
         {
             _tlsCachedArray = array;
             return;
         }
 
-        ArrayPool<RespValue>.Shared.Return(array, clearArray: true);
+        ArrayPool<RespValue>.Shared.Return(array, clearArray: false);
     }
 
     /// <summary>

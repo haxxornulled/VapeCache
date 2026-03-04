@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -109,5 +110,32 @@ public sealed class RedisRespReaderTests
 
         Assert.Equal(RedisRespReader.RespKind.BulkString, resp.Kind);
         Assert.Equal("hello", Encoding.UTF8.GetString(resp.Bulk!, 0, resp.BulkLength));
+    }
+
+    [Fact]
+    public void ReturnArray_ClearsTailReferences_WhenTlsCachedArrayIsReused()
+    {
+        // Drain any pre-existing TLS cache entry so this test controls the cached instance.
+        var drained = RedisRespReader.RentArray(1);
+        Array.Clear(drained, 0, drained.Length);
+        ArrayPool<RedisRespReader.RespValue>.Shared.Return(drained, clearArray: false);
+
+        var array = RedisRespReader.RentArray(8);
+        for (var i = 0; i < array.Length; i++)
+            array[i] = RedisRespReader.RespValue.SimpleString($"sentinel-{i}");
+
+        RedisRespReader.ReturnArray(array, length: 2);
+
+        var reused = RedisRespReader.RentArray(8);
+        try
+        {
+            Assert.Same(array, reused);
+            for (var i = 2; i < reused.Length; i++)
+                Assert.Null(reused[i]);
+        }
+        finally
+        {
+            RedisRespReader.ReturnArray(reused, reused.Length);
+        }
     }
 }
