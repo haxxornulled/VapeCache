@@ -1188,7 +1188,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private static string FormatUnexpectedSetResponse(RedisRespReader.RespValue response)
         => FormatUnexpectedResponse("SET", response);
 
-    private async ValueTask<T> ThrowUnexpectedResponseAndResetAsync<T>(
+    private static async ValueTask<T> ThrowUnexpectedResponseAndResetAsync<T>(
         RedisMultiplexedConnection conn,
         string operation,
         RedisRespReader.RespValue response,
@@ -1201,7 +1201,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         throw ex;
     }
 
-    private async ValueTask<byte[]?> ReadOptionalBytesResponseAsync(
+    private static async ValueTask<byte[]?> ReadOptionalBytesResponseAsync(
         RedisMultiplexedConnection conn,
         string operation,
         RedisRespReader.RespValue resp,
@@ -1220,7 +1220,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         return await ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, operation, resp).ConfigureAwait(false);
     }
 
-    private async ValueTask<RedisValueLease> ReadOptionalLeaseResponseAsync(
+    private static async ValueTask<RedisValueLease> ReadOptionalLeaseResponseAsync(
         RedisMultiplexedConnection conn,
         string operation,
         RedisRespReader.RespValue resp)
@@ -1234,7 +1234,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         return await ThrowUnexpectedResponseAndResetAsync<RedisValueLease>(conn, operation, resp).ConfigureAwait(false);
     }
 
-    private async ValueTask<long> ReadIntegerResponseAsync(
+    private static async ValueTask<long> ReadIntegerResponseAsync(
         RedisMultiplexedConnection conn,
         string operation,
         RedisRespReader.RespValue resp)
@@ -1245,7 +1245,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         return await ThrowUnexpectedResponseAndResetAsync<long>(conn, operation, resp).ConfigureAwait(false);
     }
 
-    private async ValueTask<string> ReadSimpleStringResponseAsync(
+    private static async ValueTask<string> ReadSimpleStringResponseAsync(
         RedisMultiplexedConnection conn,
         string operation,
         RedisRespReader.RespValue resp)
@@ -1256,7 +1256,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         return await ThrowUnexpectedResponseAndResetAsync<string>(conn, operation, resp).ConfigureAwait(false);
     }
 
-    private async ValueTask<bool> ReadSetResponseAsync(
+    private static async ValueTask<bool> ReadSetResponseAsync(
         RedisMultiplexedConnection conn,
         RedisRespReader.RespValue resp)
     {
@@ -2927,7 +2927,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
     }
 
-    private async ValueTask WaitForDrainAsync(RedisMultiplexedConnection conn, TimeSpan timeout, CancellationToken ct)
+    private static async ValueTask WaitForDrainAsync(RedisMultiplexedConnection conn, TimeSpan timeout, CancellationToken ct)
     {
         if (timeout <= TimeSpan.Zero)
             return;
@@ -3686,7 +3686,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 return resp.Bulk;
             if (resp.Kind == RedisRespReader.RespKind.Error)
                 throw new InvalidOperationException($"Redis error: {resp.Text}");
-            return await executor.ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, op, resp).ConfigureAwait(false);
+            return await ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, op, resp).ConfigureAwait(false);
         }
     }
 
@@ -3743,7 +3743,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 return RedisValueLease.Null;
             if (resp.Kind == RedisRespReader.RespKind.BulkString && resp.Bulk is not null)
                 return new RedisValueLease(resp.Bulk, resp.BulkLength, pooled: resp.BulkIsPooled);
-            return await executor.ThrowUnexpectedResponseAndResetAsync<RedisValueLease>(conn, op, resp).ConfigureAwait(false);
+            return await ThrowUnexpectedResponseAndResetAsync<RedisValueLease>(conn, op, resp).ConfigureAwait(false);
         }
     }
 
@@ -3816,7 +3816,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             try
             {
                 var resp = await task.ConfigureAwait(false);
-                return await executor.ReadSetResponseAsync(conn, resp).ConfigureAwait(false);
+                return await ReadSetResponseAsync(conn, resp).ConfigureAwait(false);
             }
             finally
             {
@@ -3865,7 +3865,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             var resp = await task.ConfigureAwait(false);
             if (resp.Kind == RedisRespReader.RespKind.Integer)
                 return resp.IntegerValue == 1;
-            return await executor.ThrowUnexpectedResponseAndResetAsync<bool>(conn, "SISMEMBER", resp).ConfigureAwait(false);
+            return await ThrowUnexpectedResponseAndResetAsync<bool>(conn, "SISMEMBER", resp).ConfigureAwait(false);
         }
     }
 
@@ -3919,7 +3919,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 return null;
             if (resp.Kind == RedisRespReader.RespKind.BulkString)
                 return resp.Bulk;
-            return await executor.ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, "LPOP", resp).ConfigureAwait(false);
+            return await ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, "LPOP", resp).ConfigureAwait(false);
         }
     }
 
@@ -4030,7 +4030,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
                 return null;
 
-            return await executor.ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, "RPOP", resp).ConfigureAwait(false);
+            return await ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, "RPOP", resp).ConfigureAwait(false);
         }
     }
 

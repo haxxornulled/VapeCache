@@ -286,7 +286,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
     [Fact]
     public async Task ScaleDownPath_WaitsForDrainTimeout_WhenInflightNotDrained()
     {
-        var waitForDrain = typeof(RedisCommandExecutor).GetMethod("WaitForDrainAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        var waitForDrain = typeof(RedisCommandExecutor).GetMethod("WaitForDrainAsync", BindingFlags.Static | BindingFlags.NonPublic);
         Assert.NotNull(waitForDrain);
         Assert.Equal(typeof(ValueTask), waitForDrain!.ReturnType);
 
@@ -316,7 +316,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
         var sw = Stopwatch.StartNew();
         try
         {
-            var vt = (ValueTask)waitForDrain.Invoke(harness.Executor, new object[] { lane, TimeSpan.FromMilliseconds(90), CancellationToken.None })!;
+            var vt = (ValueTask)waitForDrain.Invoke(null, new object[] { lane, TimeSpan.FromMilliseconds(90), CancellationToken.None })!;
             await vt.AsTask();
         }
         finally

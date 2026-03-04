@@ -57,7 +57,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         Volatile.Write(ref _cleanupOffset, nextOffset);
     }
 
-    private bool IsExpired(CacheEntry entry)
+    private static bool IsExpired(CacheEntry entry)
     {
         return entry.ExpiresAt.HasValue && entry.ExpiresAt <= DateTimeOffset.UtcNow;
     }

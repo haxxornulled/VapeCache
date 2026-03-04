@@ -610,7 +610,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
         }
     }
 
-    private void TrackDrop(string reason)
+    private static void TrackDrop(string reason)
     {
         RedisTelemetry.PoolDrops.Add(1, new KeyValuePair<string, object?>("reason", reason));
     }

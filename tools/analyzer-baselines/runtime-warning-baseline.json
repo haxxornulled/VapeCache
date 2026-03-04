@@ -1,10 +1,10 @@
 {
   "formatVersion": 1,
-  "generatedUtc": "2026-03-03T18:13:50.5181979+00:00",
+  "generatedUtc": "2026-03-04T14:03:15.5178271+00:00",
   "configuration": "Release",
   "totals": {
-    "uniqueWarningLocations": 303,
-    "entryCount": 83
+    "uniqueWarningLocations": 295,
+    "entryCount": 79
   },
   "entries": [
     {
@@ -204,11 +204,6 @@
     },
     {
       "file": "VapeCache.Infrastructure/Connections/InMemoryCommandExecutor.cs",
-      "rule": "CA1822",
-      "count": 1
-    },
-    {
-      "file": "VapeCache.Infrastructure/Connections/InMemoryCommandExecutor.cs",
       "rule": "CA1836",
       "count": 1
     },
@@ -226,11 +221,6 @@
       "file": "VapeCache.Infrastructure/Connections/RedisCommandExecutor.cs",
       "rule": "CA1512",
       "count": 4
-    },
-    {
-      "file": "VapeCache.Infrastructure/Connections/RedisCommandExecutor.cs",
-      "rule": "CA1822",
-      "count": 2
     },
     {
       "file": "VapeCache.Infrastructure/Connections/RedisCommandExecutor.cs",
@@ -274,11 +264,6 @@
     },
     {
       "file": "VapeCache.Infrastructure/Connections/RedisConnectionPool.cs",
-      "rule": "CA1822",
-      "count": 1
-    },
-    {
-      "file": "VapeCache.Infrastructure/Connections/RedisConnectionPool.cs",
       "rule": "CA1848",
       "count": 15
     },
@@ -286,11 +271,6 @@
       "file": "VapeCache.Infrastructure/Connections/RedisConnectionPool.cs",
       "rule": "CA1873",
       "count": 11
-    },
-    {
-      "file": "VapeCache.Infrastructure/Connections/RedisMultiplexedBufferCaches.cs",
-      "rule": "CA1822",
-      "count": 4
     },
     {
       "file": "VapeCache.Infrastructure/Connections/RedisMultiplexedConnection.cs",

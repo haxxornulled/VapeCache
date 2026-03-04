@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Diagnostics.CodeAnalysis;
 using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
@@ -36,7 +37,6 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private readonly Task _reader;
     private static readonly ReadOnlyMemory<byte> CrlfMemory = "\r\n"u8.ToArray();
 
-    private readonly RedisMultiplexedBufferCaches _bufferCaches = new();
     private readonly CoalescedWriteDispatcher _coalescedWriteDispatcher;
 
     private IRedisConnection? _conn;
@@ -880,17 +880,21 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private PendingOperation RentOperation()
         => _operationPool.Rent();
 
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal byte[] RentHeaderBuffer(int minLength)
-        => _bufferCaches.RentHeaderBuffer(minLength);
+        => RedisMultiplexedBufferCaches.RentHeaderBuffer(minLength);
 
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal void ReturnHeaderBuffer(byte[] buffer)
-        => _bufferCaches.ReturnHeaderBuffer(buffer);
+        => RedisMultiplexedBufferCaches.ReturnHeaderBuffer(buffer);
 
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal ReadOnlyMemory<byte>[] RentPayloadArray(int minLength)
-        => _bufferCaches.RentPayloadArray(minLength);
+        => RedisMultiplexedBufferCaches.RentPayloadArray(minLength);
 
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal void ReturnPayloadArray(ReadOnlyMemory<byte>[]? payloads)
-        => _bufferCaches.ReturnPayloadArray(payloads);
+        => RedisMultiplexedBufferCaches.ReturnPayloadArray(payloads);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal int GetLaneSelectionScore()

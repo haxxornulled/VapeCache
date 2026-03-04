@@ -46,6 +46,30 @@ internal sealed class HybridCacheService(
     private static readonly JsonSerializerOptions TagJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly byte[] TagEnvelopePrefix = "VCTAG1:"u8.ToArray();
     private const string TagVersionKeyPrefix = "vapecache:tag:v1:";
+    private static readonly Action<ILogger, string, Exception?> LogDiscardedStaleTaggedCacheEntry = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7001, nameof(LogDiscardedStaleTaggedCacheEntry)),
+        "Discarded stale tagged cache entry for key {Key}.");
+    private static readonly Action<ILogger, string, Exception?> LogTagVersionReadFallback = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7002, nameof(LogTagVersionReadFallback)),
+        "Tag version read failed for tag {Tag}; falling back to local version.");
+    private static readonly Action<ILogger, string, Exception?> LogRedisTagVersionWriteQueued = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7003, nameof(LogRedisTagVersionWriteQueued)),
+        "Redis tag version write failed for tag {Tag}; queuing reconciliation write.");
+    private static readonly Action<ILogger, string, Exception?> LogFallbackTagVersionWarmFailed = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7004, nameof(LogFallbackTagVersionWarmFailed)),
+        "Fallback tag version warm failed for key {TagVersionKey}.");
+    private static readonly Action<ILogger, string, Exception?> LogFallbackReadWarmFailed = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7005, nameof(LogFallbackReadWarmFailed)),
+        "Fallback read-warm failed for key {Key}.");
+    private static readonly Action<ILogger, string, Exception?> LogFallbackWriteMirrorFailed = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7006, nameof(LogFallbackWriteMirrorFailed)),
+        "Fallback write-mirror failed for key {Key}.");
 
     public bool Enabled => _breaker.Enabled;
     public bool IsOpen => _breaker.Enabled && (IsForcedOpen || (Volatile.Read(ref _openUntilTicks) != 0 && !IsRedisAllowedNow()));
@@ -563,7 +587,7 @@ internal sealed class HybridCacheService(
             return envelope.Payload;
 
         await TryRemoveTaggedStaleEntryAsync(key, ct).ConfigureAwait(false);
-        logger.LogDebug("Discarded stale tagged cache entry for key {Key}.", key);
+        LogDiscardedStaleTaggedCacheEntry(logger, key, null);
         return null;
     }
 
@@ -612,7 +636,7 @@ internal sealed class HybridCacheService(
         catch (Exception ex)
         {
             MarkRedisFailure();
-            logger.LogDebug(ex, "Tag version read failed for tag {Tag}; falling back to local version.", normalizedTag);
+            LogTagVersionReadFallback(logger, normalizedTag, ex);
             return fallbackVersion;
         }
         finally
@@ -622,7 +646,7 @@ internal sealed class HybridCacheService(
         }
     }
 
-    private async ValueTask<long> GetTagVersionFromBackendAsync(ICacheService backend, string tagVersionKey, CancellationToken ct)
+    private static async ValueTask<long> GetTagVersionFromBackendAsync(ICacheService backend, string tagVersionKey, CancellationToken ct)
     {
         var payload = await backend.GetAsync(tagVersionKey, ct).ConfigureAwait(false);
         return TryDeserializeTagVersion(payload, out var version) ? version : 0;
@@ -668,7 +692,7 @@ internal sealed class HybridCacheService(
         catch (Exception ex)
         {
             MarkRedisFailure();
-            logger.LogDebug(ex, "Redis tag version write failed for tag {Tag}; queuing reconciliation write.", normalizedTag);
+            LogRedisTagVersionWriteQueued(logger, normalizedTag, ex);
             reconciliation?.TrackWrite(tagVersionKey, payload, expiry: null);
         }
         finally
@@ -696,7 +720,7 @@ internal sealed class HybridCacheService(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Fallback tag version warm failed for key {TagVersionKey}.", tagVersionKey);
+            LogFallbackTagVersionWarmFailed(logger, tagVersionKey, ex);
         }
     }
 
@@ -861,7 +885,7 @@ internal sealed class HybridCacheService(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Fallback read-warm failed for key {Key}.", key);
+            LogFallbackReadWarmFailed(logger, key, ex);
         }
     }
 
@@ -898,7 +922,7 @@ internal sealed class HybridCacheService(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Fallback write-mirror failed for key {Key}.", key);
+            LogFallbackWriteMirrorFailed(logger, key, ex);
         }
     }
 

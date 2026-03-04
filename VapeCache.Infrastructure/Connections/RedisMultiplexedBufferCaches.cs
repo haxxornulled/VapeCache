@@ -20,7 +20,7 @@ internal sealed class RedisMultiplexedBufferCaches
     /// <summary>
     /// Executes value.
     /// </summary>
-    public byte[] RentHeaderBuffer(int minLength)
+    public static byte[] RentHeaderBuffer(int minLength)
     {
         if (minLength <= 512)
         {
@@ -51,7 +51,7 @@ internal sealed class RedisMultiplexedBufferCaches
     /// <summary>
     /// Executes value.
     /// </summary>
-    public void ReturnHeaderBuffer(byte[]? buffer)
+    public static void ReturnHeaderBuffer(byte[]? buffer)
     {
         if (buffer is null)
             return;
@@ -87,7 +87,7 @@ internal sealed class RedisMultiplexedBufferCaches
     /// <summary>
     /// Executes value.
     /// </summary>
-    public ReadOnlyMemory<byte>[] RentPayloadArray(int minLength)
+    public static ReadOnlyMemory<byte>[] RentPayloadArray(int minLength)
     {
         if (minLength <= 16)
         {
@@ -118,7 +118,7 @@ internal sealed class RedisMultiplexedBufferCaches
     /// <summary>
     /// Executes value.
     /// </summary>
-    public void ReturnPayloadArray(ReadOnlyMemory<byte>[]? payloads)
+    public static void ReturnPayloadArray(ReadOnlyMemory<byte>[]? payloads)
     {
         if (payloads is null)
             return;
