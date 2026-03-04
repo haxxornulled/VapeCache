@@ -12,6 +12,8 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
     private int _pos;
     private int _len;
     private int _disposed;
+    private int _activeReaders;
+    private int _bufferReturned;
     private readonly bool _useUnsafeFastPath;
     private readonly int _maxBulkStringBytes;
     private readonly int _maxArrayDepth;
@@ -45,26 +47,43 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
     /// </summary>
     public async ValueTask<RedisRespReader.RespValue> ReadAsync(bool poolBulk, CancellationToken ct)
     {
-        var prefix = await ReadByteAsync(ct).ConfigureAwait(false);
-        return prefix switch
+        if (Volatile.Read(ref _disposed) == 1)
+            throw new ObjectDisposedException(nameof(RedisRespReaderState));
+
+        Interlocked.Increment(ref _activeReaders);
+        if (Volatile.Read(ref _disposed) == 1)
         {
-            (byte)'+' => RedisRespReader.RespValue.SimpleString(await ReadLineAsync(ct).ConfigureAwait(false)),
-            (byte)'-' => RedisRespReader.RespValue.Error(await ReadLineAsync(ct).ConfigureAwait(false)),
-            (byte)':' => RedisRespReader.RespValue.Integer(await ReadInt64LineAsync(ct).ConfigureAwait(false)),
-            (byte)'$' => await ReadBulkStringAsync(poolBulk, ct).ConfigureAwait(false),
-            (byte)'*' => await ReadArrayAsync(poolBulk, ct).ConfigureAwait(false),
-            (byte)'_' => await ReadNullAsync(ct).ConfigureAwait(false),
-            (byte)',' => RedisRespReader.RespValue.SimpleString(await ReadLineAsync(ct).ConfigureAwait(false)),
-            (byte)'#' => await ReadBooleanAsync(ct).ConfigureAwait(false),
-            (byte)'(' => RedisRespReader.RespValue.SimpleString(await ReadLineAsync(ct).ConfigureAwait(false)),
-            (byte)'=' => await ReadVerbatimStringAsync(poolBulk, ct).ConfigureAwait(false),
-            (byte)'!' => await ReadBlobErrorAsync(ct).ConfigureAwait(false),
-            (byte)'~' => await ReadSetAsync(poolBulk, ct).ConfigureAwait(false),
-            (byte)'>' => await ReadPushAsync(poolBulk, ct).ConfigureAwait(false),
-            (byte)'%' => await ReadMapAsArrayAsync(poolBulk, ct).ConfigureAwait(false),
-            (byte)'|' => await ReadAttributeWrappedAsync(poolBulk, ct).ConfigureAwait(false),
-            _ => throw new InvalidOperationException($"Unsupported RESP type: {(char)prefix}")
-        };
+            CompleteRead();
+            throw new ObjectDisposedException(nameof(RedisRespReaderState));
+        }
+
+        try
+        {
+            var prefix = await ReadByteAsync(ct).ConfigureAwait(false);
+            return prefix switch
+            {
+                (byte)'+' => RedisRespReader.RespValue.SimpleString(await ReadLineAsync(ct).ConfigureAwait(false)),
+                (byte)'-' => RedisRespReader.RespValue.Error(await ReadLineAsync(ct).ConfigureAwait(false)),
+                (byte)':' => RedisRespReader.RespValue.Integer(await ReadInt64LineAsync(ct).ConfigureAwait(false)),
+                (byte)'$' => await ReadBulkStringAsync(poolBulk, ct).ConfigureAwait(false),
+                (byte)'*' => await ReadArrayAsync(poolBulk, ct).ConfigureAwait(false),
+                (byte)'_' => await ReadNullAsync(ct).ConfigureAwait(false),
+                (byte)',' => RedisRespReader.RespValue.SimpleString(await ReadLineAsync(ct).ConfigureAwait(false)),
+                (byte)'#' => await ReadBooleanAsync(ct).ConfigureAwait(false),
+                (byte)'(' => RedisRespReader.RespValue.SimpleString(await ReadLineAsync(ct).ConfigureAwait(false)),
+                (byte)'=' => await ReadVerbatimStringAsync(poolBulk, ct).ConfigureAwait(false),
+                (byte)'!' => await ReadBlobErrorAsync(ct).ConfigureAwait(false),
+                (byte)'~' => await ReadSetAsync(poolBulk, ct).ConfigureAwait(false),
+                (byte)'>' => await ReadPushAsync(poolBulk, ct).ConfigureAwait(false),
+                (byte)'%' => await ReadMapAsArrayAsync(poolBulk, ct).ConfigureAwait(false),
+                (byte)'|' => await ReadAttributeWrappedAsync(poolBulk, ct).ConfigureAwait(false),
+                _ => throw new InvalidOperationException($"Unsupported RESP type: {(char)prefix}")
+            };
+        }
+        finally
+        {
+            CompleteRead();
+        }
     }
 
     private async ValueTask<byte> ReadByteAsync(CancellationToken ct)
@@ -76,8 +95,6 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
 
     private async ValueTask FillAsync(CancellationToken ct)
     {
-        if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisRespReaderState));
-
         _pos = 0;
         _len = 0;
         var read = await _stream.ReadAsync(_buffer.AsMemory(), ct).ConfigureAwait(false);
@@ -403,9 +420,25 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return ValueTask.CompletedTask;
-        ArrayPool<byte>.Shared.Return(_buffer);
-        _buffer = Array.Empty<byte>();
+        if (Volatile.Read(ref _activeReaders) == 0)
+            ReturnBufferIfNeeded();
         return ValueTask.CompletedTask;
+    }
+
+    private void CompleteRead()
+    {
+        if (Interlocked.Decrement(ref _activeReaders) == 0 && Volatile.Read(ref _disposed) == 1)
+            ReturnBufferIfNeeded();
+    }
+
+    private void ReturnBufferIfNeeded()
+    {
+        if (Interlocked.Exchange(ref _bufferReturned, 1) == 1)
+            return;
+
+        var buffer = Interlocked.Exchange(ref _buffer, Array.Empty<byte>());
+        if (buffer.Length != 0)
+            ArrayPool<byte>.Shared.Return(buffer);
     }
 
     private async ValueTask<int> ReadInt32LineAsync(CancellationToken ct)

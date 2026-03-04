@@ -606,20 +606,6 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 await EnsureConnectedAsync(_cts.Token).ConfigureAwait(false);
                 var readGeneration = Volatile.Read(ref _generation);
                 var (resp, ex) = await _responseReaderLoop.ReadAsync(next.PoolBulk).ConfigureAwait(false);
-                var currentGeneration = Volatile.Read(ref _generation);
-
-                if (next.Generation != currentGeneration || readGeneration != currentGeneration)
-                {
-                    if (resp is not null)
-                        RedisRespReader.ReturnBuffers(resp);
-
-                    next.TrySetException(
-                        new IOException(
-                            $"Stale transport generation response ignored. Operation generation {next.Generation}, current generation {currentGeneration}."));
-                    next.MarkResponseProcessed();
-                    continue;
-                }
-
                 if (resp is not null)
                     RecordLaneResponseObserved(next, resp);
 
@@ -640,6 +626,18 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 {
                     if (resp is null)
                         throw new InvalidOperationException("RESP reader returned null response without error.");
+
+                    var currentGeneration = Volatile.Read(ref _generation);
+                    if (next.Generation != currentGeneration || readGeneration != currentGeneration)
+                    {
+                        RedisRespReader.ReturnBuffers(resp);
+                        next.TrySetException(
+                            new IOException(
+                                $"Stale transport generation response ignored. Operation generation {next.Generation}, current generation {currentGeneration}."));
+                        next.MarkResponseProcessed();
+                        continue;
+                    }
+
                     next.TrySetResult(resp);
                 }
 
