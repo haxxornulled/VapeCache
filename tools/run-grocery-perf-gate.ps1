@@ -1,6 +1,7 @@
 param(
     [string[]]$Profiles = @("LowLatency", "FullTilt"),
     [int]$Trials = 3,
+    [int]$WarmupTrials = 1,
     [int]$ShopperCount = 20000,
     [int]$MaxCartSize = 35,
     [int]$MaxDegree = 64,
@@ -21,6 +22,8 @@ param(
     [double]$LowLatencyMaxP999Ratio = 1.20,
     [double]$FullTiltMaxP99Ratio = 1.30,
     [double]$FullTiltMaxP999Ratio = 1.35,
+    [double]$MaxAllocRatio = 1.40,
+    [double]$MaxAllocBytesPerShopper = 35000.0,
     [double]$LowLatencyMaxP99Ms = 15.0,
     [double]$LowLatencyMaxP999Ms = 25.0,
     [double]$FullTiltMaxP99Ms = 20.0,
@@ -39,6 +42,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ($Trials -le 0) { throw "Trials must be greater than zero." }
+if ($WarmupTrials -lt 0) { throw "WarmupTrials cannot be negative." }
 if ($ShopperCount -le 0) { throw "ShopperCount must be greater than zero." }
 if ($MaxCartSize -le 0) { throw "MaxCartSize must be greater than zero." }
 if ($MaxDegree -lt 0) { throw "MaxDegree cannot be negative." }
@@ -153,7 +157,7 @@ elseif ($ServerGc -eq "false") {
 }
 
 Write-Host "Grocery perf gate configuration:"
-Write-Host "  Trials=$Trials Shoppers=$ShopperCount MaxCartSize=$MaxCartSize Track=$Track"
+Write-Host "  Trials=$Trials WarmupTrials=$WarmupTrials Shoppers=$ShopperCount MaxCartSize=$MaxCartSize Track=$Track"
 Write-Host "  MaxDegree=$(if ($MaxDegree -gt 0) { $MaxDegree } else { "auto" }) Profile(s)=$($Profiles -join ', ')"
 Write-Host "  MuxConnections=$MuxConnections MuxInFlight=$MuxInFlight MuxCoalesce=true AdaptiveCoalesce=$($env:VAPECACHE_BENCH_MUX_ADAPTIVE_COALESCING) SocketReader=$($env:VAPECACHE_BENCH_SOCKET_RESP_READER) DedicatedWorkers=$($env:VAPECACHE_BENCH_DEDICATED_LANE_WORKERS)"
 Write-Host "  Logging BenchLogLevel=$($env:VAPECACHE_BENCH_LOG_LEVEL) GroceryVerbose=$($env:VAPECACHE_GROCERYSTORE_VERBOSE)"
@@ -170,6 +174,15 @@ foreach ($profile in $Profiles) {
 
     Write-Host ""
     Write-Host "Running grocery perf gate for profile '$profile'..."
+    if ($WarmupTrials -gt 0) {
+        Write-Host "  Warmup $WarmupTrials trial(s)..."
+        for ($warmup = 1; $warmup -le $WarmupTrials; $warmup++) {
+            $warmupOutput = dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1
+            $warmupFile = Join-Path $artifactsRoot ("{0}-warmup-{1}.log" -f $profile.ToLowerInvariant(), $warmup)
+            $warmupOutput | Out-File -FilePath $warmupFile -Encoding utf8
+        }
+    }
+
     for ($trial = 1; $trial -le $Trials; $trial++) {
         Write-Host "  Trial $trial/$Trials..."
         $output = dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1
@@ -193,10 +206,13 @@ foreach ($profile in $Profiles) {
         $serP99 = Parse-Metric -map $ser -key "P99Ms"
         $vapeP999 = Parse-Metric -map $vape -key "P999Ms"
         $serP999 = Parse-Metric -map $ser -key "P999Ms"
+        $vapeAllocPerShopper = Parse-Metric -map $vape -key "AllocBytesPerShopper"
+        $serAllocPerShopper = Parse-Metric -map $ser -key "AllocBytesPerShopper"
 
         $throughputRatio = if ($serThroughput -gt 0) { $vapeThroughput / $serThroughput } else { [double]::PositiveInfinity }
         $p99Ratio = if ($serP99 -gt 0) { $vapeP99 / $serP99 } else { [double]::PositiveInfinity }
         $p999Ratio = if ($serP999 -gt 0) { $vapeP999 / $serP999 } else { [double]::PositiveInfinity }
+        $allocRatio = if ($serAllocPerShopper -gt 0) { $vapeAllocPerShopper / $serAllocPerShopper } else { [double]::PositiveInfinity }
 
         $profileRows.Add([pscustomobject]@{
             Profile = $profile
@@ -204,6 +220,8 @@ foreach ($profile in $Profiles) {
             ThroughputRatio = [Math]::Round($throughputRatio, 3)
             P99Ratio = [Math]::Round($p99Ratio, 3)
             P999Ratio = [Math]::Round($p999Ratio, 3)
+            AllocRatio = [Math]::Round($allocRatio, 3)
+            VapeAllocBytesPerShopper = [Math]::Round($vapeAllocPerShopper, 2)
             VapeP99Ms = [Math]::Round($vapeP99, 3)
             VapeP999Ms = [Math]::Round($vapeP999, 3)
         }) | Out-Null
@@ -216,6 +234,8 @@ foreach ($profile in $Profiles) {
     $medianThroughput = Get-Median -values @($profileRows | ForEach-Object { [double]$_.ThroughputRatio })
     $medianP99 = Get-Median -values @($profileRows | ForEach-Object { [double]$_.P99Ratio })
     $medianP999 = Get-Median -values @($profileRows | ForEach-Object { [double]$_.P999Ratio })
+    $medianAllocRatio = Get-Median -values @($profileRows | ForEach-Object { [double]$_.AllocRatio })
+    $medianVapeAlloc = Get-Median -values @($profileRows | ForEach-Object { [double]$_.VapeAllocBytesPerShopper })
     $medianVapeP99Ms = Get-Median -values @($profileRows | ForEach-Object { [double]$_.VapeP99Ms })
     $medianVapeP999Ms = Get-Median -values @($profileRows | ForEach-Object { [double]$_.VapeP999Ms })
 
@@ -225,6 +245,8 @@ foreach ($profile in $Profiles) {
         ThroughputRatioMedian = [Math]::Round($medianThroughput, 3)
         P99RatioMedian = [Math]::Round($medianP99, 3)
         P999RatioMedian = [Math]::Round($medianP999, 3)
+        AllocRatioMedian = [Math]::Round($medianAllocRatio, 3)
+        VapeAllocBytesPerShopperMedian = [Math]::Round($medianVapeAlloc, 2)
         VapeP99MsMedian = [Math]::Round($medianVapeP99Ms, 3)
         VapeP999MsMedian = [Math]::Round($medianVapeP999Ms, 3)
         MinThroughputRatio = [double]$MinThroughputRatio
@@ -237,6 +259,16 @@ foreach ($profile in $Profiles) {
     if ($medianThroughput -lt $MinThroughputRatio) {
         $violations.Add(
             ("Profile '{0}': median throughput ratio {1:N3} below minimum {2:N3}" -f $profile, $medianThroughput, $MinThroughputRatio))
+    }
+
+    if ($medianAllocRatio -gt $MaxAllocRatio) {
+        $violations.Add(
+            ("Profile '{0}': median alloc ratio {1:N3} above maximum {2:N3}" -f $profile, $medianAllocRatio, $MaxAllocRatio))
+    }
+
+    if ($medianVapeAlloc -gt $MaxAllocBytesPerShopper) {
+        $violations.Add(
+            ("Profile '{0}': median Vape alloc/shopper {1:N2}B above maximum {2:N2}B" -f $profile, $medianVapeAlloc, $MaxAllocBytesPerShopper))
     }
 
     if ($medianVapeP99Ms -gt $thresholds.MaxP99Ms) {
@@ -269,11 +301,20 @@ foreach ($profile in $Profiles) {
             Write-Warning ("Profile '{0}': median p999 ratio {1:N3} above advisory ratio {2:N3} (strict ratio gate disabled)." -f $profile, $medianP999, $thresholds.MaxP999Ratio)
         }
     }
+
+    Write-Host ("PERF-GATE|Scenario=Grocery/{0}|Trials={1}|ThroughputRatioMedian={2:N3}|P99RatioMedian={3:N3}|P999RatioMedian={4:N3}|AllocRatioMedian={5:N3}|VapeAllocBytesPerShopperMedian={6:N2}" -f
+        $profile,
+        $profileRows.Count,
+        $medianThroughput,
+        $medianP99,
+        $medianP999,
+        $medianAllocRatio,
+        $medianVapeAlloc)
 }
 
 Write-Host ""
 Write-Host "Grocery perf gate summary:"
-$summary | Format-Table Profile, Trials, ThroughputRatioMedian, VapeP99MsMedian, VapeP999MsMedian, P99RatioMedian, P999RatioMedian, MinThroughputRatio, MaxP99Ms, MaxP999Ms -AutoSize
+$summary | Format-Table Profile, Trials, ThroughputRatioMedian, AllocRatioMedian, VapeAllocBytesPerShopperMedian, VapeP99MsMedian, VapeP999MsMedian, P99RatioMedian, P999RatioMedian, MinThroughputRatio, MaxP99Ms, MaxP999Ms -AutoSize
 
 $summaryFile = Join-Path $artifactsRoot "summary.md"
 @(
@@ -281,10 +322,10 @@ $summaryFile = Join-Path $artifactsRoot "summary.md"
     ""
     ("Generated: {0} UTC" -f (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss"))
     ""
-    "| Profile | Trials | Median Throughput Ratio | Median Vape P99 (ms) | Median Vape P999 (ms) | Median P99 Ratio | Median P999 Ratio | Min Throughput Ratio | Max P99 (ms) | Max P999 (ms) |"
-    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+    "| Profile | Trials | Median Throughput Ratio | Median Alloc Ratio | Median Vape Alloc/Shopper (B) | Median Vape P99 (ms) | Median Vape P999 (ms) | Median P99 Ratio | Median P999 Ratio | Min Throughput Ratio | Max P99 (ms) | Max P999 (ms) |"
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
 ) + ($summary | ForEach-Object {
-    "| $($_.Profile) | $($_.Trials) | $($_.ThroughputRatioMedian) | $($_.VapeP99MsMedian) | $($_.VapeP999MsMedian) | $($_.P99RatioMedian) | $($_.P999RatioMedian) | $($_.MinThroughputRatio) | $($_.MaxP99Ms) | $($_.MaxP999Ms) |"
+    "| $($_.Profile) | $($_.Trials) | $($_.ThroughputRatioMedian) | $($_.AllocRatioMedian) | $($_.VapeAllocBytesPerShopperMedian) | $($_.VapeP99MsMedian) | $($_.VapeP999MsMedian) | $($_.P99RatioMedian) | $($_.P999RatioMedian) | $($_.MinThroughputRatio) | $($_.MaxP99Ms) | $($_.MaxP999Ms) |"
 }) | Set-Content -Path $summaryFile -Encoding utf8
 
 Write-Host "Summary written to: $summaryFile"

@@ -63,7 +63,7 @@ jobs:
 
       - name: Perf gates
         run: |
-          dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj
+          dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj --logger "console;verbosity=detailed"
           pwsh -File tools/perf-gate.ps1
 
       - name: Pack release packages
@@ -119,21 +119,25 @@ jobs:
 
       - name: Contention Perf Gate
         run: |
-          pwsh -File tools/run-contention-perf-gate.ps1 -Job Short -Mode fair -ContentionProcessorCounts "4,16" -ClientMaxRatio 1.00
+          pwsh -File tools/run-contention-perf-gate.ps1 -Job Short -Mode fair -Profile aggressive -ContentionProcessorCounts "4,16" -ClientMaxRatio 1.00
 
       - name: Grocery Tail Perf Gate
         run: |
           pwsh -File tools/run-grocery-perf-gate.ps1 \
             -Trials 2 \
+            -WarmupTrials 1 \
             -ShopperCount 15000 \
             -MaxCartSize 35 \
             -MuxConnections 12 \
             -MuxInFlight 4096 \
             -MinThroughputRatio 1.00 \
+            -MaxAllocRatio 1.40 \
+            -MaxAllocBytesPerShopper 35000 \
             -LowLatencyMaxP99Ratio 1.15 \
             -LowLatencyMaxP999Ratio 1.20 \
             -FullTiltMaxP99Ratio 1.30 \
             -FullTiltMaxP999Ratio 1.35 \
+            -StrictTailRatios \
             -RedisHost 127.0.0.1 \
             -RedisPort 6379 \
             -RedisUsername "" \

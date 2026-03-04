@@ -1,6 +1,8 @@
 param(
     [string]$Job = "Short",
     [string]$Mode = "fair",
+    [ValidateSet("standard", "aggressive", "extreme")]
+    [string]$Profile = "aggressive",
     [string]$ContentionProcessorCounts = "4,16,32",
     [double]$ClientMaxRatio = 1.00
 )
@@ -16,7 +18,7 @@ pwsh -File (Join-Path $PSScriptRoot "run-head-to-head-benchmarks.ps1") `
     -Suite client `
     -Job $Job `
     -Mode $Mode `
-    -Profile standard `
+    -Profile $Profile `
     -ArtifactsRoot $artifactsRoot `
     -ContentionMatrix `
     -ContentionProcessorCounts $ContentionProcessorCounts | Out-Host

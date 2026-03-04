@@ -16,6 +16,7 @@ $requiredRatioSuites = @(
     "RedisEndToEndHeadToHeadBenchmarks",
     "RedisModuleHeadToHeadBenchmarks"
 )
+$ratioSummaries = New-Object System.Collections.Generic.List[object]
 
 $hotPathSignatureFiles = @(
     "VapeCache.Abstractions/Connections/IRedisCommandExecutor.cs",
@@ -131,6 +132,14 @@ if ($EnforceBenchmarkRatios.IsPresent) {
             }
 
             $threshold = [double]$thresholdBySuite[$suite]
+            $ratioSummaries.Add([pscustomobject]@{
+                Suite = $suite
+                Scenario = $scenario
+                Ratio = [Math]::Round($ratio, 3)
+                Threshold = $threshold
+                Status = if ($ratio -gt $threshold) { "FAIL" } else { "PASS" }
+            }) | Out-Null
+
             if ($ratio -gt $threshold) {
                 $violations.Add("Benchmark ratio regression in ${suite}/${scenario}: Vape/SER ratio $ratioText exceeded threshold $threshold (source: $ComparisonPath).")
             }
@@ -141,6 +150,13 @@ if ($EnforceBenchmarkRatios.IsPresent) {
                 $violations.Add("Benchmark ratio gate enabled but suite '$suite' was not found in $ComparisonPath.")
             }
         }
+    }
+
+    if ($ratioSummaries.Count -gt 0) {
+        Write-Host "Perf ratio summary:"
+        $ratioSummaries |
+            Sort-Object Suite, Scenario |
+            Format-Table Suite, Scenario, Ratio, Threshold, Status -AutoSize
     }
 }
 
