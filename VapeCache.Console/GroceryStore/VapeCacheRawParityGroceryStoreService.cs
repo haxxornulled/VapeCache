@@ -30,9 +30,9 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     public async ValueTask<Product?> GetProductAsync(string productId)
     {
         var key = Key($"product:{productId}");
-        using var lease = await _redis.GetLeaseAsync(key, CancellationToken.None).ConfigureAwait(false);
-        if (!lease.IsNull)
-            return JsonSerializer.Deserialize(lease.Span, JsonContext.Product);
+        var payload = await _redis.GetAsync(key, CancellationToken.None).ConfigureAwait(false);
+        if (payload is not null)
+            return JsonSerializer.Deserialize(payload, JsonContext.Product);
 
         if (!ProductsById.TryGetValue(productId, out var product))
             return null;
@@ -188,14 +188,11 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
     /// </summary>
     public async ValueTask<UserSession?> GetSessionAsync(string sessionId)
     {
-        using var lease = await _redis.GetLeaseAsync(Key($"session:{sessionId}"), CancellationToken.None).ConfigureAwait(false);
-        if (lease.IsNull)
+        var payload = await _redis.GetAsync(Key($"session:{sessionId}"), CancellationToken.None).ConfigureAwait(false);
+        if (payload is null)
             return null;
 
-        if (SessionBinaryCodec.TryDeserialize(lease.Span, out var binarySession))
-            return binarySession;
-
-        return JsonSerializer.Deserialize(lease.Span, JsonContext.UserSession);
+        return JsonSerializer.Deserialize(payload, JsonContext.UserSession);
     }
 
     private static IReadOnlyDictionary<string, Product> BuildProductMap(Product[] products)

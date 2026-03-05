@@ -118,14 +118,48 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -FailBelowRatio 1.0
 ```
 `run-grocery-head-to-head.ps1` builds `Release` binaries before running trials unless `-SkipBuild` is provided.
+
+### Claim-Safe Reporting Modes
+
+Use one of these two modes and label reports explicitly:
+
+1. **Strict/Fair (authoritative)**  
+   Use `-DisableTrackDefaults` so both tracks/providers share the same mux knobs.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
+  -Trials 5 `
+  -Track both `
+  -DisableTrackDefaults `
+  -ShopperCount 50000 `
+  -MaxCartSize 40 `
+  -FailBelowRatio 1.0
+```
+
+2. **Tuned/Showcase (engineering)**  
+   Leave track defaults enabled to show workload-tuned potential.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
+  -Trials 5 `
+  -Track both `
+  -ShopperCount 50000 `
+  -MaxCartSize 40 `
+  -FailBelowRatio 1.0
+```
+
 Benchmark defaults tuned for high-core hosts:
 - `MaxDegree=72` (stability-first default for 50k shopper runs on modern multi-core hosts).
-- `MuxProfile=FullTilt`, `MuxConnections=8`, `MuxInFlight=8192`, `MuxCoalesce=true`.
+- `MuxProfile=FullTilt`, `MuxInFlight=8192`, `MuxCoalesce=true`.
+- Track-aware mux defaults are enabled by default:
+  - `optimized`: `MuxConnections=8`, `MuxAdaptiveCoalescing=true`
+  - `apples`: `MuxConnections=1`, `MuxAdaptiveCoalescing=false`
 - `CleanupRunKeys=true` to prevent key buildup and Redis memory-pressure drift across trials.
 - `Track=both` runs apples and optimized in isolated passes per trial (no shared-run coupling).
 - `ServerGc=true` (`DOTNET_GCServer=1`) for steadier throughput under load.
 - For a fixed 28-core box, `-MaxDegree 68..80` is the preferred stability window for 50k x 40 runs.
 - For peak throughput sweeps, test `-MaxDegree 80` after stability is confirmed.
+Pass `-DisableTrackDefaults` to force a single mux profile/connection strategy across both tracks.
 To use the exact same Redis setting source as the Grocery Store host, pass the connection string directly:
 - URI style is supported: `redis://user:pass@host:port/db` (or `rediss://...`).
 - StackExchange style is also supported: `host:port,user=...,password=...,ssl=...`.

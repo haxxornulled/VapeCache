@@ -231,6 +231,12 @@ app.MapPut("/media/{id}", async (string id, HttpRequest request, ICacheChunkStre
 - Latest posted benchmark summary: [PHASE1_BENCHMARK_REPORT.md](PHASE1_BENCHMARK_REPORT.md)
 - Grocery Store benchmark harness guide: [docs/GROCERY_STORE_DEMO.md](docs/GROCERY_STORE_DEMO.md)
 - Performance notes and scripts: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+- Benchmark claims policy: [docs/BENCHMARK_CLAIMS_POLICY.md](docs/BENCHMARK_CLAIMS_POLICY.md)
+
+Benchmark claims are published in two classes:
+- **Strict/Fair (authoritative):** same knobs across tracks/providers (`-DisableTrackDefaults`).
+- **Tuned/Showcase (engineering):** workload-tuned settings, always labeled as tuned.
+- **Validation rigor:** benchmark claims are backed by `Release` build + full test pass + perf-gate test pass on the same code snapshot.
 
 ## Enterprise License Runtime (Optional but Recommended)
 
@@ -294,4 +300,3 @@ Commercial use requires an enterprise license.
 Enterprise package commercial terms are in [LICENSE-ENTERPRISE.txt](LICENSE-ENTERPRISE.txt).
 
 Operational licensing guidance is in [COMMERCIAL-LICENSING.md](COMMERCIAL-LICENSING.md).
-

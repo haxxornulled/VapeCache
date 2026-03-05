@@ -20,6 +20,17 @@ Use `docs/ENGINEERING_PLAYBOOK.md` for profiler/Wireshark workflow.
 - Never claim a win from a single run; use repeated runs and median reporting.
 - Evaluate throughput + allocations + tail latency together.
 
+## Claim Classes (Required)
+
+Use explicit report classes for every benchmark publication:
+
+- **Strict/Fair (authoritative):** same knobs across tracks/providers.
+- **Tuned/Showcase (engineering):** workload-specific tuning.
+
+For grocery comparisons, `-DisableTrackDefaults` enforces strict/fair mode.
+
+Policy reference: [BENCHMARK_CLAIMS_POLICY.md](BENCHMARK_CLAIMS_POLICY.md)
+
 ## Quick Start
 
 ```powershell
@@ -33,6 +44,18 @@ powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -
 ```
 
 `fair` mode disables instrumentation overhead for apples-to-apples client benchmarking.
+
+Strict/fair grocery report command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
+  -Trials 5 `
+  -Track both `
+  -DisableTrackDefaults `
+  -ShopperCount 50000 `
+  -MaxCartSize 40 `
+  -FailBelowRatio 1.0
+```
 
 ## Modes
 

@@ -37,7 +37,8 @@ param(
     [string]$BenchLogLevel = "Debug",
     [ValidateSet("true", "false")]
     [string]$GroceryVerbose = "true",
-    [double]$FailBelowRatio = 1.0
+    [double]$FailBelowRatio = 1.0,
+    [switch]$DisableTrackDefaults
 )
 
 $ErrorActionPreference = "Stop"
@@ -157,18 +158,55 @@ function Wait-ForHostIsolation {
     throw ("Host isolation gate failed: CPU never stabilized at <= {0:N1}% for {1} consecutive samples within {2}s." -f $MaxCpu, $StableSamplesRequired, $MaxWaitSeconds)
 }
 
+function Get-EffectiveMuxSettings([string]$RunTrack) {
+    $effectiveProfile = $MuxProfile
+    $effectiveConnections = $MuxConnections
+    $effectiveInFlight = $MuxInFlight
+    $effectiveCoalesce = $MuxCoalesce.ToLowerInvariant()
+    $effectiveAdaptive = $MuxAdaptiveCoalescing.ToLowerInvariant()
+    $effectiveSocketReader = $MuxSocketReader.ToLowerInvariant()
+    $effectiveDedicatedWorkers = $MuxDedicatedWorkers.ToLowerInvariant()
+    $effectiveResponseTimeoutMs = "$MuxResponseTimeoutMs"
+
+    if (-not $DisableTrackDefaults -and $RunTrack -eq "apples") {
+        if (-not $PSBoundParameters.ContainsKey("MuxConnections")) {
+            # Apples-to-apples workload favors fewer connections to reduce fan-out overhead.
+            $effectiveConnections = 1
+        }
+
+        if (-not $PSBoundParameters.ContainsKey("MuxAdaptiveCoalescing")) {
+            # Adaptive coalescing can add burst jitter on parity workloads.
+            $effectiveAdaptive = "false"
+        }
+    }
+
+    return [pscustomobject]@{
+        Profile = $effectiveProfile
+        Connections = $effectiveConnections
+        InFlight = $effectiveInFlight
+        Coalesce = $effectiveCoalesce
+        Adaptive = $effectiveAdaptive
+        SocketReader = $effectiveSocketReader
+        DedicatedWorkers = $effectiveDedicatedWorkers
+        ResponseTimeoutMs = $effectiveResponseTimeoutMs
+    }
+}
+
+function Set-MuxEnvironment([pscustomobject]$Settings) {
+    $env:VAPECACHE_BENCH_MUX_PROFILE = "$($Settings.Profile)"
+    $env:VAPECACHE_BENCH_MUX_CONNECTIONS = "$($Settings.Connections)"
+    $env:VAPECACHE_BENCH_MUX_INFLIGHT = "$($Settings.InFlight)"
+    $env:VAPECACHE_BENCH_MUX_COALESCE = "$($Settings.Coalesce)"
+    $env:VAPECACHE_BENCH_MUX_ADAPTIVE_COALESCING = "$($Settings.Adaptive)"
+    $env:VAPECACHE_BENCH_SOCKET_RESP_READER = "$($Settings.SocketReader)"
+    $env:VAPECACHE_BENCH_DEDICATED_LANE_WORKERS = "$($Settings.DedicatedWorkers)"
+    $env:VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS = "$($Settings.ResponseTimeoutMs)"
+}
+
 $env:VAPECACHE_RUN_COMPARISON = "true"
 $env:VAPECACHE_BENCH_SHOPPERS = "$ShopperCount"
 $env:VAPECACHE_MAX_CART_SIZE = "$MaxCartSize"
 $env:VAPECACHE_BENCH_TRACK = $Track
-$env:VAPECACHE_BENCH_MUX_PROFILE = $MuxProfile
-$env:VAPECACHE_BENCH_MUX_CONNECTIONS = "$MuxConnections"
-$env:VAPECACHE_BENCH_MUX_INFLIGHT = "$MuxInFlight"
-$env:VAPECACHE_BENCH_MUX_COALESCE = $MuxCoalesce.ToLowerInvariant()
-$env:VAPECACHE_BENCH_MUX_ADAPTIVE_COALESCING = $MuxAdaptiveCoalescing.ToLowerInvariant()
-$env:VAPECACHE_BENCH_SOCKET_RESP_READER = $MuxSocketReader.ToLowerInvariant()
-$env:VAPECACHE_BENCH_DEDICATED_LANE_WORKERS = $MuxDedicatedWorkers.ToLowerInvariant()
-$env:VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS = "$MuxResponseTimeoutMs"
 $env:VAPECACHE_BENCH_CLEANUP_RUN_KEYS = $CleanupRunKeys.ToLowerInvariant()
 $env:VAPECACHE_BENCH_LOG_LEVEL = $BenchLogLevel
 $env:VAPECACHE_GROCERYSTORE_VERBOSE = $GroceryVerbose.ToLowerInvariant()
@@ -202,7 +240,18 @@ Write-Host "Track: $Track"
 if ($Track -eq "both") {
     Write-Host "Both-track isolation: enabled"
 }
-Write-Host "Mux: Profile=$MuxProfile Connections=$MuxConnections InFlight=$MuxInFlight Coalesce=$($env:VAPECACHE_BENCH_MUX_COALESCE) Adaptive=$($env:VAPECACHE_BENCH_MUX_ADAPTIVE_COALESCING) SocketReader=$($env:VAPECACHE_BENCH_SOCKET_RESP_READER) DedicatedWorkers=$($env:VAPECACHE_BENCH_DEDICATED_LANE_WORKERS) TimeoutMs=$MuxResponseTimeoutMs"
+Write-Host "Track defaults: $(if ($DisableTrackDefaults) { "disabled" } else { "enabled" })"
+if ($Track -eq "both") {
+    $applesMux = Get-EffectiveMuxSettings -RunTrack "apples"
+    $optimizedMux = Get-EffectiveMuxSettings -RunTrack "optimized"
+    Write-Host "Mux (apples): Profile=$($applesMux.Profile) Connections=$($applesMux.Connections) InFlight=$($applesMux.InFlight) Coalesce=$($applesMux.Coalesce) Adaptive=$($applesMux.Adaptive) SocketReader=$($applesMux.SocketReader) DedicatedWorkers=$($applesMux.DedicatedWorkers) TimeoutMs=$($applesMux.ResponseTimeoutMs)"
+    Write-Host "Mux (optimized): Profile=$($optimizedMux.Profile) Connections=$($optimizedMux.Connections) InFlight=$($optimizedMux.InFlight) Coalesce=$($optimizedMux.Coalesce) Adaptive=$($optimizedMux.Adaptive) SocketReader=$($optimizedMux.SocketReader) DedicatedWorkers=$($optimizedMux.DedicatedWorkers) TimeoutMs=$($optimizedMux.ResponseTimeoutMs)"
+}
+else {
+    $selectedMux = Get-EffectiveMuxSettings -RunTrack $Track
+    Set-MuxEnvironment -Settings $selectedMux
+    Write-Host "Mux: Profile=$($selectedMux.Profile) Connections=$($selectedMux.Connections) InFlight=$($selectedMux.InFlight) Coalesce=$($selectedMux.Coalesce) Adaptive=$($selectedMux.Adaptive) SocketReader=$($selectedMux.SocketReader) DedicatedWorkers=$($selectedMux.DedicatedWorkers) TimeoutMs=$($selectedMux.ResponseTimeoutMs)"
+}
 Write-Host "Cleanup: RunKeys=$($env:VAPECACHE_BENCH_CLEANUP_RUN_KEYS)"
 Write-Host "Logging: BenchLogLevel=$($env:VAPECACHE_BENCH_LOG_LEVEL) GroceryVerbose=$($env:VAPECACHE_GROCERYSTORE_VERBOSE)"
 Write-Host "DOTNET_GCServer: $(if ([string]::IsNullOrWhiteSpace($env:DOTNET_GCServer)) { "default" } else { $env:DOTNET_GCServer })"
@@ -323,8 +372,25 @@ function Parse-BenchmarkOutput([object[]]$OutputLines) {
 function Invoke-BenchmarkRun([string]$RunTrack) {
     $hadTrack = Test-Path Env:VAPECACHE_BENCH_TRACK
     $previousTrack = $env:VAPECACHE_BENCH_TRACK
+    $muxEnvNames = @(
+        "VAPECACHE_BENCH_MUX_PROFILE",
+        "VAPECACHE_BENCH_MUX_CONNECTIONS",
+        "VAPECACHE_BENCH_MUX_INFLIGHT",
+        "VAPECACHE_BENCH_MUX_COALESCE",
+        "VAPECACHE_BENCH_MUX_ADAPTIVE_COALESCING",
+        "VAPECACHE_BENCH_SOCKET_RESP_READER",
+        "VAPECACHE_BENCH_DEDICATED_LANE_WORKERS",
+        "VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS"
+    )
+    $previousMuxEnv = @{}
+    foreach ($name in $muxEnvNames) {
+        $previousMuxEnv[$name] = [Environment]::GetEnvironmentVariable($name)
+    }
     $env:VAPECACHE_BENCH_TRACK = $RunTrack
+    $settings = Get-EffectiveMuxSettings -RunTrack $RunTrack
+    Set-MuxEnvironment -Settings $settings
     try {
+        Write-Host ("  [TrackConfig] {0}: Profile={1} Connections={2} InFlight={3} Coalesce={4} Adaptive={5} SocketReader={6} DedicatedWorkers={7} TimeoutMs={8}" -f $RunTrack, $settings.Profile, $settings.Connections, $settings.InFlight, $settings.Coalesce, $settings.Adaptive, $settings.SocketReader, $settings.DedicatedWorkers, $settings.ResponseTimeoutMs)
         $runOutput = @(dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1)
         $parsed = Parse-BenchmarkOutput -OutputLines $runOutput
         return [pscustomobject]@{
@@ -338,6 +404,16 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
         }
         else {
             Remove-Item Env:VAPECACHE_BENCH_TRACK -ErrorAction SilentlyContinue
+        }
+
+        foreach ($name in $muxEnvNames) {
+            $value = $previousMuxEnv[$name]
+            if ([string]::IsNullOrEmpty($value)) {
+                Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
+            }
+            else {
+                [Environment]::SetEnvironmentVariable($name, $value)
+            }
         }
     }
 }

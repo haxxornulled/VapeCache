@@ -2,6 +2,15 @@
 
 This page is the single "what happened last" checkpoint for head-to-head performance runs.
 
+## Read First
+
+- This is a snapshot, not a universal claim.
+- Every result must be interpreted by report class:
+  - **Strict/Fair (authoritative):** same knobs across tracks/providers.
+  - **Tuned/Showcase (engineering):** workload-tuned settings.
+- Do not publish "faster than SER" statements without report class + date + workload scope.
+- Policy: [BENCHMARK_CLAIMS_POLICY.md](BENCHMARK_CLAIMS_POLICY.md)
+
 - Snapshot date: **2026-03-03**
 - Artifact sources:
   - `artifacts/compare-both-50k-trials10-strict-20260303-093721.log`
@@ -20,7 +29,7 @@ This page is the single "what happened last" checkpoint for head-to-head perform
 - Reporting split:
   - Hot-path claims: `OptimizedProductPath`
   - Feature/parity/fallback claims: `ApplesToApples`
-- Recommended production knobs for this workload:
+- Tuned knob sets are engineering guidance only and must be labeled when reported:
   - `MuxProfile=FullTilt`
   - `MuxConnections=16`
   - `MuxInFlight=8192`

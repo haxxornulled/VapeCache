@@ -24,6 +24,12 @@ A performance claim is accepted only when:
 4. Allocation and GC behavior are not regressing.
 5. Tail latency checks (p95/p99/p999) are acceptable under sustained load.
 
+Required claim classes:
+- **Strict/Fair (authoritative):** same knobs across tracks/providers.
+- **Tuned/Showcase (engineering):** workload-tuned and labeled as tuned.
+
+Policy: [BENCHMARK_CLAIMS_POLICY.md](BENCHMARK_CLAIMS_POLICY.md)
+
 ## Current Focus Areas
 
 - Bigger payload scaling (1KB/4KB/16KB).

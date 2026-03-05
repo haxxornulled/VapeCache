@@ -37,6 +37,7 @@ This index tracks the current feature set and supported APIs.
 - [PERFORMANCE.md](PERFORMANCE.md) - Benchmark methodology and results
 - [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) - Current benchmark snapshot (environment + latest comparison)
 - [BENCHMARKING.md](BENCHMARKING.md) - How to run benchmarks
+- [BENCHMARK_CLAIMS_POLICY.md](BENCHMARK_CLAIMS_POLICY.md) - Strict vs tuned reporting rules and claim language policy
 - [HOT_PATH_BENCHMARK_CHECKLIST.md](HOT_PATH_BENCHMARK_CHECKLIST.md) - Hot-path benchmark audience split, tuning checklist, and gate criteria
 - [ENGINEERING_PLAYBOOK.md](ENGINEERING_PLAYBOOK.md) - Analyzer, profiling, and capture workflow
 
