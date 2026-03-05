@@ -22,8 +22,6 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private readonly bool _useDedicatedLaneWorkers;
     private readonly int _bulkMgetKeyThreshold;
     private readonly int _bulkPayloadBytesThreshold;
-    private readonly int _fastTimeoutResetThreshold;
-    private readonly long _fastTimeoutResetWindowStopwatchTicks;
     private readonly int _maxBulkStringBytes;
     private readonly int _maxArrayDepth;
     private readonly TimeSpan _responseTimeout;
@@ -62,8 +60,6 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private long _laneExpectedResponseSequence;
     private long _lanePendingSequenceAssigned;
     private long _generation;
-    private long _fastTimeoutWindowStartTimestamp;
-    private int _fastTimeoutsInWindow;
 
 
     private static int RoundUpToPowerOfTwo(int value)
@@ -119,9 +115,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         _useDedicatedLaneWorkers = useDedicatedLaneWorkers;
         _bulkMgetKeyThreshold = Math.Max(1, bulkMgetKeyThreshold);
         _bulkPayloadBytesThreshold = Math.Max(1, bulkPayloadBytesThreshold);
-        _fastTimeoutResetThreshold = Math.Max(1, fastTimeoutResetThreshold);
-        var timeoutResetWindow = fastTimeoutResetWindow <= TimeSpan.Zero ? TimeSpan.FromSeconds(2) : fastTimeoutResetWindow;
-        _fastTimeoutResetWindowStopwatchTicks = (long)Math.Max(1, timeoutResetWindow.TotalSeconds * Stopwatch.Frequency);
+        _ = fastTimeoutResetThreshold;
+        _ = fastTimeoutResetWindow;
         _maxBulkStringBytes = maxBulkStringBytes;
         _maxArrayDepth = maxArrayDepth;
         _responseTimeout = responseTimeout <= TimeSpan.Zero || responseTimeout == Timeout.InfiniteTimeSpan
@@ -618,31 +613,12 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             && ((token[2] | 0x20) == (byte)'e')
             && ((token[3] | 0x20) == (byte)'t');
 
-    private bool ShouldResetTransportForTimeout(PendingOperation operation)
+    private static bool ShouldResetTransportForTimeout(PendingOperation operation)
     {
-        // Socket-reader timeouts are implemented via cancellation of an outstanding receive awaitable.
-        // To keep RESP framing integrity, always recycle the transport before the next read.
-        if (_useSocketReader)
-            return true;
-
-        if (operation.OperationClass == OperationClass.Bulk)
-            return false;
-
-        return ShouldResetAfterFastTimeout();
-    }
-
-    private bool ShouldResetAfterFastTimeout()
-    {
-        var now = Stopwatch.GetTimestamp();
-        if (_fastTimeoutWindowStartTimestamp == 0
-            || now - _fastTimeoutWindowStartTimestamp > _fastTimeoutResetWindowStopwatchTicks)
-        {
-            _fastTimeoutWindowStartTimestamp = now;
-            _fastTimeoutsInWindow = 0;
-        }
-
-        _fastTimeoutsInWindow++;
-        return _fastTimeoutsInWindow >= _fastTimeoutResetThreshold;
+        _ = operation;
+        // Timeout handling can interrupt a RESP frame mid-parse. Always recycle transport
+        // to guarantee framing integrity for the next operation.
+        return true;
     }
 
     private async Task EnsureConnectedAsync(CancellationToken ct)
@@ -877,8 +853,6 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         Interlocked.Increment(ref _failureCount);
         Interlocked.Increment(ref _consecutiveFailures);
         Interlocked.Increment(ref _generation);
-        _fastTimeoutWindowStartTimestamp = 0;
-        _fastTimeoutsInWindow = 0;
         Volatile.Write(ref _laneExpectedResponseSequence, 0);
         if (countTransportReset)
             Interlocked.Increment(ref _laneTransportResetCount);

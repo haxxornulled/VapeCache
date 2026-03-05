@@ -408,7 +408,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
                 int sent;
                 try
                 {
-                    sent = await socket.SendAsync(_socketSendWindow, SocketFlags.None).ConfigureAwait(false);
+                    sent = await socket.SendAsync(_socketSendWindow, SocketFlags.None).WaitAsync(ct).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {

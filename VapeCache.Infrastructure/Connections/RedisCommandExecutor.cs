@@ -18,6 +18,9 @@ namespace VapeCache.Infrastructure.Connections;
 internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultiplexerDiagnostics
 {
     private static readonly ReadOnlyMemory<byte> CrlfMemory = "\r\n"u8.ToArray();
+    private static readonly long StopwatchUtcAnchorTimestamp = Stopwatch.GetTimestamp();
+    private static readonly long StopwatchUtcAnchorDateTicks = DateTimeOffset.UtcNow.UtcTicks;
+    private static readonly long ScaleEventWindowStopwatchTicks = ToStopwatchTicks(TimeSpan.FromMinutes(1));
     private RedisMultiplexedConnection[] _conns = Array.Empty<RedisMultiplexedConnection>();
     private RedisMultiplexedConnection[] _readConns = Array.Empty<RedisMultiplexedConnection>();
     private RedisMultiplexedConnection[] _writeConns = Array.Empty<RedisMultiplexedConnection>();
@@ -201,6 +204,23 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool IsCommandInstrumentationEnabled()
         => ReadRuntimeConfig().EnableCommandInstrumentation;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long ToStopwatchTicks(TimeSpan duration)
+    {
+        if (duration <= TimeSpan.Zero)
+            return 0;
+
+        var ticks = duration.TotalSeconds * Stopwatch.Frequency;
+        return ticks >= long.MaxValue ? long.MaxValue : Math.Max(1L, (long)Math.Ceiling(ticks));
+    }
+
+    private static DateTimeOffset ToUtcTimestamp(long stopwatchTicks)
+    {
+        var deltaStopwatchTicks = stopwatchTicks - StopwatchUtcAnchorTimestamp;
+        var deltaUtcTicks = (long)(deltaStopwatchTicks * ((double)TimeSpan.TicksPerSecond / Stopwatch.Frequency));
+        return new DateTimeOffset(StopwatchUtcAnchorDateTicks + deltaUtcTicks, TimeSpan.Zero);
+    }
 
     private void LogNormalizationIfChanged(
         string optionsName,
@@ -2471,8 +2491,8 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         if (conns.Length == 0)
             return;
 
-        var now = DateTime.UtcNow.Ticks;
-        var minuteWindowTicks = TimeSpan.FromMinutes(1).Ticks;
+        var now = Stopwatch.GetTimestamp();
+        var minuteWindowTicks = ScaleEventWindowStopwatchTicks;
         var currentWindowStart = Interlocked.Read(ref _scaleEventWindowStartTicks);
         if (currentWindowStart != 0 && now - currentWindowStart >= minuteWindowTicks)
         {
@@ -2511,14 +2531,18 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
         var lastTicks = Interlocked.Read(ref _lastTimeoutSampleTicks);
         var lastCount = Interlocked.Read(ref _lastTimeoutSampleCount);
-        var elapsedSec = lastTicks == 0 ? _autoscaleSampleInterval.TotalSeconds : Math.Max(0.001, TimeSpan.FromTicks(now - lastTicks).TotalSeconds);
+        var elapsedSec = lastTicks == 0
+            ? _autoscaleSampleInterval.TotalSeconds
+            : Math.Max(0.001, (now - lastTicks) / (double)Stopwatch.Frequency);
         var timeoutRatePerSec = Math.Max(0, timeoutTotal - lastCount) / elapsedSec;
         Interlocked.Exchange(ref _lastTimeoutSampleCount, timeoutTotal);
         Interlocked.Exchange(ref _lastTimeoutSampleTicks, now);
 
         var lastFailureTicks = Interlocked.Read(ref _lastFailureSampleTicks);
         var lastFailureCount = Interlocked.Read(ref _lastFailureSampleCount);
-        var failureElapsedSec = lastFailureTicks == 0 ? _autoscaleSampleInterval.TotalSeconds : Math.Max(0.001, TimeSpan.FromTicks(now - lastFailureTicks).TotalSeconds);
+        var failureElapsedSec = lastFailureTicks == 0
+            ? _autoscaleSampleInterval.TotalSeconds
+            : Math.Max(0.001, (now - lastFailureTicks) / (double)Stopwatch.Frequency);
         var reconnectFailureRatePerSec = Math.Max(0, failureTotal - lastFailureCount) / failureElapsedSec;
         Interlocked.Exchange(ref _lastFailureSampleCount, failureTotal);
         Interlocked.Exchange(ref _lastFailureSampleTicks, now);
@@ -2556,11 +2580,11 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
 
         var isFrozen = TryGetFreezeState(now, out var frozenReason, out var frozenUntilUtc);
-        var sampleTicks = _autoscaleSampleInterval.Ticks;
+        var sampleTicks = ToStopwatchTicks(_autoscaleSampleInterval);
         var highStreakTicks = Interlocked.Read(ref _highPressureStreakTicks);
         var lowStreakTicks = Interlocked.Read(ref _lowPressureStreakTicks);
-        var upCooldownActive = now - Interlocked.Read(ref _lastScaleUpTicks) < _scaleUpCooldown.Ticks;
-        var downCooldownActive = now - Interlocked.Read(ref _lastScaleDownTicks) < _scaleDownCooldown.Ticks;
+        var upCooldownActive = now - Interlocked.Read(ref _lastScaleUpTicks) < ToStopwatchTicks(_scaleUpCooldown);
+        var downCooldownActive = now - Interlocked.Read(ref _lastScaleDownTicks) < ToStopwatchTicks(_scaleDownCooldown);
         if (highPressure)
         {
             Interlocked.Exchange(ref _lowPressureStreakTicks, 0);
@@ -2583,8 +2607,8 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             lowStreakTicks = 0;
         }
 
-        var upWindowSatisfied = highStreakTicks >= _scaleUpWindow.Ticks;
-        var downWindowSatisfied = lowStreakTicks >= _scaleDownWindow.Ticks;
+        var upWindowSatisfied = highStreakTicks >= ToStopwatchTicks(_scaleUpWindow);
+        var downWindowSatisfied = lowStreakTicks >= ToStopwatchTicks(_scaleDownWindow);
         var action = "hold";
         var reason = "steady-state";
         var targetConnections = conns.Length;
@@ -2783,13 +2807,18 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     private void ApplyAutoscaleOptions(RedisMultiplexerOptions o)
     {
+        RedisMultiplexedConnection[]? bulkConnsToDispose = null;
         lock (_connGate)
         {
             _autoscaleEnabled = o.EnableAutoscaling;
             _minConnections = Math.Max(1, Math.Min(o.MinConnections, o.MaxConnections));
             _maxConnections = Math.Max(_minConnections, o.MaxConnections);
-            _bulkLaneConnections = ResolveBulkLaneConnections(o);
-            _bulkLaneResponseTimeout = ResolveBulkLaneResponseTimeout(o);
+            var desiredBulkLaneConnections = ResolveBulkLaneConnections(o);
+            var desiredBulkLaneResponseTimeout = ResolveBulkLaneResponseTimeout(o);
+            var bulkTimeoutChanged = desiredBulkLaneResponseTimeout != _bulkLaneResponseTimeout;
+
+            _bulkLaneConnections = desiredBulkLaneConnections;
+            _bulkLaneResponseTimeout = desiredBulkLaneResponseTimeout;
             _autoscaleSampleInterval = o.AutoscaleSampleInterval <= TimeSpan.Zero ? TimeSpan.FromSeconds(1) : o.AutoscaleSampleInterval;
             _scaleUpWindow = o.ScaleUpWindow <= TimeSpan.Zero ? TimeSpan.FromSeconds(10) : o.ScaleUpWindow;
             _scaleDownWindow = o.ScaleDownWindow <= TimeSpan.Zero ? TimeSpan.FromMinutes(2) : o.ScaleDownWindow;
@@ -2809,6 +2838,43 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             _autoscaleFreezeDuration = o.AutoscaleFreezeDuration <= TimeSpan.Zero ? TimeSpan.FromMinutes(2) : o.AutoscaleFreezeDuration;
             _reconnectStormFailureRatePerSecThreshold = Math.Max(0.01, o.ReconnectStormFailureRatePerSecThreshold);
 
+            if (_bulkConns.Length > 0 && (desiredBulkLaneConnections == 0 || bulkTimeoutChanged))
+            {
+                bulkConnsToDispose = _bulkConns;
+                _bulkConns = Array.Empty<RedisMultiplexedConnection>();
+            }
+
+            if (desiredBulkLaneConnections > 0 && _conns.Length > 1)
+            {
+                if (_bulkConns.Length == 0)
+                {
+                    _bulkConns = new RedisMultiplexedConnection[desiredBulkLaneConnections];
+                    for (var i = 0; i < _bulkConns.Length; i++)
+                        _bulkConns[i] = CreateBulkConnection();
+                }
+                else if (_bulkConns.Length != desiredBulkLaneConnections)
+                {
+                    var oldBulk = _bulkConns;
+                    var nextBulk = new RedisMultiplexedConnection[desiredBulkLaneConnections];
+                    var retained = Math.Min(oldBulk.Length, nextBulk.Length);
+                    Array.Copy(oldBulk, nextBulk, retained);
+                    for (var i = retained; i < nextBulk.Length; i++)
+                        nextBulk[i] = CreateBulkConnection();
+                    _bulkConns = nextBulk;
+
+                    if (oldBulk.Length > retained)
+                    {
+                        var removed = new RedisMultiplexedConnection[oldBulk.Length - retained];
+                        Array.Copy(oldBulk, retained, removed, 0, removed.Length);
+                        bulkConnsToDispose = bulkConnsToDispose is null
+                            ? removed
+                            : [.. bulkConnsToDispose, .. removed];
+                    }
+                }
+            }
+
+            RebuildLanesUnsafe();
+
             if (!_autoscaleEnabled)
             {
                 Interlocked.Exchange(ref _autoscaleFrozenUntilTicks, 0);
@@ -2819,6 +2885,24 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 Volatile.Write(ref _flapToggleCount, 0);
                 _lastScaleDirectionForFlap = null;
                 Interlocked.Exchange(ref _lastScaleDirectionTicks, 0);
+            }
+        }
+
+        if (bulkConnsToDispose is { Length: > 0 })
+            _ = DisposeConnectionsAsync(bulkConnsToDispose);
+    }
+
+    private static async Task DisposeConnectionsAsync(RedisMultiplexedConnection[] connections)
+    {
+        for (var i = 0; i < connections.Length; i++)
+        {
+            try
+            {
+                await connections[i].DisposeAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Best effort cleanup; lane recreation already succeeded.
             }
         }
     }
@@ -2975,7 +3059,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             }
 
             RebuildLanesUnsafe();
-            Volatile.Write(ref _lastScaleEventTicks, DateTimeOffset.UtcNow.UtcTicks);
+            Volatile.Write(ref _lastScaleEventTicks, Stopwatch.GetTimestamp());
             _lastScaleDirection = "up";
             _lastScaleReason = reason;
         }
@@ -3002,7 +3086,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             }
 
             RebuildLanesUnsafe();
-            Volatile.Write(ref _lastScaleEventTicks, DateTimeOffset.UtcNow.UtcTicks);
+            Volatile.Write(ref _lastScaleEventTicks, Stopwatch.GetTimestamp());
             _lastScaleDirection = "down";
             _lastScaleReason = reason;
         }
@@ -3101,7 +3185,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         if (TryGetFreezeState(nowTicks, out blockedReason, out _))
             return false;
 
-        var minuteWindowTicks = TimeSpan.FromMinutes(1).Ticks;
+        var minuteWindowTicks = ScaleEventWindowStopwatchTicks;
         var windowStartTicks = Interlocked.Read(ref _scaleEventWindowStartTicks);
         if (windowStartTicks == 0 || nowTicks - windowStartTicks >= minuteWindowTicks)
         {
@@ -3123,7 +3207,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     private void RegisterScaleEvent(string direction, long nowTicks)
     {
-        var minuteWindowTicks = TimeSpan.FromMinutes(1).Ticks;
+        var minuteWindowTicks = ScaleEventWindowStopwatchTicks;
         var windowStartTicks = Interlocked.Read(ref _scaleEventWindowStartTicks);
         if (windowStartTicks == 0 || nowTicks - windowStartTicks >= minuteWindowTicks)
         {
@@ -3132,7 +3216,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             Volatile.Write(ref _flapToggleCount, 0);
         }
 
-        Volatile.Write(ref _scaleEventsInCurrentMinute, Volatile.Read(ref _scaleEventsInCurrentMinute) + 1);
+        Interlocked.Increment(ref _scaleEventsInCurrentMinute);
 
         var previousDirection = _lastScaleDirectionForFlap;
         var previousDirectionTicks = Interlocked.Read(ref _lastScaleDirectionTicks);
@@ -3143,7 +3227,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             nowTicks - previousDirectionTicks <= minuteWindowTicks;
 
         if (isRapidToggle)
-            Volatile.Write(ref _flapToggleCount, Volatile.Read(ref _flapToggleCount) + 1);
+            Interlocked.Increment(ref _flapToggleCount);
 
         _lastScaleDirectionForFlap = direction;
         Interlocked.Exchange(ref _lastScaleDirectionTicks, nowTicks);
@@ -3155,7 +3239,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private void FreezeAutoscaler(string reason, long nowTicks)
     {
         var freezeDuration = _autoscaleFreezeDuration <= TimeSpan.Zero ? TimeSpan.FromMinutes(2) : _autoscaleFreezeDuration;
-        var untilTicks = nowTicks + freezeDuration.Ticks;
+        var untilTicks = nowTicks + ToStopwatchTicks(freezeDuration);
         var existingUntil = Interlocked.Read(ref _autoscaleFrozenUntilTicks);
         if (untilTicks > existingUntil)
             Interlocked.Exchange(ref _autoscaleFrozenUntilTicks, untilTicks);
@@ -3164,7 +3248,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         _logger.LogWarning(
             "Autoscaler freeze: reason={Reason} until={UntilUtc:o}",
             reason,
-            new DateTimeOffset(Interlocked.Read(ref _autoscaleFrozenUntilTicks), TimeSpan.Zero));
+            ToUtcTimestamp(Interlocked.Read(ref _autoscaleFrozenUntilTicks)));
     }
 
     private bool TryGetFreezeState(long nowTicks, out string reason, out DateTimeOffset? frozenUntilUtc)
@@ -3182,7 +3266,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             reason = string.IsNullOrWhiteSpace(_freezeReason)
                 ? "blocked:frozen"
                 : $"blocked:frozen:{_freezeReason}";
-            frozenUntilUtc = new DateTimeOffset(frozenUntilTicks, TimeSpan.Zero);
+            frozenUntilUtc = ToUtcTimestamp(frozenUntilTicks);
             return true;
         }
 
@@ -3250,7 +3334,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         var eventTicks = Volatile.Read(ref _lastScaleEventTicks);
         var frozenUntilTicks = Interlocked.Read(ref _autoscaleFrozenUntilTicks);
-        var nowTicks = DateTimeOffset.UtcNow.UtcTicks;
+        var nowTicks = Stopwatch.GetTimestamp();
         var frozen = frozenUntilTicks > nowTicks;
         return new RedisAutoscalerSnapshot(
             Enabled: _autoscaleEnabled,
@@ -3272,9 +3356,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             ScaleEventsInCurrentMinute: Volatile.Read(ref _scaleEventsInCurrentMinute),
             MaxScaleEventsPerMinute: _maxScaleEventsPerMinute,
             Frozen: frozen,
-            FrozenUntilUtc: frozen ? new DateTimeOffset(frozenUntilTicks, TimeSpan.Zero) : null,
+            FrozenUntilUtc: frozen ? ToUtcTimestamp(frozenUntilTicks) : null,
             FreezeReason: frozen ? _freezeReason : null,
-            LastScaleEventUtc: eventTicks == 0 ? null : new DateTimeOffset(eventTicks, TimeSpan.Zero),
+            LastScaleEventUtc: eventTicks == 0 ? null : ToUtcTimestamp(eventTicks),
             LastScaleDirection: _lastScaleDirection,
             LastScaleReason: _lastScaleReason);
     }

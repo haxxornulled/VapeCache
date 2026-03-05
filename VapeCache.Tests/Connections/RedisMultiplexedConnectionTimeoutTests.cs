@@ -66,7 +66,7 @@ public class RedisMultiplexedConnectionTimeoutTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_BulkTimeout_DoesNotResetTransport()
+    public async Task ExecuteAsync_BulkTimeout_ResetsTransport()
     {
         var factory = new NeverRespondingFactory();
         var mux = new RedisMultiplexedConnection(
@@ -87,8 +87,13 @@ public class RedisMultiplexedConnectionTimeoutTests
             await Assert.ThrowsAsync<TimeoutException>(() => task);
 
             Assert.Equal(1, mux.ResponseTimeoutCount);
-            Assert.Equal(0, mux.FailureCount);
-            Assert.Equal(1, factory.CreateCount);
+            Assert.True(mux.FailureCount >= 1);
+
+            var second = mux.ExecuteAsync(command, CancellationToken.None).AsTask();
+            var secondDone = await Task.WhenAny(second, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.Same(second, secondDone);
+            await Assert.ThrowsAsync<TimeoutException>(() => second);
+            Assert.True(factory.CreateCount >= 2);
         }
         finally
         {
@@ -129,7 +134,7 @@ public class RedisMultiplexedConnectionTimeoutTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_FastTimeoutBurst_ResetsTransportAfterThreshold()
+    public async Task ExecuteAsync_FastTimeout_ResetsTransportImmediately()
     {
         var factory = new NeverRespondingFactory();
         var mux = new RedisMultiplexedConnection(
@@ -146,21 +151,14 @@ public class RedisMultiplexedConnectionTimeoutTests
             var firstDone = await Task.WhenAny(first, Task.Delay(TimeSpan.FromSeconds(1)));
             Assert.Same(first, firstDone);
             await Assert.ThrowsAsync<TimeoutException>(() => first);
-            Assert.Equal(0, mux.FailureCount);
+            Assert.True(mux.FailureCount >= 1);
 
             var second = mux.ExecuteAsync(RedisRespProtocol.PingCommand, CancellationToken.None).AsTask();
             var secondDone = await Task.WhenAny(second, Task.Delay(TimeSpan.FromSeconds(1)));
             Assert.Same(second, secondDone);
             await Assert.ThrowsAsync<TimeoutException>(() => second);
 
-            Assert.True(mux.FailureCount >= 1);
             Assert.True(mux.ResponseTimeoutCount >= 2);
-
-            var third = mux.ExecuteAsync(RedisRespProtocol.PingCommand, CancellationToken.None).AsTask();
-            var thirdDone = await Task.WhenAny(third, Task.Delay(TimeSpan.FromSeconds(1)));
-            Assert.Same(third, thirdDone);
-            await Assert.ThrowsAsync<TimeoutException>(() => third);
-
             Assert.True(factory.CreateCount >= 2);
         }
         finally

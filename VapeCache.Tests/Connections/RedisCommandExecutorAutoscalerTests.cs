@@ -71,7 +71,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
         SetLaneField(bulkLane!, "_responseTimeoutCount", 100L);
 
         SetField(harness.Executor, "_lastTimeoutSampleCount", 0L);
-        SetField(harness.Executor, "_lastTimeoutSampleTicks", DateTime.UtcNow.AddSeconds(-1).Ticks);
+        SetField(harness.Executor, "_lastTimeoutSampleTicks", SecondsAgoStopwatchTicks(1));
         InvokeEvaluateAutoscale(harness.Executor);
 
         var snapshot = harness.Executor.GetAutoscalerSnapshot();
@@ -145,7 +145,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
         Assert.Equal(2, first);
 
         // Keep cooldown active.
-        SetField(harness.Executor, "_lastScaleUpTicks", DateTime.UtcNow.Ticks);
+        SetField(harness.Executor, "_lastScaleUpTicks", Stopwatch.GetTimestamp());
         ForceTimeoutSpike(harness.Executor, 10);
         InvokeEvaluateAutoscale(harness.Executor);
 
@@ -169,7 +169,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
         });
 
         // Simulate sustained low pressure.
-        SetField(harness.Executor, "_lowPressureStreakTicks", TimeSpan.FromSeconds(1).Ticks);
+        SetField(harness.Executor, "_lowPressureStreakTicks", ToStopwatchTicks(TimeSpan.FromSeconds(1)));
         SetField(harness.Executor, "_lastScaleDownTicks", 0L);
         InvokeEvaluateAutoscale(harness.Executor);
         Thread.Sleep(20);
@@ -227,7 +227,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
         });
 
         SetField(harness.Executor, "_lastFailureSampleCount", -10L);
-        SetField(harness.Executor, "_lastFailureSampleTicks", DateTime.UtcNow.AddSeconds(-1).Ticks);
+        SetField(harness.Executor, "_lastFailureSampleTicks", SecondsAgoStopwatchTicks(1));
         ForceTimeoutSpike(harness.Executor, 30);
         InvokeEvaluateAutoscale(harness.Executor);
 
@@ -283,7 +283,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
             ScaleDownP95LatencyMsThreshold = 50
         });
 
-        SetField(harness.Executor, "_lowPressureStreakTicks", TimeSpan.FromSeconds(1).Ticks);
+        SetField(harness.Executor, "_lowPressureStreakTicks", ToStopwatchTicks(TimeSpan.FromSeconds(1)));
         SetField(harness.Executor, "_lastScaleDownTicks", 0L);
         MarkFirstLaneUnhealthy(harness.Executor);
         InvokeEvaluateAutoscale(harness.Executor);
@@ -310,10 +310,10 @@ public sealed class RedisCommandExecutorAutoscalerTests
         });
 
         var registerScaleEvent = GetMethod("RegisterScaleEvent");
-        var now = DateTime.UtcNow.Ticks;
+        var now = Stopwatch.GetTimestamp();
         registerScaleEvent.Invoke(harness.Executor, new object[] { "up", now });
-        registerScaleEvent.Invoke(harness.Executor, new object[] { "down", now + TimeSpan.FromSeconds(1).Ticks });
-        registerScaleEvent.Invoke(harness.Executor, new object[] { "up", now + TimeSpan.FromSeconds(2).Ticks });
+        registerScaleEvent.Invoke(harness.Executor, new object[] { "down", now + ToStopwatchTicks(TimeSpan.FromSeconds(1)) });
+        registerScaleEvent.Invoke(harness.Executor, new object[] { "up", now + ToStopwatchTicks(TimeSpan.FromSeconds(2)) });
 
         var snapshot = harness.Executor.GetAutoscalerSnapshot();
         Assert.True(snapshot.Frozen);
@@ -365,6 +365,54 @@ public sealed class RedisCommandExecutorAutoscalerTests
         Assert.True(sw.ElapsedMilliseconds >= 70, $"Expected drain wait near timeout, got {sw.ElapsedMilliseconds}ms.");
     }
 
+    [Fact]
+    public void RuntimeBulkLaneOptionChange_ReconcilesImmediately()
+    {
+        using var harness = CreateHarness(new RedisMultiplexerOptions
+        {
+            Connections = 2,
+            BulkLaneConnections = 0,
+            EnableAutoscaling = true,
+            MinConnections = 1,
+            MaxConnections = 4
+        });
+
+        Assert.DoesNotContain(harness.Executor.GetMuxLaneSnapshots(), lane => lane.Role == "bulk-read-write");
+        Assert.Equal(0, GetConnectionArray(harness.Executor, "_bulkConns").Length);
+
+        var apply = GetMethod(nameof(ApplyAutoscaleOptions));
+        apply.Invoke(harness.Executor, new object[]
+        {
+            new RedisMultiplexerOptions
+            {
+                Connections = 2,
+                BulkLaneConnections = 1,
+                BulkLaneResponseTimeout = TimeSpan.FromSeconds(8),
+                EnableAutoscaling = true,
+                MinConnections = 1,
+                MaxConnections = 4
+            }
+        });
+
+        Assert.Contains(harness.Executor.GetMuxLaneSnapshots(), lane => lane.Role == "bulk-read-write");
+        Assert.Equal(1, GetConnectionArray(harness.Executor, "_bulkConns").Length);
+
+        apply.Invoke(harness.Executor, new object[]
+        {
+            new RedisMultiplexerOptions
+            {
+                Connections = 2,
+                BulkLaneConnections = 0,
+                EnableAutoscaling = true,
+                MinConnections = 1,
+                MaxConnections = 4
+            }
+        });
+
+        Assert.DoesNotContain(harness.Executor.GetMuxLaneSnapshots(), lane => lane.Role == "bulk-read-write");
+        Assert.Equal(0, GetConnectionArray(harness.Executor, "_bulkConns").Length);
+    }
+
     private static void InvokeEvaluateAutoscale(RedisCommandExecutor executor)
     {
         var method = typeof(RedisCommandExecutor).GetMethod("EvaluateAutoscale", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -377,7 +425,18 @@ public sealed class RedisCommandExecutorAutoscalerTests
         // timeoutRatePerSec = (timeoutTotal - lastCount) / elapsedSec
         // Keep timeoutTotal ~= 0 and push lastCount negative so rate is large.
         SetField(executor, "_lastTimeoutSampleCount", -delta);
-        SetField(executor, "_lastTimeoutSampleTicks", DateTime.UtcNow.AddSeconds(-1).Ticks);
+        SetField(executor, "_lastTimeoutSampleTicks", SecondsAgoStopwatchTicks(1));
+    }
+
+    private static long SecondsAgoStopwatchTicks(double seconds)
+        => Stopwatch.GetTimestamp() - ToStopwatchTicks(TimeSpan.FromSeconds(seconds));
+
+    private static long ToStopwatchTicks(TimeSpan duration)
+    {
+        if (duration <= TimeSpan.Zero)
+            return 0;
+
+        return Math.Max(1L, (long)Math.Ceiling(duration.TotalSeconds * Stopwatch.Frequency));
     }
 
     private static MethodInfo GetMethod(string methodName)
