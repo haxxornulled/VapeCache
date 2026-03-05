@@ -1,0 +1,3 @@
+  Determining projects to restore...
+  Restored C:\Visual Studio Projects\VapeCache\VapeCache.Benchmarks\VapeCache.Benchmarks.Runner.csproj (in 561 ms).
+  11 of 12 projects are up-to-date for restore.

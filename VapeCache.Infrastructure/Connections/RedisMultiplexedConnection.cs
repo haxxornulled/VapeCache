@@ -156,8 +156,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             () => _writes.Count,
             _pending.EnqueueAsync,
             NextPendingResponseSequence,
-            ReturnHeaderBuffer,
-            ReturnPayloadArray,
+            ReturnHeaderBufferFromMux,
+            ReturnPayloadArrayFromMux,
             static (req, ex) => req.Op.AbortUnqueued(ex),
             RecordLaneBytesSent,
             coalescingEnterQueueDepth,
@@ -375,7 +375,10 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
 
         var req = new PendingRequest(command, op);
         if (_writes.TryEnqueue(req))
+        {
+            MarkRequestBuffersOwnedByMux(req);
             return op.ValueTask;
+        }
 
         return EnqueueWithQueueWaitAsync(req, op, ct);
     }
@@ -396,6 +399,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         var req = new PendingRequest(command, op);
         if (_writes.TryEnqueue(req))
         {
+            MarkRequestBuffersOwnedByMux(req);
             task = op.ValueTask;
             return true;
         }
@@ -426,7 +430,10 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
 
         var req = new PendingRequest(header, op, payload, payloads, payloadCount, appendCrlf, appendCrlfPerPayload, headerBuffer, payloadArrayBuffer);
         if (_writes.TryEnqueue(req))
+        {
+            MarkRequestBuffersOwnedByMux(req);
             return op.ValueTask;
+        }
 
         return EnqueueWithQueueWaitAsync(req, op, ct);
     }
@@ -454,6 +461,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         var req = new PendingRequest(header, op, payload, payloads, payloadCount, appendCrlf, appendCrlfPerPayload, headerBuffer, payloadArrayBuffer);
         if (_writes.TryEnqueue(req))
         {
+            MarkRequestBuffersOwnedByMux(req);
             task = op.ValueTask;
             return true;
         }
@@ -510,6 +518,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         try
         {
             await _writes.EnqueueAsync(req, ct).ConfigureAwait(false);
+            MarkRequestBuffersOwnedByMux(req);
         }
         catch (Exception ex)
         {
@@ -611,6 +620,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
 
     private bool ShouldResetTransportForTimeout(PendingOperation operation)
     {
+        // Socket-reader timeouts are implemented via cancellation of an outstanding receive awaitable.
+        // To keep RESP framing integrity, always recycle the transport before the next read.
+        if (_useSocketReader)
+            return true;
+
         if (operation.OperationClass == OperationClass.Bulk)
             return false;
 
@@ -709,11 +723,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 {
                     await SendDirectAsync(req, conn, generation, _cts.Token).ConfigureAwait(false);
                     if (req.HeaderBuffer is not null)
-                        ReturnHeaderBuffer(req.HeaderBuffer);
+                        ReturnHeaderBufferFromMux(req.HeaderBuffer);
                     if (req.PayloadArrayBuffer is not null)
                     {
                         // Preserve length; skip clearing to avoid extra work.
-                        ReturnPayloadArray(req.PayloadArrayBuffer);
+                        ReturnPayloadArrayFromMux(req.PayloadArrayBuffer);
                     }
                 }
             }
@@ -740,12 +754,12 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         }
     }
 
-    private void ReturnRequestBuffers(PendingRequest req)
+    private static void ReturnRequestBuffers(PendingRequest req)
     {
         if (req.HeaderBuffer is not null)
-            ReturnHeaderBuffer(req.HeaderBuffer);
+            ReturnHeaderBufferFromMux(req.HeaderBuffer);
         if (req.PayloadArrayBuffer is not null)
-            ReturnPayloadArray(req.PayloadArrayBuffer);
+            ReturnPayloadArrayFromMux(req.PayloadArrayBuffer);
     }
 
     private async Task ReaderLoopAsync()
@@ -903,9 +917,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         while (_writes.TryDequeue(out var req))
         {
             if (req.HeaderBuffer is not null)
-                ReturnHeaderBuffer(req.HeaderBuffer);
+                ReturnHeaderBufferFromMux(req.HeaderBuffer);
             if (req.PayloadArrayBuffer is not null)
-                ReturnPayloadArray(req.PayloadArrayBuffer);
+                ReturnPayloadArrayFromMux(req.PayloadArrayBuffer);
             if (req.Op is not null)
                 req.Op.AbortUnqueued(ex);
         }
@@ -1059,13 +1073,26 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private PendingOperation RentOperation()
         => _operationPool.Rent();
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void MarkRequestBuffersOwnedByMux(PendingRequest request)
+    {
+        if (request.HeaderBuffer is not null)
+            RedisMultiplexedBufferCaches.MarkHeaderBufferInFlight(request.HeaderBuffer);
+        if (request.PayloadArrayBuffer is not null)
+            RedisMultiplexedBufferCaches.MarkPayloadArrayInFlight(request.PayloadArrayBuffer);
+    }
+
     [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal byte[] RentHeaderBuffer(int minLength)
         => RedisMultiplexedBufferCaches.RentHeaderBuffer(minLength);
 
     [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal void ReturnHeaderBuffer(byte[] buffer)
-        => RedisMultiplexedBufferCaches.ReturnHeaderBuffer(buffer);
+        => RedisMultiplexedBufferCaches.ReturnHeaderBufferFromCaller(buffer);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ReturnHeaderBufferFromMux(byte[]? buffer)
+        => RedisMultiplexedBufferCaches.ReturnHeaderBufferFromMux(buffer);
 
     [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal ReadOnlyMemory<byte>[] RentPayloadArray(int minLength)
@@ -1073,7 +1100,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
 
     [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal void ReturnPayloadArray(ReadOnlyMemory<byte>[]? payloads)
-        => RedisMultiplexedBufferCaches.ReturnPayloadArray(payloads);
+        => RedisMultiplexedBufferCaches.ReturnPayloadArrayFromCaller(payloads);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ReturnPayloadArrayFromMux(ReadOnlyMemory<byte>[]? payloads)
+        => RedisMultiplexedBufferCaches.ReturnPayloadArrayFromMux(payloads);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal int GetLaneSelectionScore()

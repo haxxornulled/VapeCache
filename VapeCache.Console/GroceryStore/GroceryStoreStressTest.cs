@@ -111,6 +111,10 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         var sw = Stopwatch.StartNew();
         var completedShoppers = 0;
         var nextShopperId = 0;
+        using var workloadCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        if (workload.TargetDuration > TimeSpan.Zero)
+            workloadCts.CancelAfter(workload.TargetDuration);
+        var runToken = workloadCts.Token;
 
         using var statsCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var statsTask = ReportStatsAsync(sw, workload.TargetDuration, workload.StatsInterval, statsCts.Token);
@@ -120,7 +124,7 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         {
             workerTasks[i] = Task.Run(async () =>
             {
-                while (!stoppingToken.IsCancellationRequested)
+                while (!runToken.IsCancellationRequested)
                 {
                     var shopperId = Interlocked.Increment(ref nextShopperId);
                     if (shopperId > workload.TotalShoppers)
@@ -128,13 +132,27 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
                         break;
                     }
 
-                    await SimulateShopperAsync(shopperId, flashSales, hotProduct, hotFlashSale, cartBatchWriter, workload, stoppingToken).ConfigureAwait(false);
+                    await SimulateShopperAsync(shopperId, flashSales, hotProduct, hotFlashSale, cartBatchWriter, workload, runToken).ConfigureAwait(false);
                     Interlocked.Increment(ref completedShoppers);
                 }
-            }, stoppingToken);
+            }, runToken);
         }
 
-        await Task.WhenAll(workerTasks).ConfigureAwait(false);
+        var workersCompletion = Task.WhenAll(workerTasks);
+        var completionDeadline = workload.TargetDuration + TimeSpan.FromSeconds(5);
+        var completed = await Task.WhenAny(workersCompletion, Task.Delay(completionDeadline, stoppingToken)).ConfigureAwait(false);
+        if (!ReferenceEquals(completed, workersCompletion))
+        {
+            workloadCts.Cancel();
+            _logger.LogWarning(
+                "Shopper workers did not fully drain within {Deadline}. Proceeding with shutdown to avoid host hang.",
+                completionDeadline);
+        }
+        else
+        {
+            await workersCompletion.ConfigureAwait(false);
+        }
+
         sw.Stop();
 
         statsCts.Cancel();

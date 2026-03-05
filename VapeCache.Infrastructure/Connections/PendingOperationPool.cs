@@ -73,6 +73,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     private int _registrationsDisposed;
     private int _responseProcessed;
     private int _awaiterObserved;
+    private int _returnedToPool;
     private int _operationClass;
     private long _sequenceId;
     private long _generation;
@@ -121,6 +122,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         Volatile.Write(ref _registrationsDisposed, 0);
         Volatile.Write(ref _responseProcessed, 0);
         Volatile.Write(ref _awaiterObserved, 0);
+        Volatile.Write(ref _returnedToPool, 0);
         Volatile.Write(ref _operationClass, (int)OperationClass.Fast);
         Volatile.Write(ref _sequenceId, 0);
         Volatile.Write(ref _generation, 0);
@@ -277,6 +279,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     {
         if (Volatile.Read(ref _responseProcessed) == 0) return;
         if (Volatile.Read(ref _awaiterObserved) == 0) return;
+        if (Interlocked.Exchange(ref _returnedToPool, 1) != 0) return;
         _returnToPool(this);
     }
 

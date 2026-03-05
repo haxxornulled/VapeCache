@@ -32,8 +32,12 @@ public class GroceryStoreComparisonStressTest
     /// <summary>
     /// Run comprehensive stress test and return performance metrics.
     /// </summary>
-    public async Task<StressTestResult> RunStressTestAsync(int shopperCount = 10_000, int maxCartSize = 35)
+    public async Task<StressTestResult> RunStressTestAsync(
+        int shopperCount = 10_000,
+        int maxCartSize = 35,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         maxCartSize = Math.Max(15, maxCartSize);
         _logger.LogInformation("===== {Provider} Grocery Store Stress Test =====", _providerName);
         _logger.LogInformation("Shoppers: {Count:N0}, Max Cart Size: {MaxCart}", shopperCount, maxCartSize);
@@ -45,7 +49,8 @@ public class GroceryStoreComparisonStressTest
         var cacheStart = Stopwatch.StartNew();
         foreach (var product in products)
         {
-            await _service.CacheProductAsync(product, TimeSpan.FromMinutes(10));
+            cancellationToken.ThrowIfCancellationRequested();
+            await _service.CacheProductAsync(product, TimeSpan.FromMinutes(10)).ConfigureAwait(false);
         }
         var cacheTime = cacheStart.Elapsed;
         _logger.LogInformation("Pre-cached {Count} products in {Ms}ms", products.Length, cacheTime.TotalMilliseconds);
@@ -79,6 +84,7 @@ public class GroceryStoreComparisonStressTest
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var deterministic = _deterministicSeed.HasValue;
                 var seed = _deterministicSeed.GetValueOrDefault();
                 var shopperSw = Stopwatch.StartNew();
@@ -99,12 +105,14 @@ public class GroceryStoreComparisonStressTest
 
                 // 1. Join flash sale
                 var stepStart = Stopwatch.GetTimestamp();
-                await _service.JoinFlashSaleAsync(saleId, userId);
+                cancellationToken.ThrowIfCancellationRequested();
+                await _service.JoinFlashSaleAsync(saleId, userId).ConfigureAwait(false);
                 joinFlashSaleStep = ElapsedMs(stepStart);
 
                 // 2. Check if in sale
                 stepStart = Stopwatch.GetTimestamp();
-                await _service.IsInFlashSaleAsync(saleId, userId);
+                cancellationToken.ThrowIfCancellationRequested();
+                await _service.IsInFlashSaleAsync(saleId, userId).ConfigureAwait(false);
                 isInFlashSaleStep = ElapsedMs(stepStart);
 
                 // 3. Add random items to cart (15-35 items)
@@ -132,6 +140,7 @@ public class GroceryStoreComparisonStressTest
                 buildCartItemsStep = ElapsedMs(stepStart);
 
                 stepStart = Stopwatch.GetTimestamp();
+                cancellationToken.ThrowIfCancellationRequested();
                 if (batchWriter is not null)
                 {
                     await batchWriter.AddToCartBatchAsync(userId, items).ConfigureAwait(false);
@@ -147,6 +156,7 @@ public class GroceryStoreComparisonStressTest
 
                 // 4/5. Independent reads - issue together to reduce artificial serial latency.
                 stepStart = Stopwatch.GetTimestamp();
+                cancellationToken.ThrowIfCancellationRequested();
                 var cartCountTask = _service.GetCartCountAsync(userId);
                 var cartTask = _service.GetCartAsync(userId);
                 if (cartCountTask.IsCompletedSuccessfully)
@@ -170,6 +180,7 @@ public class GroceryStoreComparisonStressTest
 
                 // 6. Save session
                 stepStart = Stopwatch.GetTimestamp();
+                cancellationToken.ThrowIfCancellationRequested();
                 var session = new UserSession(
                     userId,
                     $"session-{shopperIndex}",
@@ -212,7 +223,8 @@ public class GroceryStoreComparisonStressTest
 
                 // 9. Clear cart (checkout)
                 stepStart = Stopwatch.GetTimestamp();
-                await _service.ClearCartAsync(userId);
+                cancellationToken.ThrowIfCancellationRequested();
+                await _service.ClearCartAsync(userId).ConfigureAwait(false);
                 clearCartStep = ElapsedMs(stepStart);
 
                 shopperSw.Stop();
@@ -226,6 +238,15 @@ public class GroceryStoreComparisonStressTest
                 cartReadPhaseMs[slot] = cartReadPhaseStep;
                 sessionAndSalePhaseMs[slot] = sessionAndSalePhaseStep;
                 clearCartMs[slot] = clearCartStep;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Timeout-driven cancellation: stop scheduling additional shoppers without logging
+                // disposal noise from downstream services.
+            }
+            catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Transport/provider teardown can race with late shopper work during timeout cancellation.
             }
             catch (Exception ex)
             {
@@ -243,6 +264,9 @@ public class GroceryStoreComparisonStressTest
             {
                 while (true)
                 {
+                    if (cancellationToken.IsCancellationRequested)
+                        break;
+
                     var shopperIndex = Interlocked.Increment(ref nextShopper);
                     if (shopperIndex >= shopperCount)
                         break;
@@ -253,6 +277,7 @@ public class GroceryStoreComparisonStressTest
         }
 
         await Task.WhenAll(workers).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
 
         shopperStart.Stop();
         sw.Stop();

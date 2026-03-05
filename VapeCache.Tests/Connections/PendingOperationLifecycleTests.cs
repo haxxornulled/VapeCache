@@ -95,6 +95,27 @@ public sealed class PendingOperationLifecycleTests
         Assert.Same(first, returned);
     }
 
+    [Fact]
+    public async Task Duplicate_mark_processed_does_not_return_same_operation_twice()
+    {
+        var inFlight = new SemaphoreSlim(1, 1);
+        var pool = new PendingOperationPool(CancellationToken.None, inFlight, null, null);
+
+        var op = pool.Rent();
+        op.Start(poolBulk: false, ct: CancellationToken.None, holdsSlot: false, sequenceId: 1);
+
+        op.TrySetResult(RedisRespReader.RespValue.Integer(42));
+        op.MarkResponseProcessed();
+        op.MarkResponseProcessed();
+
+        var resp = await op.ValueTask;
+        Assert.Equal(42, resp.IntegerValue);
+
+        Assert.True(WaitForPoolItem(pool, out var returned));
+        Assert.Same(op, returned);
+        Assert.False(pool.TryTake(out _));
+    }
+
     private static bool WaitForPoolItem(PendingOperationPool pool, out PendingOperation? operation)
     {
         operation = null;

@@ -1,0 +1,24 @@
+  Determining projects to restore...
+  Restored C:\Visual Studio Projects\VapeCache\VapeCache.Benchmarks\VapeCache.Benchmarks.csproj (in 199 ms).
+  9 of 10 projects are up-to-date for restore.
+  VapeCache.Application -> C:\Visual Studio Projects\VapeCache\VapeCache.Application\bin\Release\net10.0\VapeCache.Application.dll
+  VapeCache.Abstractions -> C:\Visual Studio Projects\VapeCache\VapeCache.Abstractions\bin\Release\net10.0\VapeCache.Abstractions.dll
+  VapeCache.Extensions.AspNetCore -> C:\Visual Studio Projects\VapeCache\VapeCache.Extensions.AspNetCore\bin\Release\net10.0\VapeCache.Extensions.AspNetCore.dll
+  VapeCache.Infrastructure -> C:\Visual Studio Projects\VapeCache\VapeCache.Infrastructure\bin\Release\net10.0\VapeCache.Infrastructure.dll
+  VapeCache.Persistence -> C:\Visual Studio Projects\VapeCache\VapeCache.Persistence\bin\Release\net10.0\VapeCache.Persistence.dll
+  VapeCache.Extensions.Aspire -> C:\Visual Studio Projects\VapeCache\VapeCache.Extensions.Aspire\bin\Release\net10.0\VapeCache.Extensions.Aspire.dll
+  VapeCache.Reconciliation -> C:\Visual Studio Projects\VapeCache\VapeCache.Reconciliation\bin\Release\net10.0\VapeCache.Reconciliation.dll
+  VapeCache.Console -> C:\Visual Studio Projects\VapeCache\VapeCache.Console\bin\Release\net10.0\VapeCache.Console.dll
+  VapeCache.Benchmarks -> C:\Visual Studio Projects\VapeCache\VapeCache.Benchmarks\bin\Release\net10.0\VapeCache.Benchmarks.dll
+  VapeCache.Tests -> C:\Visual Studio Projects\VapeCache\VapeCache.Tests\bin\Release\net10.0\VapeCache.Tests.dll
+Test run for C:\Visual Studio Projects\VapeCache\VapeCache.Tests\bin\Release\net10.0\VapeCache.Tests.dll (.NETCoreApp,Version=v10.0)
+VSTest version 18.0.1 (x64)
+
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.55]     VapeCache.Tests.Connections.TcpKeepAliveConfigurationTests.TcpKeepAlive_DoesNotThrow_OnNonWindows [SKIP]
+  Skipped VapeCache.Tests.Connections.TcpKeepAliveConfigurationTests.TcpKeepAlive_DoesNotThrow_OnNonWindows [1 ms]
+[xUnit.net 00:00:08.93]     VapeCache.Tests.Integration.RedisReconnectDrillIntegrationTests.ForcedClientKill_ReconnectsAndSustainsTraffic [SKIP]
+  Skipped VapeCache.Tests.Integration.RedisReconnectDrillIntegrationTests.ForcedClientKill_ReconnectsAndSustainsTraffic [1 ms]
+
+Passed!  - Failed:     0, Passed:   482, Skipped:     2, Total:   484, Duration: 9 s - VapeCache.Tests.dll (net10.0)

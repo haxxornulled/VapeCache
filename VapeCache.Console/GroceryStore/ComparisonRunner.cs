@@ -484,7 +484,7 @@ public static class ComparisonRunner
                 deterministicSeed,
                 harness.MaxDegreeOfParallelism);
             return await RunWithOptionalTimeoutAsync(
-                    () => test.RunStressTestAsync(shopperCount, maxCartSize),
+                    ct => test.RunStressTestAsync(shopperCount, maxCartSize, ct),
                     harness.ProviderTimeout,
                     providerName)
                 .ConfigureAwait(false);
@@ -584,7 +584,7 @@ public static class ComparisonRunner
                 deterministicSeed,
                 harness.MaxDegreeOfParallelism);
             return await RunWithOptionalTimeoutAsync(
-                    () => test.RunStressTestAsync(shopperCount, maxCartSize),
+                    ct => test.RunStressTestAsync(shopperCount, maxCartSize, ct),
                     harness.ProviderTimeout,
                     providerName)
                 .ConfigureAwait(false);
@@ -781,23 +781,43 @@ public static class ComparisonRunner
     }
 
     private static async Task<StressTestResult> RunWithOptionalTimeoutAsync(
-        Func<Task<StressTestResult>> run,
+        Func<CancellationToken, Task<StressTestResult>> run,
         TimeSpan timeout,
         string providerName)
     {
         if (timeout <= TimeSpan.Zero)
-            return await run().ConfigureAwait(false);
+            return await run(CancellationToken.None).ConfigureAwait(false);
+
+        using var timeoutCts = new CancellationTokenSource();
+        var runTask = run(timeoutCts.Token);
+        var completed = await Task.WhenAny(runTask, Task.Delay(timeout)).ConfigureAwait(false);
+        if (completed == runTask)
+            return await runTask.ConfigureAwait(false);
+
+        timeoutCts.Cancel();
+        Exception? timeoutInner = null;
 
         try
         {
-            return await run().WaitAsync(timeout).ConfigureAwait(false);
+            // Allow cooperative cancellation to drain briefly before forcing timeout.
+            await runTask.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         }
-        catch (TimeoutException ex)
+        catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
         {
-            throw new TimeoutException(
-                $"Benchmark provider '{providerName}' exceeded timeout of {timeout.TotalSeconds:N0}s.",
-                ex);
+            timeoutInner = ex;
         }
+        catch (TimeoutException)
+        {
+            // Timed out waiting for cancellation drain; force fail below.
+        }
+        catch (Exception ex)
+        {
+            timeoutInner = ex;
+        }
+
+        throw new TimeoutException(
+            $"Benchmark provider '{providerName}' exceeded timeout of {timeout.TotalSeconds:N0}s.",
+            timeoutInner);
     }
 
     private static int? GetNullableIntFromSources(string? envValue, string? configValue)

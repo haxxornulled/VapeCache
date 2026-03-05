@@ -205,9 +205,10 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         }
         catch (Exception ex)
         {
+            var transportFailure = NormalizeTransportException(ex);
             for (var i = enqueuedToPending; i < _coalesceDrained.Count; i++)
-                _abortPendingRequest(_coalesceDrained[i], ex);
-            throw;
+                _abortPendingRequest(_coalesceDrained[i], transportFailure);
+            throw transportFailure;
         }
         finally
         {
@@ -347,7 +348,16 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     {
         while (!buffer.IsEmpty)
         {
-            var sent = await socket.SendAsync(buffer, SocketFlags.None, ct).ConfigureAwait(false);
+            int sent;
+            try
+            {
+                sent = await socket.SendAsync(buffer, SocketFlags.None, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                throw NormalizeTransportException(ex);
+            }
+
             if (sent <= 0)
                 throw new IOException("Socket send returned 0.");
             await onBytesCommitted(sent).ConfigureAwait(false);
@@ -395,7 +405,16 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             while (_socketSendWindow.Count > 0)
             {
                 ct.ThrowIfCancellationRequested();
-                var sent = await socket.SendAsync(_socketSendWindow, SocketFlags.None).ConfigureAwait(false);
+                int sent;
+                try
+                {
+                    sent = await socket.SendAsync(_socketSendWindow, SocketFlags.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    throw NormalizeTransportException(ex);
+                }
+
                 if (sent <= 0)
                     throw new IOException("Socket send returned 0.");
                 await onBytesCommitted(sent).ConfigureAwait(false);
@@ -436,6 +455,23 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         }
 
         return _burstCoalescingActive;
+    }
+
+    private static Exception NormalizeTransportException(Exception ex)
+    {
+        if (ex is ObjectDisposedException)
+            return new IOException("Socket was disposed during coalesced write send.", ex);
+
+        if (ex is SocketException se &&
+            (se.SocketErrorCode == SocketError.OperationAborted ||
+             se.SocketErrorCode == SocketError.ConnectionReset ||
+             se.SocketErrorCode == SocketError.ConnectionAborted ||
+             se.SocketErrorCode == SocketError.NotConnected))
+        {
+            return new IOException($"Socket write failed: {se.SocketErrorCode}.", se);
+        }
+
+        return ex;
     }
 
     private sealed class SocketSendSegmentWindow : IList<ArraySegment<byte>>
