@@ -1,4 +1,4 @@
-using VapeCache.Application.Guards;
+using VapeCache.Core.Guards;
 
 namespace VapeCache.Tests.Application;
 

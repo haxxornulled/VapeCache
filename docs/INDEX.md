@@ -29,6 +29,7 @@ This index tracks the current feature set and supported APIs.
 - [FAQ.md](FAQ.md) - Common questions and behavior clarifications
 
 ## Architecture & Performance
+- [CLEAN_ARCHITECTURE.md](CLEAN_ARCHITECTURE.md) - Layer boundaries, dependency rules, and enforcement tests
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System design and data flow
 - [MUX_FAST_PATH_ARCHITECTURE.md](MUX_FAST_PATH_ARCHITECTURE.md) - Fast-path mux flowcharts, lane management, and tuning playbook
 - [COALESCED_WRITES.md](COALESCED_WRITES.md) - Coalesced write strategy

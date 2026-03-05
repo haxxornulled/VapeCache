@@ -1,20 +1,13 @@
 using LanguageExt;
-using static LanguageExt.Prelude;
 using HashSet = System.Collections.Generic.HashSet<string>;
+using static LanguageExt.Prelude;
 
-namespace VapeCache.Application.Guards;
+namespace VapeCache.Core.Guards;
 
-/// <summary>
-/// Paranoia: Extreme validation for inputs that could destroy everything if left unchecked.
-/// Trust nothing. Validate everything.
-/// </summary>
 public static class Paranoia
 {
     public delegate Task<Validation<TFail, TSuccess>> AsyncValidation<TFail, TSuccess>();
 
-    /// <summary>
-    /// Executes value.
-    /// </summary>
     public static Validation<MonoidFail, Unit> Combine(params Validation<MonoidFail, bool>[] validations)
     {
         var acc = Success<MonoidFail, Unit>(unit);
@@ -28,17 +21,11 @@ public static class Paranoia
         return acc;
     }
 
-    /// <summary>
-    /// Validates value.
-    /// </summary>
     public static Validation<MonoidFail, bool> Validate(string? input, string paramName)
         => string.IsNullOrEmpty(input)
             ? Fail<MonoidFail, bool>(MonoidFail.FromError($"{paramName} cannot be null or empty"))
             : Success<MonoidFail, bool>(true);
 
-    /// <summary>
-    /// Validates value.
-    /// </summary>
     public static Validation<MonoidFail, bool> Validate(string[]? input, string paramName)
     {
         if (input is null || input.Length == 0)
@@ -74,39 +61,24 @@ public static class Paranoia
         return Success<MonoidFail, bool>(true);
     }
 
-    /// <summary>
-    /// Validates value.
-    /// </summary>
     public static Task<Validation<MonoidFail, bool>> ValidateAsync(AsyncValidation<MonoidFail, bool> asyncValidation)
         => asyncValidation();
 
-    /// <summary>
-    /// Validates value.
-    /// </summary>
     public static Validation<MonoidFail, bool> ValidateNonNegativeTimeSpan(TimeSpan value, string paramName)
         => value < TimeSpan.Zero
             ? Fail<MonoidFail, bool>(MonoidFail.FromError($"{paramName} must be non-negative"))
             : Success<MonoidFail, bool>(true);
 
-    /// <summary>
-    /// Validates value.
-    /// </summary>
     public static Validation<MonoidFail, bool> ValidateNonNegativeInt(int value, string paramName)
         => value < 0
             ? Fail<MonoidFail, bool>(MonoidFail.FromError($"{paramName} must be non-negative"))
             : Success<MonoidFail, bool>(true);
 
-    /// <summary>
-    /// Validates value.
-    /// </summary>
     public static Validation<MonoidFail, bool> Validate(ReadOnlyMemory<byte> input, string paramName)
         => input.IsEmpty
             ? Fail<MonoidFail, bool>(MonoidFail.FromError($"{paramName} cannot be empty"))
             : Success<MonoidFail, bool>(true);
 
-    /// <summary>
-    /// Validates value.
-    /// </summary>
     public static Validation<MonoidFail, bool> Validate(ReadOnlyMemory<byte>[]? input, string paramName)
     {
         if (input is null || input.Length == 0)
