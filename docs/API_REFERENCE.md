@@ -349,13 +349,15 @@ app.MapVapeCacheEndpoints(
     prefix: "/vapecache",
     includeBreakerControlEndpoints: false,
     includeLiveStreamEndpoint: true,
-    includeIntentEndpoints: true);
+    includeIntentEndpoints: true,
+    includeDashboardEndpoint: true);
 ```
 
 Default wrapper routes:
 - `GET /vapecache/status`
 - `GET /vapecache/stats`
 - `GET /vapecache/stream`
+- `GET /vapecache/dashboard`
 - `GET /vapecache/intent/{key}`
 - `GET /vapecache/intent?take=50`
 - `POST /vapecache/breaker/force-open` (opt-in)

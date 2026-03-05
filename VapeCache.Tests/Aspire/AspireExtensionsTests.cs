@@ -47,6 +47,7 @@ public sealed class AspireExtensionsTests
         Assert.False(options.Enabled);
         Assert.False(options.IncludeIntentEndpoints);
         Assert.False(options.EnableLiveStream);
+        Assert.False(options.EnableDashboard);
         Assert.False(options.IncludeBreakerControlEndpoints);
     }
 

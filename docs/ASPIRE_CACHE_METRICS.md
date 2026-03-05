@@ -432,6 +432,8 @@ While Aspire Dashboard doesn't support custom dashboards yet (as of .NET 9), you
 
 `GET /vapecache/stream` exposes realtime SSE frames (`event: vapecache-stats`) for Blazor charting.
 
+`GET /vapecache/dashboard` serves a built-in realtime dashboard (Vite + TypeScript) that consumes `/stream` and falls back to `/stats` polling when stream connectivity is degraded.
+
 ## Benefits for Blazor Developers
 
 ### 1. Zero-Config Observability

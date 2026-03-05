@@ -126,6 +126,28 @@ public sealed class AspireEndpointExtensionsTests
     }
 
     [Fact]
+    public async Task MapVapeCacheEndpoints_MapsDashboardAssets_WhenEnabled()
+    {
+        await using var app = await CreateAppAsync(includeBreakerControlEndpoints: false, includeDashboardEndpoint: true);
+        using var client = app.GetTestClient();
+
+        var dashboard = await client.GetAsync("/vapecache/dashboard");
+        var script = await client.GetAsync("/vapecache/dashboard/dashboard.js");
+        var style = await client.GetAsync("/vapecache/dashboard/dashboard.css");
+
+        Assert.Equal(HttpStatusCode.OK, dashboard.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, script.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, style.StatusCode);
+        Assert.Equal("text/html", dashboard.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("text/javascript", script.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("text/css", style.Content.Headers.ContentType?.MediaType);
+
+        var dashboardHtml = await dashboard.Content.ReadAsStringAsync();
+        Assert.Contains("./dashboard.js", dashboardHtml, StringComparison.Ordinal);
+        Assert.Contains("./dashboard.css", dashboardHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task WithAutoMappedEndpoints_MapsEndpoints_WithoutProgramRouteSetup()
     {
         await using var app = await CreateAutoMappedAppAsync(enabled: true);
@@ -133,11 +155,13 @@ public sealed class AspireEndpointExtensionsTests
 
         var status = await client.GetAsync("/vapecache/status");
         var stats = await client.GetAsync("/vapecache/stats");
+        var dashboard = await client.GetAsync("/vapecache/dashboard");
         using var streamRequest = new HttpRequestMessage(HttpMethod.Get, "/vapecache/stream");
         using var stream = await client.SendAsync(streamRequest, HttpCompletionOption.ResponseHeadersRead);
 
         Assert.Equal(HttpStatusCode.OK, status.StatusCode);
         Assert.Equal(HttpStatusCode.OK, stats.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, dashboard.StatusCode);
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
         Assert.Equal("text/event-stream", stream.Content.Headers.ContentType?.MediaType);
 
@@ -176,7 +200,11 @@ public sealed class AspireEndpointExtensionsTests
         Assert.Equal(HttpStatusCode.NotFound, status.StatusCode);
     }
 
-    private static async Task<WebApplication> CreateAppAsync(bool includeBreakerControlEndpoints, string prefix = "/vapecache", bool includeIntentEndpoints = true)
+    private static async Task<WebApplication> CreateAppAsync(
+        bool includeBreakerControlEndpoints,
+        string prefix = "/vapecache",
+        bool includeIntentEndpoints = true,
+        bool includeDashboardEndpoint = false)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -201,7 +229,12 @@ public sealed class AspireEndpointExtensionsTests
             intentRegistry.RecordSet("intent-endpoint-key", "memory", options, payloadBytes: 5);
             return Results.Ok();
         });
-        app.MapVapeCacheEndpoints(prefix, includeBreakerControlEndpoints, includeLiveStreamEndpoint: false, includeIntentEndpoints: includeIntentEndpoints);
+        app.MapVapeCacheEndpoints(
+            prefix,
+            includeBreakerControlEndpoints,
+            includeLiveStreamEndpoint: false,
+            includeIntentEndpoints: includeIntentEndpoints,
+            includeDashboardEndpoint: includeDashboardEndpoint);
         await app.StartAsync();
         return app;
     }
@@ -225,6 +258,7 @@ public sealed class AspireEndpointExtensionsTests
                 options.IncludeBreakerControlEndpoints = false;
                 options.IncludeIntentEndpoints = true;
                 options.EnableLiveStream = true;
+                options.EnableDashboard = true;
                 options.LiveSampleInterval = TimeSpan.FromMilliseconds(50);
             });
         builder.Services.AddOptions<RedisConnectionOptions>()

@@ -220,13 +220,16 @@ var app = builder.Build();
 app.UseVapeCacheFailoverAffinityHints();
 ```
 
-### `MapVapeCacheEndpoints(prefix, includeBreakerControlEndpoints, includeLiveStreamEndpoint, includeIntentEndpoints)`
+### `MapVapeCacheEndpoints(prefix, includeBreakerControlEndpoints, includeLiveStreamEndpoint, includeIntentEndpoints, includeDashboardEndpoint)`
 
 Maps wrapper-facing HTTP endpoints:
 
 - `GET {prefix}/status`
 - `GET {prefix}/stats`
 - `GET {prefix}/stream` (Server-Sent Events realtime channel)
+- `GET {prefix}/dashboard` (built-in realtime dashboard UI, optional)
+- `GET {prefix}/dashboard/dashboard.js` (dashboard script)
+- `GET {prefix}/dashboard/dashboard.css` (dashboard styles)
 - `POST {prefix}/breaker/force-open` (optional)
 - `POST {prefix}/breaker/clear` (optional)
 
@@ -246,7 +249,8 @@ app.MapVapeCacheEndpoints(
     prefix: "/vapecache-admin",
     includeBreakerControlEndpoints: true,
     includeLiveStreamEndpoint: true,
-    includeIntentEndpoints: true);
+    includeIntentEndpoints: true,
+    includeDashboardEndpoint: true);
 ```
 
 `GET {prefix}/status` and `GET {prefix}/stats` include the stampede hardening counters:
@@ -362,9 +366,19 @@ builder.AddVapeCache()
         options.Prefix = "/cache";
         options.IncludeBreakerControlEndpoints = false;
         options.EnableLiveStream = true;
+        options.EnableDashboard = true;
         options.LiveSampleInterval = TimeSpan.FromMilliseconds(500);
         options.LiveChannelCapacity = 512;
     });
+```
+
+Dashboard UI frontend source is maintained in `VapeCache.Extensions.Aspire/dashboard-ui` (Vite + TypeScript).
+To rebuild the shipped dashboard assets (`DashboardAssets/`):
+
+```bash
+cd VapeCache.Extensions.Aspire/dashboard-ui
+npm install
+npm run build
 ```
 
 Enterprise transport/autoscaler architecture and tuning:

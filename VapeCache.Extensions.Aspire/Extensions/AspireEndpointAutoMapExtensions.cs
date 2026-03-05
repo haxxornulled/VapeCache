@@ -59,7 +59,8 @@ public static class AspireEndpointAutoMapExtensions
                         endpointOptions.Prefix,
                         endpointOptions.IncludeBreakerControlEndpoints,
                         endpointOptions.EnableLiveStream,
-                        endpointOptions.IncludeIntentEndpoints);
+                        endpointOptions.IncludeIntentEndpoints,
+                        endpointOptions.EnableDashboard);
                 });
             };
         }

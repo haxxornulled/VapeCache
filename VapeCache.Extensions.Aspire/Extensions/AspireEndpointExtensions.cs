@@ -14,6 +14,9 @@ namespace VapeCache.Extensions.Aspire;
 /// </summary>
 public static class AspireEndpointExtensions
 {
+    private static readonly Lazy<DashboardAssetBundle> DashboardAssets = new(LoadDashboardAssets);
+    private const string DashboardResourcePrefix = "VapeCache.Extensions.Aspire.DashboardAssets.";
+
     /// <summary>
     /// Maps VapeCache diagnostics endpoints under a route prefix.
     /// By default this maps read-only endpoints; breaker control endpoints are opt-in.
@@ -24,13 +27,17 @@ public static class AspireEndpointExtensions
     /// When true, maps POST endpoints for force-open/clear breaker operations.
     /// Keep disabled by default and secure these routes in production.
     /// </param>
+    /// <param name="includeDashboardEndpoint">
+    /// When true, maps a built-in realtime dashboard UI at {prefix}/dashboard.
+    /// </param>
     /// <returns>A route group builder for additional customization.</returns>
     public static RouteGroupBuilder MapVapeCacheEndpoints(
         this IEndpointRouteBuilder endpoints,
         string prefix = "/vapecache",
         bool includeBreakerControlEndpoints = false,
         bool includeLiveStreamEndpoint = true,
-        bool includeIntentEndpoints = true)
+        bool includeIntentEndpoints = true,
+        bool includeDashboardEndpoint = false)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
         if (string.IsNullOrWhiteSpace(prefix))
@@ -161,6 +168,30 @@ public static class AspireEndpointExtensions
             .WithName("VapeCacheLiveStream");
         }
 
+        if (includeDashboardEndpoint)
+        {
+            group.MapGet("/dashboard", () =>
+            {
+                var assets = DashboardAssets.Value;
+                return Results.Content(assets.IndexHtml, "text/html; charset=utf-8");
+            })
+            .WithName("VapeCacheDashboard");
+
+            group.MapGet("/dashboard/dashboard.js", () =>
+            {
+                var assets = DashboardAssets.Value;
+                return Results.Content(assets.Script, "text/javascript; charset=utf-8");
+            })
+            .WithName("VapeCacheDashboardScript");
+
+            group.MapGet("/dashboard/dashboard.css", () =>
+            {
+                var assets = DashboardAssets.Value;
+                return Results.Content(assets.Style, "text/css; charset=utf-8");
+            })
+            .WithName("VapeCacheDashboardStyle");
+        }
+
         if (includeBreakerControlEndpoints)
         {
             group.MapPost("/breaker/force-open", static (
@@ -205,6 +236,66 @@ public static class AspireEndpointExtensions
         normalized = normalized.TrimEnd('/');
         return string.IsNullOrEmpty(normalized) ? "/" : normalized;
     }
+
+    private static DashboardAssetBundle LoadDashboardAssets()
+    {
+        return new DashboardAssetBundle(
+            IndexHtml: ReadDashboardAssetText("index.html"),
+            Script: ReadDashboardAssetText("dashboard.js"),
+            Style: ReadDashboardAssetText("dashboard.css"));
+    }
+
+    private static string ReadDashboardAssetText(string fileName)
+    {
+        var assembly = typeof(AspireEndpointExtensions).Assembly;
+        var resourceName = DashboardResourcePrefix + fileName;
+
+        using var stream = assembly.GetManifestResourceStream(resourceName);
+        if (stream is null)
+            return CreateMissingAssetFallback(fileName, resourceName);
+
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private static string CreateMissingAssetFallback(string fileName, string resourceName)
+    {
+        return fileName switch
+        {
+            "index.html" => $$"""
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VapeCache Dashboard Asset Missing</title>
+    <style>
+        body { font-family: Segoe UI, sans-serif; margin: 20px; background: #111827; color: #e5e7eb; }
+        code { color: #93c5fd; }
+        pre { background: #1f2937; padding: 12px; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <h1>VapeCache dashboard assets were not found</h1>
+    <p>Expected embedded resource:</p>
+    <pre><code>{{resourceName}}</code></pre>
+    <p>Rebuild dashboard assets:</p>
+    <pre><code>cd VapeCache.Extensions.Aspire/dashboard-ui
+npm install
+npm run build</code></pre>
+</body>
+</html>
+""",
+            "dashboard.js" => "console.error('VapeCache dashboard script asset is missing. Run npm run build in VapeCache.Extensions.Aspire/dashboard-ui.');",
+            "dashboard.css" => "body { font-family: Segoe UI, sans-serif; background: #111827; color: #e5e7eb; }",
+            _ => string.Empty
+        };
+    }
+
+    private sealed record DashboardAssetBundle(
+        string IndexHtml,
+        string Script,
+        string Style);
 }
 
 /// <summary>
