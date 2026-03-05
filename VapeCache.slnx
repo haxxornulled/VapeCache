@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="VapeCache.Abstractions/VapeCache.Abstractions.csproj" />
+  <Project Path="VapeCache.AppHost/VapeCache.AppHost.csproj" Id="23c6546e-e61d-4985-848e-b08b33d30d2e" />
   <Project Path="VapeCache.Application/VapeCache.Application.csproj" />
   <Project Path="VapeCache.Benchmarks/VapeCache.Benchmarks.csproj" />
   <Project Path="VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj" />
@@ -11,5 +12,7 @@
   <Project Path="VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj" />
   <Project Path="VapeCache.Persistence/VapeCache.Persistence.csproj" />
   <Project Path="VapeCache.Reconciliation/VapeCache.Reconciliation.csproj" />
+  <Project Path="VapeCache.ServiceDefaults/VapeCache.ServiceDefaults.csproj" />
   <Project Path="VapeCache.Tests/VapeCache.Tests.csproj" />
+  <Project Path="VapeCache.UI/VapeCache.UI.csproj" />
 </Solution>

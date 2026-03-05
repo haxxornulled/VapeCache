@@ -1,9 +1,15 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using System.Reflection;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Extensions.Aspire;
 
 public static class AspireRedisResourceExtensions
 {
+    private static readonly PropertyInfo ConnectionStringProperty =
+        typeof(RedisConnectionOptions).GetProperty(nameof(RedisConnectionOptions.ConnectionString))!;
+
     /// <summary>
     /// Configures value.
     /// </summary>
@@ -14,20 +20,21 @@ public static class AspireRedisResourceExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionName);
 
-        // Aspire automatically injects connection strings when .WithReference(redis) is called.
-        // The connection string is available at ConnectionStrings:{connectionName}
-        //
-        // VapeCache.Infrastructure already reads ConnectionString from RedisConnectionOptions,
-        // and the host should bind it from configuration:
-        //
-        // builder.Services.Configure<RedisConnectionOptions>(
-        //     builder.Configuration.GetSection("RedisConnection"));
-        //
-        // For Aspire, users should set VAPECACHE_REDIS_CONNECTIONSTRING environment variable
-        // or configure RedisConnectionOptions.ConnectionString in appsettings.json to reference
-        // the Aspire-injected connection string.
-        //
-        // This method is provided for future enhancements and documentation purposes.
+        var redisSection = builder.Builder.Configuration.GetSection("RedisConnection");
+        builder.Builder.Services.AddOptions<RedisConnectionOptions>().Bind(redisSection);
+
+        var connectionStringKey = $"ConnectionStrings:{connectionName}";
+        builder.Builder.Services.PostConfigure<RedisConnectionOptions>(options =>
+        {
+            if (!string.IsNullOrWhiteSpace(options.ConnectionString))
+                return;
+
+            var aspireConnectionString = builder.Builder.Configuration[connectionStringKey];
+            if (string.IsNullOrWhiteSpace(aspireConnectionString))
+                return;
+
+            ConnectionStringProperty.SetValue(options, aspireConnectionString);
+        });
 
         return builder;
     }

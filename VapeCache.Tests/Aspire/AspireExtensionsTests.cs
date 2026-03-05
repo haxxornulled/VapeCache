@@ -62,6 +62,41 @@ public sealed class AspireExtensionsTests
     }
 
     [Fact]
+    public void WithRedisFromAspire_BindsConnectionStringFromAspireResource()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        hostBuilder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:redis"] = "redis://localhost:6379"
+        });
+        hostBuilder.AddVapeCache()
+            .WithRedisFromAspire("redis");
+
+        using var provider = hostBuilder.Services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RedisConnectionOptions>>().Value;
+
+        Assert.Equal("redis://localhost:6379", options.ConnectionString);
+    }
+
+    [Fact]
+    public void WithRedisFromAspire_DoesNotOverrideExplicitRedisConnectionString()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        hostBuilder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:redis"] = "redis://aspire:6379",
+            ["RedisConnection:ConnectionString"] = "redis://explicit:6379"
+        });
+        hostBuilder.AddVapeCache()
+            .WithRedisFromAspire("redis");
+
+        using var provider = hostBuilder.Services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RedisConnectionOptions>>().Value;
+
+        Assert.Equal("redis://explicit:6379", options.ConnectionString);
+    }
+
+    [Fact]
     public void WithAspireTelemetry_ReturnsBuilder()
     {
         var hostBuilder = new HostApplicationBuilder();
