@@ -9,7 +9,17 @@ builder.AddServiceDefaults();
 builder.AddVapeCache()
     .WithRedisFromAspire("redis")
     .WithHealthChecks()
-    .WithAspireTelemetry();
+    .WithAspireTelemetry()
+    .WithAutoMappedEndpoints(options =>
+    {
+        options.Enabled = true;
+        options.Prefix = "/vapecache";
+        options.IncludeBreakerControlEndpoints = false;
+        options.IncludeIntentEndpoints = true;
+        options.EnableLiveStream = true;
+        options.EnableDashboard = true;
+        options.LiveSampleInterval = TimeSpan.FromMilliseconds(500);
+    });
 
 // Add services to the container.
 builder.Services.AddRazorComponents()

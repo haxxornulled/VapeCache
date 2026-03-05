@@ -4,6 +4,7 @@ var redis = builder.AddRedis("redis");
 
 builder.AddProject<Projects.VapeCache_UI>("vapecache-ui")
     .WithReference(redis)
-    .WaitFor(redis);
+    .WaitFor(redis)
+    .WithExternalHttpEndpoints();
 
 builder.Build().Run();
