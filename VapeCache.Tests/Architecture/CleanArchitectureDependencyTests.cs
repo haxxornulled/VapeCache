@@ -24,12 +24,12 @@ public sealed class CleanArchitectureDependencyTests
     }
 
     [Fact]
-    public void Abstractions_DoesNotReference_ApplicationOrInfrastructureOrCore()
+    public void Abstractions_References_Core_ButNotApplicationOrInfrastructure()
     {
         var references = GetAssemblyReferenceNames(typeof(ICacheService).Assembly);
+        Assert.Contains("VapeCache.Core", references);
         Assert.DoesNotContain("VapeCache.Application", references);
         Assert.DoesNotContain("VapeCache.Infrastructure", references);
-        Assert.DoesNotContain("VapeCache.Core", references);
     }
 
     [Fact]

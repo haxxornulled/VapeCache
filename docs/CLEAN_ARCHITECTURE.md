@@ -20,7 +20,8 @@ Use-case contracts and orchestration abstractions:
 Public API contracts for consumers:
 - cache, connection, module interfaces
 - options/DTOs and public surface
-- independent of `Application`, `Core`, and `Infrastructure`
+- independent of `Application` and `Infrastructure`
+- may depend on `Core` for shared domain policy primitives
 
 4. `VapeCache.Infrastructure`
 Transport and runtime implementations:
@@ -43,8 +44,21 @@ Allowed baseline flow:
 Disallowed:
 - `Core -> *VapeCache.*`
 - `Application -> Infrastructure`
-- `Abstractions -> (Core|Application|Infrastructure)`
+- `Abstractions -> (Application|Infrastructure)`  
+`Abstractions -> Core` is allowed for shared domain policy primitives exposed through public contracts.
 - `Infrastructure -> Application`
+
+## Policy Ownership
+
+Business/domain policies belong in `VapeCache.Core`:
+- cache tag normalization and zone-tag rules
+- stampede profile default values
+- domain invariants and value semantics
+
+Technical/operational policies belong in `VapeCache.Infrastructure`:
+- socket and transport tuning
+- mux autoscaling/coalescing/runtime normalization
+- protocol and connection-level retry/error handling
 
 ## Enforcement
 
