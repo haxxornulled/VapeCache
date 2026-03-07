@@ -6,7 +6,7 @@ using VapeCache.Abstractions.Modules;
 
 namespace VapeCache.Infrastructure.Caching;
 
-internal sealed class JsonCacheService : IJsonCache
+internal sealed partial class JsonCacheService : IJsonCache
 {
     private static readonly JsonSerializerOptions DefaultOptions = new(JsonSerializerDefaults.Web);
 
@@ -68,7 +68,7 @@ internal sealed class JsonCacheService : IJsonCache
         }
 
         if (!IsRootPath(path))
-            _logger.LogWarning("RedisJSON unavailable; JSON path '{Path}' ignored for key {Key}.", path, key);
+            LogJsonPathIgnored(_logger, path, key);
 
         var bytes = await _cache.GetAsync(key, ct).ConfigureAwait(false);
         if (bytes is null)
@@ -85,13 +85,13 @@ internal sealed class JsonCacheService : IJsonCache
             return await _redis.JsonGetLeaseAsync(key, path, ct).ConfigureAwait(false);
 
         if (!IsRootPath(path))
-            _logger.LogWarning("RedisJSON unavailable; JSON path '{Path}' ignored for key {Key}.", path, key);
+            LogJsonPathIgnored(_logger, path, key);
 
         var bytes = await _cache.GetAsync(key, ct).ConfigureAwait(false);
         if (bytes is null)
             return RedisValueLease.Null;
 
-        return new RedisValueLease(bytes, bytes.Length, pooled: false);
+        return RedisValueLease.Create(bytes, bytes.Length, pooled: false);
     }
 
     public async ValueTask SetAsync<T>(string key, T value, string? path = null, CancellationToken ct = default)
@@ -104,7 +104,7 @@ internal sealed class JsonCacheService : IJsonCache
         }
 
         if (!IsRootPath(path))
-            _logger.LogWarning("RedisJSON unavailable; JSON path '{Path}' ignored for key {Key}.", path, key);
+            LogJsonPathIgnored(_logger, path, key);
 
         await _cache.SetAsync(key, json, default, ct).ConfigureAwait(false);
     }
@@ -123,7 +123,7 @@ internal sealed class JsonCacheService : IJsonCache
         }
 
         if (!IsRootPath(path))
-            _logger.LogWarning("RedisJSON unavailable; JSON path '{Path}' ignored for key {Key}.", path, key);
+            LogJsonPathIgnored(_logger, path, key);
 
         await _cache.SetAsync(key, json.Memory, default, ct).ConfigureAwait(false);
     }
@@ -137,7 +137,7 @@ internal sealed class JsonCacheService : IJsonCache
             return await _redis.JsonDelAsync(key, path, ct).ConfigureAwait(false);
 
         if (!IsRootPath(path))
-            _logger.LogWarning("RedisJSON unavailable; JSON path '{Path}' ignored for key {Key}.", path, key);
+            LogJsonPathIgnored(_logger, path, key);
 
         var removed = await _cache.RemoveAsync(key, ct).ConfigureAwait(false);
         return removed ? 1L : 0L;
@@ -145,4 +145,10 @@ internal sealed class JsonCacheService : IJsonCache
 
     private static bool IsRootPath(string? path)
         => string.IsNullOrWhiteSpace(path) || path == ".";
+
+    [LoggerMessage(
+        EventId = 7201,
+        Level = LogLevel.Warning,
+        Message = "RedisJSON unavailable; JSON path '{Path}' ignored for key {Key}.")]
+    private static partial void LogJsonPathIgnored(ILogger logger, string? path, string key);
 }

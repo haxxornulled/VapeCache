@@ -78,7 +78,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
     private static RedisValueLease CreateCopiedLease(byte[]? source)
         => source is null
             ? RedisValueLease.Null
-            : new RedisValueLease(CopyBuffer(source), source.Length, pooled: false);
+            : RedisValueLease.Create(CopyBuffer(source), source.Length, pooled: false);
 
     // ========== String Commands ==========
 
@@ -740,7 +740,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                 {
                     var value = entry.ListValue.First!.Value;
                     entry.ListValue.RemoveFirst();
-                    return ValueTask.FromResult(new RedisValueLease(value, value.Length, pooled: false));
+                    return ValueTask.FromResult(RedisValueLease.Create(value, value.Length, pooled: false));
                 }
             }
         }
@@ -768,7 +768,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                     entry.ListValue.RemoveLast();
                     if (entry.ListValue.Count == 0)
                         _store.TryRemove(key, out _);
-                    return ValueTask.FromResult(new RedisValueLease(value, value.Length, pooled: false));
+                    return ValueTask.FromResult(RedisValueLease.Create(value, value.Length, pooled: false));
                 }
             }
         }

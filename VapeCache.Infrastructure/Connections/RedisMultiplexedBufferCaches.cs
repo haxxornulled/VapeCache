@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Buffers;
-using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace VapeCache.Infrastructure.Connections;
 
@@ -15,8 +15,6 @@ internal sealed class RedisMultiplexedBufferCaches
     private static readonly ConcurrentBag<byte[]> SharedSmallHeaderCache = new();
     private static readonly ConcurrentBag<ReadOnlyMemory<byte>[]> SharedPayloadArrayCache = new();
     private static readonly ConcurrentBag<ReadOnlyMemory<byte>[]> SharedSmallPayloadArrayCache = new();
-    private static readonly ConcurrentDictionary<byte[], int> HeaderInFlight = new(ReferenceEqualityComparer.Instance);
-    private static readonly ConcurrentDictionary<ReadOnlyMemory<byte>[], int> PayloadArraysInFlight = new(ReferenceEqualityComparer.Instance);
 
     private const int MaxSharedCacheSize = 64;
 
@@ -54,13 +52,8 @@ internal sealed class RedisMultiplexedBufferCaches
     /// <summary>
     /// Executes value.
     /// </summary>
-    public static void MarkHeaderBufferInFlight(byte[]? buffer)
-    {
-        if (buffer is null)
-            return;
-
-        HeaderInFlight.AddOrUpdate(buffer, static _ => 1, static (_, current) => current + 1);
-    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void MarkHeaderBufferInFlight(byte[]? buffer) => _ = buffer;
 
     /// <summary>
     /// Executes value.
@@ -75,9 +68,6 @@ internal sealed class RedisMultiplexedBufferCaches
         if (buffer is null)
             return;
 
-        if (HeaderInFlight.ContainsKey(buffer))
-            return;
-
         ReturnHeaderBufferCore(buffer);
     }
 
@@ -87,9 +77,6 @@ internal sealed class RedisMultiplexedBufferCaches
     public static void ReturnHeaderBufferFromMux(byte[]? buffer)
     {
         if (buffer is null)
-            return;
-
-        if (!ShouldReturnAfterMuxRelease(HeaderInFlight, buffer))
             return;
 
         ReturnHeaderBufferCore(buffer);
@@ -128,13 +115,8 @@ internal sealed class RedisMultiplexedBufferCaches
     /// <summary>
     /// Executes value.
     /// </summary>
-    public static void MarkPayloadArrayInFlight(ReadOnlyMemory<byte>[]? payloads)
-    {
-        if (payloads is null)
-            return;
-
-        PayloadArraysInFlight.AddOrUpdate(payloads, static _ => 1, static (_, current) => current + 1);
-    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void MarkPayloadArrayInFlight(ReadOnlyMemory<byte>[]? payloads) => _ = payloads;
 
     /// <summary>
     /// Executes value.
@@ -180,9 +162,6 @@ internal sealed class RedisMultiplexedBufferCaches
         if (payloads is null)
             return;
 
-        if (PayloadArraysInFlight.ContainsKey(payloads))
-            return;
-
         ReturnPayloadArrayCore(payloads);
     }
 
@@ -192,9 +171,6 @@ internal sealed class RedisMultiplexedBufferCaches
     public static void ReturnPayloadArrayFromMux(ReadOnlyMemory<byte>[]? payloads)
     {
         if (payloads is null)
-            return;
-
-        if (!ShouldReturnAfterMuxRelease(PayloadArraysInFlight, payloads))
             return;
 
         ReturnPayloadArrayCore(payloads);
@@ -229,25 +205,5 @@ internal sealed class RedisMultiplexedBufferCaches
         }
 
         ArrayPool<ReadOnlyMemory<byte>>.Shared.Return(payloads, clearArray: true);
-    }
-
-    private static bool ShouldReturnAfterMuxRelease<TKey>(ConcurrentDictionary<TKey, int> inFlight, TKey key)
-        where TKey : class
-    {
-        while (inFlight.TryGetValue(key, out var current))
-        {
-            if (current <= 1)
-            {
-                if (inFlight.TryRemove(new KeyValuePair<TKey, int>(key, current)))
-                    return true;
-
-                continue;
-            }
-
-            if (inFlight.TryUpdate(key, current - 1, current))
-                return false;
-        }
-
-        return true;
     }
 }

@@ -375,7 +375,7 @@ internal static class RedisRespReader
         };
     }
 
-    internal sealed class RespValue
+    internal readonly struct RespValue
     {
         private RespValue(RespKind kind, string? text, byte[]? bulk, int bulkLength, bool bulkIsPooled, long integer, RespValue[]? array, int arrayLength, bool arrayIsPooled)
         {

@@ -131,7 +131,14 @@ public sealed class RedisRespReaderTests
         {
             Assert.Same(array, reused);
             for (var i = 2; i < reused.Length; i++)
-                Assert.Null(reused[i]);
+            {
+                var cleared = reused[i];
+                Assert.Null(cleared.Text);
+                Assert.Null(cleared.Bulk);
+                Assert.Null(cleared.ArrayItems);
+                Assert.Equal(0, cleared.BulkLength);
+                Assert.Equal(0, cleared.ArrayLength);
+            }
         }
         finally
         {

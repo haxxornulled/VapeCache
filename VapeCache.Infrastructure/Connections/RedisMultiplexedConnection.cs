@@ -749,13 +749,13 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 await EnsureConnectedAsync(_cts.Token).ConfigureAwait(false);
                 var readGeneration = Volatile.Read(ref _generation);
                 var (resp, ex) = await _responseReaderLoop.ReadAsync(next.PoolBulk).ConfigureAwait(false);
-                if (resp is not null)
-                    RecordLaneResponseObserved(next, resp);
+                if (resp.HasValue)
+                    RecordLaneResponseObserved(next, resp.Value);
 
                 if (next.IsCompleted)
                 {
-                    if (resp is not null)
-                        RedisRespReader.ReturnBuffers(resp);
+                    if (resp.HasValue)
+                        RedisRespReader.ReturnBuffers(resp.Value);
                 }
                 else if (ex is not null)
                 {
@@ -765,19 +765,20 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                         if (ShouldResetTransportForTimeout(next))
                             await FailTransportAsync(timeout).ConfigureAwait(false);
                     }
-                    if (resp is not null)
-                        RedisRespReader.ReturnBuffers(resp);
+                    if (resp.HasValue)
+                        RedisRespReader.ReturnBuffers(resp.Value);
                     next.TrySetException(ex);
                 }
                 else
                 {
-                    if (resp is null)
+                    if (!resp.HasValue)
                         throw new InvalidOperationException("RESP reader returned null response without error.");
 
+                    var response = resp.Value;
                     var currentGeneration = Volatile.Read(ref _generation);
                     if (next.Generation != currentGeneration || readGeneration != currentGeneration)
                     {
-                        RedisRespReader.ReturnBuffers(resp);
+                        RedisRespReader.ReturnBuffers(response);
                         next.TrySetException(
                             new IOException(
                                 $"Stale transport generation response ignored. Operation generation {next.Generation}, current generation {currentGeneration}."));
@@ -785,7 +786,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                         continue;
                     }
 
-                    next.TrySetResult(resp);
+                    next.TrySetResult(response);
                 }
 
                 next.MarkResponseProcessed();
