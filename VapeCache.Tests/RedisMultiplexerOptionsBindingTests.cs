@@ -30,6 +30,7 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.Equal(128, o.CoalescedWriteMaxOperations);
         Assert.Equal(8, o.CoalescingSpinBudget);
         Assert.False(o.EnableAutoscaling);
+        Assert.True(o.Connections >= 2);
         Assert.Equal(1, o.BulkLaneConnections);
         Assert.False(o.AutoAdjustBulkLanes);
         Assert.Equal(0.25, o.BulkLaneTargetRatio);
