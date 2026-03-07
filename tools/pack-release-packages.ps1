@@ -14,6 +14,8 @@ if (-not [System.IO.Path]::IsPathRooted($OutputDir))
 }
 
 $projects = Get-ReleasePackageProjects
+$coreProject = "VapeCache.Core/VapeCache.Core.csproj"
+$projects = @($coreProject) + $projects
 $resolvedPackageVersion = Resolve-ReleasePackageVersion -PackageVersion $PackageVersion
 
 if (Test-Path -LiteralPath $OutputDir)
@@ -29,7 +31,25 @@ foreach ($project in $projects)
 {
     $projectPath = Join-Path $repoRoot $project
     Write-Host "Packing $project"
-    dotnet pack $projectPath -c Release --no-restore -p:Version=$resolvedPackageVersion -o $OutputDir
+
+    $packArgs = @(
+        $projectPath
+        "-c"
+        "Release"
+        "--no-restore"
+        "-p:Version=$resolvedPackageVersion"
+        "-o"
+        $OutputDir
+    )
+
+    if ($project -eq $coreProject)
+    {
+        # VapeCache.Abstractions carries a package dependency on VapeCache.Core.
+        # Emit an explicit core package in release artifacts so smoke restore resolves locally.
+        $packArgs += "-p:IsPackable=true"
+    }
+
+    dotnet pack @packArgs
     if ($LASTEXITCODE -ne 0)
     {
         throw "dotnet pack failed for $project"
