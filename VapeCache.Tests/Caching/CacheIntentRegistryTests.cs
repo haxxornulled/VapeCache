@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 using VapeCache.Infrastructure.Caching;
 
 namespace VapeCache.Tests.Caching;
@@ -23,7 +24,7 @@ public sealed class CacheIntentRegistryTests
 
         Assert.True(intentRegistry.TryGet("intent:key", out var entry));
         Assert.NotNull(entry);
-        Assert.Equal("memory", entry!.Backend);
+        Assert.Equal(BackendType.InMemory, entry!.Backend);
         Assert.Equal(CacheIntentKind.QueryResult, entry.Intent.Kind);
         Assert.Equal("catalog-page", entry.Intent.Reason);
 
@@ -38,9 +39,9 @@ public sealed class CacheIntentRegistryTests
         var expired = new CacheEntryOptions(TimeSpan.FromMilliseconds(1), new CacheIntent(CacheIntentKind.ReadThrough, "short"));
         var active = new CacheEntryOptions(TimeSpan.FromMinutes(1), new CacheIntent(CacheIntentKind.ReadThrough, "active"));
 
-        registry.RecordSet("expired:key", "memory", expired, 10);
+        registry.RecordSet("expired:key", BackendType.InMemory, expired, 10);
         Thread.Sleep(20);
-        registry.RecordSet("active:key", "memory", active, 20);
+        registry.RecordSet("active:key", BackendType.InMemory, active, 20);
 
         Assert.False(registry.TryGet("expired:key", out _));
         Assert.True(registry.TryGet("active:key", out _));

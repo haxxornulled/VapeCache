@@ -4,7 +4,7 @@ using VapeCache.Abstractions.Modules;
 
 namespace VapeCache.Infrastructure.Modules;
 
-internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
+internal sealed partial class RedisTimeSeriesService : IRedisTimeSeriesService
 {
     private readonly IRedisCommandExecutor _redis;
     private readonly IRedisFallbackCommandExecutor _fallback;
@@ -58,7 +58,7 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
         if (await IsAvailableAsync(ct).ConfigureAwait(false))
             return await _redis.TsCreateAsync(key, ct).ConfigureAwait(false);
 
-        _logger.LogDebug("RedisTimeSeries unavailable; using in-memory fallback for {Key}.", key);
+        LogFallbackToMemory(_logger, key);
         return await _fallback.TsCreateAsync(key, ct).ConfigureAwait(false);
     }
 
@@ -70,7 +70,7 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
         if (await IsAvailableAsync(ct).ConfigureAwait(false))
             return await _redis.TsAddAsync(key, timestamp, value, ct).ConfigureAwait(false);
 
-        _logger.LogDebug("RedisTimeSeries unavailable; using in-memory fallback for {Key}.", key);
+        LogFallbackToMemory(_logger, key);
         return await _fallback.TsAddAsync(key, timestamp, value, ct).ConfigureAwait(false);
     }
 
@@ -79,7 +79,13 @@ internal sealed class RedisTimeSeriesService : IRedisTimeSeriesService
         if (await IsAvailableAsync(ct).ConfigureAwait(false))
             return await _redis.TsRangeAsync(key, from, to, ct).ConfigureAwait(false);
 
-        _logger.LogDebug("RedisTimeSeries unavailable; using in-memory fallback for {Key}.", key);
+        LogFallbackToMemory(_logger, key);
         return await _fallback.TsRangeAsync(key, from, to, ct).ConfigureAwait(false);
     }
+
+    [LoggerMessage(
+        EventId = 23100,
+        Level = LogLevel.Debug,
+        Message = "RedisTimeSeries unavailable; using in-memory fallback for {Key}.")]
+    private static partial void LogFallbackToMemory(ILogger logger, string key);
 }

@@ -7,8 +7,11 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Moq;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Abstractions.Diagnostics;
 using VapeCache.Extensions.Aspire;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
@@ -34,7 +37,7 @@ public sealed class AspireEndpointExtensionsTests
 
         Assert.NotNull(status);
         Assert.NotNull(stats);
-        Assert.Equal("redis", status!.CurrentBackend);
+        Assert.Equal(BackendType.Redis, status!.CurrentBackend);
         Assert.Equal(0, stats!.GetCalls);
         Assert.Equal(0d, stats.HitRate);
         Assert.NotNull(status.Spill);
@@ -148,6 +151,75 @@ public sealed class AspireEndpointExtensionsTests
     }
 
     [Fact]
+    public async Task MapVapeCacheEndpoints_ExposesSharedSnapshot_WhenPresent()
+    {
+        var snapshot = new VapeCacheSharedDashboardSnapshot(
+            TimestampUtc: DateTimeOffset.UtcNow,
+            Backend: BackendType.Redis,
+            HitRate: 0.82d,
+            Reads: 140,
+            Writes: 32,
+            Hits: 115,
+            Misses: 25,
+            FallbackToMemory: 0,
+            RedisBreakerOpened: 0,
+            StampedeKeyRejected: 0,
+            StampedeLockWaitTimeout: 0,
+            StampedeFailureBackoffRejected: 0,
+            BreakerEnabled: true,
+            BreakerOpen: false,
+            BreakerConsecutiveFailures: 0,
+            BreakerOpenRemaining: null,
+            BreakerForcedOpen: false,
+            BreakerReason: null,
+            Autoscaler: null,
+            Lanes: Array.Empty<RedisMuxLaneSnapshot>(),
+            Spill: null);
+
+        var payload = JsonSerializer.SerializeToUtf8Bytes(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var redis = new Mock<IRedisCommandExecutor>();
+        redis.Setup(x => x.GetAsync(VapeCacheSharedDashboardSnapshotStore.RedisKey, It.IsAny<CancellationToken>()))
+            .Returns((string _, CancellationToken _) => ValueTask.FromResult<byte[]?>(payload));
+
+        await using var app = await CreateAppAsync(
+            includeBreakerControlEndpoints: false,
+            redisCommandExecutor: redis.Object);
+        using var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/vapecache/dashboard/shared-snapshot");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var envelope = await response.Content.ReadFromJsonAsync<VapeCacheSharedDashboardSnapshotEnvelope>();
+        Assert.NotNull(envelope);
+        Assert.True(envelope!.Exists);
+        Assert.True(envelope.IsFresh);
+        Assert.NotNull(envelope.Snapshot);
+        Assert.Equal(BackendType.Redis, envelope.Snapshot!.Backend);
+        Assert.Equal(140, envelope.Snapshot.Reads);
+    }
+
+    [Fact]
+    public async Task MapVapeCacheEndpoints_ExposesSharedSnapshot_NotFound_WhenMissing()
+    {
+        var redis = new Mock<IRedisCommandExecutor>();
+        redis.Setup(x => x.GetAsync(VapeCacheSharedDashboardSnapshotStore.RedisKey, It.IsAny<CancellationToken>()))
+            .Returns((string _, CancellationToken _) => ValueTask.FromResult<byte[]?>(null));
+
+        await using var app = await CreateAppAsync(
+            includeBreakerControlEndpoints: false,
+            redisCommandExecutor: redis.Object);
+        using var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/vapecache/dashboard/shared-snapshot");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        var envelope = await response.Content.ReadFromJsonAsync<VapeCacheSharedDashboardSnapshotEnvelope>();
+        Assert.NotNull(envelope);
+        Assert.False(envelope!.Exists);
+        Assert.Null(envelope.Snapshot);
+    }
+
+    [Fact]
     public async Task WithAutoMappedEndpoints_MapsEndpoints_WithoutProgramRouteSetup()
     {
         await using var app = await CreateAutoMappedAppAsync(enabled: true);
@@ -204,7 +276,8 @@ public sealed class AspireEndpointExtensionsTests
         bool includeBreakerControlEndpoints,
         string prefix = "/vapecache",
         bool includeIntentEndpoints = true,
-        bool includeDashboardEndpoint = false)
+        bool includeDashboardEndpoint = false,
+        IRedisCommandExecutor? redisCommandExecutor = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -219,6 +292,11 @@ public sealed class AspireEndpointExtensionsTests
         builder.Services.AddVapecacheCaching();
         builder.Services.AddOptions<RedisConnectionOptions>()
             .Bind(builder.Configuration.GetSection("RedisConnection"));
+        if (redisCommandExecutor is not null)
+        {
+            builder.Services.RemoveAll<IRedisCommandExecutor>();
+            builder.Services.AddSingleton(redisCommandExecutor);
+        }
 
         var app = builder.Build();
         app.MapPost("/seed-intent", (ICacheIntentRegistry intentRegistry) =>
@@ -226,7 +304,7 @@ public sealed class AspireEndpointExtensionsTests
             var options = new CacheEntryOptions(
                 TimeSpan.FromMinutes(1),
                 new CacheIntent(CacheIntentKind.ReadThrough, "endpoint-test", "tests"));
-            intentRegistry.RecordSet("intent-endpoint-key", "memory", options, payloadBytes: 5);
+            intentRegistry.RecordSet("intent-endpoint-key", BackendType.InMemory, options, payloadBytes: 5);
             return Results.Ok();
         });
         app.MapVapeCacheEndpoints(

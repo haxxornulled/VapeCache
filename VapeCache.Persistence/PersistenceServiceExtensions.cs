@@ -8,6 +8,15 @@ namespace VapeCache.Persistence;
 public static class PersistenceServiceExtensions
 {
     /// <summary>
+    /// Registers VapeCache persistence features using VAPECACHE_LICENSE_KEY from environment.
+    /// REQUIRES ENTERPRISE LICENSE ($499/month).
+    /// </summary>
+    public static IServiceCollection AddVapeCachePersistence(
+        this IServiceCollection services,
+        Action<InMemorySpillOptions>? configure = null)
+        => services.AddVapeCachePersistence(licenseKey: null, configure);
+
+    /// <summary>
     /// Registers VapeCache persistence features (spill-to-disk).
     /// REQUIRES ENTERPRISE LICENSE ($499/month).
     /// </summary>
@@ -16,13 +25,15 @@ public static class PersistenceServiceExtensions
     /// <param name="configure">Optional configuration</param>
     public static IServiceCollection AddVapeCachePersistence(
         this IServiceCollection services,
-        string licenseKey,
+        string? licenseKey,
         Action<InMemorySpillOptions>? configure = null)
     {
+        licenseKey ??= Environment.GetEnvironmentVariable("VAPECACHE_LICENSE_KEY");
         LicenseFeatureGate.RequireEnterpriseFeature(
             licenseKey,
             LicenseFeatures.Persistence,
-            "VapeCache.Persistence");
+            "VapeCache.Persistence",
+            static message => new VapeCacheLicenseException(message));
 
         // Register persistence services
         if (configure != null)
@@ -45,14 +56,26 @@ public static class PersistenceServiceExtensions
     /// </summary>
     public static IServiceCollection AddVapeCachePersistence<TEncryption>(
         this IServiceCollection services,
-        string licenseKey,
+        Action<InMemorySpillOptions>? configure = null)
+        where TEncryption : class, ISpillEncryptionProvider
+        => services.AddVapeCachePersistence<TEncryption>(licenseKey: null, configure);
+
+    /// <summary>
+    /// Registers VapeCache persistence with custom encryption provider.
+    /// REQUIRES ENTERPRISE LICENSE ($499/month).
+    /// </summary>
+    public static IServiceCollection AddVapeCachePersistence<TEncryption>(
+        this IServiceCollection services,
+        string? licenseKey,
         Action<InMemorySpillOptions>? configure = null)
         where TEncryption : class, ISpillEncryptionProvider
     {
+        licenseKey ??= Environment.GetEnvironmentVariable("VAPECACHE_LICENSE_KEY");
         LicenseFeatureGate.RequireEnterpriseFeature(
             licenseKey,
             LicenseFeatures.Persistence,
-            "VapeCache.Persistence");
+            "VapeCache.Persistence",
+            static message => new VapeCacheLicenseException(message));
 
         // Register with custom encryption
         if (configure != null)

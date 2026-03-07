@@ -1,0 +1,122 @@
+@page "/vapecache/dashboard"
+@page "/dashboard"
+@rendermode InteractiveServer
+
+<PageTitle>VapeCache Dashboard</PageTitle>
+
+<section class="dashboard-shell">
+    <header class="dashboard-header">
+        <div>
+            <h1>VapeCache Dashboard</h1>
+            <div class="dashboard-kickers">
+                <span class="dashboard-kicker">Backend: @_snapshot.Backend</span>
+                <span class="dashboard-kicker dashboard-kicker-muted">Live sample: 500ms</span>
+            </div>
+            <p>Last sample: @_snapshot.TimestampUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss.fff")</p>
+        </div>
+        <button class="refresh-button" @onclick="RefreshNowAsync">Refresh</button>
+    </header>
+
+    <section class="gauge-grid">
+        <MetricGauge Label="Hit Rate" Value="@(_snapshot.HitRate * 100d)" Unit="%" Min="0" Max="100" Decimals="2" Caption="cache accuracy" />
+        <MetricGauge Label="Reads" Value="_snapshot.Reads" Min="0" Max="@Math.Max(1d, _snapshot.Reads)" Decimals="0" Caption="total read calls" />
+        <MetricGauge Label="Writes" Value="_snapshot.Writes" Min="0" Max="@Math.Max(1d, _snapshot.Writes)" Decimals="0" Caption="set + remove calls" />
+        <MetricGauge Label="Fallback Events" Value="_snapshot.FallbackToMemory" Min="0" Max="@Math.Max(1d, _snapshot.FallbackToMemory)" Decimals="0" Caption="redis to memory" />
+        <MetricGauge Label="Breaker Opens" Value="_snapshot.RedisBreakerOpened" Min="0" Max="@Math.Max(1d, _snapshot.RedisBreakerOpened)" Decimals="0" Caption="circuit trips" />
+        <MetricGauge Label="Stampede Rejects" Value="_snapshot.StampedeKeyRejected" Min="0" Max="@Math.Max(1d, _snapshot.StampedeKeyRejected)" Decimals="0" Caption="lock protection" />
+    </section>
+
+    <section class="summary-grid">
+        <article>
+            <h2>Breaker</h2>
+            <dl>
+                <dt>Enabled</dt><dd>@_snapshot.BreakerEnabled</dd>
+                <dt>Open</dt><dd>@_snapshot.BreakerOpen</dd>
+                <dt>Forced Open</dt><dd>@_snapshot.BreakerForcedOpen</dd>
+                <dt>Reason</dt><dd>@(_snapshot.BreakerReason ?? "n/a")</dd>
+                <dt>Open Remaining</dt><dd>@(_snapshot.BreakerOpenRemaining?.ToString() ?? "n/a")</dd>
+                <dt>Consecutive Failures</dt><dd>@_snapshot.BreakerConsecutiveFailures</dd>
+            </dl>
+        </article>
+
+        <article>
+            <h2>Autoscaler</h2>
+            @if (_snapshot.Autoscaler is { } autoscaler)
+            {
+                <dl>
+                    <dt>Enabled</dt><dd>@autoscaler.Enabled</dd>
+                    <dt>Connections</dt><dd>@autoscaler.CurrentConnections / @autoscaler.TargetConnections</dd>
+                    <dt>Lanes (R/W)</dt><dd>@autoscaler.CurrentReadLanes / @autoscaler.CurrentWriteLanes</dd>
+                    <dt>Queue (avg/max)</dt><dd>@autoscaler.AvgQueueDepth.ToString("F2") / @autoscaler.MaxQueueDepth</dd>
+                    <dt>P95 / P99 (ms)</dt><dd>@autoscaler.RollingP95LatencyMs.ToString("F2") / @autoscaler.RollingP99LatencyMs.ToString("F2")</dd>
+                    <dt>Frozen</dt><dd>@autoscaler.Frozen</dd>
+                </dl>
+            }
+            else
+            {
+                <p>No autoscaler snapshot available.</p>
+            }
+        </article>
+
+        <article>
+            <h2>Spill</h2>
+            @if (_snapshot.Spill is { } spill)
+            {
+                <dl>
+                    <dt>Mode</dt><dd>@spill.Mode</dd>
+                    <dt>Supports Disk</dt><dd>@spill.SupportsDiskSpill</dd>
+                    <dt>Configured</dt><dd>@spill.SpillToDiskConfigured</dd>
+                    <dt>Total Files</dt><dd>@spill.TotalSpillFiles</dd>
+                    <dt>Active Shards</dt><dd>@spill.ActiveShards</dd>
+                    <dt>Max Files In Shard</dt><dd>@spill.MaxFilesInShard</dd>
+                </dl>
+            }
+            else
+            {
+                <p>No spill diagnostics available.</p>
+            }
+        </article>
+    </section>
+
+    <section class="lanes-section">
+        <h2>MUX Lanes</h2>
+        @if (_snapshot.Lanes.Count == 0)
+        {
+            <p>No lane snapshots available.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Lane</th>
+                            <th>Role</th>
+                            <th>Conn</th>
+                            <th>Queue</th>
+                            <th>InFlight</th>
+                            <th>Ops</th>
+                            <th>Fail</th>
+                            <th>Healthy</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var lane in _sortedLanes)
+                        {
+                            <tr>
+                                <td>@lane.LaneIndex</td>
+                                <td>@lane.Role</td>
+                                <td>@lane.ConnectionId</td>
+                                <td>@lane.WriteQueueDepth</td>
+                                <td>@lane.InFlight / @lane.MaxInFlight</td>
+                                <td>@lane.Operations</td>
+                                <td>@lane.Failures</td>
+                                <td class="@(lane.Healthy ? "state-ok" : "state-danger")">@(lane.Healthy ? "yes" : "no")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</section>

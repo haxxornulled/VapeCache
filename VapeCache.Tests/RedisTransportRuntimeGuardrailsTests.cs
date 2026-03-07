@@ -97,6 +97,8 @@ public sealed class RedisTransportRuntimeGuardrailsTests
             CoalescingSpinBudget = -4,
             ResponseTimeout = TimeSpan.FromMilliseconds(-1),
             BulkLaneConnections = -5,
+            AutoAdjustBulkLanes = true,
+            BulkLaneTargetRatio = double.NaN,
             BulkLaneResponseTimeout = TimeSpan.Zero,
             MinConnections = 4,
             MaxConnections = 2,
@@ -138,6 +140,8 @@ public sealed class RedisTransportRuntimeGuardrailsTests
         Assert.Equal(0, effective.CoalescingSpinBudget);
         Assert.Equal(TimeSpan.Zero, effective.ResponseTimeout);
         Assert.Equal(1, effective.BulkLaneConnections);
+        Assert.True(effective.AutoAdjustBulkLanes);
+        Assert.Equal(0.25, effective.BulkLaneTargetRatio);
         Assert.Equal(TimeSpan.FromSeconds(5), effective.BulkLaneResponseTimeout);
         Assert.Equal(4, effective.MinConnections);
         Assert.Equal(4, effective.MaxConnections);
@@ -180,7 +184,9 @@ public sealed class RedisTransportRuntimeGuardrailsTests
             CoalescingExitQueueDepth = 4,
             CoalescedWriteMaxOperations = 72,
             CoalescingSpinBudget = 11,
-            BulkLaneConnections = 2,
+            BulkLaneConnections = 16,
+            AutoAdjustBulkLanes = true,
+            BulkLaneTargetRatio = 0.30,
             BulkLaneResponseTimeout = TimeSpan.FromSeconds(9)
         };
 

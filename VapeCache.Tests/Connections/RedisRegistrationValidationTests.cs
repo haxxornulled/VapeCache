@@ -93,6 +93,24 @@ public sealed class RedisRegistrationValidationTests
     }
 
     [Fact]
+    public async Task ServiceRegistrations_FailHostStartup_WhenAutoAdjustBulkLaneRatioIsInvalid()
+    {
+        using var provider = BuildServiceProvider(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal",
+            ["RedisMultiplexer:Connections"] = "8",
+            ["RedisMultiplexer:AutoAdjustBulkLanes"] = "true",
+            ["RedisMultiplexer:BulkLaneTargetRatio"] = "1.2"
+        });
+        var validator = GetStartupValidator(provider, "RedisMultiplexerOptionsStartupHostedService");
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => validator.StartAsync(CancellationToken.None));
+        var validation = AssertOptionsValidationFailure(ex);
+
+        Assert.Contains("RedisMultiplexer:BulkLaneTargetRatio must be in [0,0.90] when AutoAdjustBulkLanes is enabled.", validation.Failures);
+    }
+
+    [Fact]
     public void AutofacConnectionsModule_FailsContainerBuild_WhenRedisEndpointIsMissing()
     {
         var builder = new ContainerBuilder();

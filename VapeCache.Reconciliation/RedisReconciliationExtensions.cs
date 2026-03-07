@@ -1,3 +1,4 @@
+using System.Linq;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -87,6 +88,12 @@ public static class RedisReconciliationExtensions
         this IServiceCollection services,
         Action<RedisReconciliationReaperOptions>? configure = null)
     {
+        if (!services.Any(static descriptor => descriptor.ServiceType == typeof(IRedisReconciliationService)))
+        {
+            throw new InvalidOperationException(
+                "AddVapeCacheRedisReconciliation must be called before AddReconciliationReaper.");
+        }
+
         var optionsBuilder = services.AddOptions<RedisReconciliationReaperOptions>()
             .Validate(o => o.Interval > TimeSpan.Zero, "Interval must be greater than zero")
             .Validate(o => o.InitialDelay >= TimeSpan.Zero, "InitialDelay must be non-negative")

@@ -21,6 +21,8 @@ public static class CacheRegistration
     /// </summary>
     public static IServiceCollection AddVapecacheCaching(this IServiceCollection services)
     {
+        CacheTelemetry.EnsureInitialized();
+
         services.AddMemoryCache();
         services.AddOptions<InMemorySpillOptions>();
         services.AddOptions<HybridFailoverOptions>();
@@ -56,7 +58,9 @@ public static class CacheRegistration
         services.TryAddSingleton<ISpillStoreDiagnostics>(sp =>
         {
             var spillStore = sp.GetRequiredService<IInMemorySpillStore>();
-            return spillStore as ISpillStoreDiagnostics ?? FallbackSpillDiagnostics.Instance;
+            var diagnostics = spillStore as ISpillStoreDiagnostics ?? FallbackSpillDiagnostics.Instance;
+            CacheTelemetry.InitializeSpillDiagnostics(diagnostics);
+            return diagnostics;
         });
 
         // Cache services

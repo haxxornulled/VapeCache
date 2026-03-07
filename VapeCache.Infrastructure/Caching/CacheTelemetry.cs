@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Infrastructure.Caching;
 
@@ -36,13 +37,21 @@ public static class CacheTelemetry
     private static ICurrentCacheService? _currentCacheService;
     private static ISpillStoreDiagnostics? _spillStoreDiagnostics;
 
-    internal static int MapBackendName(string current) => current switch
+    internal static void EnsureInitialized()
     {
-        "redis" => 1,
-        "memory" => 0,
-        "in-memory" => 0,
-        _ => -1
-    };
+        _ = CurrentBackend;
+        _ = SpillActiveShards;
+        _ = SpillMaxFilesInShard;
+        _ = SpillImbalanceRatio;
+    }
+
+    internal static int MapBackendName(string current)
+    {
+        if (!BackendTypeResolver.TryParseName(current, out var backend))
+            return -1;
+
+        return backend.ToGaugeValue();
+    }
 
     /// <summary>
     /// Initializes the current backend observable gauge. Called during service registration.
@@ -83,8 +92,11 @@ public static class CacheTelemetry
 
         var current = _currentCacheService.CurrentName;
         var value = MapBackendName(current);
+        var tagValue = value >= 0 && BackendTypeResolver.TryParseName(current, out var backend)
+            ? backend.ToWireName()
+            : "unknown";
 
-        return new Measurement<int>(value, new TagList { { "backend", current } });
+        return new Measurement<int>(value, new TagList { { "backend", tagValue } });
     }
 
     /// <summary>

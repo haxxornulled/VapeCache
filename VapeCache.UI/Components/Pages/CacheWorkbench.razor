@@ -1,5 +1,4 @@
 @page "/cache-workbench"
-@inject CacheWorkbenchOrchestrator Orchestrator
 
 <PageTitle>Cache Workbench</PageTitle>
 
@@ -29,6 +28,16 @@
         <button @onclick="RefreshAsync">Refresh Status</button>
     </div>
 
+    <label>
+        Breaker reason
+        <input style="display:block;width:100%" @bind="_breakerReason" />
+    </label>
+
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+        <button @onclick="ForceOpenBreakerAsync">Force Open Breaker</button>
+        <button @onclick="ClearForcedOpenBreakerAsync">Clear Forced Open</button>
+    </div>
+
     @if (!string.IsNullOrWhiteSpace(_message))
     {
         <p><strong>Status:</strong> @_message</p>
@@ -42,6 +51,10 @@
         <dd>@_status.BreakerOpen</dd>
         <dt>Breaker remaining</dt>
         <dd>@(_status.BreakerOpenRemaining?.ToString() ?? "n/a")</dd>
+        <dt>Breaker forced open</dt>
+        <dd>@_status.BreakerForcedOpen</dd>
+        <dt>Breaker reason</dt>
+        <dd>@(_status.BreakerReason ?? "n/a")</dd>
         <dt>Consecutive failures</dt>
         <dd>@_status.ConsecutiveFailures</dd>
         <dt>Get/Hit/Miss</dt>
@@ -50,80 +63,3 @@
         <dd>@_status.SetCalls / @_status.RemoveCalls / @_status.FallbackToMemory</dd>
     </dl>
 </div>
-
-@code {
-    private string _key = "demo:welcome";
-    private string _value = "Hello from VapeCache.UI";
-    private int _ttlSeconds = 120;
-    private string? _message;
-    private CacheWorkbenchStatus _status = new(
-        Backend: "unknown",
-        BreakerOpen: false,
-        ConsecutiveFailures: 0,
-        BreakerOpenRemaining: null,
-        GetCalls: 0,
-        Hits: 0,
-        Misses: 0,
-        SetCalls: 0,
-        RemoveCalls: 0,
-        FallbackToMemory: 0);
-
-    protected override async Task OnInitializedAsync()
-    {
-        await RefreshAsync();
-    }
-
-    private async Task SetAsync()
-    {
-        try
-        {
-            var result = await Orchestrator.SetStringAsync(_key, _value, _ttlSeconds);
-            _message = $"Set '{result.Key}' ({result.Value.Length} chars).";
-        }
-        catch (Exception ex)
-        {
-            _message = $"Set failed: {ex.Message}";
-        }
-
-        await RefreshAsync();
-    }
-
-    private async Task GetAsync()
-    {
-        try
-        {
-            var result = await Orchestrator.ReadStringAsync(_key);
-            _message = result.Found
-                ? $"Read '{result.Key}': {result.Value}"
-                : $"Key '{result.Key}' was not found.";
-        }
-        catch (Exception ex)
-        {
-            _message = $"Get failed: {ex.Message}";
-        }
-
-        await RefreshAsync();
-    }
-
-    private async Task RemoveAsync()
-    {
-        try
-        {
-            var removed = await Orchestrator.RemoveAsync(_key);
-            _message = removed
-                ? $"Removed '{_key}'."
-                : $"Nothing removed for '{_key}'.";
-        }
-        catch (Exception ex)
-        {
-            _message = $"Remove failed: {ex.Message}";
-        }
-
-        await RefreshAsync();
-    }
-
-    private async Task RefreshAsync()
-    {
-        _status = await Orchestrator.GetStatusAsync();
-    }
-}

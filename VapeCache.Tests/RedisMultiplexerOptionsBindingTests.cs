@@ -31,6 +31,8 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.Equal(8, o.CoalescingSpinBudget);
         Assert.False(o.EnableAutoscaling);
         Assert.Equal(1, o.BulkLaneConnections);
+        Assert.False(o.AutoAdjustBulkLanes);
+        Assert.Equal(0.25, o.BulkLaneTargetRatio);
         Assert.Equal(TimeSpan.FromSeconds(5), o.BulkLaneResponseTimeout);
         Assert.Equal(2, o.MaxScaleEventsPerMinute);
         Assert.Equal(4, o.FlapToggleThreshold);
@@ -66,6 +68,8 @@ public sealed class RedisMultiplexerOptionsBindingTests
             "CoalescingSpinBudget": 10,
             "ResponseTimeout": "00:00:01.500",
             "BulkLaneConnections": 2,
+            "AutoAdjustBulkLanes": true,
+            "BulkLaneTargetRatio": 0.3,
             "BulkLaneResponseTimeout": "00:00:06",
             "MaxScaleEventsPerMinute": 3,
             "FlapToggleThreshold": 5,
@@ -109,6 +113,8 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.Equal(10, o.CoalescingSpinBudget);
         Assert.Equal(TimeSpan.FromMilliseconds(1500), o.ResponseTimeout);
         Assert.Equal(2, o.BulkLaneConnections);
+        Assert.True(o.AutoAdjustBulkLanes);
+        Assert.Equal(0.3, o.BulkLaneTargetRatio);
         Assert.Equal(TimeSpan.FromSeconds(6), o.BulkLaneResponseTimeout);
         Assert.Equal(3, o.MaxScaleEventsPerMinute);
         Assert.Equal(5, o.FlapToggleThreshold);

@@ -1,9 +1,12 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Abstractions.Diagnostics;
 using System.Linq;
 
 namespace VapeCache.Extensions.Aspire;
@@ -15,6 +18,7 @@ namespace VapeCache.Extensions.Aspire;
 public static class AspireEndpointExtensions
 {
     private static readonly Lazy<DashboardAssetBundle> DashboardAssets = new(LoadDashboardAssets);
+    private static readonly JsonSerializerOptions SharedSnapshotJsonOptions = new(JsonSerializerDefaults.Web);
     private const string DashboardResourcePrefix = "VapeCache.Extensions.Aspire.DashboardAssets.";
 
     /// <summary>
@@ -64,7 +68,10 @@ public static class AspireEndpointExtensions
 
             var response = new VapeCacheEndpointStatusResponse(
                 TimestampUtc: DateTimeOffset.UtcNow,
-                CurrentBackend: current.CurrentName,
+                CurrentBackend: BackendTypeResolver.Resolve(
+                    current.CurrentName,
+                    breaker.IsOpen,
+                    failover.IsForcedOpen),
                 Stats: new VapeCacheEndpointStatsResponse(
                     GetCalls: snapshot.GetCalls,
                     Hits: snapshot.Hits,
@@ -123,6 +130,58 @@ public static class AspireEndpointExtensions
         })
         .WithName("VapeCacheStats");
 
+        group.MapGet("/dashboard/shared-snapshot", static async (IRedisCommandExecutor redis, CancellationToken ct) =>
+        {
+            try
+            {
+                var payload = await redis.GetAsync(VapeCacheSharedDashboardSnapshotStore.RedisKey, ct).ConfigureAwait(false);
+                if (payload is null || payload.Length == 0)
+                {
+                    return Results.NotFound(
+                        new VapeCacheSharedDashboardSnapshotEnvelope(
+                            RetrievedAtUtc: DateTimeOffset.UtcNow,
+                            RedisKey: VapeCacheSharedDashboardSnapshotStore.RedisKey,
+                            Exists: false,
+                            IsFresh: false,
+                            Age: null,
+                            Snapshot: null));
+                }
+
+                var snapshot = JsonSerializer.Deserialize<VapeCacheSharedDashboardSnapshot>(payload, SharedSnapshotJsonOptions);
+                if (snapshot is null)
+                {
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status502BadGateway,
+                        title: "VapeCache shared snapshot payload was invalid.");
+                }
+
+                var age = DateTimeOffset.UtcNow - snapshot.TimestampUtc;
+                if (age < TimeSpan.Zero)
+                    age = TimeSpan.Zero;
+
+                return Results.Ok(
+                    new VapeCacheSharedDashboardSnapshotEnvelope(
+                        RetrievedAtUtc: DateTimeOffset.UtcNow,
+                        RedisKey: VapeCacheSharedDashboardSnapshotStore.RedisKey,
+                        Exists: true,
+                        IsFresh: age <= VapeCacheSharedDashboardSnapshotStore.MaxSnapshotAge,
+                        Age: age,
+                        Snapshot: snapshot));
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return Results.StatusCode(StatusCodes.Status408RequestTimeout);
+            }
+            catch
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "VapeCache shared snapshot unavailable.",
+                    detail: "Unable to read shared dashboard snapshot from Redis.");
+            }
+        })
+        .WithName("VapeCacheSharedSnapshot");
+
         if (includeIntentEndpoints)
         {
             group.MapGet("/intent/{key}", static (string key, ICacheIntentRegistry intentRegistry) =>
@@ -177,6 +236,22 @@ public static class AspireEndpointExtensions
             })
             .WithName("VapeCacheDashboard");
 
+            // Support both /vapecache/dashboard (no trailing slash) and /vapecache/dashboard/ URL resolution.
+            // The bundled index uses relative asset URLs (./dashboard.js, ./dashboard.css).
+            group.MapGet("/dashboard.js", () =>
+            {
+                var assets = DashboardAssets.Value;
+                return Results.Content(assets.Script, "text/javascript; charset=utf-8");
+            })
+            .WithName("VapeCacheDashboardScriptRoot");
+
+            group.MapGet("/dashboard.css", () =>
+            {
+                var assets = DashboardAssets.Value;
+                return Results.Content(assets.Style, "text/css; charset=utf-8");
+            })
+            .WithName("VapeCacheDashboardStyleRoot");
+
             group.MapGet("/dashboard/dashboard.js", () =>
             {
                 var assets = DashboardAssets.Value;
@@ -207,7 +282,9 @@ public static class AspireEndpointExtensions
                     IsForcedOpen: failover.IsForcedOpen,
                     Reason: failover.Reason));
             })
-            .WithName("VapeCacheBreakerForceOpen");
+            .WithName("VapeCacheBreakerForceOpen")
+            .WithMetadata(new IgnoreAntiforgeryTokenAttribute())
+            .DisableAntiforgery();
 
             group.MapPost("/breaker/clear", static (IRedisFailoverController failover) =>
             {
@@ -216,7 +293,9 @@ public static class AspireEndpointExtensions
                     IsForcedOpen: failover.IsForcedOpen,
                     Reason: failover.Reason));
             })
-            .WithName("VapeCacheBreakerClear");
+            .WithName("VapeCacheBreakerClear")
+            .WithMetadata(new IgnoreAntiforgeryTokenAttribute())
+            .DisableAntiforgery();
         }
 
         return group;
@@ -303,7 +382,7 @@ npm run build</code></pre>
 /// </summary>
 public sealed record VapeCacheEndpointStatusResponse(
     DateTimeOffset TimestampUtc,
-    string CurrentBackend,
+    [property: JsonConverter(typeof(JsonStringEnumConverter<BackendType>))] BackendType CurrentBackend,
     VapeCacheEndpointStatsResponse Stats,
     VapeCacheEndpointBreakerResponse CircuitBreaker,
     SpillStoreDiagnosticsSnapshot? Spill,
@@ -352,3 +431,14 @@ public sealed record VapeCacheForceOpenRequest(string? Reason);
 public sealed record VapeCacheBreakerControlResponse(
     bool IsForcedOpen,
     string? Reason);
+
+/// <summary>
+/// Shared dashboard snapshot payload envelope for cross-process telemetry validation.
+/// </summary>
+public sealed record VapeCacheSharedDashboardSnapshotEnvelope(
+    DateTimeOffset RetrievedAtUtc,
+    string RedisKey,
+    bool Exists,
+    bool IsFresh,
+    TimeSpan? Age,
+    VapeCacheSharedDashboardSnapshot? Snapshot);

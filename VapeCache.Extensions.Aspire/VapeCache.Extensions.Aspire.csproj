@@ -45,6 +45,7 @@
 
   <ItemGroup>
     <!-- .NET Aspire Service Discovery -->
+    <PackageReference Include="Autofac" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="9.0.0" />
 
     <!-- OpenTelemetry (for Aspire Dashboard integration) - Updated to 1.11.2+ to fix CVE-2025-27513 / GHSA-8785-wc3w-h8q6 -->

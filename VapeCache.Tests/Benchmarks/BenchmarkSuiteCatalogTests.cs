@@ -63,8 +63,9 @@ public sealed class BenchmarkSuiteCatalogTests
         Assert.Equal("Comparison: datatypes", plan.DisplayName);
         Assert.Equal("extended parity comparison", plan.ReportAudience);
         Assert.Equal(["--filter", "*RedisDatatypeParityHeadToHeadBenchmarks*"], plan.Arguments);
-        Assert.Equal(4, plan.EnvironmentDefaults.Length);
+        Assert.Equal(5, plan.EnvironmentDefaults.Length);
         Assert.Contains(plan.EnvironmentDefaults, static entry => entry.Key == "VAPECACHE_BENCH_DATATYPE_PAYLOADS" && entry.Value == "256,1024,4096,16384");
+        Assert.Contains(plan.EnvironmentDefaults, static entry => entry.Key == "VAPECACHE_BENCH_PARITY_PAYLOADS" && entry.Value == "256,1024,4096,16384");
         Assert.Contains(plan.EnvironmentDefaults, static entry => entry.Key == "VAPECACHE_BENCH_DEDICATED_LANE_WORKERS" && entry.Value == "true");
         Assert.Contains(plan.EnvironmentDefaults, static entry => entry.Key == "VAPECACHE_BENCH_SOCKET_RESP_READER" && entry.Value == "true");
         Assert.Contains(plan.EnvironmentDefaults, static entry => entry.Key == "VAPECACHE_BENCH_REPORT_AUDIENCE" && entry.Value == "extended parity comparison");
@@ -88,6 +89,27 @@ public sealed class BenchmarkSuiteCatalogTests
         Assert.Contains("--job", plan.Arguments);
         Assert.Contains("Short", plan.Arguments);
         Assert.Contains(plan.EnvironmentDefaults, static entry => entry.Key == "VAPECACHE_BENCH_REPORT_AUDIENCE" && entry.Value == "hot-path comparison");
+    }
+
+    [Fact]
+    public void TryCreateInvocationPlan_BuildsParityAliasAcrossParitySuites()
+    {
+        var created = BenchmarkSuiteCatalog.TryCreateInvocationPlan(
+            ["compare", "parity", "--job", "Short"],
+            out var plan,
+            out var error);
+
+        Assert.True(created, error);
+        Assert.Equal("Comparison: parity", plan.DisplayName);
+        Assert.Equal("extended parity comparison", plan.ReportAudience);
+        Assert.Equal("--filter", plan.Arguments[0]);
+        Assert.Contains("*RedisEndToEndHeadToHeadBenchmarks*", plan.Arguments);
+        Assert.Contains("*RedisModuleHeadToHeadBenchmarks*", plan.Arguments);
+        Assert.Contains("*RedisDatatypeParityHeadToHeadBenchmarks*", plan.Arguments);
+        Assert.Contains("--job", plan.Arguments);
+        Assert.Contains("Short", plan.Arguments);
+        Assert.Contains(plan.EnvironmentDefaults, static entry => entry.Key == "VAPECACHE_BENCH_PARITY_PAYLOADS" && entry.Value == "256,1024,4096,16384");
+        Assert.Contains(plan.EnvironmentDefaults, static entry => entry.Key == "VAPECACHE_BENCH_REPORT_AUDIENCE" && entry.Value == "extended parity comparison");
     }
 
     [Fact]

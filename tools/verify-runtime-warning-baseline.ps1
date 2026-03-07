@@ -11,6 +11,25 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $repoRoot
 
+function Resolve-SolutionPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RequestedPath
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath) -and (Test-Path $RequestedPath)) {
+        return $RequestedPath
+    }
+
+    foreach ($candidate in @("VapeCache.slnx", "VapeCache.sln")) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    throw "Could not find a solution file. Checked '$RequestedPath', 'VapeCache.slnx', and 'VapeCache.sln'."
+}
+
 function Get-RuntimeWarningSnapshot {
     param(
         [Parameter(Mandatory = $true)]
@@ -72,7 +91,8 @@ function Get-RuntimeWarningSnapshot {
     }
 }
 
-$snapshot = Get-RuntimeWarningSnapshot -SolutionPath $Solution -BuildConfiguration $Configuration
+$resolvedSolution = Resolve-SolutionPath -RequestedPath $Solution
+$snapshot = Get-RuntimeWarningSnapshot -SolutionPath $resolvedSolution -BuildConfiguration $Configuration
 $baselineFullPath = Join-Path $repoRoot $BaselinePath
 
 if ($UpdateBaseline) {

@@ -1,10 +1,13 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ServiceDiscovery;
 using OpenTelemetry;
+using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
@@ -17,6 +20,17 @@ public static class Extensions
 {
     private const string HealthEndpointPath = "/health";
     private const string AlivenessEndpointPath = "/alive";
+    private static readonly PathString[] TelemetryExcludedPaths =
+    [
+        new PathString(HealthEndpointPath),
+        new PathString(AlivenessEndpointPath),
+        new PathString("/vapecache/status"),
+        new PathString("/vapecache/stats"),
+        new PathString("/vapecache/stream"),
+        new PathString("/vapecache/dashboard"),
+        new PathString("/dashboard"),
+        new PathString("/_blazor")
+    ];
 
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
@@ -63,10 +77,7 @@ public static class Extensions
             {
                 tracing.AddSource(builder.Environment.ApplicationName)
                     .AddAspNetCoreInstrumentation(tracing =>
-                        // Exclude health check requests from tracing
-                        tracing.Filter = context =>
-                            !context.Request.Path.StartsWithSegments(HealthEndpointPath)
-                            && !context.Request.Path.StartsWithSegments(AlivenessEndpointPath)
+                        tracing.Filter = static context => ShouldIncludeAspNetTelemetry(context.Request.Path)
                     )
                     // Uncomment the following line to enable gRPC instrumentation (requires the OpenTelemetry.Instrumentation.GrpcNetClient package)
                     //.AddGrpcClientInstrumentation()
@@ -80,11 +91,14 @@ public static class Extensions
 
     private static TBuilder AddOpenTelemetryExporters<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
-        var useOtlpExporter = !string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]);
+        var endpoint = ResolveOtlpEndpoint(builder.Configuration);
 
-        if (useOtlpExporter)
+        if (!string.IsNullOrWhiteSpace(endpoint) && Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
         {
-            builder.Services.AddOpenTelemetry().UseOtlpExporter();
+            var protocol = ResolveOtlpProtocol(builder.Configuration, endpointUri);
+            builder.Services.AddOpenTelemetry().UseOtlpExporter(
+                protocol: protocol,
+                baseUrl: endpointUri);
         }
 
         // Uncomment the following lines to enable the Azure Monitor exporter (requires the Azure.Monitor.OpenTelemetry.AspNetCore package)
@@ -95,6 +109,83 @@ public static class Extensions
         //}
 
         return builder;
+    }
+
+    private static string? ResolveOtlpEndpoint(IConfiguration configuration)
+    {
+        var endpoint = configuration["OpenTelemetry:Otlp:Endpoint"];
+        if (!string.IsNullOrWhiteSpace(endpoint))
+            return endpoint;
+
+        endpoint = configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
+        if (!string.IsNullOrWhiteSpace(endpoint))
+            return endpoint;
+
+        endpoint = configuration["DOTNET_DASHBOARD_OTLP_ENDPOINT_URL"];
+        return string.IsNullOrWhiteSpace(endpoint) ? null : endpoint;
+    }
+
+    private static OtlpExportProtocol ResolveOtlpProtocol(IConfiguration configuration, Uri endpoint)
+    {
+        var configured = configuration["OpenTelemetry:Otlp:Protocol"];
+        if (TryParseOtlpProtocol(configured, out var protocol))
+            return protocol;
+
+        configured = configuration["OTEL_EXPORTER_OTLP_PROTOCOL"];
+        if (TryParseOtlpProtocol(configured, out protocol))
+            return protocol;
+
+        return InferOtlpProtocol(endpoint);
+    }
+
+    private static bool TryParseOtlpProtocol(string? configured, out OtlpExportProtocol protocol)
+    {
+        protocol = default;
+        if (string.IsNullOrWhiteSpace(configured))
+            return false;
+
+        var normalized = configured.Trim().ToLowerInvariant();
+        if (normalized is "http/protobuf" or "http-protobuf" or "httpprotobuf")
+        {
+            protocol = OtlpExportProtocol.HttpProtobuf;
+            return true;
+        }
+
+        if (normalized is "grpc")
+        {
+            protocol = OtlpExportProtocol.Grpc;
+            return true;
+        }
+
+        return Enum.TryParse(configured, ignoreCase: true, out protocol);
+    }
+
+    private static OtlpExportProtocol InferOtlpProtocol(Uri endpoint)
+    {
+        if (endpoint.Port == 4318)
+            return OtlpExportProtocol.HttpProtobuf;
+
+        if (endpoint.Port == 5341)
+            return OtlpExportProtocol.HttpProtobuf;
+
+        if (endpoint.AbsolutePath.Contains("/ingest/otlp", StringComparison.OrdinalIgnoreCase))
+            return OtlpExportProtocol.HttpProtobuf;
+
+        if (endpoint.AbsolutePath.Contains("/v1/", StringComparison.OrdinalIgnoreCase))
+            return OtlpExportProtocol.HttpProtobuf;
+
+        return OtlpExportProtocol.Grpc;
+    }
+
+    private static bool ShouldIncludeAspNetTelemetry(PathString path)
+    {
+        for (var i = 0; i < TelemetryExcludedPaths.Length; i++)
+        {
+            if (path.StartsWithSegments(TelemetryExcludedPaths[i]))
+                return false;
+        }
+
+        return true;
     }
 
     public static TBuilder AddDefaultHealthChecks<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder

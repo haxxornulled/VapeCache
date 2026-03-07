@@ -58,6 +58,10 @@ public static class AspireHealthCheckExtensions
                 name: "redis",
                 failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
                 tags: new[] { "vapecache", "redis", "infrastructure" })
+            .AddCheck<VapeCacheStartupReadinessHealthCheck>(
+                name: "vapecache-startup-readiness",
+                failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+                tags: new[] { "vapecache", "startup", "readiness" })
             .AddCheck<VapeCacheHealthCheck>(
                 name: "vapecache",
                 failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,

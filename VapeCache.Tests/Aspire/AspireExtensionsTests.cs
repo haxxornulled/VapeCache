@@ -25,6 +25,18 @@ public sealed class AspireExtensionsTests
     }
 
     [Fact]
+    public void AddVapeCacheClientBuilder_CanSkipCoreServiceCollectionRegistrations()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        var builder = hostBuilder.AddVapeCacheClientBuilder(registerCoreServices: false);
+
+        Assert.NotNull(builder);
+        Assert.DoesNotContain(hostBuilder.Services, sd => sd.ServiceType == typeof(IRedisCommandExecutor));
+        Assert.DoesNotContain(hostBuilder.Services, sd => sd.ServiceType == typeof(ICacheService));
+        Assert.Contains(hostBuilder.Services, sd => sd.ServiceType == typeof(IVapeCacheStartupReadiness));
+    }
+
+    [Fact]
     public void WithHealthChecks_RegistersHealthChecks()
     {
         var hostBuilder = new HostApplicationBuilder();
@@ -36,7 +48,52 @@ public sealed class AspireExtensionsTests
         var options = provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>();
 
         Assert.Contains(options.Value.Registrations, r => r.Name == "redis" && r.Factory is not null);
+        Assert.Contains(options.Value.Registrations, r => r.Name == "vapecache-startup-readiness" && r.Factory is not null);
         Assert.Contains(options.Value.Registrations, r => r.Name == "vapecache" && r.Factory is not null);
+    }
+
+    [Fact]
+    public void UseTransport_AppliesExpectedProfileAndMuxToggles()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        hostBuilder.AddVapeCacheClientBuilder(registerCoreServices: false)
+            .UseTransport(VapeCacheAspireTransportMode.UltraLowLatency);
+
+        using var provider = hostBuilder.Services.BuildServiceProvider();
+        var connection = provider.GetRequiredService<IOptions<RedisConnectionOptions>>().Value;
+        var multiplexer = provider.GetRequiredService<IOptions<RedisMultiplexerOptions>>().Value;
+
+        Assert.Equal(RedisTransportProfile.LowLatency, connection.TransportProfile);
+        Assert.Equal(RedisTransportProfile.LowLatency, multiplexer.TransportProfile);
+        Assert.True(multiplexer.EnableCoalescedSocketWrites);
+        Assert.True(multiplexer.EnableSocketRespReader);
+        Assert.False(multiplexer.UseDedicatedLaneWorkers);
+    }
+
+    [Fact]
+    public async Task WithStartupWarmup_RegistersHostedServiceAndOptions()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        hostBuilder.AddVapeCacheClientBuilder(registerCoreServices: false)
+            .WithStartupWarmup(options =>
+            {
+                options.ConnectionsToWarm = 6;
+                options.RequiredSuccessfulConnections = 3;
+                options.Timeout = TimeSpan.FromSeconds(10);
+            });
+
+        await using var provider = hostBuilder.Services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<VapeCacheStartupWarmupOptions>>().Value;
+
+        Assert.True(options.Enabled);
+        Assert.Equal(6, options.ConnectionsToWarm);
+        Assert.Equal(3, options.RequiredSuccessfulConnections);
+        Assert.Equal(TimeSpan.FromSeconds(10), options.Timeout);
+        Assert.Contains(
+            hostBuilder.Services,
+            static descriptor =>
+                descriptor.ServiceType == typeof(IHostedService) &&
+                descriptor.ImplementationType?.Name == "VapeCacheStartupWarmupHostedService");
     }
 
     [Fact]

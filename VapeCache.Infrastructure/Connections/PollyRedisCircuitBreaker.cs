@@ -11,7 +11,7 @@ namespace VapeCache.Infrastructure.Connections;
 /// Polly-based circuit breaker for Redis operations.
 /// Implements proper Circuit Breaker Pattern following Polly best practices.
 /// </summary>
-internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRedisFailoverController
+internal sealed partial class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRedisFailoverController
 {
     private readonly ResiliencePipeline _pipeline;
     private readonly ILogger<PollyRedisCircuitBreaker> _logger;
@@ -44,24 +44,21 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
                     _stats.IncBreakerOpened();
                     CacheTelemetry.RedisBreakerOpened.Add(1, new System.Diagnostics.TagList { { "backend", "hybrid" } });
 
-                    _logger.LogWarning(
-                        "Circuit breaker opened after failures. Switching to in-memory mode for {Duration} seconds.",
-                        _options.BreakDuration.TotalSeconds);
-                    _logger.LogWarning(
-                        "Cache writes during this outage are not reconciled back to Redis without a reconciliation store.");
+                    LogCircuitOpened(_logger, _options.BreakDuration.TotalSeconds);
+                    LogReconciliationStoreWarning(_logger);
 
                     return ValueTask.CompletedTask;
                 },
                 OnClosed = args =>
                 {
                     _currentState = CircuitState.Closed;
-                    _logger.LogInformation("Circuit breaker closed. Redis operations resumed.");
+                    LogCircuitClosed(_logger);
                     return ValueTask.CompletedTask;
                 },
                 OnHalfOpened = args =>
                 {
                     _currentState = CircuitState.HalfOpen;
-                    _logger.LogInformation("Circuit breaker half-open. Testing Redis connection.");
+                    LogCircuitHalfOpen(_logger);
                     return ValueTask.CompletedTask;
                 }
             })
@@ -122,7 +119,7 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
         if (!_options.Enabled) return;
         _forcedReason = reason;
         _currentState = CircuitState.Open;
-        _logger.LogWarning("Circuit breaker manually forced open: {Reason}", reason);
+        LogForcedOpen(_logger, reason);
     }
 
     /// <summary>
@@ -133,7 +130,43 @@ internal sealed class PollyRedisCircuitBreaker : IRedisCircuitBreakerState, IRed
         if (!_options.Enabled) return;
         _forcedReason = null;
         _currentState = CircuitState.Closed;
-        _logger.LogInformation("Circuit breaker manual override cleared");
+        LogManualOverrideCleared(_logger);
     }
+
+    [LoggerMessage(
+        EventId = 24000,
+        Level = LogLevel.Warning,
+        Message = "Circuit breaker opened after failures. Switching to in-memory mode for {Duration} seconds.")]
+    private static partial void LogCircuitOpened(ILogger logger, double duration);
+
+    [LoggerMessage(
+        EventId = 24001,
+        Level = LogLevel.Warning,
+        Message = "Cache writes during this outage are not reconciled back to Redis without a reconciliation store.")]
+    private static partial void LogReconciliationStoreWarning(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 24002,
+        Level = LogLevel.Information,
+        Message = "Circuit breaker closed. Redis operations resumed.")]
+    private static partial void LogCircuitClosed(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 24003,
+        Level = LogLevel.Information,
+        Message = "Circuit breaker half-open. Testing Redis connection.")]
+    private static partial void LogCircuitHalfOpen(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 24004,
+        Level = LogLevel.Warning,
+        Message = "Circuit breaker manually forced open: {Reason}")]
+    private static partial void LogForcedOpen(ILogger logger, string reason);
+
+    [LoggerMessage(
+        EventId = 24005,
+        Level = LogLevel.Information,
+        Message = "Circuit breaker manual override cleared")]
+    private static partial void LogManualOverrideCleared(ILogger logger);
 }
 

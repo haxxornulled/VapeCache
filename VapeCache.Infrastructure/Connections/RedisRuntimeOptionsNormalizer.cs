@@ -39,8 +39,11 @@ internal static class RedisRuntimeOptionsNormalizer
     private const int MinAutoscaleConnections = 1;
     private const int MaxAutoscaleConnections = 256;
     private const int MinBulkLaneConnections = 0;
-    private const int MaxBulkLaneConnections = 2;
+    private const int MaxBulkLaneConnections = MaxMultiplexerConnections - 1;
     private const double MinPositiveThreshold = 0.01d;
+    private const double MinBulkLaneTargetRatio = 0d;
+    private const double MaxBulkLaneTargetRatio = 0.90d;
+    private const double DefaultBulkLaneTargetRatio = 0.25d;
 
     private static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan DefaultAcquireTimeout = TimeSpan.FromSeconds(2);
@@ -186,6 +189,8 @@ internal static class RedisRuntimeOptionsNormalizer
 
         var responseTimeout = NormalizeTimeout(profiled.ResponseTimeout);
         var bulkLaneConnections = NormalizeBulkLaneConnections(profiled.BulkLaneConnections);
+        var autoAdjustBulkLanes = profiled.AutoAdjustBulkLanes;
+        var bulkLaneTargetRatio = NormalizeBulkLaneTargetRatio(profiled.BulkLaneTargetRatio);
         var bulkLaneResponseTimeout = NormalizePositive(profiled.BulkLaneResponseTimeout, DefaultBulkLaneResponseTimeout);
         var autoscaleSampleInterval = NormalizePositive(profiled.AutoscaleSampleInterval, DefaultAutoscaleSampleInterval);
         var scaleUpWindow = NormalizePositive(profiled.ScaleUpWindow, DefaultScaleUpWindow);
@@ -223,6 +228,8 @@ internal static class RedisRuntimeOptionsNormalizer
             CoalescingSpinBudget = coalescingSpinBudget,
             ResponseTimeout = responseTimeout,
             BulkLaneConnections = bulkLaneConnections,
+            AutoAdjustBulkLanes = autoAdjustBulkLanes,
+            BulkLaneTargetRatio = bulkLaneTargetRatio,
             BulkLaneResponseTimeout = bulkLaneResponseTimeout,
             MinConnections = minConnections,
             MaxConnections = maxConnections,
@@ -331,5 +338,13 @@ internal static class RedisRuntimeOptionsNormalizer
             return 1;
 
         return Math.Clamp(value, MinBulkLaneConnections, MaxBulkLaneConnections);
+    }
+
+    private static double NormalizeBulkLaneTargetRatio(double value)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+            return DefaultBulkLaneTargetRatio;
+
+        return Math.Clamp(value, MinBulkLaneTargetRatio, MaxBulkLaneTargetRatio);
     }
 }

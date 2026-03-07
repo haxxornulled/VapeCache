@@ -3,6 +3,7 @@ import "./styles.css";
 type UnknownRecord = Record<string, unknown>;
 
 type ConnectionLevel = "ok" | "warn" | "danger";
+type BackendType = "Redis" | "InMemory";
 
 interface RedisMuxLaneSnapshot {
   laneIndex: number;
@@ -48,7 +49,7 @@ interface AutoscalerSnapshot {
 
 interface LiveSample {
   timestampUtc: Date;
-  currentBackend: string;
+  currentBackend: BackendType;
   hits: number;
   misses: number;
   setCalls: number;
@@ -110,6 +111,26 @@ function asString(value: unknown, fallback = ""): string {
 
 function asBoolean(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function asBackendType(value: unknown, fallback: BackendType = "Redis"): BackendType {
+  if (typeof value !== "string" || value.length === 0) {
+    return fallback;
+  }
+
+  if (value === "Redis" || value === "InMemory") {
+    return value;
+  }
+
+  if (value.toLowerCase() === "redis") {
+    return "Redis";
+  }
+
+  if (value.toLowerCase() === "memory" || value.toLowerCase() === "in-memory") {
+    return "InMemory";
+  }
+
+  return fallback;
 }
 
 function escapeHtml(value: string): string {
@@ -381,7 +402,7 @@ function normalizeSample(raw: unknown): LiveSample {
 
   return {
     timestampUtc,
-    currentBackend: asString(getValue(sample, "CurrentBackend", "currentBackend"), "unknown"),
+    currentBackend: asBackendType(getValue(sample, "CurrentBackend", "currentBackend")),
     hits: asNumber(getValue(sample, "Hits", "hits")),
     misses: asNumber(getValue(sample, "Misses", "misses")),
     setCalls: asNumber(getValue(sample, "SetCalls", "setCalls")),
@@ -573,7 +594,7 @@ function renderCharts(): void {
 function renderCards(sample: LiveSample): void {
   const reads = sample.hits + sample.misses;
 
-  dom.backend.textContent = sample.currentBackend;
+  dom.backend.textContent = sample.currentBackend === "InMemory" ? "in-memory" : "redis";
   dom.hitRate.textContent = asPercent(sample.hitRate);
   dom.readsTotal.textContent = `reads: ${formatInt(reads)}`;
   dom.readsPerSec.textContent = asRate(sample.readsPerSec);

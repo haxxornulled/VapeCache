@@ -6,9 +6,13 @@ namespace VapeCache.Benchmarks;
 public static class BenchmarkSuiteCatalog
 {
     private const string HotPathComparisonAlias = "hotpath";
+    private const string ParityComparisonAlias = "parity";
+    private const string ParityPayloadsEnvironmentVariable = "VAPECACHE_BENCH_PARITY_PAYLOADS";
     private const string ReportAudienceEnvironmentVariable = "VAPECACHE_BENCH_REPORT_AUDIENCE";
     private static readonly FrozenSet<string> HotPathComparisonSuites =
         new[] { "client", "throughput", "endtoend" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> ParityComparisonSuites =
+        new[] { "endtoend", "modules", "datatypes" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     private static readonly BenchmarkSuiteDefinition[] FeatureSuites =
     [
@@ -51,19 +55,28 @@ public static class BenchmarkSuiteCatalog
             BenchmarkSuiteAudience.Comparison,
             "VapeCache vs StackExchange.Redis client API parity",
             ["*RedisClientHeadToHeadBenchmarks*"],
-            [new("VAPECACHE_BENCH_CLIENT_PAYLOADS", "256,1024,4096,16384")]),
+            [
+                new("VAPECACHE_BENCH_CLIENT_PAYLOADS", "256,1024,4096,16384"),
+                new(ParityPayloadsEnvironmentVariable, "256,1024,4096,16384")
+            ]),
         new(
             "throughput",
             BenchmarkSuiteAudience.Comparison,
             "Sustained throughput and tail-latency matrices",
             ["*RedisThroughputHeadToHeadBenchmarks*"],
-            [new("VAPECACHE_BENCH_THROUGHPUT_PAYLOADS", "256,1024,4096,16384")]),
+            [
+                new("VAPECACHE_BENCH_THROUGHPUT_PAYLOADS", "256,1024,4096,16384"),
+                new(ParityPayloadsEnvironmentVariable, "256,1024,4096,16384")
+            ]),
         new(
             "endtoend",
             BenchmarkSuiteAudience.Comparison,
             "End-to-end operation latency across common data structures",
             ["*RedisEndToEndHeadToHeadBenchmarks*"],
-            [new("VAPECACHE_BENCH_E2E_PAYLOADS", "256,1024,4096,16384")]),
+            [
+                new("VAPECACHE_BENCH_E2E_PAYLOADS", "256,1024,4096,16384"),
+                new(ParityPayloadsEnvironmentVariable, "256,1024,4096,16384")
+            ]),
         new(
             "modules",
             BenchmarkSuiteAudience.Comparison,
@@ -77,6 +90,7 @@ public static class BenchmarkSuiteCatalog
             ["*RedisDatatypeParityHeadToHeadBenchmarks*"],
             [
                 new("VAPECACHE_BENCH_DATATYPE_PAYLOADS", "256,1024,4096,16384"),
+                new(ParityPayloadsEnvironmentVariable, "256,1024,4096,16384"),
                 new("VAPECACHE_BENCH_DEDICATED_LANE_WORKERS", "true"),
                 new("VAPECACHE_BENCH_SOCKET_RESP_READER", "true")
             ])
@@ -101,6 +115,7 @@ public static class BenchmarkSuiteCatalog
             .AppendLine("  featuresets <suite|all> [BenchmarkDotNet args]")
             .AppendLine("  compare <suite|all> [BenchmarkDotNet args]")
             .AppendLine("    compare hotpath = compare client + throughput + endtoend")
+            .AppendLine("    compare parity  = compare endtoend + modules + datatypes")
             .AppendLine("  list-suites [featuresets|compare]");
 
         builder.AppendLine()
@@ -166,6 +181,8 @@ public static class BenchmarkSuiteCatalog
             ? $"{GetAudienceDisplayName(audience)} (all)"
             : string.Equals(suiteKey, HotPathComparisonAlias, StringComparison.OrdinalIgnoreCase)
                 ? "Comparison: hotpath"
+            : string.Equals(suiteKey, ParityComparisonAlias, StringComparison.OrdinalIgnoreCase)
+                ? "Comparison: parity"
             : selectedSuites[0].DisplayName;
 
         var reportAudience = ResolveReportAudience(audience, selectedSuites);
@@ -189,6 +206,7 @@ public static class BenchmarkSuiteCatalog
         if (audience == BenchmarkSuiteAudience.Comparison)
         {
             builder.AppendLine($"  {HotPathComparisonAlias,-11} Hot-path comparison bundle (client + throughput + endtoend)");
+            builder.AppendLine($"  {ParityComparisonAlias,-11} Parity bundle (endtoend + modules + datatypes)");
         }
     }
 
@@ -209,6 +227,17 @@ public static class BenchmarkSuiteCatalog
                 ComparisonLookup["client"],
                 ComparisonLookup["throughput"],
                 ComparisonLookup["endtoend"]
+            ];
+        }
+
+        if (audience == BenchmarkSuiteAudience.Comparison &&
+            string.Equals(suiteKey, ParityComparisonAlias, StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                ComparisonLookup["endtoend"],
+                ComparisonLookup["modules"],
+                ComparisonLookup["datatypes"]
             ];
         }
 
@@ -243,6 +272,12 @@ public static class BenchmarkSuiteCatalog
                 ? "mixed feature/fallback + internal feature behavior"
                 : "feature behavior";
         }
+
+        var hasParityBundle = suites.Count == ParityComparisonSuites.Count &&
+                              suites.All(suite => ParityComparisonSuites.Contains(suite.Key));
+
+        if (hasParityBundle)
+            return "extended parity comparison";
 
         var includesHotPath = suites.Any(suite => HotPathComparisonSuites.Contains(suite.Key));
         var includesNonHotPath = suites.Any(suite => !HotPathComparisonSuites.Contains(suite.Key));

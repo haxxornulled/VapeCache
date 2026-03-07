@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -51,6 +52,17 @@ public static class AspireEndpointAutoMapExtensions
                 var endpointOptions = options.Value;
                 if (!endpointOptions.Enabled)
                     return;
+
+                if (app is IEndpointRouteBuilder endpointRouteBuilder)
+                {
+                    endpointRouteBuilder.MapVapeCacheEndpoints(
+                        endpointOptions.Prefix,
+                        endpointOptions.IncludeBreakerControlEndpoints,
+                        endpointOptions.EnableLiveStream,
+                        endpointOptions.IncludeIntentEndpoints,
+                        endpointOptions.EnableDashboard);
+                    return;
+                }
 
                 app.UseRouting();
                 app.UseEndpoints(endpoints =>

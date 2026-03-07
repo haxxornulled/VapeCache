@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Extensions.Aspire;
 
@@ -14,7 +16,7 @@ public interface IVapeCacheLiveMetricsFeed
 
 public sealed record VapeCacheLiveSample(
     DateTimeOffset TimestampUtc,
-    string CurrentBackend,
+    [property: JsonConverter(typeof(JsonStringEnumConverter<BackendType>))] BackendType CurrentBackend,
     long Hits,
     long Misses,
     long SetCalls,
@@ -36,7 +38,7 @@ internal sealed class VapeCacheLiveMetricsFeed(
     ISpillStoreDiagnostics? spillDiagnostics = null,
     IRedisMultiplexerDiagnostics? diagnostics = null) : BackgroundService, IVapeCacheLiveMetricsFeed
 {
-    private readonly ConcurrentDictionary<int, Channel<VapeCacheLiveSample>> _subscribers = new();
+    private readonly ConcurrentDictionary<int, Subscriber> _subscribers = new();
     private int _subscriberId;
 
     /// <summary>
@@ -53,13 +55,15 @@ internal sealed class VapeCacheLiveMetricsFeed(
         });
 
         var id = Interlocked.Increment(ref _subscriberId);
-        _subscribers[id] = channel;
-
-        ct.Register(() =>
-        {
-            if (_subscribers.TryRemove(id, out var existing))
-                existing.Writer.TryComplete();
-        });
+        var subscriber = new Subscriber(channel);
+        _subscribers[id] = subscriber;
+        subscriber.CancellationRegistration = ct.Register(
+            static state =>
+            {
+                var callbackState = (SubscriberCancellationState)state!;
+                callbackState.Owner.RemoveSubscriber(callbackState.Id);
+            },
+            new SubscriberCancellationState(this, id));
 
         return channel.Reader;
     }
@@ -82,7 +86,7 @@ internal sealed class VapeCacheLiveMetricsFeed(
             var reads = snapshot.Hits + snapshot.Misses;
             var sample = new VapeCacheLiveSample(
                 TimestampUtc: DateTimeOffset.UtcNow,
-                CurrentBackend: current.CurrentName,
+                CurrentBackend: BackendTypeResolver.Resolve(current.CurrentName, breakerOpen: false, forcedOpen: false),
                 Hits: snapshot.Hits,
                 Misses: snapshot.Misses,
                 SetCalls: snapshot.SetCalls,
@@ -99,13 +103,41 @@ internal sealed class VapeCacheLiveMetricsFeed(
 
             foreach (var kvp in _subscribers)
             {
-                if (!kvp.Value.Writer.TryWrite(sample))
+                if (!kvp.Value.Channel.Writer.TryWrite(sample))
                     continue;
             }
         }
 
-        foreach (var channel in _subscribers.Values)
-            channel.Writer.TryComplete();
+        foreach (var subscriber in _subscribers.Values)
+            subscriber.CompleteAndDispose();
         _subscribers.Clear();
     }
+
+    public override void Dispose()
+    {
+        foreach (var subscriber in _subscribers.Values)
+            subscriber.CompleteAndDispose();
+        _subscribers.Clear();
+        base.Dispose();
+    }
+
+    private void RemoveSubscriber(int id)
+    {
+        if (_subscribers.TryRemove(id, out var subscriber))
+            subscriber.CompleteAndDispose();
+    }
+
+    private sealed class Subscriber(Channel<VapeCacheLiveSample> channel)
+    {
+        public Channel<VapeCacheLiveSample> Channel { get; } = channel;
+        public CancellationTokenRegistration CancellationRegistration { get; set; }
+
+        public void CompleteAndDispose()
+        {
+            Channel.Writer.TryComplete();
+            CancellationRegistration.Dispose();
+        }
+    }
+
+    private sealed record SubscriberCancellationState(VapeCacheLiveMetricsFeed Owner, int Id);
 }

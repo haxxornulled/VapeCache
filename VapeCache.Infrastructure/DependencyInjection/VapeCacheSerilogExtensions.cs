@@ -126,7 +126,12 @@ public static class VapeCacheSerilogExtensions
         if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
             return;
 
-        var protocol = ResolveProtocol(configuration["Serilog:OpenTelemetry:Protocol"], endpointUri);
+        var configuredProtocol =
+            configuration["Serilog:OpenTelemetry:Protocol"] ??
+            configuration["OpenTelemetry:Otlp:Protocol"] ??
+            Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_PROTOCOL");
+
+        var protocol = ResolveProtocol(configuredProtocol, endpointUri);
         var sinkEndpoint = protocol == OtlpProtocol.HttpProtobuf
             ? ResolveSignalEndpoint(endpointUri, "logs")
             : endpointUri;
@@ -141,7 +146,7 @@ public static class VapeCacheSerilogExtensions
 
     private static OtlpProtocol ResolveProtocol(string? configuredProtocol, Uri endpoint)
     {
-        if (Enum.TryParse(configuredProtocol, ignoreCase: true, out OtlpProtocol parsed))
+        if (TryParseOtlpProtocol(configuredProtocol, out var parsed))
             return parsed;
 
         var isHttpProtobuf = endpoint.Port == 4318 ||
@@ -150,6 +155,28 @@ public static class VapeCacheSerilogExtensions
                              endpoint.AbsolutePath.Contains("/v1/", StringComparison.OrdinalIgnoreCase);
 
         return isHttpProtobuf ? OtlpProtocol.HttpProtobuf : OtlpProtocol.Grpc;
+    }
+
+    private static bool TryParseOtlpProtocol(string? configuredProtocol, out OtlpProtocol protocol)
+    {
+        protocol = default;
+        if (string.IsNullOrWhiteSpace(configuredProtocol))
+            return false;
+
+        var normalized = configuredProtocol.Trim().ToLowerInvariant();
+        if (normalized is "http/protobuf" or "http-protobuf" or "httpprotobuf")
+        {
+            protocol = OtlpProtocol.HttpProtobuf;
+            return true;
+        }
+
+        if (normalized is "grpc")
+        {
+            protocol = OtlpProtocol.Grpc;
+            return true;
+        }
+
+        return Enum.TryParse(configuredProtocol, ignoreCase: true, out protocol);
     }
 
     private static Dictionary<string, object> BuildResourceAttributes(IConfiguration configuration)

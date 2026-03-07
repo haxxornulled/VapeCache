@@ -113,16 +113,28 @@ internal sealed class RedisMultiplexerOptionsValidator : IValidateOptions<RedisM
         if (options.ScaleDownP95LatencyMsThreshold <= 0)
             AddFailure(ref failures, "RedisMultiplexer:ScaleDownP95LatencyMsThreshold must be > 0.");
 
-        if (options.BulkLaneConnections < 0 || options.BulkLaneConnections > 2)
-            AddFailure(ref failures, "RedisMultiplexer:BulkLaneConnections must be in [0,2].");
+        if (options.BulkLaneConnections < 0)
+            AddFailure(ref failures, "RedisMultiplexer:BulkLaneConnections must be >= 0.");
 
-        if (options.BulkLaneConnections > 0 && options.Connections <= 1)
+        if (options.AutoAdjustBulkLanes)
+        {
+            if (double.IsNaN(options.BulkLaneTargetRatio) || double.IsInfinity(options.BulkLaneTargetRatio))
+                AddFailure(ref failures, "RedisMultiplexer:BulkLaneTargetRatio must be a finite value.");
+            else if (options.BulkLaneTargetRatio < 0 || options.BulkLaneTargetRatio > 0.90)
+                AddFailure(ref failures, "RedisMultiplexer:BulkLaneTargetRatio must be in [0,0.90] when AutoAdjustBulkLanes is enabled.");
+        }
+
+        if (!options.AutoAdjustBulkLanes && options.BulkLaneConnections > 0 && options.Connections <= 1)
             AddFailure(ref failures, "RedisMultiplexer:BulkLaneConnections requires RedisMultiplexer:Connections > 1 for lane isolation.");
 
         if (options.BulkLaneResponseTimeout <= TimeSpan.Zero)
             AddFailure(ref failures, "RedisMultiplexer:BulkLaneResponseTimeout must be > 0.");
 
-        if (options.BulkLaneConnections > 0 &&
+        var bulkLaneIsolationEnabled = options.AutoAdjustBulkLanes
+            ? options.Connections > 1 && options.BulkLaneTargetRatio > 0
+            : options.BulkLaneConnections > 0;
+
+        if (bulkLaneIsolationEnabled &&
             options.ResponseTimeout > TimeSpan.Zero &&
             options.BulkLaneResponseTimeout < options.ResponseTimeout)
             AddFailure(ref failures, "RedisMultiplexer:BulkLaneResponseTimeout must be >= RedisMultiplexer:ResponseTimeout when bulk lanes are enabled.");

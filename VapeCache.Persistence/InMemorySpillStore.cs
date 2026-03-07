@@ -31,6 +31,7 @@ public sealed class FileSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics
         _encryption = encryption;
         _cleanupIntervalTicks = ToStopwatchTicks(_options.OrphanCleanupInterval);
         _lastCleanupTicks = 0;
+        Directory.CreateDirectory(_rootPath);
     }
 
     /// <summary>
@@ -47,27 +48,38 @@ public sealed class FileSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics
             Directory.CreateDirectory(dir);
 
         var encrypted = await _encryption.EncryptAsync(data, ct).ConfigureAwait(false);
-        var tempPath = path + ".tmp";
+        var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
 
-        await using (var stream = new FileStream(
-                         tempPath,
-                         FileMode.Create,
-                         FileAccess.Write,
-                         FileShare.None,
-                         bufferSize: 81920,
-                         options: FileOptions.Asynchronous | FileOptions.SequentialScan))
+        try
         {
-            await stream.WriteAsync(encrypted, ct).ConfigureAwait(false);
-            await stream.FlushAsync(ct).ConfigureAwait(false);
+            await using (var stream = new FileStream(
+                             tempPath,
+                             FileMode.Create,
+                             FileAccess.Write,
+                             FileShare.None,
+                             bufferSize: 81920,
+                             options: FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await stream.WriteAsync(encrypted, ct).ConfigureAwait(false);
+                await stream.FlushAsync(ct).ConfigureAwait(false);
+            }
+
+            File.Move(tempPath, path, overwrite: true);
+            if (!existedBefore)
+                IncrementShard(shardKey);
+
+            CacheTelemetry.SpillWriteCount.Add(1);
+            CacheTelemetry.SpillWriteBytes.Add(data.Length);
         }
-
-        File.Move(tempPath, path, overwrite: true);
-        if (!existedBefore)
-            IncrementShard(shardKey);
-
-        CacheTelemetry.SpillWriteCount.Add(1);
-        CacheTelemetry.SpillWriteBytes.Add(data.Length);
-        TryScheduleOrphanCleanup();
+        catch
+        {
+            TryDeleteFile(tempPath);
+            throw;
+        }
+        finally
+        {
+            TryScheduleOrphanCleanup();
+        }
     }
 
     /// <summary>
@@ -252,6 +264,19 @@ public sealed class FileSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics
         Interlocked.Exchange(ref _totalSpillFiles, total);
     }
 
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+            // Best-effort cleanup.
+        }
+    }
+
     private void IncrementShard(int shardKey)
     {
         _shardFileCounts.AddOrUpdate(shardKey, 1, static (_, current) => current + 1);
@@ -359,6 +384,25 @@ public sealed class FileSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics
                         if (shardKey >= 0)
                             DecrementShard(shardKey);
                     }
+                    deleted++;
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup.
+            }
+        }
+
+        foreach (var tempFile in Directory.EnumerateFiles(_rootPath, "*.tmp", SearchOption.AllDirectories))
+        {
+            scanned++;
+            try
+            {
+                var info = new FileInfo(tempFile);
+                if (info.LastWriteTimeUtc <= cutoffUtc)
+                {
+                    deletedBytes += info.Length;
+                    File.Delete(tempFile);
                     deleted++;
                 }
             }

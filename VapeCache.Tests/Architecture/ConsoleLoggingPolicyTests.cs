@@ -63,7 +63,8 @@ public sealed class ConsoleLoggingPolicyTests
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current is not null)
         {
-            if (File.Exists(Path.Combine(current.FullName, "VapeCache.sln")))
+            if (File.Exists(Path.Combine(current.FullName, "VapeCache.sln")) ||
+                File.Exists(Path.Combine(current.FullName, "VapeCache.slnx")))
             {
                 return current.FullName;
             }
@@ -71,6 +72,6 @@ public sealed class ConsoleLoggingPolicyTests
             current = current.Parent;
         }
 
-        throw new InvalidOperationException("Unable to locate repository root (VapeCache.sln).");
+        throw new InvalidOperationException("Unable to locate repository root (VapeCache.sln or VapeCache.slnx).");
     }
 }

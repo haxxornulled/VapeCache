@@ -116,9 +116,22 @@ public sealed record RedisMultiplexerOptions
 
     /// <summary>
     /// Number of dedicated bulk lanes used for pooled bulk responses (for example GET lease/MGET-style flows).
+    /// This count is carved out of the total <see cref="Connections"/> budget.
     /// Set to 0 to disable isolation and share fast lanes.
     /// </summary>
     public int BulkLaneConnections { get; init; } = 1;
+
+    /// <summary>
+    /// When true, bulk lane count is derived from <see cref="BulkLaneTargetRatio"/> and recomputed from the total lane budget.
+    /// When false, <see cref="BulkLaneConnections"/> is treated as the fixed target count.
+    /// </summary>
+    public bool AutoAdjustBulkLanes { get; init; } = false;
+
+    /// <summary>
+    /// Target ratio of total lanes reserved as bulk lanes when <see cref="AutoAdjustBulkLanes"/> is enabled.
+    /// Example: 0.25 keeps roughly 25% of all lanes as bulk-read-write.
+    /// </summary>
+    public double BulkLaneTargetRatio { get; init; } = 0.25;
 
     /// <summary>
     /// Response timeout applied to dedicated bulk lanes.

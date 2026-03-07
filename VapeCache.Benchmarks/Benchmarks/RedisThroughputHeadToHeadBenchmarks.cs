@@ -40,6 +40,8 @@ public class RedisThroughputHeadToHeadBenchmarks
     private static readonly int[] FullMuxConnections = [2, 4, 8, 16];
     private static readonly int[] QuickMuxConnections = [2, 4];
     private static readonly bool[] WorkerModes = [false, true];
+    private static readonly VapeReadPath[] FullReadPaths = [VapeReadPath.Lease, VapeReadPath.Materialized];
+    private static readonly VapeReadPath[] QuickReadPaths = [VapeReadPath.Lease];
 
     [ParamsSource(nameof(Operations))]
     public RedisThroughputOperation Operation { get; set; }
@@ -59,14 +61,18 @@ public class RedisThroughputHeadToHeadBenchmarks
     [ParamsSource(nameof(DedicatedLaneWorkerModes))]
     public bool UseDedicatedLaneWorkers { get; set; }
 
-    [Params(VapeReadPath.Lease, VapeReadPath.Materialized)]
+    [ParamsSource(nameof(ReadPaths))]
     public VapeReadPath ReadPath { get; set; }
 
     public IEnumerable<RedisThroughputOperation> Operations =>
         BenchmarkRedisConfig.ResolveEnumParams("VAPECACHE_BENCH_THROUGHPUT_OPERATIONS", FullOperations, QuickOperations);
 
     public IEnumerable<int> PayloadSizes =>
-        BenchmarkRedisConfig.ResolveIntParams("VAPECACHE_BENCH_THROUGHPUT_PAYLOADS", FullPayloadSizes, QuickPayloadSizes);
+        BenchmarkRedisConfig.ResolveIntParamsWithFallback(
+            "VAPECACHE_BENCH_THROUGHPUT_PAYLOADS",
+            "VAPECACHE_BENCH_PARITY_PAYLOADS",
+            FullPayloadSizes,
+            QuickPayloadSizes);
 
     public IEnumerable<int> ConcurrencyLevels =>
         BenchmarkRedisConfig.ResolveIntParams("VAPECACHE_BENCH_THROUGHPUT_CONCURRENCY", FullConcurrency, QuickConcurrency);
@@ -79,6 +85,12 @@ public class RedisThroughputHeadToHeadBenchmarks
 
     public IEnumerable<bool> DedicatedLaneWorkerModes =>
         BenchmarkRedisConfig.ResolveBoolParams("VAPECACHE_BENCH_THROUGHPUT_DEDICATED_WORKERS", WorkerModes, WorkerModes);
+
+    public IEnumerable<VapeReadPath> ReadPaths =>
+        BenchmarkRedisConfig.ResolveEnumParams(
+            "VAPECACHE_BENCH_THROUGHPUT_READ_PATHS",
+            FullReadPaths,
+            QuickReadPaths);
 
     private readonly Consumer _consumer = new();
 

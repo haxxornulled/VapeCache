@@ -10,7 +10,7 @@ namespace VapeCache.Infrastructure.Connections;
 /// Hybrid Redis command executor that automatically falls back to a configured executor
 /// when Redis is unavailable. Applies circuit breaker pattern to all Redis data structure operations.
 /// </summary>
-internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMultiplexerDiagnostics
+internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRedisMultiplexerDiagnostics
 {
     private readonly RedisCommandExecutor _redis;
     private readonly IRedisFallbackCommandExecutor _fallback;
@@ -137,8 +137,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             {
                 attempt++;
                 var delay = TimeSpan.FromMilliseconds(Math.Pow(2, attempt) * 10); // 20ms, 40ms, 80ms
-                _logger.LogWarning(ex, "Transient error in {Operation}, retrying ({Attempt}/{MaxRetries}) after {Delay}ms",
-                    operationName, attempt, maxRetries, delay.TotalMilliseconds);
+                LogTransientRetry(_logger, ex, operationName, attempt, maxRetries, delay.TotalMilliseconds);
                 await Task.Delay(delay, ct).ConfigureAwait(false);
             }
         }
@@ -258,7 +257,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         _breakerController.MarkRedisFailure();
         _stats.IncFallbackToMemory();
         _current.SetCurrent(_fallback.Name);
-        _logger.LogWarning(error, "Redis {Op} failed; falling back to fallback", op);
+        LogRedisOperationFallback(_logger, error, op);
 
         await foreach (var item in fallback().WithCancellation(ct).ConfigureAwait(false))
             yield return item;
@@ -302,7 +301,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis GET failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "GET", key);
             return await _fallback.GetAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -343,7 +342,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis GETEX failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "GETEX", key);
             return await _fallback.GetExAsync(key, ttl, ct).ConfigureAwait(false);
         }
     }
@@ -384,7 +383,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis MGET failed; falling back to fallback");
+            LogRedisOperationFallback(_logger, ex, "MGET");
             return await _fallback.MGetAsync(keys, ct).ConfigureAwait(false);
         }
     }
@@ -425,7 +424,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis SET failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "SET", key);
             return await _fallback.SetAsync(key, value, ttl, ct).ConfigureAwait(false);
         }
     }
@@ -466,7 +465,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis MSET failed; falling back to fallback");
+            LogRedisOperationFallback(_logger, ex, "MSET");
             return await _fallback.MSetAsync(items, ct).ConfigureAwait(false);
         }
     }
@@ -507,7 +506,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis DEL failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "DEL", key);
             return await _fallback.DeleteAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -544,7 +543,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis TTL failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "TTL", key);
             return await _fallback.TtlSecondsAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -573,7 +572,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis PTTL failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "PTTL", key);
             return await _fallback.PTtlMillisecondsAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -602,7 +601,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis UNLINK failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "UNLINK", key);
             return await _fallback.UnlinkAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -633,7 +632,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis GET (lease) failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "GET (lease)", key);
             return await _fallback.GetLeaseAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -687,7 +686,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis GETEX (lease) failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "GETEX (lease)", key);
             return await _fallback.GetExLeaseAsync(key, ttl, ct).ConfigureAwait(false);
         }
     }
@@ -718,7 +717,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis HSET failed for key {Key} field {Field}; falling back to fallback", key, field);
+            LogRedisKeyFieldFallback(_logger, ex, "HSET", key, field);
             return await _fallback.HSetAsync(key, field, value, ct).ConfigureAwait(false);
         }
     }
@@ -747,7 +746,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis HGET failed for key {Key} field {Field}; falling back to fallback", key, field);
+            LogRedisKeyFieldFallback(_logger, ex, "HGET", key, field);
             return await _fallback.HGetAsync(key, field, ct).ConfigureAwait(false);
         }
     }
@@ -776,7 +775,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis HMGET failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "HMGET", key);
             return await _fallback.HMGetAsync(key, fields, ct).ConfigureAwait(false);
         }
     }
@@ -805,7 +804,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis HGET (lease) failed for key {Key} field {Field}; falling back to fallback", key, field);
+            LogRedisKeyFieldFallback(_logger, ex, "HGET (lease)", key, field);
             return await _fallback.HGetLeaseAsync(key, field, ct).ConfigureAwait(false);
         }
     }
@@ -821,7 +820,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         {
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogDebug("Circuit breaker open. Using fallback for LPUSH on key {Key}", key);
+            LogBreakerOpenUsingFallback(_logger, "LPUSH", key);
             return await _fallback.LPushAsync(key, value, ct).ConfigureAwait(false);
         }
 
@@ -837,7 +836,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis LPUSH failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "LPUSH", key);
             return await _fallback.LPushAsync(key, value, ct).ConfigureAwait(false);
         }
     }
@@ -866,7 +865,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis RPUSH failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "RPUSH", key);
             return await _fallback.RPushAsync(key, value, ct).ConfigureAwait(false);
         }
     }
@@ -895,7 +894,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis RPUSH (many) failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "RPUSH (many)", key);
             return await _fallback.RPushManyAsync(key, values, count, ct).ConfigureAwait(false);
         }
     }
@@ -924,7 +923,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis LPOP failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "LPOP", key);
             return await _fallback.LPopAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -1103,7 +1102,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis RPOP failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "RPOP", key);
             return await _fallback.RPopAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -1157,7 +1156,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis LRANGE failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "LRANGE", key);
             return await _fallback.LRangeAsync(key, start, stop, ct).ConfigureAwait(false);
         }
     }
@@ -1186,7 +1185,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis LLEN failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "LLEN", key);
             return await _fallback.LLenAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -1215,7 +1214,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis LPOP (lease) failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "LPOP (lease)", key);
             return await _fallback.LPopLeaseAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -1269,7 +1268,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis RPOP (lease) failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "RPOP (lease)", key);
             return await _fallback.RPopLeaseAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -1325,7 +1324,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis SADD failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "SADD", key);
             return await _fallback.SAddAsync(key, member, ct).ConfigureAwait(false);
         }
     }
@@ -1354,7 +1353,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis SREM failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "SREM", key);
             return await _fallback.SRemAsync(key, member, ct).ConfigureAwait(false);
         }
     }
@@ -1383,7 +1382,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis SISMEMBER failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "SISMEMBER", key);
             return await _fallback.SIsMemberAsync(key, member, ct).ConfigureAwait(false);
         }
     }
@@ -1437,7 +1436,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis SMEMBERS failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "SMEMBERS", key);
             return await _fallback.SMembersAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -1466,7 +1465,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis SCARD failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "SCARD", key);
             return await _fallback.SCardAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -1497,7 +1496,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis ZADD failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "ZADD", key);
             return await _fallback.ZAddAsync(key, score, member, ct).ConfigureAwait(false);
         }
     }
@@ -1526,7 +1525,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis ZREM failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "ZREM", key);
             return await _fallback.ZRemAsync(key, member, ct).ConfigureAwait(false);
         }
     }
@@ -1555,7 +1554,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis ZCARD failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "ZCARD", key);
             return await _fallback.ZCardAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -1584,7 +1583,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis ZSCORE failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "ZSCORE", key);
             return await _fallback.ZScoreAsync(key, member, ct).ConfigureAwait(false);
         }
     }
@@ -1613,7 +1612,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis ZRANK failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "ZRANK", key);
             return await _fallback.ZRankAsync(key, member, descending, ct).ConfigureAwait(false);
         }
     }
@@ -1642,7 +1641,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis ZINCRBY failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "ZINCRBY", key);
             return await _fallback.ZIncrByAsync(key, increment, member, ct).ConfigureAwait(false);
         }
     }
@@ -1668,7 +1667,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis ZRANGE failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "ZRANGE", key);
             return await _fallback.ZRangeWithScoresAsync(key, start, stop, descending, ct).ConfigureAwait(false);
         }
     }
@@ -1701,7 +1700,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis ZRANGEBYSCORE failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "ZRANGEBYSCORE", key);
             return await _fallback.ZRangeByScoreWithScoresAsync(key, min, max, descending, offset, count, ct).ConfigureAwait(false);
         }
     }
@@ -1732,7 +1731,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis JSON.GET failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "JSON.GET", key);
             return await _fallback.JsonGetAsync(key, path, ct).ConfigureAwait(false);
         }
     }
@@ -1761,7 +1760,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis JSON.GET (lease) failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "JSON.GET (lease)", key);
             return await _fallback.JsonGetLeaseAsync(key, path, ct).ConfigureAwait(false);
         }
     }
@@ -1815,7 +1814,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis JSON.SET failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "JSON.SET", key);
             return await _fallback.JsonSetAsync(key, path, json, ct).ConfigureAwait(false);
         }
     }
@@ -1846,7 +1845,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis JSON.SET (lease) failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "JSON.SET (lease)", key);
             return await _fallback.JsonSetLeaseAsync(key, path, json, ct).ConfigureAwait(false);
         }
     }
@@ -1875,7 +1874,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis JSON.DEL failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "JSON.DEL", key);
             return await _fallback.JsonDelAsync(key, path, ct).ConfigureAwait(false);
         }
     }
@@ -1905,7 +1904,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         {
             _breakerController.MarkRedisSuccess();
             _current.SetCurrent("redis");
-            _logger.LogDebug("Redis FT.CREATE index {Index} already exists; treating as ready.", index);
+            LogSearchIndexAlreadyExists(_logger, index);
             return false;
         }
         catch (Exception ex)
@@ -1913,7 +1912,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis FT.CREATE failed for index {Index}; falling back to fallback", index);
+            LogRedisIndexFallback(_logger, ex, "FT.CREATE", index);
             return await _fallback.FtCreateAsync(index, prefix, fields, ct).ConfigureAwait(false);
         }
     }
@@ -1942,7 +1941,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis FT.SEARCH failed for index {Index}; falling back to fallback", index);
+            LogRedisIndexFallback(_logger, ex, "FT.SEARCH", index);
             return await _fallback.FtSearchAsync(index, query, offset, count, ct).ConfigureAwait(false);
         }
     }
@@ -1971,7 +1970,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis BF.ADD failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "BF.ADD", key);
             return await _fallback.BfAddAsync(key, item, ct).ConfigureAwait(false);
         }
     }
@@ -2000,7 +1999,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis BF.EXISTS failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "BF.EXISTS", key);
             return await _fallback.BfExistsAsync(key, item, ct).ConfigureAwait(false);
         }
     }
@@ -2029,7 +2028,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis TS.CREATE failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "TS.CREATE", key);
             return await _fallback.TsCreateAsync(key, ct).ConfigureAwait(false);
         }
     }
@@ -2058,7 +2057,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis TS.ADD failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "TS.ADD", key);
             return await _fallback.TsAddAsync(key, timestamp, value, ct).ConfigureAwait(false);
         }
     }
@@ -2084,7 +2083,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis TS.RANGE failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "TS.RANGE", key);
             return await _fallback.TsRangeAsync(key, from, to, ct).ConfigureAwait(false);
         }
     }
@@ -2135,7 +2134,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis PING failed; falling back to fallback");
+            LogRedisOperationFallback(_logger, ex, "PING");
             return await _fallback.PingAsync(ct).ConfigureAwait(false);
         }
     }
@@ -2148,7 +2147,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         try
         {
             if (_breaker.Enabled && _breakerState.IsOpen)
-                _logger.LogDebug("Circuit breaker open. Executing {Command} directly against Redis for capability discovery", "MODULE LIST");
+                LogBreakerOpenCapabilityDiscovery(_logger, "MODULE LIST");
 
             return await _redis.ModuleListAsync(ct).ConfigureAwait(false);
         }
@@ -2158,7 +2157,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Redis MODULE LIST failed; fallback backend does not provide Redis module metadata");
+            LogRedisCapabilityDiscoveryFailed(_logger, ex, "MODULE LIST");
             throw;
         }
     }
@@ -2172,7 +2171,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         {
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogDebug("Circuit breaker open. Executing {Command} against fallback backend", "EXPIRE");
+            LogBreakerOpenExecutingFallback(_logger, "EXPIRE");
             return await _fallback.ExpireAsync(key, ttl, ct).ConfigureAwait(false);
         }
 
@@ -2188,7 +2187,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis EXPIRE failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "EXPIRE", key);
             return await _fallback.ExpireAsync(key, ttl, ct).ConfigureAwait(false);
         }
     }
@@ -2202,7 +2201,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         {
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogDebug("Circuit breaker open. Executing {Command} against fallback backend", "LINDEX");
+            LogBreakerOpenExecutingFallback(_logger, "LINDEX");
             return await _fallback.LIndexAsync(key, index, ct).ConfigureAwait(false);
         }
 
@@ -2218,7 +2217,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis LINDEX failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "LINDEX", key);
             return await _fallback.LIndexAsync(key, index, ct).ConfigureAwait(false);
         }
     }
@@ -2232,7 +2231,7 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
         {
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogDebug("Circuit breaker open. Executing {Command} against fallback backend", "GETRANGE");
+            LogBreakerOpenExecutingFallback(_logger, "GETRANGE");
             return await _fallback.GetRangeAsync(key, start, end, ct).ConfigureAwait(false);
         }
 
@@ -2248,10 +2247,76 @@ internal sealed class HybridCommandExecutor : IRedisCommandExecutor, IRedisMulti
             _breakerController.MarkRedisFailure();
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
-            _logger.LogWarning(ex, "Redis GETRANGE failed for key {Key}; falling back to fallback", key);
+            LogRedisKeyFallback(_logger, ex, "GETRANGE", key);
             return await _fallback.GetRangeAsync(key, start, end, ct).ConfigureAwait(false);
         }
     }
+
+    [LoggerMessage(
+        EventId = 5301,
+        Level = LogLevel.Warning,
+        Message = "Transient error in {Operation}, retrying ({Attempt}/{MaxRetries}) after {DelayMs}ms")]
+    private static partial void LogTransientRetry(
+        ILogger logger,
+        Exception exception,
+        string operation,
+        int attempt,
+        int maxRetries,
+        double delayMs);
+
+    [LoggerMessage(
+        EventId = 5302,
+        Level = LogLevel.Warning,
+        Message = "Redis {Operation} failed; falling back to fallback")]
+    private static partial void LogRedisOperationFallback(ILogger logger, Exception exception, string operation);
+
+    [LoggerMessage(
+        EventId = 5303,
+        Level = LogLevel.Warning,
+        Message = "Redis {Operation} failed for key {Key}; falling back to fallback")]
+    private static partial void LogRedisKeyFallback(ILogger logger, Exception exception, string operation, string key);
+
+    [LoggerMessage(
+        EventId = 5304,
+        Level = LogLevel.Warning,
+        Message = "Redis {Operation} failed for key {Key} field {Field}; falling back to fallback")]
+    private static partial void LogRedisKeyFieldFallback(ILogger logger, Exception exception, string operation, string key, string field);
+
+    [LoggerMessage(
+        EventId = 5305,
+        Level = LogLevel.Warning,
+        Message = "Redis {Operation} failed for index {Index}; falling back to fallback")]
+    private static partial void LogRedisIndexFallback(ILogger logger, Exception exception, string operation, string index);
+
+    [LoggerMessage(
+        EventId = 5306,
+        Level = LogLevel.Debug,
+        Message = "Circuit breaker open. Using fallback for {Operation} on key {Key}")]
+    private static partial void LogBreakerOpenUsingFallback(ILogger logger, string operation, string key);
+
+    [LoggerMessage(
+        EventId = 5307,
+        Level = LogLevel.Debug,
+        Message = "Redis FT.CREATE index {Index} already exists; treating as ready.")]
+    private static partial void LogSearchIndexAlreadyExists(ILogger logger, string index);
+
+    [LoggerMessage(
+        EventId = 5308,
+        Level = LogLevel.Warning,
+        Message = "Redis {Operation} failed; fallback backend does not provide Redis module metadata")]
+    private static partial void LogRedisCapabilityDiscoveryFailed(ILogger logger, Exception exception, string operation);
+
+    [LoggerMessage(
+        EventId = 5309,
+        Level = LogLevel.Debug,
+        Message = "Circuit breaker open. Executing {Command} directly against Redis for capability discovery")]
+    private static partial void LogBreakerOpenCapabilityDiscovery(ILogger logger, string command);
+
+    [LoggerMessage(
+        EventId = 5310,
+        Level = LogLevel.Debug,
+        Message = "Circuit breaker open. Executing {Command} against fallback backend")]
+    private static partial void LogBreakerOpenExecutingFallback(ILogger logger, string command);
 
     /// <summary>
     /// Asynchronously releases resources used by the current instance.

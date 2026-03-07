@@ -6,6 +6,7 @@ namespace VapeCache.Infrastructure.Connections;
 
 public static class RedisTelemetry
 {
+    private const int UnknownConnectionId = -1;
     public static readonly Meter Meter = new("VapeCache.Redis");
 
     public static readonly Counter<long> ConnectAttempts = Meter.CreateCounter<long>("redis.connect.attempts");
@@ -104,6 +105,27 @@ public static class RedisTelemetry
         unit: "ratio",
         description: "Current in-flight utilization (0..1) on each mux lane");
 
+    internal static void EnsureInitialized()
+    {
+        _ = QueueDepth;
+        _ = MuxLaneBytesSent;
+        _ = MuxLaneBytesReceived;
+        _ = MuxLaneOperations;
+        _ = MuxLaneResponses;
+        _ = MuxLaneFailures;
+        _ = MuxLaneOrphanedResponses;
+        _ = MuxLaneResponseSequenceMismatches;
+        _ = MuxLaneTransportResets;
+        _ = MuxLaneInFlight;
+        _ = MuxLaneInFlightUtilization;
+    }
+
+    internal static void ResetForTesting()
+    {
+        QueueDepthProviders.Clear();
+        MuxLaneUsageProviders.Clear();
+    }
+
     internal static void RegisterQueueDepthProvider(int connectionId, Func<QueueDepthSnapshot> provider)
     {
         QueueDepthProviders[connectionId] = provider;
@@ -126,6 +148,17 @@ public static class RedisTelemetry
 
     private static IEnumerable<Measurement<int>> ObserveQueueDepth()
     {
+        if (QueueDepthProviders.IsEmpty)
+        {
+            yield return new Measurement<int>(
+                0,
+                new TagList { { "queue", "writes" }, { "connection.id", UnknownConnectionId }, { "capacity", 0 } });
+            yield return new Measurement<int>(
+                0,
+                new TagList { { "queue", "pending" }, { "connection.id", UnknownConnectionId }, { "capacity", 0 } });
+            yield break;
+        }
+
         foreach (var entry in QueueDepthProviders)
         {
             QueueDepthSnapshot snapshot;
@@ -149,6 +182,14 @@ public static class RedisTelemetry
 
     private static IEnumerable<Measurement<long>> ObserveMuxLaneBytesSent()
     {
+        if (MuxLaneUsageProviders.IsEmpty)
+        {
+            yield return new Measurement<long>(
+                0,
+                new TagList { { "connection.id", UnknownConnectionId } });
+            yield break;
+        }
+
         foreach (var entry in MuxLaneUsageProviders)
         {
             MuxLaneUsageSnapshot snapshot;
@@ -168,6 +209,14 @@ public static class RedisTelemetry
 
     private static IEnumerable<Measurement<long>> ObserveMuxLaneBytesReceived()
     {
+        if (MuxLaneUsageProviders.IsEmpty)
+        {
+            yield return new Measurement<long>(
+                0,
+                new TagList { { "connection.id", UnknownConnectionId } });
+            yield break;
+        }
+
         foreach (var entry in MuxLaneUsageProviders)
         {
             MuxLaneUsageSnapshot snapshot;
@@ -187,6 +236,14 @@ public static class RedisTelemetry
 
     private static IEnumerable<Measurement<long>> ObserveMuxLaneOperations()
     {
+        if (MuxLaneUsageProviders.IsEmpty)
+        {
+            yield return new Measurement<long>(
+                0,
+                new TagList { { "connection.id", UnknownConnectionId } });
+            yield break;
+        }
+
         foreach (var entry in MuxLaneUsageProviders)
         {
             MuxLaneUsageSnapshot snapshot;
@@ -206,6 +263,14 @@ public static class RedisTelemetry
 
     private static IEnumerable<Measurement<long>> ObserveMuxLaneFailures()
     {
+        if (MuxLaneUsageProviders.IsEmpty)
+        {
+            yield return new Measurement<long>(
+                0,
+                new TagList { { "connection.id", UnknownConnectionId } });
+            yield break;
+        }
+
         foreach (var entry in MuxLaneUsageProviders)
         {
             MuxLaneUsageSnapshot snapshot;
@@ -225,6 +290,14 @@ public static class RedisTelemetry
 
     private static IEnumerable<Measurement<long>> ObserveMuxLaneResponses()
     {
+        if (MuxLaneUsageProviders.IsEmpty)
+        {
+            yield return new Measurement<long>(
+                0,
+                new TagList { { "connection.id", UnknownConnectionId } });
+            yield break;
+        }
+
         foreach (var entry in MuxLaneUsageProviders)
         {
             MuxLaneUsageSnapshot snapshot;
@@ -244,6 +317,14 @@ public static class RedisTelemetry
 
     private static IEnumerable<Measurement<long>> ObserveMuxLaneOrphanedResponses()
     {
+        if (MuxLaneUsageProviders.IsEmpty)
+        {
+            yield return new Measurement<long>(
+                0,
+                new TagList { { "connection.id", UnknownConnectionId } });
+            yield break;
+        }
+
         foreach (var entry in MuxLaneUsageProviders)
         {
             MuxLaneUsageSnapshot snapshot;
@@ -263,6 +344,14 @@ public static class RedisTelemetry
 
     private static IEnumerable<Measurement<long>> ObserveMuxLaneResponseSequenceMismatches()
     {
+        if (MuxLaneUsageProviders.IsEmpty)
+        {
+            yield return new Measurement<long>(
+                0,
+                new TagList { { "connection.id", UnknownConnectionId } });
+            yield break;
+        }
+
         foreach (var entry in MuxLaneUsageProviders)
         {
             MuxLaneUsageSnapshot snapshot;
@@ -282,6 +371,14 @@ public static class RedisTelemetry
 
     private static IEnumerable<Measurement<long>> ObserveMuxLaneTransportResets()
     {
+        if (MuxLaneUsageProviders.IsEmpty)
+        {
+            yield return new Measurement<long>(
+                0,
+                new TagList { { "connection.id", UnknownConnectionId } });
+            yield break;
+        }
+
         foreach (var entry in MuxLaneUsageProviders)
         {
             MuxLaneUsageSnapshot snapshot;
@@ -301,6 +398,14 @@ public static class RedisTelemetry
 
     private static IEnumerable<Measurement<int>> ObserveMuxLaneInFlight()
     {
+        if (MuxLaneUsageProviders.IsEmpty)
+        {
+            yield return new Measurement<int>(
+                0,
+                new TagList { { "connection.id", UnknownConnectionId }, { "max_inflight", 0 } });
+            yield break;
+        }
+
         foreach (var entry in MuxLaneUsageProviders)
         {
             MuxLaneUsageSnapshot snapshot;
@@ -320,6 +425,14 @@ public static class RedisTelemetry
 
     private static IEnumerable<Measurement<double>> ObserveMuxLaneInFlightUtilization()
     {
+        if (MuxLaneUsageProviders.IsEmpty)
+        {
+            yield return new Measurement<double>(
+                0d,
+                new TagList { { "connection.id", UnknownConnectionId } });
+            yield break;
+        }
+
         foreach (var entry in MuxLaneUsageProviders)
         {
             MuxLaneUsageSnapshot snapshot;

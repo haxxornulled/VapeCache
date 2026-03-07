@@ -14,7 +14,16 @@ internal static class BenchmarkRedisConfig
 
     public static int[] ResolveIntParams(string key, IReadOnlyList<int> fullDefaults, IReadOnlyList<int> quickDefaults)
     {
-        var parsed = ParseCsv(Environment.GetEnvironmentVariable(key))
+        return ResolveIntParamsWithFallback(key, fallbackKey: null, fullDefaults, quickDefaults);
+    }
+
+    public static int[] ResolveIntParamsWithFallback(
+        string key,
+        string? fallbackKey,
+        IReadOnlyList<int> fullDefaults,
+        IReadOnlyList<int> quickDefaults)
+    {
+        var parsed = ParseCsv(ReadWithFallback(key, fallbackKey))
             .Select(token => int.TryParse(token, out var value) ? value : (int?)null)
             .Where(value => value.HasValue && value.Value > 0)
             .Select(value => value!.Value)
@@ -211,6 +220,18 @@ internal static class BenchmarkRedisConfig
             if (!string.IsNullOrWhiteSpace(token))
                 yield return token;
         }
+    }
+
+    private static string? ReadWithFallback(string key, string? fallbackKey)
+    {
+        var value = Environment.GetEnvironmentVariable(key);
+        if (!string.IsNullOrWhiteSpace(value))
+            return value;
+
+        if (!string.IsNullOrWhiteSpace(fallbackKey))
+            return Environment.GetEnvironmentVariable(fallbackKey);
+
+        return null;
     }
 
     private sealed class SimpleOptionsMonitor : IOptionsMonitor<RedisConnectionOptions>

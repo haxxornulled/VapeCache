@@ -404,6 +404,45 @@ public sealed class RedisCommandExecutorScriptedTests
         Assert.False(created);
     }
 
+    [Fact]
+    public async Task ZScoreAsync_parses_special_double_tokens()
+    {
+        var stream = new ScriptedResponseStream();
+        await using var factory = new ReconnectingConnectionFactory(stream);
+        await using var sut = CreateExecutor(factory);
+
+        stream.Enqueue("$4\r\n+inf\r\n");
+        var positiveInfinity = await sut.ZScoreAsync("z1", "m1"u8.ToArray(), default);
+        Assert.Equal(double.PositiveInfinity, positiveInfinity);
+
+        stream.Enqueue("$4\r\n-inf\r\n");
+        var negativeInfinity = await sut.ZScoreAsync("z1", "m1"u8.ToArray(), default);
+        Assert.Equal(double.NegativeInfinity, negativeInfinity);
+
+        stream.Enqueue("$3\r\nNaN\r\n");
+        var nan = await sut.ZScoreAsync("z1", "m1"u8.ToArray(), default);
+        Assert.NotNull(nan);
+        Assert.True(double.IsNaN(nan.Value));
+    }
+
+    [Fact]
+    public async Task ScanAsync_parses_bulk_cursor_and_yields_keys()
+    {
+        var stream = new ScriptedResponseStream();
+        await using var factory = new ReconnectingConnectionFactory(stream);
+        await using var sut = CreateExecutor(factory);
+
+        stream.Enqueue("*2\r\n$1\r\n0\r\n*2\r\n$4\r\nkey1\r\n$4\r\nkey2\r\n");
+
+        var keys = new List<string>();
+        await foreach (var key in sut.ScanAsync(pattern: null, pageSize: 16, default))
+        {
+            keys.Add(key);
+        }
+
+        Assert.Equal(["key1", "key2"], keys);
+    }
+
     private static RedisCommandExecutor CreateExecutor(
         IRedisConnectionFactory factory,
         RedisMultiplexerOptions? options = null)

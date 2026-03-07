@@ -221,6 +221,30 @@ public sealed class FileSpillStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task WriteAsync_CleansUpTempFiles_WhenCanceled()
+    {
+        // Arrange
+        var options = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions
+        {
+            SpillDirectory = _testRoot,
+            EnableOrphanCleanup = false
+        });
+        var store = new FileSpillStore(options, new NoopSpillEncryptionProvider());
+
+        var spillRef = Guid.NewGuid();
+        using var canceledCts = new CancellationTokenSource();
+        canceledCts.Cancel();
+
+        // Act
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await store.WriteAsync(spillRef, new byte[32 * 1024], canceledCts.Token));
+
+        // Assert
+        var tmpFiles = Directory.GetFiles(_testRoot, "*.tmp", SearchOption.AllDirectories);
+        Assert.Empty(tmpFiles);
+    }
+
+    [Fact]
     public async Task WriteAsync_OverwritesExisting_OnSubsequentWrite()
     {
         // Arrange

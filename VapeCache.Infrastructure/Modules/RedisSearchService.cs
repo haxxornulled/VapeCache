@@ -5,7 +5,7 @@ using VapeCache.Abstractions.Modules;
 
 namespace VapeCache.Infrastructure.Modules;
 
-internal sealed class RedisSearchService : IRedisSearchService
+internal sealed partial class RedisSearchService : IRedisSearchService
 {
     private readonly IRedisCommandExecutor _redis;
     private readonly IRedisModuleDetector _modules;
@@ -55,7 +55,7 @@ internal sealed class RedisSearchService : IRedisSearchService
     {
         if (!await IsAvailableAsync(ct).ConfigureAwait(false))
         {
-            _logger.LogWarning("RediSearch module not available; FT.CREATE for {Index} ignored.", index);
+            LogRedisSearchUnavailable(_logger, index);
             return false;
         }
 
@@ -72,4 +72,10 @@ internal sealed class RedisSearchService : IRedisSearchService
 
         return await _redis.FtSearchAsync(index, query, offset, count, ct).ConfigureAwait(false);
     }
+
+    [LoggerMessage(
+        EventId = 7301,
+        Level = LogLevel.Warning,
+        Message = "RediSearch module not available; FT.CREATE for {Index} ignored.")]
+    private static partial void LogRedisSearchUnavailable(ILogger logger, string index);
 }

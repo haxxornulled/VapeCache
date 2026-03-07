@@ -21,6 +21,9 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
     private readonly IHostApplicationLifetime _hostLifetime;
     private readonly GroceryStoreService _store;
     private readonly ICacheStats _stats;
+    private readonly ICurrentCacheService _currentCache;
+    private readonly IRedisCircuitBreakerState _breakerState;
+    private readonly IRedisFailoverController _failoverController;
     private readonly IRedisModuleDetector _moduleDetector;
     private readonly IOptionsMonitor<GroceryStoreStressOptions> _optionsMonitor;
     private readonly ILogger<GroceryStoreStressTest> _logger;
@@ -31,6 +34,9 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         IHostApplicationLifetime hostLifetime,
         GroceryStoreService store,
         ICacheStats stats,
+        ICurrentCacheService currentCache,
+        IRedisCircuitBreakerState breakerState,
+        IRedisFailoverController failoverController,
         IRedisModuleDetector moduleDetector,
         IOptionsMonitor<GroceryStoreStressOptions> optionsMonitor,
         ILogger<GroceryStoreStressTest> logger)
@@ -38,6 +44,9 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         _hostLifetime = hostLifetime;
         _store = store;
         _stats = stats;
+        _currentCache = currentCache;
+        _breakerState = breakerState;
+        _failoverController = failoverController;
         _moduleDetector = moduleDetector;
         _optionsMonitor = optionsMonitor;
         _logger = logger;
@@ -358,10 +367,25 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
             var elapsed = sw.Elapsed.TotalSeconds;
             var snapshot = _stats.Snapshot;
             var hitRate = snapshot.GetCalls > 0 ? (snapshot.Hits * 100.0 / snapshot.GetCalls) : 0;
+            var backend = _currentCache.CurrentName;
+            var breakerOpen = _breakerState.IsOpen;
+            var forcedOpen = _failoverController.IsForcedOpen;
+            var breakerFailures = _breakerState.ConsecutiveFailures;
+            var breakerReason = _failoverController.Reason ?? "n/a";
 
             _logger.LogInformation(
-                "[{Elapsed:F0}s] Cache Stats - Gets: {Gets} | Sets: {Sets} | Hits: {Hits} ({HitRate:F1}%) | Misses: {Misses}",
-                elapsed, snapshot.GetCalls, snapshot.SetCalls, snapshot.Hits, hitRate, snapshot.Misses);
+                "[{Elapsed:F0}s] Cache Stats - Backend: {Backend} | Breaker: {BreakerState} | Forced: {Forced} | Fails: {Failures} | Reason: {Reason} | Gets: {Gets} | Sets: {Sets} | Hits: {Hits} ({HitRate:F1}%) | Misses: {Misses}",
+                elapsed,
+                backend,
+                breakerOpen ? "open" : "closed",
+                forcedOpen,
+                breakerFailures,
+                breakerReason,
+                snapshot.GetCalls,
+                snapshot.SetCalls,
+                snapshot.Hits,
+                hitRate,
+                snapshot.Misses);
         }
     }
 
@@ -398,6 +422,12 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         _logger.LogInformation("  Total Removes: {Removes}", finalSnapshot.RemoveCalls);
         _logger.LogInformation("  Fallback Events: {Fallback}", finalSnapshot.FallbackToMemory);
         _logger.LogInformation("  Circuit Breaker Opens: {Opens}", finalSnapshot.RedisBreakerOpened);
+        _logger.LogInformation("  Current Backend: {Backend}", _currentCache.CurrentName);
+        _logger.LogInformation("  Breaker Open: {Open}", _breakerState.IsOpen);
+        _logger.LogInformation("  Breaker Consecutive Failures: {Failures}", _breakerState.ConsecutiveFailures);
+        _logger.LogInformation("  Breaker Open Remaining: {Remaining}", _breakerState.OpenRemaining);
+        _logger.LogInformation("  Breaker Forced Open: {Forced}", _failoverController.IsForcedOpen);
+        _logger.LogInformation("  Breaker Reason: {Reason}", _failoverController.Reason ?? "n/a");
     }
 
     private static async Task AwaitStatsTaskAsync(Task statsTask)

@@ -10,6 +10,25 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $repoRoot
 
+function Resolve-SolutionPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RequestedPath
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath) -and (Test-Path $RequestedPath)) {
+        return $RequestedPath
+    }
+
+    foreach ($candidate in @("VapeCache.slnx", "VapeCache.sln")) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    throw "Could not find a solution file. Checked '$RequestedPath', 'VapeCache.slnx', and 'VapeCache.sln'."
+}
+
 function Invoke-VulnerabilityAudit {
     param(
         [Parameter(Mandatory = $true)]
@@ -85,7 +104,8 @@ if ($Projects.Count -gt 0)
 }
 else
 {
-    foreach ($project in (Get-SolutionProjects -SolutionPath $Solution)) {
+    $resolvedSolution = Resolve-SolutionPath -RequestedPath $Solution
+    foreach ($project in (Get-SolutionProjects -SolutionPath $resolvedSolution)) {
         if (Test-ProjectHasPackageReferences -ProjectPath $project) {
             $targets.Add($project) | Out-Null
         }

@@ -166,12 +166,31 @@ public static class AspireTelemetryExtensions
         if (!Uri.TryCreate(endpointText, UriKind.Absolute, out var endpointUri))
             throw new ArgumentException($"Invalid OpenTelemetry OTLP endpoint: {endpointText}", nameof(options));
 
-        var protocol = options.OtlpProtocol ?? InferProtocol(endpointUri);
+        var protocol = ResolveProtocol(configuration, options, endpointUri);
         var metricsEndpoint = ResolveSignalEndpoint(endpointUri, protocol, signal: "metrics");
         var tracesEndpoint = ResolveSignalEndpoint(endpointUri, protocol, signal: "traces");
         var headers = ResolveOtlpHeaders(configuration, options);
 
         return new ExporterConfiguration(protocol, metricsEndpoint, tracesEndpoint, headers);
+    }
+
+    private static OtlpExportProtocol ResolveProtocol(
+        IConfiguration configuration,
+        VapeCacheTelemetryOptions options,
+        Uri endpoint)
+    {
+        if (options.OtlpProtocol is not null)
+            return options.OtlpProtocol.Value;
+
+        var configured = configuration["OpenTelemetry:Otlp:Protocol"];
+        if (TryParseOtlpProtocol(configured, out var protocol))
+            return protocol;
+
+        configured = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_PROTOCOL");
+        if (TryParseOtlpProtocol(configured, out protocol))
+            return protocol;
+
+        return InferProtocol(endpoint);
     }
 
     private static string? ResolveOtlpHeaders(IConfiguration configuration, VapeCacheTelemetryOptions options)
@@ -225,6 +244,28 @@ public static class AspireTelemetryExtensions
             return OtlpExportProtocol.HttpProtobuf;
 
         return OtlpExportProtocol.Grpc;
+    }
+
+    private static bool TryParseOtlpProtocol(string? configured, out OtlpExportProtocol protocol)
+    {
+        protocol = default;
+        if (string.IsNullOrWhiteSpace(configured))
+            return false;
+
+        var normalized = configured.Trim().ToLowerInvariant();
+        if (normalized is "http/protobuf" or "http-protobuf" or "httpprotobuf")
+        {
+            protocol = OtlpExportProtocol.HttpProtobuf;
+            return true;
+        }
+
+        if (normalized is "grpc")
+        {
+            protocol = OtlpExportProtocol.Grpc;
+            return true;
+        }
+
+        return Enum.TryParse(configured, ignoreCase: true, out protocol);
     }
 
     private static Uri ResolveSignalEndpoint(Uri endpoint, OtlpExportProtocol protocol, string signal)

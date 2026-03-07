@@ -60,7 +60,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
         });
 
         var lanes = harness.Executor.GetMuxLaneSnapshots();
-        Assert.Equal(3, lanes.Count);
+        Assert.Equal(2, lanes.Count);
         Assert.Contains(lanes, lane => lane.Role == "bulk-read-write");
         Assert.Contains(lanes, lane => lane.Role == "read-write");
 
@@ -77,6 +77,58 @@ public sealed class RedisCommandExecutorAutoscalerTests
         var snapshot = harness.Executor.GetAutoscalerSnapshot();
         Assert.Equal(2, snapshot.CurrentConnections);
         Assert.True(snapshot.TimeoutRatePerSec < 0.1, $"Expected fast-lane timeout rate near zero, got {snapshot.TimeoutRatePerSec:F3}/s.");
+    }
+
+    [Fact]
+    public void FixedBulkLaneCount_SupportsEnterpriseLaneMixBeyondTwo()
+    {
+        using var harness = CreateHarness(new RedisMultiplexerOptions
+        {
+            Connections = 64,
+            BulkLaneConnections = 16,
+            AutoAdjustBulkLanes = false,
+            EnableAutoscaling = false
+        });
+
+        Assert.Equal(16, GetConnectionArray(harness.Executor, "_bulkConns").Length);
+        var lanes = harness.Executor.GetMuxLaneSnapshots();
+
+        var bulkLaneSnapshots = 0;
+        for (var i = 0; i < lanes.Count; i++)
+        {
+            if (string.Equals(lanes[i].Role, "bulk-read-write", StringComparison.Ordinal))
+                bulkLaneSnapshots++;
+        }
+
+        Assert.Equal(16, bulkLaneSnapshots);
+        Assert.Equal(64, lanes.Count);
+    }
+
+    [Fact]
+    public async Task AutoAdjustBulkLanes_ReconcilesBulkCount_WhenTotalLaneBudgetScales()
+    {
+        using var harness = CreateHarness(new RedisMultiplexerOptions
+        {
+            Connections = 8,
+            BulkLaneConnections = 0,
+            AutoAdjustBulkLanes = true,
+            BulkLaneTargetRatio = 0.25,
+            EnableAutoscaling = true,
+            MinConnections = 4,
+            MaxConnections = 12
+        });
+
+        Assert.Equal(2, GetConnectionArray(harness.Executor, "_bulkConns").Length);
+
+        SetField(harness.Executor, "_scaleDownDrainTimeout", TimeSpan.Zero);
+        await InvokeScaleDownAsync(harness.Executor, "test");
+        await InvokeScaleDownAsync(harness.Executor, "test");
+        await InvokeScaleDownAsync(harness.Executor, "test"); // 8 -> 5 total lanes, expected 1 bulk lane.
+        Assert.Equal(1, GetConnectionArray(harness.Executor, "_bulkConns").Length);
+
+        InvokeScaleUp(harness.Executor, "test");
+        InvokeScaleUp(harness.Executor, "test"); // 5 -> 7 total lanes, expected 2 bulk lanes.
+        Assert.Equal(2, GetConnectionArray(harness.Executor, "_bulkConns").Length);
     }
 
     [Fact]
@@ -444,6 +496,20 @@ public sealed class RedisCommandExecutorAutoscalerTests
         var m = typeof(RedisCommandExecutor).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(m);
         return m!;
+    }
+
+    private static void InvokeScaleUp(RedisCommandExecutor executor, string reason)
+    {
+        var method = GetMethod("ScaleUp");
+        method.Invoke(executor, new object[] { reason });
+    }
+
+    private static async Task InvokeScaleDownAsync(RedisCommandExecutor executor, string reason)
+    {
+        var method = GetMethod("ScaleDownAsync");
+        var task = method.Invoke(executor, new object[] { reason }) as Task;
+        Assert.NotNull(task);
+        await task!.ConfigureAwait(false);
     }
 
     private static void SetField(RedisCommandExecutor executor, string fieldName, object value)

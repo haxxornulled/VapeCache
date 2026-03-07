@@ -12,6 +12,16 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $repoRoot
 
+function Resolve-SolutionPath {
+    foreach ($candidate in @("VapeCache.slnx", "VapeCache.sln")) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    throw "Could not find 'VapeCache.slnx' or 'VapeCache.sln' in $repoRoot."
+}
+
 function Invoke-DotNetOrThrow {
     param(
         [Parameter(Mandatory = $true)]
@@ -60,9 +70,11 @@ if ($activeBenchmarks.Count -gt 0) {
 
 Write-Host "Running .NET 10 analyzer build for VapeCache..."
 
+$solutionPath = Resolve-SolutionPath
+
 $buildArgs = @(
     "build",
-    "VapeCache.sln",
+    $solutionPath,
     "-t:Rebuild",
     "-c", $Configuration,
     "/p:EnableNETAnalyzers=true",
@@ -78,7 +90,7 @@ Invoke-DotNetOrThrow -Arguments $buildArgs -Description "Analyzer build"
 
 if ($VerifyFormatting) {
     Write-Host "Verifying analyzer/code-style formatting..."
-    Invoke-DotNetOrThrow -Arguments @("format", "analyzers", "VapeCache.sln", "--verify-no-changes", "--severity", "warn") -Description "Analyzer format verification"
+    Invoke-DotNetOrThrow -Arguments @("format", "analyzers", $solutionPath, "--verify-no-changes", "--severity", "warn") -Description "Analyzer format verification"
 }
 
 if ($RunTests) {

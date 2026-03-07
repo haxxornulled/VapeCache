@@ -56,6 +56,24 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Resolve solution path
+        id: solution
+        shell: pwsh
+        run: |
+          if (Test-Path "VapeCache.slnx")
+          {
+              "path=VapeCache.slnx" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+
+          if (Test-Path "VapeCache.sln")
+          {
+              "path=VapeCache.sln" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+
+          throw "Could not find VapeCache.slnx or VapeCache.sln."
+
       - name: Authenticate GitHub Packages
         shell: pwsh
         env:
@@ -76,10 +94,10 @@ jobs:
           }
 
       - name: Restore
-        run: dotnet restore VapeCache.sln --configfile NuGet.config
+        run: dotnet restore ${{ steps.solution.outputs.path }} --configfile NuGet.config
 
       - name: Build
-        run: dotnet build -c Release --no-restore VapeCache.sln
+        run: dotnet build -c Release --no-restore ${{ steps.solution.outputs.path }}
 
       - name: Unit tests
         run: dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj

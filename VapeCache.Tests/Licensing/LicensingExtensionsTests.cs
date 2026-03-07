@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Licensing;
@@ -111,7 +112,7 @@ public class LicensingExtensionsTests
                     features: new[] { LicenseFeatures.Reconciliation });
 
                 var services = new ServiceCollection();
-                var ex = Assert.Throws<InvalidOperationException>(() => services.AddVapeCachePersistence(key));
+                var ex = Assert.Throws<VapeCacheLicenseException>(() => services.AddVapeCachePersistence(key));
 
                 Assert.Contains(LicenseFeatures.Persistence, ex.Message, StringComparison.OrdinalIgnoreCase);
             }
@@ -119,6 +120,44 @@ public class LicensingExtensionsTests
             {
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, originalPublicKey);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, originalKeyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowVerifierOverride);
+            }
+        }
+    }
+
+    [Fact]
+    public void AddVapeCachePersistence_NoExplicitLicense_UsesEnvironmentVariable()
+    {
+        const string keyId = "persistence-env-kid";
+        var (privateKeyPem, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+
+        lock (LicenseTestEnvironment.EnvironmentLock)
+        {
+            var originalPublicKey = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable);
+            var originalKeyId = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable);
+            var originalLicenseKey = Environment.GetEnvironmentVariable("VAPECACHE_LICENSE_KEY");
+            var originalAllowVerifierOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
+
+            try
+            {
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, publicKeyPem);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, keyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, "true");
+
+                var issuer = new LicenseTokenIssuer(privateKeyPem, keyId);
+                var key = issuer.GenerateEnterpriseLicenseKey("acme", DateTimeOffset.UtcNow.AddDays(7));
+                Environment.SetEnvironmentVariable("VAPECACHE_LICENSE_KEY", key);
+
+                var services = new ServiceCollection();
+                services.AddVapeCachePersistence();
+
+                Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IInMemorySpillStore));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, originalPublicKey);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, originalKeyId);
+                Environment.SetEnvironmentVariable("VAPECACHE_LICENSE_KEY", originalLicenseKey);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowVerifierOverride);
             }
         }
@@ -198,6 +237,56 @@ public class LicensingExtensionsTests
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, originalPublicKey);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, originalKeyId);
                 Environment.SetEnvironmentVariable("VAPECACHE_LICENSE_KEY", originalLicenseKey);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowVerifierOverride);
+            }
+        }
+    }
+
+    [Fact]
+    public void AddReconciliationReaper_WithoutReconciliationRegistration_ThrowsHelpfulError()
+    {
+        var services = new ServiceCollection();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => services.AddReconciliationReaper());
+
+        Assert.Contains("AddVapeCacheRedisReconciliation", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddReconciliationReaper_WithReconciliationRegistration_RegistersHostedService()
+    {
+        const string keyId = "reaper-registration-kid";
+        var (privateKeyPem, publicKeyPem) = LicenseTestKeys.GeneratePemKeyPair();
+
+        lock (LicenseTestEnvironment.EnvironmentLock)
+        {
+            var originalPublicKey = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable);
+            var originalKeyId = Environment.GetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable);
+            var originalAllowVerifierOverride = Environment.GetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable);
+
+            try
+            {
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, publicKeyPem);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, keyId);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, "true");
+
+                var issuer = new LicenseTokenIssuer(privateKeyPem, keyId);
+                var key = issuer.GenerateEnterpriseLicenseKey("acme", DateTimeOffset.UtcNow.AddDays(7));
+
+                var services = new ServiceCollection();
+                services.AddVapeCacheRedisReconciliation(key);
+                services.AddReconciliationReaper();
+
+                Assert.Contains(
+                    services,
+                    descriptor =>
+                        descriptor.ServiceType == typeof(IHostedService) &&
+                        descriptor.ImplementationType == typeof(RedisReconciliationReaper));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationPublicKeyEnvironmentVariable, originalPublicKey);
+                Environment.SetEnvironmentVariable(LicenseValidationOptions.VerificationKeyIdEnvironmentVariable, originalKeyId);
                 Environment.SetEnvironmentVariable(LicenseValidationOptions.AllowVerificationOverrideEnvironmentVariable, originalAllowVerifierOverride);
             }
         }

@@ -7,7 +7,7 @@ using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
 
-internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnectionPoolReaper
+internal sealed partial class RedisConnectionPool : IRedisConnectionPool, IRedisConnectionPoolReaper
 {
     private readonly Channel<PooledConnection> _idle;
     private readonly SemaphoreSlim _connectionSlots;
@@ -37,10 +37,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
         var maxIdle = Math.Clamp(Math.Max(1, o.MaxIdle), 1, maxConnections);
         if (o.MaxIdle <= 0)
         {
-            _logger.LogWarning(
-                "RedisConnectionOptions.MaxIdle was {ConfiguredMaxIdle}. Using {EffectiveMaxIdle} to keep the pool operational.",
-                o.MaxIdle,
-                maxIdle);
+            LogMaxIdleAdjusted(_logger, o.MaxIdle, maxIdle);
         }
         _connectionSlots = new SemaphoreSlim(maxConnections, maxConnections);
         _availabilitySignals = new SemaphoreSlim(0, maxConnections);
@@ -212,16 +209,16 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
             var warmTarget = Math.Clamp(o.Warm, 0, Math.Max(0, Math.Min(o.MaxIdle, o.MaxConnections)));
 
             if (warmTarget <= 0) return;
-            _logger.LogInformation("Redis pool warming: Warm={Warm} MaxConnections={MaxConnections} MaxIdle={MaxIdle}", warmTarget, o.MaxConnections, o.MaxIdle);
+            LogPoolWarming(_logger, warmTarget, o.MaxConnections, o.MaxIdle);
 
             await MaintainWarmAsync(o, warmTarget, CancellationToken.None).ConfigureAwait(false);
 
-            _logger.LogInformation("Redis pool warm complete: Created={Created} Idle={Idle} Disposed={Disposed}", _created, _idleCount, _disposedConnections);
+            LogPoolWarmComplete(_logger, _created, _idleCount, _disposedConnections);
         }
         catch (Exception ex)
         {
             // Log warm-up failure but don't crash - pool can still work with on-demand connection creation
-            _logger.LogWarning(ex, "Redis pool warm-up failed, pool will create connections on-demand: Created={Created} Idle={Idle}", _created, _idleCount);
+            LogPoolWarmFailed(_logger, ex, _created, _idleCount);
         }
     }
 
@@ -240,11 +237,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
             totalAttempts++;
             if (totalAttempts > maxTotalAttempts)
             {
-                _logger.LogWarning(
-                    "Failed to warm connection pool after {Attempts} attempts (WarmTarget={WarmTarget}, Idle={Idle}). Stopping warmup to prevent infinite loop.",
-                    maxTotalAttempts,
-                    warmTarget,
-                    Volatile.Read(ref _idleCount));
+                LogPoolWarmAttemptsExceeded(_logger, maxTotalAttempts, warmTarget, Volatile.Read(ref _idleCount));
                 ReleaseConnectionSlot();
                 return;
             }
@@ -257,7 +250,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
                 if (retryCount >= MaxWarmupRetries)
                 {
-                    _logger.LogWarning("Failed to warm connection pool after {Retries} attempts. Redis may be unavailable. Pool will attempt to create connections on-demand.", MaxWarmupRetries);
+                    LogPoolWarmRetriesExceeded(_logger, MaxWarmupRetries);
                     return;
                 }
 
@@ -353,7 +346,7 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
         await _factory.DisposeAsync().ConfigureAwait(false);
         _availabilitySignals.Dispose();
-        _logger.LogInformation("Redis pool disposed: Created={Created} Returned={Returned} Idle={Idle} Disposed={Disposed}", _created, _returned, _idleCount, _disposedConnections);
+        LogPoolDisposed(_logger, _created, _returned, _idleCount, _disposedConnections);
     }
 
     /// <summary>
@@ -431,9 +424,12 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
         if (disposed > 0)
         {
             RedisTelemetry.PoolReaps.Add(disposed);
-            _logger.LogInformation("Redis pool reaped: Disposed={Disposed} Idle={Idle} Created={Created}", disposed, _idleCount, _created);
-            if (disposedByReason is not null)
-                _logger.LogInformation("Redis pool reap reasons: {Reasons}", FormatReasons(disposedByReason));
+            LogPoolReaped(_logger, disposed, _idleCount, _created);
+            if (disposedByReason is not null && _logger.IsEnabled(LogLevel.Information))
+            {
+                var reasons = FormatReasons(disposedByReason);
+                LogPoolReapReasons(_logger, reasons);
+            }
         }
 
         if (warmTarget > 0 && Volatile.Read(ref _idleCount) < warmTarget)
@@ -610,6 +606,119 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
         }
     }
 
+    [LoggerMessage(
+        EventId = 12000,
+        Level = LogLevel.Warning,
+        Message = "RedisConnectionOptions.MaxIdle was {ConfiguredMaxIdle}. Using {EffectiveMaxIdle} to keep the pool operational.")]
+    private static partial void LogMaxIdleAdjusted(ILogger logger, int configuredMaxIdle, int effectiveMaxIdle);
+
+    [LoggerMessage(
+        EventId = 12001,
+        Level = LogLevel.Information,
+        Message = "Redis pool warming: Warm={Warm} MaxConnections={MaxConnections} MaxIdle={MaxIdle}")]
+    private static partial void LogPoolWarming(ILogger logger, int warm, int maxConnections, int maxIdle);
+
+    [LoggerMessage(
+        EventId = 12002,
+        Level = LogLevel.Information,
+        Message = "Redis pool warm complete: Created={Created} Idle={Idle} Disposed={Disposed}")]
+    private static partial void LogPoolWarmComplete(ILogger logger, long created, long idle, long disposed);
+
+    [LoggerMessage(
+        EventId = 12003,
+        Level = LogLevel.Warning,
+        Message = "Redis pool warm-up failed, pool will create connections on-demand: Created={Created} Idle={Idle}")]
+    private static partial void LogPoolWarmFailed(ILogger logger, Exception exception, long created, long idle);
+
+    [LoggerMessage(
+        EventId = 12004,
+        Level = LogLevel.Warning,
+        Message = "Failed to warm connection pool after {Attempts} attempts (WarmTarget={WarmTarget}, Idle={Idle}). Stopping warmup to prevent infinite loop.")]
+    private static partial void LogPoolWarmAttemptsExceeded(ILogger logger, int attempts, int warmTarget, long idle);
+
+    [LoggerMessage(
+        EventId = 12005,
+        Level = LogLevel.Warning,
+        Message = "Failed to warm connection pool after {Retries} attempts. Redis may be unavailable. Pool will attempt to create connections on-demand.")]
+    private static partial void LogPoolWarmRetriesExceeded(ILogger logger, int retries);
+
+    [LoggerMessage(
+        EventId = 12006,
+        Level = LogLevel.Information,
+        Message = "Redis pool disposed: Created={Created} Returned={Returned} Idle={Idle} Disposed={Disposed}")]
+    private static partial void LogPoolDisposed(ILogger logger, long created, long returned, long idle, long disposed);
+
+    [LoggerMessage(
+        EventId = 12007,
+        Level = LogLevel.Information,
+        Message = "Redis pool reaped: Disposed={Disposed} Idle={Idle} Created={Created}")]
+    private static partial void LogPoolReaped(ILogger logger, int disposed, long idle, long created);
+
+    [LoggerMessage(
+        EventId = 12008,
+        Level = LogLevel.Information,
+        Message = "Redis pool reap reasons: {Reasons}")]
+    private static partial void LogPoolReapReasons(ILogger logger, string reasons);
+
+    [LoggerMessage(
+        EventId = 12009,
+        Level = LogLevel.Information,
+        Message = "Redis conn drop ({Stage}): Reason={Reason} Id={Id} IdleMs={IdleMs} AgeMs={AgeMs} Faulted={Faulted} LastErrorType={LastErrorType} LastError={LastError} Idle={Idle}")]
+    private static partial void LogConnectionDropDetailed(
+        ILogger logger,
+        string stage,
+        string reason,
+        long id,
+        long idleMs,
+        long ageMs,
+        bool faulted,
+        string? lastErrorType,
+        string? lastError,
+        long idle);
+
+    [LoggerMessage(
+        EventId = 12010,
+        Level = LogLevel.Information,
+        Message = "Redis conn drop ({Stage}): Reason={Reason}")]
+    private static partial void LogConnectionDrop(ILogger logger, string stage, string reason);
+
+    [LoggerMessage(
+        EventId = 12011,
+        Level = LogLevel.Information,
+        Message = "Redis lease ({Kind}): Id={Id} RemoteEndPoint={RemoteEndPoint} Created={Created} Returned={Returned} IdleMs={IdleMs}")]
+    private static partial void LogConnectionLeaseDetailed(
+        ILogger logger,
+        string kind,
+        long id,
+        object? remoteEndPoint,
+        long created,
+        long returned,
+        long idleMs);
+
+    [LoggerMessage(
+        EventId = 12012,
+        Level = LogLevel.Information,
+        Message = "Redis lease ({Kind})")]
+    private static partial void LogConnectionLease(ILogger logger, string kind);
+
+    [LoggerMessage(
+        EventId = 12013,
+        Level = LogLevel.Information,
+        Message = "Redis pool add ({Kind}): Id={Id} Created={Created} Returned={Returned} Idle={Idle}")]
+    private static partial void LogPoolAddDetailed(
+        ILogger logger,
+        string kind,
+        long id,
+        long created,
+        long returned,
+        long idle);
+
+    [LoggerMessage(
+        EventId = 12014,
+        Level = LogLevel.Information,
+        Message = "Redis pool add ({Kind})")]
+    private static partial void LogPoolAdd(ILogger logger, string kind);
+
     private static void TrackDrop(string reason)
     {
         RedisTelemetry.PoolDrops.Add(1, new KeyValuePair<string, object?>("reason", reason));
@@ -617,12 +726,16 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
     private void TryLogDrop(string stage, string reason, PooledConnection conn)
     {
+        if (!_logger.IsEnabled(LogLevel.Information))
+            return;
+
         try
         {
             if (conn.Inner is RedisConnection rc)
             {
-                _logger.LogInformation(
-                    "Redis conn drop ({Stage}): Reason={Reason} Id={Id} IdleMs={IdleMs} AgeMs={AgeMs} Faulted={Faulted} LastErrorType={LastErrorType} LastError={LastError} Idle={Idle}",
+                var idle = Volatile.Read(ref _idleCount);
+                LogConnectionDropDetailed(
+                    _logger,
                     stage,
                     reason,
                     rc.Id,
@@ -631,11 +744,11 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
                     conn.IsFaulted,
                     conn.LastErrorType,
                     conn.LastErrorMessage,
-                    Volatile.Read(ref _idleCount));
+                    idle);
             }
             else
             {
-                _logger.LogInformation("Redis conn drop ({Stage}): Reason={Reason}", stage, reason);
+                LogConnectionDrop(_logger, stage, reason);
             }
         }
         catch { }
@@ -643,6 +756,9 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
     private void TryLogLease(string kind, PooledConnection conn)
     {
+        if (!_logger.IsEnabled(LogLevel.Information))
+            return;
+
         try
         {
             var created = Volatile.Read(ref _created);
@@ -655,18 +771,19 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
             if (conn.Inner is RedisConnection rc)
             {
-                _logger.LogInformation(
-                    "Redis lease ({Kind}): Id={Id} RemoteEndPoint={RemoteEndPoint} Created={Created} Returned={Returned} IdleMs={IdleMs}",
+                var remoteEndPoint = rc.Socket.RemoteEndPoint;
+                LogConnectionLeaseDetailed(
+                    _logger,
                     kind,
                     rc.Id,
-                    rc.Socket.RemoteEndPoint?.ToString() ?? "?",
+                    remoteEndPoint,
                     created,
                     returned,
                     (long)conn.IdleFor.TotalMilliseconds);
             }
             else
             {
-                _logger.LogInformation("Redis lease ({Kind})", kind);
+                LogConnectionLease(_logger, kind);
             }
         }
         catch { }
@@ -674,6 +791,9 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
     private void TryLogReturn(string kind, PooledConnection conn)
     {
+        if (!_logger.IsEnabled(LogLevel.Information))
+            return;
+
         try
         {
             var created = Volatile.Read(ref _created);
@@ -686,17 +806,18 @@ internal sealed class RedisConnectionPool : IRedisConnectionPool, IRedisConnecti
 
             if (conn.Inner is RedisConnection rc)
             {
-                _logger.LogInformation(
-                    "Redis pool add ({Kind}): Id={Id} Created={Created} Returned={Returned} Idle={Idle}",
+                var idle = Volatile.Read(ref _idleCount);
+                LogPoolAddDetailed(
+                    _logger,
                     kind,
                     rc.Id,
                     created,
                     returned,
-                    Volatile.Read(ref _idleCount));
+                    idle);
             }
             else
             {
-                _logger.LogInformation("Redis pool add ({Kind})", kind);
+                LogPoolAdd(_logger, kind);
             }
         }
         catch { }

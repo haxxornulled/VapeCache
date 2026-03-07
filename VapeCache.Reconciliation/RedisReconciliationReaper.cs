@@ -9,7 +9,7 @@ namespace VapeCache.Reconciliation;
 /// Background service that periodically runs reconciliation to sync tracked operations back to Redis.
 /// The "Reaper" cleans up (reaps) pending operations from the backing store and syncs them to Redis.
 /// </summary>
-internal sealed class RedisReconciliationReaper : BackgroundService
+internal sealed partial class RedisReconciliationReaper : BackgroundService
 {
     private readonly IRedisReconciliationService _reconciliationService;
     private readonly ILogger<RedisReconciliationReaper> _logger;
@@ -32,14 +32,11 @@ internal sealed class RedisReconciliationReaper : BackgroundService
     {
         if (!_options.Enabled)
         {
-            _logger.LogInformation("RedisReconciliationReaper is disabled. Skipping background reconciliation.");
+            LogReaperDisabled(_logger);
             return;
         }
 
-        _logger.LogInformation(
-            "RedisReconciliationReaper started. Interval: {Interval}, InitialDelay: {InitialDelay}",
-            _options.Interval,
-            _options.InitialDelay);
+        LogReaperStarted(_logger, _options.Interval, _options.InitialDelay);
 
         // Initial delay before first reconciliation run
         if (_options.InitialDelay > TimeSpan.Zero)
@@ -50,7 +47,7 @@ internal sealed class RedisReconciliationReaper : BackgroundService
             }
             catch (OperationCanceledException)
             {
-                _logger.LogInformation("RedisReconciliationReaper stopped during initial delay.");
+                LogReaperStoppedDuringInitialDelay(_logger);
                 return;
             }
         }
@@ -65,9 +62,7 @@ internal sealed class RedisReconciliationReaper : BackgroundService
                 var pendingBefore = _reconciliationService.PendingOperations;
                 if (pendingBefore > 0)
                 {
-                    _logger.LogInformation(
-                        "RedisReconciliationReaper: Starting reconciliation run. Pending operations: {Pending}",
-                        pendingBefore);
+                    LogReaperRunStarting(_logger, pendingBefore);
                 }
 
                 // Always attempt reconciliation so persisted operations can be discovered after restart.
@@ -77,24 +72,21 @@ internal sealed class RedisReconciliationReaper : BackgroundService
                 if (pendingBefore > 0 || pendingAfter > 0)
                 {
                     var processed = Math.Max(0, pendingBefore - pendingAfter);
-                    _logger.LogInformation(
-                        "RedisReconciliationReaper: Reconciliation run completed. Processed: {Processed}, Remaining: {Remaining}",
-                        processed,
-                        pendingAfter);
+                    LogReaperRunCompleted(_logger, processed, pendingAfter);
                 }
                 else
                 {
-                    _logger.LogDebug("RedisReconciliationReaper: No pending operations to reconcile.");
+                    LogReaperNoPending(_logger);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                _logger.LogInformation("RedisReconciliationReaper: Stopping gracefully.");
+                LogReaperStoppingGracefully(_logger);
                 break;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "RedisReconciliationReaper: Error during reconciliation run. Will retry on next interval.");
+                LogReaperRunError(_logger, ex);
             }
 
             // Wait for next interval
@@ -109,12 +101,72 @@ internal sealed class RedisReconciliationReaper : BackgroundService
                 }
                 catch (OperationCanceledException)
                 {
-                    _logger.LogInformation("RedisReconciliationReaper: Stopped during interval delay.");
+                    LogReaperStoppedDuringIntervalDelay(_logger);
                     break;
                 }
             }
         }
 
-        _logger.LogInformation("RedisReconciliationReaper: Stopped.");
+        LogReaperStopped(_logger);
     }
+
+    [LoggerMessage(
+        EventId = 21000,
+        Level = LogLevel.Information,
+        Message = "RedisReconciliationReaper is disabled. Skipping background reconciliation.")]
+    private static partial void LogReaperDisabled(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 21001,
+        Level = LogLevel.Information,
+        Message = "RedisReconciliationReaper started. Interval: {Interval}, InitialDelay: {InitialDelay}")]
+    private static partial void LogReaperStarted(ILogger logger, TimeSpan interval, TimeSpan initialDelay);
+
+    [LoggerMessage(
+        EventId = 21002,
+        Level = LogLevel.Information,
+        Message = "RedisReconciliationReaper stopped during initial delay.")]
+    private static partial void LogReaperStoppedDuringInitialDelay(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 21003,
+        Level = LogLevel.Information,
+        Message = "RedisReconciliationReaper: Starting reconciliation run. Pending operations: {Pending}")]
+    private static partial void LogReaperRunStarting(ILogger logger, int pending);
+
+    [LoggerMessage(
+        EventId = 21004,
+        Level = LogLevel.Information,
+        Message = "RedisReconciliationReaper: Reconciliation run completed. Processed: {Processed}, Remaining: {Remaining}")]
+    private static partial void LogReaperRunCompleted(ILogger logger, int processed, int remaining);
+
+    [LoggerMessage(
+        EventId = 21005,
+        Level = LogLevel.Debug,
+        Message = "RedisReconciliationReaper: No pending operations to reconcile.")]
+    private static partial void LogReaperNoPending(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 21006,
+        Level = LogLevel.Information,
+        Message = "RedisReconciliationReaper: Stopping gracefully.")]
+    private static partial void LogReaperStoppingGracefully(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 21007,
+        Level = LogLevel.Error,
+        Message = "RedisReconciliationReaper: Error during reconciliation run. Will retry on next interval.")]
+    private static partial void LogReaperRunError(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        EventId = 21008,
+        Level = LogLevel.Information,
+        Message = "RedisReconciliationReaper: Stopped during interval delay.")]
+    private static partial void LogReaperStoppedDuringIntervalDelay(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 21009,
+        Level = LogLevel.Information,
+        Message = "RedisReconciliationReaper: Stopped.")]
+    private static partial void LogReaperStopped(ILogger logger);
 }

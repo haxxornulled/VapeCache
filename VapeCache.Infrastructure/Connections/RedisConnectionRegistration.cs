@@ -14,6 +14,8 @@ public static class RedisConnectionRegistration
     /// </summary>
     public static IServiceCollection AddVapecacheRedisConnections(this IServiceCollection services)
     {
+        RedisTelemetry.EnsureInitialized();
+
         services.AddOptions<RedisConnectionOptions>()
             .ValidateOnStart();
         services.TryAddSingleton<RedisConnectionOptionsValidator>();

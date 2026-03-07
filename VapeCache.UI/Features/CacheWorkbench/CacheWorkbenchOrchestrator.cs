@@ -1,4 +1,5 @@
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.UI.Features.CacheWorkbench;
 
@@ -6,20 +7,24 @@ public sealed class CacheWorkbenchOrchestrator(
     IVapeCache cache,
     ICurrentCacheService currentCache,
     ICacheStats cacheStats,
-    IRedisCircuitBreakerState breakerState)
+    IRedisCircuitBreakerState breakerState,
+    IRedisFailoverController failoverController)
 {
     public ValueTask<CacheWorkbenchStatus> GetStatusAsync(CancellationToken ct = default)
     {
         var snapshot = cacheStats.Snapshot;
-        var backend = string.IsNullOrWhiteSpace(currentCache.CurrentName)
-            ? "unknown"
-            : currentCache.CurrentName;
+        var backend = BackendTypeResolver.Resolve(
+            currentCache.CurrentName,
+            breakerState.IsOpen,
+            failoverController.IsForcedOpen);
 
         return ValueTask.FromResult(new CacheWorkbenchStatus(
             backend,
             breakerState.IsOpen,
             breakerState.ConsecutiveFailures,
             breakerState.OpenRemaining,
+            failoverController.IsForcedOpen,
+            failoverController.Reason,
             snapshot.GetCalls,
             snapshot.Hits,
             snapshot.Misses,
@@ -54,6 +59,21 @@ public sealed class CacheWorkbenchOrchestrator(
     public ValueTask<bool> RemoveAsync(string key, CancellationToken ct = default) =>
         cache.RemoveAsync(new CacheKey(NormalizeKey(key)), ct);
 
+    public ValueTask ForceBreakerOpenAsync(string reason, CancellationToken ct = default)
+    {
+        var normalizedReason = string.IsNullOrWhiteSpace(reason)
+            ? "manual-force-open"
+            : reason.Trim();
+        failoverController.ForceOpen(normalizedReason);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask ClearBreakerForceOpenAsync(CancellationToken ct = default)
+    {
+        failoverController.ClearForcedOpen();
+        return ValueTask.CompletedTask;
+    }
+
     private static string NormalizeKey(string key)
     {
         if (string.IsNullOrWhiteSpace(key))
@@ -64,10 +84,12 @@ public sealed class CacheWorkbenchOrchestrator(
 }
 
 public sealed record CacheWorkbenchStatus(
-    string Backend,
+    BackendType Backend,
     bool BreakerOpen,
     int ConsecutiveFailures,
     TimeSpan? BreakerOpenRemaining,
+    bool BreakerForcedOpen,
+    string? BreakerReason,
     long GetCalls,
     long Hits,
     long Misses,

@@ -10,7 +10,7 @@ namespace VapeCache.Reconciliation;
 /// Tracks in-memory cache writes during Redis circuit breaker outages and syncs them back to Redis on recovery.
 /// Provides no-drop tracking semantics by replaying tracked write/delete operations.
 /// </summary>
-internal sealed class RedisReconciliationService : IRedisReconciliationService
+internal sealed partial class RedisReconciliationService : IRedisReconciliationService
 {
     private readonly IRedisReconciliationExecutor _redis;
     private readonly ILogger<RedisReconciliationService> _logger;
@@ -109,10 +109,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
             var warningCount = Interlocked.Increment(ref _thresholdWarningCount);
             if (warningCount <= 3 || warningCount % 100 == 0)
             {
-                _logger.LogWarning(
-                    "Reconciliation pending operations exceeded advisory threshold {Threshold}. PendingOperations={PendingOperations}. Tracking continues to preserve no-drop guarantees.",
-                    limit,
-                    pending);
+                LogPendingThresholdExceeded(_logger, limit, pending);
             }
         }
     }
@@ -147,7 +144,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         var backoff = _options.InitialBackoff;
         var pendingRemovals = new List<string>(batchSize);
 
-        _logger.LogInformation("Starting Redis reconciliation: {Count} operations to sync", snapshot.Count);
+        LogReconciliationStarting(_logger, snapshot.Count);
 
         for (var i = 0; i < snapshot.Count; i++)
         {
@@ -155,7 +152,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
 
             if (_options.MaxRunDuration > TimeSpan.Zero && _timeProvider.GetUtcNow() - start > _options.MaxRunDuration)
             {
-                _logger.LogWarning("Redis reconciliation stopped due to MaxRunDuration.");
+                LogReconciliationStoppedMaxDuration(_logger);
                 break;
             }
 
@@ -202,7 +199,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
             catch (Exception ex)
             {
                 failed++;
-                _logger.LogWarning(ex, "Failed to reconcile operation for key {Key}. Will retry on next reconciliation run.", op.Key);
+                LogReconciliationOperationFailed(_logger, ex, op.Key);
 
                 // DO NOT remove from pendingRemovals - keep in SQLite for retry
                 // Apply backoff to avoid hammering Redis
@@ -216,7 +213,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
                 // If too many consecutive failures, stop reconciliation early to avoid long blocking
                 if (failed >= _options.MaxConsecutiveFailures && _options.MaxConsecutiveFailures > 0)
                 {
-                    _logger.LogWarning("Stopping reconciliation early after {Failed} consecutive failures. Remaining operations will retry later.", failed);
+                    LogReconciliationStoppedConsecutiveFailures(_logger, failed);
                     break;
                 }
             }
@@ -243,8 +240,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         RedisReconciliationTelemetry.Failed.Add(failed);
         RedisReconciliationTelemetry.RunMs.Record((_timeProvider.GetUtcNow() - start).TotalMilliseconds);
 
-        _logger.LogInformation(
-            "Redis reconciliation complete: {Synced} synced, {Skipped} skipped, {Failed} failed", synced, skipped, failed);
+        LogReconciliationComplete(_logger, synced, skipped, failed);
     }
 
     /// <summary>
@@ -303,12 +299,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
             var warningCount = Interlocked.Increment(ref _queueFallbackWarningCount);
             if (warningCount <= 3 || warningCount % 100 == 0)
             {
-                _logger.LogWarning(
-                    ex,
-                    "Reconciliation inline persistence failed for {MutationType} key {Key}; queued for retry. PendingOperations={PendingOperations}",
-                    mutationType,
-                    mutation.Key,
-                    PendingOperations);
+                LogInlinePersistenceFailed(_logger, ex, mutationType, mutation.Key, PendingOperations);
             }
         }
     }
@@ -356,7 +347,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Reconciliation tracking queue pump stopped unexpectedly.");
+            LogTrackingQueuePumpStopped(_logger, ex);
         }
         finally
         {
@@ -393,16 +384,10 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
             {
                 _deferredMutations[mutation.Key] = mutation;
                 var warningCount = Interlocked.Increment(ref _deferredPersistWarningCount);
-                _logger.LogWarning(
-                    ex,
-                    "Failed to persist reconciliation {MutationType} for key {Key}; queued for retry.",
-                    mutation.Type,
-                    mutation.Key);
+                LogDeferredPersistFailed(_logger, ex, mutation.Type, mutation.Key);
                 if (warningCount <= 3 || warningCount % 100 == 0)
                 {
-                    _logger.LogWarning(
-                        "Deferred reconciliation buffer contains {DeferredCount} keys after persistence failure.",
-                        _deferredMutations.Count);
+                    LogDeferredBufferSize(_logger, _deferredMutations.Count);
                 }
             }
             finally
@@ -451,10 +436,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(
-                    ex,
-                    "Deferred reconciliation persistence failed for key {Key}; will retry on next run.",
-                    kvp.Key);
+                LogDeferredPersistenceRetry(_logger, ex, kvp.Key);
             }
         }
     }
@@ -472,9 +454,7 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(
-                ex,
-                "Failed to load reconciliation pending estimate asynchronously. Starting from zero.");
+            LogPendingEstimateLoadFailed(_logger, ex);
             Interlocked.CompareExchange(ref _pendingEstimate, 0, -1);
         }
     }
@@ -524,6 +504,87 @@ internal sealed class RedisReconciliationService : IRedisReconciliationService
                 return;
         }
     }
+
+    [LoggerMessage(
+        EventId = 22000,
+        Level = LogLevel.Warning,
+        Message = "Reconciliation pending operations exceeded advisory threshold {Threshold}. PendingOperations={PendingOperations}. Tracking continues to preserve no-drop guarantees.")]
+    private static partial void LogPendingThresholdExceeded(ILogger logger, int threshold, int pendingOperations);
+
+    [LoggerMessage(
+        EventId = 22001,
+        Level = LogLevel.Information,
+        Message = "Starting Redis reconciliation: {Count} operations to sync")]
+    private static partial void LogReconciliationStarting(ILogger logger, int count);
+
+    [LoggerMessage(
+        EventId = 22002,
+        Level = LogLevel.Warning,
+        Message = "Redis reconciliation stopped due to MaxRunDuration.")]
+    private static partial void LogReconciliationStoppedMaxDuration(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 22003,
+        Level = LogLevel.Warning,
+        Message = "Failed to reconcile operation for key {Key}. Will retry on next reconciliation run.")]
+    private static partial void LogReconciliationOperationFailed(ILogger logger, Exception exception, string key);
+
+    [LoggerMessage(
+        EventId = 22004,
+        Level = LogLevel.Warning,
+        Message = "Stopping reconciliation early after {Failed} consecutive failures. Remaining operations will retry later.")]
+    private static partial void LogReconciliationStoppedConsecutiveFailures(ILogger logger, int failed);
+
+    [LoggerMessage(
+        EventId = 22005,
+        Level = LogLevel.Information,
+        Message = "Redis reconciliation complete: {Synced} synced, {Skipped} skipped, {Failed} failed")]
+    private static partial void LogReconciliationComplete(ILogger logger, int synced, int skipped, int failed);
+
+    [LoggerMessage(
+        EventId = 22006,
+        Level = LogLevel.Warning,
+        Message = "Reconciliation inline persistence failed for {MutationType} key {Key}; queued for retry. PendingOperations={PendingOperations}")]
+    private static partial void LogInlinePersistenceFailed(
+        ILogger logger,
+        Exception exception,
+        string mutationType,
+        string key,
+        int pendingOperations);
+
+    [LoggerMessage(
+        EventId = 22007,
+        Level = LogLevel.Warning,
+        Message = "Reconciliation tracking queue pump stopped unexpectedly.")]
+    private static partial void LogTrackingQueuePumpStopped(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        EventId = 22008,
+        Level = LogLevel.Warning,
+        Message = "Failed to persist reconciliation {MutationType} for key {Key}; queued for retry.")]
+    private static partial void LogDeferredPersistFailed(
+        ILogger logger,
+        Exception exception,
+        OperationType mutationType,
+        string key);
+
+    [LoggerMessage(
+        EventId = 22009,
+        Level = LogLevel.Warning,
+        Message = "Deferred reconciliation buffer contains {DeferredCount} keys after persistence failure.")]
+    private static partial void LogDeferredBufferSize(ILogger logger, int deferredCount);
+
+    [LoggerMessage(
+        EventId = 22010,
+        Level = LogLevel.Warning,
+        Message = "Deferred reconciliation persistence failed for key {Key}; will retry on next run.")]
+    private static partial void LogDeferredPersistenceRetry(ILogger logger, Exception exception, string key);
+
+    [LoggerMessage(
+        EventId = 22011,
+        Level = LogLevel.Warning,
+        Message = "Failed to load reconciliation pending estimate asynchronously. Starting from zero.")]
+    private static partial void LogPendingEstimateLoadFailed(ILogger logger, Exception exception);
 
     private abstract record TrackingWorkItem;
 

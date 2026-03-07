@@ -5,10 +5,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Infrastructure.Caching;
 
-internal sealed class InMemoryCacheService : ICacheFallbackService
+internal sealed partial class InMemoryCacheService : ICacheFallbackService
 {
     private readonly IMemoryCache _cache;
     private readonly ICurrentCacheService _current;
@@ -131,7 +132,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
                     {
                         await _spillStore.WriteAsync(spillRef, tail, ct).ConfigureAwait(false);
                         StoreEntry(key, options, new SpillEntry(spillRef, inlinePrefix, inlinePrefixBytes, value.Length));
-                        _intentRegistry.RecordSet(key, Name, options, value.Length);
+                        _intentRegistry.RecordSet(key, BackendType.InMemory, options, value.Length);
                         return;
                     }
                     catch
@@ -142,7 +143,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
             }
 
             StoreEntry(key, options, value);
-            _intentRegistry.RecordSet(key, Name, options, value.Length);
+            _intentRegistry.RecordSet(key, BackendType.InMemory, options, value.Length);
         }
         finally
         {
@@ -225,10 +226,14 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
             return;
 
         CacheTelemetry.SpillStoreUnavailable.Add(1);
-        _logger.LogWarning(
-            "InMemory spill-to-disk is enabled, but the active spill store is no-op. " +
-            "Register persistence spill services (AddVapeCachePersistence) to enable file-backed scatter spill.");
+        LogSpillStoreUnavailable(_logger);
     }
+
+    [LoggerMessage(
+        EventId = 7101,
+        Level = LogLevel.Warning,
+        Message = "InMemory spill-to-disk is enabled, but the active spill store is no-op. Register persistence spill services (AddVapeCachePersistence) to enable file-backed scatter spill.")]
+    private static partial void LogSpillStoreUnavailable(ILogger logger);
 
     private void StoreEntry(string key, CacheEntryOptions options, ReadOnlyMemory<byte> value)
     {
@@ -382,7 +387,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         /// <summary>
         /// Executes value.
         /// </summary>
-        public void RecordSet(string key, string backend, in CacheEntryOptions options, int payloadBytes) { }
+        public void RecordSet(string key, BackendType backend, in CacheEntryOptions options, int payloadBytes) { }
         /// <summary>
         /// Attempts to value.
         /// </summary>

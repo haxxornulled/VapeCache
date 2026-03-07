@@ -5,6 +5,7 @@ using LanguageExt.Common;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Abstractions.Diagnostics;
 using VapeCache.Extensions.Aspire.HealthChecks;
 using VapeCache.Infrastructure.Caching;
 
@@ -54,7 +55,7 @@ public sealed class AspireHealthCheckBehaviorTests
         var result = await healthCheck.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
 
         Assert.Equal(HealthStatus.Degraded, result.Status);
-        Assert.Equal("memory", result.Data["current_backend"]);
+        Assert.Equal(BackendType.InMemory, result.Data["current_backend"]);
         Assert.Equal(true, result.Data["breaker_open"]);
     }
 
@@ -71,8 +72,31 @@ public sealed class AspireHealthCheckBehaviorTests
         var result = await healthCheck.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
 
         Assert.Equal(HealthStatus.Healthy, result.Status);
-        Assert.Equal("redis", result.Data["current_backend"]);
+        Assert.Equal(BackendType.Redis, result.Data["current_backend"]);
         Assert.Equal(false, result.Data["breaker_open"]);
+    }
+
+    [Fact]
+    public async Task VapeCacheHealthCheck_ReturnsHealthy_WhenBreakerClosed_EvenIfCurrentBackendIsMemory()
+    {
+        var current = new CurrentCacheService();
+        var cache = new FakeCacheService(current, backendName: "memory");
+        var stats = new FixedCacheStats(new CacheStatsSnapshot(5, 2, 3, 1, 0, 0, 0, 0, 0, 0));
+        var breaker = new FakeBreakerState
+        {
+            Enabled = true,
+            IsOpen = false,
+            ConsecutiveFailures = 0
+        };
+        var failover = new FakeFailoverController();
+        var healthCheck = new VapeCacheHealthCheck(cache, current, stats, breaker, failover);
+
+        var result = await healthCheck.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
+
+        Assert.Equal(HealthStatus.Healthy, result.Status);
+        Assert.Equal(BackendType.InMemory, result.Data["current_backend"]);
+        Assert.Equal(false, result.Data["breaker_open"]);
+        Assert.Equal(false, result.Data["forced_open"]);
     }
 
     private sealed class FakePool(Result<IRedisConnectionLease> result) : IRedisConnectionPool

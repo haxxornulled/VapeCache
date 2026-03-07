@@ -74,6 +74,22 @@ public sealed class RedisCommandExecutorTests
     }
 
     [Fact]
+    public void TryParseClusterRedirectMessage_ParsesMovedWithExtraWhitespace()
+    {
+        var method = GetTryParseClusterRedirectMessageMethod();
+        var args = new object?[] { "  Redis error:   MOVED   7   cache-node.local:6380   details", null };
+
+        var ok = (bool)method.Invoke(null, args)!;
+        Assert.True(ok);
+        AssertClusterRedirect(
+            args[1],
+            isAsk: false,
+            slot: 7,
+            host: "cache-node.local",
+            port: 6380);
+    }
+
+    [Fact]
     public void TryParseClusterRedirectMessage_ReturnsFalseForNonRedirect()
     {
         var method = GetTryParseClusterRedirectMessageMethod();

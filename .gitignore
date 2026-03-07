@@ -32,6 +32,7 @@ BenchmarkDotNet.Artifacts/
 nupkg/
 *.nupkg
 *.snupkg
+**/node_modules/
 
 # Test/debug scripts and artifacts
 test_*.csx
@@ -56,9 +57,11 @@ run_comparison.ps1
 # Temporary files
 nul
 tmp/
+.tmp/
 artifacts/
 **/TestResults/
 tools/VapeCache.DocCommenter/
+VapeCache.UI/wwwroot/js/reconnect-modal.js
 
 # ===================================
 # ENTERPRISE / PRIVATE CODE

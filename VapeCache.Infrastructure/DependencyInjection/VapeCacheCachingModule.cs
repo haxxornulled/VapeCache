@@ -18,6 +18,8 @@ public sealed class VapeCacheCachingModule : Module
 {
     protected override void Load(ContainerBuilder builder)
     {
+        CacheTelemetry.EnsureInitialized();
+
         builder.RegisterInstance(TimeProvider.System).As<TimeProvider>().SingleInstance();
 
         builder.RegisterType<CurrentCacheService>()
@@ -52,6 +54,7 @@ public sealed class VapeCacheCachingModule : Module
             .As<IInMemorySpillStore>()
             .As<ISpillStoreDiagnostics>()
             .SingleInstance()
+            .OnActivated(e => CacheTelemetry.InitializeSpillDiagnostics(e.Instance))
             .IfNotRegistered(typeof(IInMemorySpillStore));
 
         builder.Register(ctx => new RedisCacheService(

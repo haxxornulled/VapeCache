@@ -52,6 +52,19 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
                 ["RedisConnection:ConnectionString"] = secret
             });
         }
+        else
+        {
+            // Aspire references provide connection strings via ConnectionStrings:{name}.
+            // Use this as a fallback when no explicit secret env var is set.
+            var aspireRedisConnectionString = temp.GetConnectionString("redis");
+            if (!string.IsNullOrWhiteSpace(aspireRedisConnectionString))
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["RedisConnection:ConnectionString"] = aspireRedisConnectionString
+                });
+            }
+        }
         // Never throw here; Redis can be unavailable or not configured. Startup preflight/failover controls behavior.
     })
     .UseSerilog(static (context, services, loggerConfig) =>
@@ -228,6 +241,8 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.ScaleUpTimeoutRatePerSecThreshold > 0, "RedisMultiplexer:ScaleUpTimeoutRatePerSecThreshold must be > 0.")
             .Validate(static o => o.ScaleUpP99LatencyMsThreshold > 0, "RedisMultiplexer:ScaleUpP99LatencyMsThreshold must be > 0.")
             .Validate(static o => o.ScaleDownP95LatencyMsThreshold > 0, "RedisMultiplexer:ScaleDownP95LatencyMsThreshold must be > 0.")
+            .Validate(static o => o.BulkLaneConnections >= 0, "RedisMultiplexer:BulkLaneConnections must be >= 0.")
+            .Validate(static o => !o.AutoAdjustBulkLanes || (o.BulkLaneTargetRatio >= 0 && o.BulkLaneTargetRatio <= 0.90), "RedisMultiplexer:BulkLaneTargetRatio must be in [0,0.90] when AutoAdjustBulkLanes is enabled.")
             .Validate(static o => o.EmergencyScaleUpTimeoutRatePerSecThreshold > 0, "RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold must be > 0.")
             .Validate(static o => o.ScaleDownDrainTimeout > TimeSpan.Zero, "RedisMultiplexer:ScaleDownDrainTimeout must be > 0.")
             .Validate(static o => o.MaxScaleEventsPerMinute > 0, "RedisMultiplexer:MaxScaleEventsPerMinute must be > 0.")
@@ -285,6 +300,7 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
         services.AddHostedService<StartupPreflightHostedService>();
         services.AddHostedService<RedisSanityCheckHostedService>();
         services.AddHostedService<RedisConnectionPoolReaperHostedService>();
+        services.AddHostedService<SharedDashboardSnapshotPublisherHostedService>();
         services.AddHostedService<PluginDemoHostedService>();
         // services.AddHostedService<RedisStressHostedService>();  // Disabled in favor of grocery store test
         // services.AddHostedService<LiveDemoHostedService>();     // Disabled in favor of grocery store test
@@ -358,6 +374,21 @@ static void ConfigureOtlpForSignal(string endpoint, OtlpExporterOptions otlp, st
     if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
         return;
 
+    var configuredProtocol = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_PROTOCOL");
+    if (TryParseOtlpProtocol(configuredProtocol, out var explicitProtocol))
+    {
+        if (explicitProtocol == OtlpExportProtocol.HttpProtobuf)
+        {
+            otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
+            otlp.Endpoint = ResolveSignalEndpoint(endpointUri, signal);
+            return;
+        }
+
+        otlp.Protocol = OtlpExportProtocol.Grpc;
+        otlp.Endpoint = endpointUri;
+        return;
+    }
+
     var isHttpProtobuf = endpointUri.Port == 5341 ||
                          endpointUri.Port == 4318 ||
                          endpointUri.AbsolutePath.Contains("/ingest/otlp", StringComparison.OrdinalIgnoreCase) ||
@@ -392,6 +423,28 @@ static Uri ResolveSignalEndpoint(Uri endpoint, string signal)
         return endpoint;
 
     return new Uri($"{endpointText}{signalSuffix}", UriKind.Absolute);
+}
+
+static bool TryParseOtlpProtocol(string? configured, out OtlpExportProtocol protocol)
+{
+    protocol = default;
+    if (string.IsNullOrWhiteSpace(configured))
+        return false;
+
+    var normalized = configured.Trim().ToLowerInvariant();
+    if (normalized is "http/protobuf" or "http-protobuf" or "httpprotobuf")
+    {
+        protocol = OtlpExportProtocol.HttpProtobuf;
+        return true;
+    }
+
+    if (normalized is "grpc")
+    {
+        protocol = OtlpExportProtocol.Grpc;
+        return true;
+    }
+
+    return Enum.TryParse(configured, ignoreCase: true, out protocol);
 }
 
 static CacheStampedeProfile ResolveCacheStampedeProfile(IConfiguration configuration)

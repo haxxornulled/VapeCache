@@ -258,6 +258,36 @@ public sealed class OrphanCleanupTests : IDisposable
     }
 
     [Fact]
+    public async Task OrphanCleanup_RemovesOldTempFiles()
+    {
+        // Arrange
+        var options = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions
+        {
+            SpillDirectory = _testRoot,
+            EnableOrphanCleanup = true,
+            OrphanMaxAge = TimeSpan.FromSeconds(1),
+            OrphanCleanupInterval = TimeSpan.FromMilliseconds(100)
+        });
+        var store = new FileSpillStore(options, new NoopSpillEncryptionProvider());
+
+        var spillRef = Guid.NewGuid();
+        var name = spillRef.ToString("N");
+        var dir = Path.Combine(_testRoot, name.Substring(0, 2), name.Substring(2, 2));
+        Directory.CreateDirectory(dir);
+
+        var tempPath = Path.Combine(dir, $"{name}.bin.stale.tmp");
+        await File.WriteAllBytesAsync(tempPath, new byte[] { 1, 2, 3 });
+        File.SetLastWriteTimeUtc(tempPath, DateTime.UtcNow.AddHours(-2));
+
+        // Act - trigger background cleanup
+        await store.WriteAsync(Guid.NewGuid(), new byte[] { 9 }, CancellationToken.None);
+        await Task.Delay(TimeSpan.FromMilliseconds(300));
+
+        // Assert
+        Assert.False(File.Exists(tempPath));
+    }
+
+    [Fact]
     public async Task NoopSpillStore_DoesNothing()
     {
         // Arrange

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Extensions.Aspire.HealthChecks;
 
@@ -38,9 +39,15 @@ public sealed class VapeCacheHealthCheck : IHealthCheck
             _ = await _cache.GetAsync(healthCheckKey, cancellationToken);
             var snapshot = _stats.Snapshot;
             var reads = snapshot.Hits + snapshot.Misses;
+            var currentBackend = BackendTypeResolver.Resolve(
+                _current.CurrentName,
+                _breaker.IsOpen,
+                _failover.IsForcedOpen);
+            var currentBackendIsRedis = currentBackend == BackendType.Redis;
             var data = new Dictionary<string, object>
             {
-                ["current_backend"] = _current.CurrentName,
+                ["current_backend"] = currentBackend,
+                ["current_backend_is_redis"] = currentBackendIsRedis,
                 ["breaker_open"] = _breaker.IsOpen,
                 ["forced_open"] = _failover.IsForcedOpen,
                 ["consecutive_failures"] = _breaker.ConsecutiveFailures,
@@ -48,7 +55,10 @@ public sealed class VapeCacheHealthCheck : IHealthCheck
                 ["hit_rate"] = reads <= 0 ? 0d : (double)snapshot.Hits / reads
             };
 
-            if (_failover.IsForcedOpen || _breaker.IsOpen || !string.Equals(_current.CurrentName, "redis", StringComparison.OrdinalIgnoreCase))
+            // "current_backend" reflects the most recent operation path and may legitimately
+            // be "memory" on cache misses even when Redis is healthy. Only degrade when
+            // failover is active (forced-open or breaker-open).
+            if (_failover.IsForcedOpen || _breaker.IsOpen)
             {
                 if (_breaker.OpenRemaining is { } remaining)
                     data["open_remaining_ms"] = remaining.TotalMilliseconds;

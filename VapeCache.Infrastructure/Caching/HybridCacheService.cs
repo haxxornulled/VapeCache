@@ -14,7 +14,7 @@ namespace VapeCache.Infrastructure.Caching;
 /// automatic failover to in-memory caching when Redis is unavailable.
 /// Uses a circuit breaker pattern to detect failures and gradually recover.
 /// </summary>
-internal sealed class HybridCacheService(
+internal sealed partial class HybridCacheService(
     RedisCacheService redis,
     ICacheFallbackService fallback,
     ICurrentCacheService current,
@@ -45,6 +45,8 @@ internal sealed class HybridCacheService(
     private int _reconcileInFlight;
     private static readonly JsonSerializerOptions TagJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly byte[] TagEnvelopePrefix = "VCTAG1:"u8.ToArray();
+    private static readonly string[] ReadWarmTags = ["hybrid-failover", "read-warm"];
+    private static readonly string[] WriteMirrorTags = ["hybrid-failover", "write-mirror"];
     private const string TagVersionKeyPrefix = "vapecache:tag:v1:";
     private static readonly Action<ILogger, string, Exception?> LogDiscardedStaleTaggedCacheEntry = LoggerMessage.Define<string>(
         LogLevel.Debug,
@@ -154,7 +156,7 @@ internal sealed class HybridCacheService(
             if (breaker.MaxConsecutiveRetries > 0 && attempts > breaker.MaxConsecutiveRetries)
             {
                 Volatile.Write(ref _openUntilTicks, long.MaxValue);
-                logger.LogWarning("Redis circuit breaker reached MaxConsecutiveRetries ({Attempts}); holding open indefinitely until manual reset.", attempts);
+                LogBreakerMaxRetriesReached(logger, attempts);
             }
             else
             {
@@ -165,7 +167,7 @@ internal sealed class HybridCacheService(
             {
                 _stats.IncBreakerOpened();
                 CacheTelemetry.RedisBreakerOpened.Add(1, new TagList { { "backend", Name } });
-                logger.LogWarning("Circuit breaker opened after {Failures} consecutive failures. Switching to {Fallback} mode for {Duration} seconds.", failures, fallback.Name, breakDuration.TotalSeconds);
+                LogBreakerOpened(logger, failures, fallback.Name, breakDuration.TotalSeconds);
             }
         }
     }
@@ -258,7 +260,7 @@ internal sealed class HybridCacheService(
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
-                logger.LogWarning(ex, "Redis GET failed; falling back to {Fallback}.", fallback.Name);
+                LogRedisGetFallback(logger, ex, fallback.Name);
             }
 
             var fallbackBytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
@@ -338,7 +340,7 @@ internal sealed class HybridCacheService(
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
-                logger.LogWarning(ex, "Redis SET failed; writing to {Fallback}.", fallback.Name);
+                LogRedisSetFallback(logger, ex, fallback.Name);
                 await fallback.SetAsync(key, valueToStore, options, ct).ConfigureAwait(false);
                 reconciliation?.TrackWrite(key, valueToStore, options.Ttl);
             }
@@ -402,7 +404,7 @@ internal sealed class HybridCacheService(
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
-                logger.LogWarning(ex, "Redis DEL failed; using {Fallback} only.", fallback.Name);
+                LogRedisDeleteFallback(logger, ex, fallback.Name);
                 reconciliation?.TrackDelete(key);
                 return ok;
             }
@@ -478,7 +480,7 @@ internal sealed class HybridCacheService(
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
-                logger.LogWarning(ex, "Redis GET failed; falling back to {Fallback}.", fallback.Name);
+                LogRedisGetFallback(logger, ex, fallback.Name);
             }
 
             var bytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
@@ -736,7 +738,7 @@ internal sealed class HybridCacheService(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Fallback stale-tag cleanup failed for key {Key}.", key);
+            LogFallbackStaleTagCleanupFailed(logger, ex, key);
         }
 
         var breaker = _breaker;
@@ -766,7 +768,7 @@ internal sealed class HybridCacheService(
         catch (Exception ex)
         {
             MarkRedisFailure();
-            logger.LogDebug(ex, "Redis stale-tag cleanup failed for key {Key}; queued for reconciliation.", key);
+            LogRedisStaleTagCleanupQueued(logger, ex, key);
             reconciliation?.TrackDelete(key);
         }
         finally
@@ -876,7 +878,7 @@ internal sealed class HybridCacheService(
                     CacheIntentKind.ReadThrough,
                     Reason: "hybrid-failover-read-warm",
                     Owner: Name,
-                    Tags: new[] { "hybrid-failover", "read-warm" }));
+                    Tags: ReadWarmTags));
             await fallback.SetAsync(key, value, writeOptions, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -913,7 +915,7 @@ internal sealed class HybridCacheService(
                     CacheIntentKind.ReadThrough,
                     Reason: "hybrid-failover-write-mirror",
                     Owner: Name,
-                    Tags: new[] { "hybrid-failover", "write-mirror" }));
+                    Tags: WriteMirrorTags));
             await fallback.SetAsync(key, value, writeOptions, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -946,7 +948,7 @@ internal sealed class HybridCacheService(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Fallback remove failed for key {Key}.", key);
+            LogFallbackRemoveFailed(logger, ex, key);
         }
     }
 
@@ -989,7 +991,7 @@ internal sealed class HybridCacheService(
 
         _ = Task.Run(async () =>
         {
-            logger.LogInformation("Starting Redis reconciliation after breaker close.");
+            LogReconciliationStart(logger);
             var sw = Stopwatch.StartNew();
             try
             {
@@ -997,15 +999,81 @@ internal sealed class HybridCacheService(
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Redis reconciliation failed.");
+                LogReconciliationFailed(logger, ex);
             }
             finally
             {
-                logger.LogInformation("Redis reconciliation finished in {Duration}ms.", sw.Elapsed.TotalMilliseconds);
+                LogReconciliationFinished(logger, sw.Elapsed.TotalMilliseconds);
                 Interlocked.Exchange(ref _reconcileInFlight, 0);
             }
         });
     }
+
+    [LoggerMessage(
+        EventId = 7007,
+        Level = LogLevel.Warning,
+        Message = "Redis circuit breaker reached MaxConsecutiveRetries ({Attempts}); holding open indefinitely until manual reset.")]
+    private static partial void LogBreakerMaxRetriesReached(ILogger logger, int attempts);
+
+    [LoggerMessage(
+        EventId = 7008,
+        Level = LogLevel.Warning,
+        Message = "Circuit breaker opened after {Failures} consecutive failures. Switching to {Fallback} mode for {Duration} seconds.")]
+    private static partial void LogBreakerOpened(ILogger logger, int failures, string fallback, double duration);
+
+    [LoggerMessage(
+        EventId = 7009,
+        Level = LogLevel.Warning,
+        Message = "Redis GET failed; falling back to {Fallback}.")]
+    private static partial void LogRedisGetFallback(ILogger logger, Exception exception, string fallback);
+
+    [LoggerMessage(
+        EventId = 7010,
+        Level = LogLevel.Warning,
+        Message = "Redis SET failed; writing to {Fallback}.")]
+    private static partial void LogRedisSetFallback(ILogger logger, Exception exception, string fallback);
+
+    [LoggerMessage(
+        EventId = 7011,
+        Level = LogLevel.Warning,
+        Message = "Redis DEL failed; using {Fallback} only.")]
+    private static partial void LogRedisDeleteFallback(ILogger logger, Exception exception, string fallback);
+
+    [LoggerMessage(
+        EventId = 7012,
+        Level = LogLevel.Debug,
+        Message = "Fallback stale-tag cleanup failed for key {Key}.")]
+    private static partial void LogFallbackStaleTagCleanupFailed(ILogger logger, Exception exception, string key);
+
+    [LoggerMessage(
+        EventId = 7013,
+        Level = LogLevel.Debug,
+        Message = "Redis stale-tag cleanup failed for key {Key}; queued for reconciliation.")]
+    private static partial void LogRedisStaleTagCleanupQueued(ILogger logger, Exception exception, string key);
+
+    [LoggerMessage(
+        EventId = 7014,
+        Level = LogLevel.Debug,
+        Message = "Fallback remove failed for key {Key}.")]
+    private static partial void LogFallbackRemoveFailed(ILogger logger, Exception exception, string key);
+
+    [LoggerMessage(
+        EventId = 7015,
+        Level = LogLevel.Information,
+        Message = "Starting Redis reconciliation after breaker close.")]
+    private static partial void LogReconciliationStart(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 7016,
+        Level = LogLevel.Warning,
+        Message = "Redis reconciliation failed.")]
+    private static partial void LogReconciliationFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        EventId = 7017,
+        Level = LogLevel.Information,
+        Message = "Redis reconciliation finished in {Duration}ms.")]
+    private static partial void LogReconciliationFinished(ILogger logger, double duration);
 
     private sealed class DefaultHybridFailoverOptionsMonitor : IOptionsMonitor<HybridFailoverOptions>
     {
