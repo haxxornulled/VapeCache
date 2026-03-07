@@ -15,6 +15,7 @@ public sealed class LiveDemoHostedServiceTests
     {
         using var memory = new MemoryCache(new MemoryCacheOptions());
         var current = new CurrentCacheService();
+        var backendState = new CacheBackendState(current, breaker: null, failover: null);
         var registry = new CacheStatsRegistry();
         var spillOptions = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions { EnableSpillToDisk = false });
         var cache = new InMemoryCacheService(memory, current, registry, spillOptions, new NoopSpillStore());
@@ -30,7 +31,7 @@ public sealed class LiveDemoHostedServiceTests
         var sut = new LiveDemoHostedService(
             options,
             cache,
-            current,
+            backendState,
             circuitBreaker: null,
             NullLogger<LiveDemoHostedService>.Instance);
 
@@ -49,6 +50,7 @@ public sealed class LiveDemoHostedServiceTests
     {
         using var memory = new MemoryCache(new MemoryCacheOptions());
         var current = new CurrentCacheService();
+        var backendState = new CacheBackendState(current, breaker: null, failover: null);
         var registry = new CacheStatsRegistry();
         var spillOptions = new TestOptionsMonitor<InMemorySpillOptions>(new InMemorySpillOptions { EnableSpillToDisk = false });
         var cache = new InMemoryCacheService(memory, current, registry, spillOptions, new NoopSpillStore());
@@ -64,7 +66,7 @@ public sealed class LiveDemoHostedServiceTests
         var sut = new LiveDemoHostedService(
             options,
             cache,
-            current,
+            backendState,
             circuitBreaker: null,
             NullLogger<LiveDemoHostedService>.Instance);
 

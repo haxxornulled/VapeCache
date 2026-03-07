@@ -105,12 +105,20 @@ jobs:
       - name: Perf gates tests
         run: dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj
 
-      - name: Vulnerability scan
+      - name: Vulnerability scan (public feeds)
         shell: pwsh
         run: |
           . ./tools/release-package-manifest.ps1
           $projects = Get-ReleasePackageProjects
-          pwsh -File tools/audit-vulnerabilities.ps1 -Projects $projects -IncludePrivateFeeds
+          pwsh -File tools/audit-vulnerabilities.ps1 -Projects $projects
+
+      - name: Vulnerability scan (private feeds)
+        if: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN != '' }}
+        shell: pwsh
+        run: |
+          . ./tools/release-package-manifest.ps1
+          $projects = Get-ReleasePackageProjects
+          pwsh -File tools/audit-vulnerabilities.ps1 -Projects $projects -IncludePrivateFeeds -FailOnPrivateFeedAuthError
 
       - name: Pack
         run: pwsh -File tools/pack-release-packages.ps1 -OutputDir artifacts/packages -PackageVersion "${{ steps.release_tag.outputs.package_version }}"

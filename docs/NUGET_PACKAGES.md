@@ -39,6 +39,13 @@ ASP.NET Core output-cache pipeline hooks (MVC/Blazor/Minimal API) backed by Vape
 dotnet add package VapeCache.Extensions.AspNetCore
 ```
 
+### VapeCache.Features.Invalidation
+Optional policy-driven invalidation engine (tags/zones/keys + profiles).
+
+```bash
+dotnet add package VapeCache.Features.Invalidation
+```
+
 ### VapeCache.Reconciliation
 Optional reconciliation service to sync in-memory writes after Redis recovery.
 

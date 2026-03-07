@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Core.Policies;
 
 namespace VapeCache.Infrastructure.Caching;
 
@@ -526,7 +527,7 @@ internal sealed partial class HybridCacheService(
     /// </summary>
     public async ValueTask<long> InvalidateTagAsync(string tag, CancellationToken ct = default)
     {
-        var normalizedTag = NormalizeTag(tag);
+        var normalizedTag = CacheTagPolicy.NormalizeTag(tag);
         var currentVersion = await GetCurrentTagVersionAsync(normalizedTag, ct).ConfigureAwait(false);
         var nextVersion = currentVersion == long.MaxValue ? 1 : currentVersion + 1;
         await WriteTagVersionAsync(normalizedTag, nextVersion, ct).ConfigureAwait(false);
@@ -537,7 +538,7 @@ internal sealed partial class HybridCacheService(
     /// Gets value.
     /// </summary>
     public ValueTask<long> GetTagVersionAsync(string tag, CancellationToken ct = default)
-        => GetCurrentTagVersionAsync(NormalizeTag(tag), ct);
+        => GetCurrentTagVersionAsync(CacheTagPolicy.NormalizeTag(tag), ct);
 
     /// <summary>
     /// Executes value.
@@ -556,7 +557,7 @@ internal sealed partial class HybridCacheService(
         CacheEntryOptions options,
         CancellationToken ct)
     {
-        var tags = NormalizeTags(options.Intent?.Tags);
+        var tags = CacheTagPolicy.NormalizeTags(existingTags: null, additionalTags: options.Intent?.Tags);
         if (tags.Length == 0)
             return payload;
 
@@ -835,33 +836,6 @@ internal sealed partial class HybridCacheService(
         {
             return false;
         }
-    }
-
-    private static string NormalizeTag(string tag)
-    {
-        if (string.IsNullOrWhiteSpace(tag))
-            throw new ArgumentException("Tag must not be null or whitespace.", nameof(tag));
-        return tag.Trim();
-    }
-
-    private static string[] NormalizeTags(string[]? tags)
-    {
-        if (tags is null || tags.Length == 0)
-            return Array.Empty<string>();
-
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var result = new List<string>(tags.Length);
-        foreach (var tag in tags)
-        {
-            if (string.IsNullOrWhiteSpace(tag))
-                continue;
-
-            var normalized = tag.Trim();
-            if (seen.Add(normalized))
-                result.Add(normalized);
-        }
-
-        return result.ToArray();
     }
 
     private async ValueTask TryWarmFallbackFromReadAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)

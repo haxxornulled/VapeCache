@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Abstractions.Diagnostics;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 
@@ -43,6 +44,7 @@ internal static class TestModules
         // Core services
         builder.RegisterInstance(timeProvider ?? TimeProvider.System).As<TimeProvider>().SingleInstance();
         builder.RegisterType<CurrentCacheService>().As<ICurrentCacheService>().SingleInstance();
+        builder.RegisterType<CacheBackendState>().As<ICacheBackendState>().SingleInstance();
         builder.RegisterType<CacheStatsRegistry>().AsSelf().SingleInstance();
         builder.RegisterType<CurrentCacheStats>().As<ICacheStats>().SingleInstance();
         builder.RegisterInstance(Options.Create(new MemoryCacheOptions())).As<IOptions<MemoryCacheOptions>>();

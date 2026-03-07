@@ -34,7 +34,7 @@ public static class CacheTelemetry
     public static readonly Counter<long> LargeKeyWrites = Meter.CreateCounter<long>("cache.set.large_key", description: "Large payload cache writes");
     public static readonly Counter<long> Evictions = Meter.CreateCounter<long>("cache.evictions", description: "In-memory cache evictions");
 
-    private static ICurrentCacheService? _currentCacheService;
+    private static ICacheBackendState? _backendState;
     private static ISpillStoreDiagnostics? _spillStoreDiagnostics;
 
     internal static void EnsureInitialized()
@@ -56,9 +56,9 @@ public static class CacheTelemetry
     /// <summary>
     /// Initializes the current backend observable gauge. Called during service registration.
     /// </summary>
-    internal static void Initialize(ICurrentCacheService currentCacheService)
+    internal static void Initialize(ICacheBackendState backendState)
     {
-        _currentCacheService = currentCacheService;
+        _backendState = backendState;
     }
 
     /// <summary>
@@ -71,7 +71,7 @@ public static class CacheTelemetry
 
     internal static void ResetForTesting()
     {
-        _currentCacheService = null;
+        _backendState = null;
         _spillStoreDiagnostics = null;
     }
 
@@ -87,16 +87,11 @@ public static class CacheTelemetry
 
     internal static Measurement<int> GetCurrentBackendMeasurement()
     {
-        if (_currentCacheService is null)
+        if (_backendState is null)
             return new Measurement<int>(-1, new TagList { { "backend", "unknown" } });
 
-        var current = _currentCacheService.CurrentName;
-        var value = MapBackendName(current);
-        var tagValue = value >= 0 && BackendTypeResolver.TryParseName(current, out var backend)
-            ? backend.ToWireName()
-            : "unknown";
-
-        return new Measurement<int>(value, new TagList { { "backend", tagValue } });
+        var backend = _backendState.EffectiveBackend;
+        return new Measurement<int>(backend.ToGaugeValue(), new TagList { { "backend", backend.ToWireName() } });
     }
 
     /// <summary>

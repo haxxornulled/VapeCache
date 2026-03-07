@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 using VapeCache.Abstractions.Modules;
 
 namespace VapeCache.Console.GroceryStore;
@@ -21,7 +22,7 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
     private readonly IHostApplicationLifetime _hostLifetime;
     private readonly GroceryStoreService _store;
     private readonly ICacheStats _stats;
-    private readonly ICurrentCacheService _currentCache;
+    private readonly ICacheBackendState _backendState;
     private readonly IRedisCircuitBreakerState _breakerState;
     private readonly IRedisFailoverController _failoverController;
     private readonly IRedisModuleDetector _moduleDetector;
@@ -34,7 +35,7 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         IHostApplicationLifetime hostLifetime,
         GroceryStoreService store,
         ICacheStats stats,
-        ICurrentCacheService currentCache,
+        ICacheBackendState backendState,
         IRedisCircuitBreakerState breakerState,
         IRedisFailoverController failoverController,
         IRedisModuleDetector moduleDetector,
@@ -44,7 +45,7 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         _hostLifetime = hostLifetime;
         _store = store;
         _stats = stats;
-        _currentCache = currentCache;
+        _backendState = backendState;
         _breakerState = breakerState;
         _failoverController = failoverController;
         _moduleDetector = moduleDetector;
@@ -367,7 +368,7 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
             var elapsed = sw.Elapsed.TotalSeconds;
             var snapshot = _stats.Snapshot;
             var hitRate = snapshot.GetCalls > 0 ? (snapshot.Hits * 100.0 / snapshot.GetCalls) : 0;
-            var backend = _currentCache.CurrentName;
+            var backend = _backendState.EffectiveBackend.ToWireName();
             var breakerOpen = _breakerState.IsOpen;
             var forcedOpen = _failoverController.IsForcedOpen;
             var breakerFailures = _breakerState.ConsecutiveFailures;
@@ -422,7 +423,7 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         _logger.LogInformation("  Total Removes: {Removes}", finalSnapshot.RemoveCalls);
         _logger.LogInformation("  Fallback Events: {Fallback}", finalSnapshot.FallbackToMemory);
         _logger.LogInformation("  Circuit Breaker Opens: {Opens}", finalSnapshot.RedisBreakerOpened);
-        _logger.LogInformation("  Current Backend: {Backend}", _currentCache.CurrentName);
+        _logger.LogInformation("  Current Backend: {Backend}", _backendState.EffectiveBackend.ToWireName());
         _logger.LogInformation("  Breaker Open: {Open}", _breakerState.IsOpen);
         _logger.LogInformation("  Breaker Consecutive Failures: {Failures}", _breakerState.ConsecutiveFailures);
         _logger.LogInformation("  Breaker Open Remaining: {Remaining}", _breakerState.OpenRemaining);

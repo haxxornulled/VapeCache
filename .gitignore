@@ -62,6 +62,9 @@ artifacts/
 **/TestResults/
 tools/VapeCache.DocCommenter/
 VapeCache.UI/wwwroot/js/reconnect-modal.js
+.tools/
+AspireIntSample/
+pending_status.txt
 
 # ===================================
 # ENTERPRISE / PRIVATE CODE

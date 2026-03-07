@@ -7,20 +7,20 @@ namespace VapeCache.Extensions.Aspire.HealthChecks;
 public sealed class VapeCacheHealthCheck : IHealthCheck
 {
     private readonly ICacheService _cache;
-    private readonly ICurrentCacheService _current;
+    private readonly ICacheBackendState _backendState;
     private readonly ICacheStats _stats;
     private readonly IRedisCircuitBreakerState _breaker;
     private readonly IRedisFailoverController _failover;
 
     public VapeCacheHealthCheck(
         ICacheService cache,
-        ICurrentCacheService current,
+        ICacheBackendState backendState,
         ICacheStats stats,
         IRedisCircuitBreakerState breaker,
         IRedisFailoverController failover)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _current = current ?? throw new ArgumentNullException(nameof(current));
+        _backendState = backendState ?? throw new ArgumentNullException(nameof(backendState));
         _stats = stats ?? throw new ArgumentNullException(nameof(stats));
         _breaker = breaker ?? throw new ArgumentNullException(nameof(breaker));
         _failover = failover ?? throw new ArgumentNullException(nameof(failover));
@@ -39,10 +39,7 @@ public sealed class VapeCacheHealthCheck : IHealthCheck
             _ = await _cache.GetAsync(healthCheckKey, cancellationToken);
             var snapshot = _stats.Snapshot;
             var reads = snapshot.Hits + snapshot.Misses;
-            var currentBackend = BackendTypeResolver.Resolve(
-                _current.CurrentName,
-                _breaker.IsOpen,
-                _failover.IsForcedOpen);
+            var currentBackend = _backendState.EffectiveBackend;
             var currentBackendIsRedis = currentBackend == BackendType.Redis;
             var data = new Dictionary<string, object>
             {
@@ -55,9 +52,8 @@ public sealed class VapeCacheHealthCheck : IHealthCheck
                 ["hit_rate"] = reads <= 0 ? 0d : (double)snapshot.Hits / reads
             };
 
-            // "current_backend" reflects the most recent operation path and may legitimately
-            // be "memory" on cache misses even when Redis is healthy. Only degrade when
-            // failover is active (forced-open or breaker-open).
+            // Backend state is authoritative from breaker/failover status and does not
+            // oscillate based on transient per-operation fallback paths.
             if (_failover.IsForcedOpen || _breaker.IsOpen)
             {
                 if (_breaker.OpenRemaining is { } remaining)

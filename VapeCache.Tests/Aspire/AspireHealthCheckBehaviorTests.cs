@@ -39,8 +39,7 @@ public sealed class AspireHealthCheckBehaviorTests
     [Fact]
     public async Task VapeCacheHealthCheck_ReturnsDegraded_WhenServingFallback()
     {
-        var current = new CurrentCacheService();
-        var cache = new FakeCacheService(current, backendName: "memory");
+        var cache = new FakeCacheService(backendName: "memory");
         var stats = new FixedCacheStats(new CacheStatsSnapshot(10, 7, 3, 4, 1, 2, 1, 0, 0, 0));
         var breaker = new FakeBreakerState
         {
@@ -50,7 +49,8 @@ public sealed class AspireHealthCheckBehaviorTests
             OpenRemaining = TimeSpan.FromSeconds(30)
         };
         var failover = new FakeFailoverController();
-        var healthCheck = new VapeCacheHealthCheck(cache, current, stats, breaker, failover);
+        var backendState = new EffectiveBackendState(breaker, failover);
+        var healthCheck = new VapeCacheHealthCheck(cache, backendState, stats, breaker, failover);
 
         var result = await healthCheck.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
 
@@ -62,12 +62,12 @@ public sealed class AspireHealthCheckBehaviorTests
     [Fact]
     public async Task VapeCacheHealthCheck_ReturnsHealthy_WhenRedisIsServing()
     {
-        var current = new CurrentCacheService();
-        var cache = new FakeCacheService(current, backendName: "redis");
+        var cache = new FakeCacheService(backendName: "redis");
         var stats = new FixedCacheStats(new CacheStatsSnapshot(4, 3, 1, 2, 0, 0, 0, 0, 0, 0));
         var breaker = new FakeBreakerState();
         var failover = new FakeFailoverController();
-        var healthCheck = new VapeCacheHealthCheck(cache, current, stats, breaker, failover);
+        var backendState = new EffectiveBackendState(breaker, failover);
+        var healthCheck = new VapeCacheHealthCheck(cache, backendState, stats, breaker, failover);
 
         var result = await healthCheck.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
 
@@ -77,10 +77,9 @@ public sealed class AspireHealthCheckBehaviorTests
     }
 
     [Fact]
-    public async Task VapeCacheHealthCheck_ReturnsHealthy_WhenBreakerClosed_EvenIfCurrentBackendIsMemory()
+    public async Task VapeCacheHealthCheck_ReturnsHealthy_WithRedisBackend_WhenBreakerClosed_EvenIfTransientMemoryFallbackOccurs()
     {
-        var current = new CurrentCacheService();
-        var cache = new FakeCacheService(current, backendName: "memory");
+        var cache = new FakeCacheService(backendName: "memory");
         var stats = new FixedCacheStats(new CacheStatsSnapshot(5, 2, 3, 1, 0, 0, 0, 0, 0, 0));
         var breaker = new FakeBreakerState
         {
@@ -89,12 +88,13 @@ public sealed class AspireHealthCheckBehaviorTests
             ConsecutiveFailures = 0
         };
         var failover = new FakeFailoverController();
-        var healthCheck = new VapeCacheHealthCheck(cache, current, stats, breaker, failover);
+        var backendState = new EffectiveBackendState(breaker, failover);
+        var healthCheck = new VapeCacheHealthCheck(cache, backendState, stats, breaker, failover);
 
         var result = await healthCheck.CheckHealthAsync(new HealthCheckContext(), CancellationToken.None);
 
         Assert.Equal(HealthStatus.Healthy, result.Status);
-        Assert.Equal(BackendType.InMemory, result.Data["current_backend"]);
+        Assert.Equal(BackendType.Redis, result.Data["current_backend"]);
         Assert.Equal(false, result.Data["breaker_open"]);
         Assert.Equal(false, result.Data["forced_open"]);
     }
@@ -197,13 +197,12 @@ public sealed class AspireHealthCheckBehaviorTests
         public override void SetLength(long value) => throw new NotSupportedException();
     }
 
-    private sealed class FakeCacheService(ICurrentCacheService current, string backendName, Exception? failure = null) : ICacheService
+    private sealed class FakeCacheService(string backendName, Exception? failure = null) : ICacheService
     {
         public string Name => backendName;
 
         public ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
         {
-            current.SetCurrent(backendName);
             if (failure is not null)
                 throw failure;
             return ValueTask.FromResult<byte[]?>(null);
@@ -269,5 +268,13 @@ public sealed class AspireHealthCheckBehaviorTests
         public void MarkRedisFailure()
         {
         }
+    }
+
+    private sealed class EffectiveBackendState(
+        IRedisCircuitBreakerState breaker,
+        IRedisFailoverController failover) : ICacheBackendState
+    {
+        public BackendType EffectiveBackend =>
+            (failover.IsForcedOpen || breaker.IsOpen) ? BackendType.InMemory : BackendType.Redis;
     }
 }

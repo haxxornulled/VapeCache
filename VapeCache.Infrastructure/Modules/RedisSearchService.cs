@@ -5,7 +5,7 @@ using VapeCache.Abstractions.Modules;
 
 namespace VapeCache.Infrastructure.Modules;
 
-internal sealed partial class RedisSearchService : IRedisSearchService
+internal sealed partial class RedisSearchService : IRedisSearchService, IDisposable
 {
     private readonly IRedisCommandExecutor _redis;
     private readonly IRedisModuleDetector _modules;
@@ -78,4 +78,6 @@ internal sealed partial class RedisSearchService : IRedisSearchService
         Level = LogLevel.Warning,
         Message = "RediSearch module not available; FT.CREATE for {Index} ignored.")]
     private static partial void LogRedisSearchUnavailable(ILogger logger, string index);
+
+    public void Dispose() => _gate.Dispose();
 }

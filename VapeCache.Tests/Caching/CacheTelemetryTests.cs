@@ -1,5 +1,6 @@
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Globalization;
 using VapeCache.Tests.Telemetry;
@@ -35,7 +36,7 @@ public sealed class CacheTelemetryTests
         CacheTelemetry.ResetForTesting();
         CacheTelemetry.EnsureInitialized();
 
-        var current = new FakeCurrentCacheService("redis");
+        var backendState = new FakeBackendState(BackendType.Redis);
         var spill = new FakeSpillDiagnostics(new SpillStoreDiagnosticsSnapshot(
             SupportsDiskSpill: true,
             SpillToDiskConfigured: true,
@@ -48,7 +49,7 @@ public sealed class CacheTelemetryTests
             TopShards: Array.Empty<SpillShardLoad>(),
             SampledAtUtc: DateTimeOffset.UtcNow));
 
-        CacheTelemetry.Initialize(current);
+        CacheTelemetry.Initialize(backendState);
         CacheTelemetry.InitializeSpillDiagnostics(spill);
 
         var measurements = CaptureObservableMeasurements("VapeCache.Cache");
@@ -123,11 +124,9 @@ public sealed class CacheTelemetryTests
 
     private sealed record MeasurementSnapshot(double Value, IReadOnlyDictionary<string, string> Tags);
 
-    private sealed class FakeCurrentCacheService(string initialName) : ICurrentCacheService
+    private sealed class FakeBackendState(BackendType backend) : ICacheBackendState
     {
-        public string CurrentName { get; private set; } = initialName;
-
-        public void SetCurrent(string name) => CurrentName = name;
+        public BackendType EffectiveBackend { get; } = backend;
     }
 
     private sealed class FakeSpillDiagnostics(SpillStoreDiagnosticsSnapshot snapshot) : ISpillStoreDiagnostics

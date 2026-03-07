@@ -16,6 +16,7 @@ public sealed class BenchmarkSuiteCatalogTests
         Assert.Equal("Feature sets (all)", plan.DisplayName);
         Assert.Equal("--filter", plan.Arguments[0]);
         Assert.Contains("*CacheServiceApiBenchmarks*", plan.Arguments);
+        Assert.Contains("*CacheTagPolicyBenchmarks*", plan.Arguments);
         Assert.Contains("*CircuitBreakerPerformanceBenchmarks*", plan.Arguments);
         Assert.Contains("*RedisRespProtocolBenchmarks*", plan.Arguments);
         Assert.Contains("*RedisMultiplexedConnectionBenchmarks*", plan.Arguments);

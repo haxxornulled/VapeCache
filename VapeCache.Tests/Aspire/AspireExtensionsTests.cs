@@ -215,6 +215,37 @@ public sealed class AspireExtensionsTests
     }
 
     [Fact]
+    public void WithRedisExporterMetrics_BindsConfigurationAndRegistersHostedService()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        hostBuilder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["VapeCache:RedisExporter:Enabled"] = "true",
+            ["VapeCache:RedisExporter:Endpoint"] = "http://localhost:9121/metrics",
+            ["VapeCache:RedisExporter:PollInterval"] = "00:00:03",
+            ["VapeCache:RedisExporter:RequestTimeout"] = "00:00:01"
+        });
+
+        hostBuilder
+            .AddVapeCacheClientBuilder(registerCoreServices: false)
+            .WithRedisExporterMetrics();
+
+        using var provider = hostBuilder.Services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptionsMonitor<RedisExporterMetricsOptions>>().CurrentValue;
+
+        Assert.True(options.Enabled);
+        Assert.Equal("http://localhost:9121/metrics", options.Endpoint);
+        Assert.Equal(TimeSpan.FromSeconds(3), options.PollInterval);
+        Assert.Equal(TimeSpan.FromSeconds(1), options.RequestTimeout);
+
+        Assert.Contains(
+            hostBuilder.Services,
+            static descriptor =>
+                descriptor.ServiceType == typeof(IHostedService) &&
+                descriptor.ImplementationType?.Name == "RedisExporterMetricsHostedService");
+    }
+
+    [Fact]
     public async Task WithAspNetCoreOutputCaching_RegistersVapeCacheStore()
     {
         var hostBuilder = new HostApplicationBuilder();

@@ -1,15 +1,16 @@
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Infrastructure.Caching;
 
 internal sealed class CurrentCacheStats : ICacheStats
 {
-    private readonly ICurrentCacheService _current;
+    private readonly ICacheBackendState _backendState;
     private readonly CacheStatsRegistry _registry;
 
-    public CurrentCacheStats(ICurrentCacheService current, CacheStatsRegistry registry)
+    public CurrentCacheStats(ICacheBackendState backendState, CacheStatsRegistry registry)
     {
-        _current = current;
+        _backendState = backendState;
         _registry = registry;
     }
 
@@ -17,7 +18,9 @@ internal sealed class CurrentCacheStats : ICacheStats
     {
         get
         {
-            var name = _current.CurrentName;
+            var name = _backendState.EffectiveBackend == BackendType.InMemory
+                ? CacheStatsNames.Memory
+                : CacheStatsNames.Redis;
             var current = _registry.TryGet(name, out var currentStats)
                 ? currentStats.Snapshot
                 : default;

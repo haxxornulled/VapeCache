@@ -71,6 +71,11 @@ jobs:
         shell: pwsh
         run: pwsh -File tools/audit-vulnerabilities.ps1 -Solution ${{ steps.solution.outputs.path }}
 
+      - name: Vulnerability audit (private feeds)
+        if: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN != '' }}
+        shell: pwsh
+        run: pwsh -File tools/audit-vulnerabilities.ps1 -Solution ${{ steps.solution.outputs.path }} -IncludePrivateFeeds -FailOnPrivateFeedAuthError
+
       - name: Unit tests
         run: dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj
 

@@ -75,8 +75,10 @@ public static class AspireTelemetryExtensions
                 // These are already defined in VapeCache.Infrastructure:
                 // - CacheTelemetry.Meter ("VapeCache.Cache")
                 // - RedisTelemetry.Meter ("VapeCache.Redis")
+                // - RedisExporterTelemetry.Meter ("VapeCache.RedisServer")
                 metrics.AddMeter("VapeCache.Cache");   // Cache hit/miss, operations
                 metrics.AddMeter("VapeCache.Redis");   // Redis commands, pool metrics
+                metrics.AddMeter("VapeCache.RedisServer"); // redis_exporter server metrics
 
                 // Configure histogram buckets for cache operation latency
                 // Optimized for sub-millisecond to multi-second operations

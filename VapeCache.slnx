@@ -8,6 +8,7 @@
   <Project Path="VapeCache.Core/VapeCache.Core.csproj" />
   <Project Path="VapeCache.Extensions.Aspire/VapeCache.Extensions.Aspire.csproj" />
   <Project Path="VapeCache.Extensions.AspNetCore/VapeCache.Extensions.AspNetCore.csproj" />
+  <Project Path="VapeCache.Features.Invalidation/VapeCache.Features.Invalidation.csproj" />
   <Project Path="VapeCache.Infrastructure/VapeCache.Infrastructure.csproj" />
   <Project Path="VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj" />
   <Project Path="VapeCache.Persistence/VapeCache.Persistence.csproj" />

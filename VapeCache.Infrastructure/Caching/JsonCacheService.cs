@@ -6,7 +6,7 @@ using VapeCache.Abstractions.Modules;
 
 namespace VapeCache.Infrastructure.Caching;
 
-internal sealed partial class JsonCacheService : IJsonCache
+internal sealed partial class JsonCacheService : IJsonCache, IDisposable
 {
     private static readonly JsonSerializerOptions DefaultOptions = new(JsonSerializerDefaults.Web);
 
@@ -151,4 +151,6 @@ internal sealed partial class JsonCacheService : IJsonCache
         Level = LogLevel.Warning,
         Message = "RedisJSON unavailable; JSON path '{Path}' ignored for key {Key}.")]
     private static partial void LogJsonPathIgnored(ILogger logger, string? path, string key);
+
+    public void Dispose() => _moduleGate.Dispose();
 }

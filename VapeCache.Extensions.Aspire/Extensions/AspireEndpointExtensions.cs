@@ -52,7 +52,7 @@ public static class AspireEndpointExtensions
             .WithTags("VapeCache");
 
         group.MapGet("/status", static (
-            ICurrentCacheService current,
+            ICacheBackendState backendState,
             ICacheStats stats,
             IRedisCircuitBreakerState breaker,
             IRedisFailoverController failover,
@@ -68,10 +68,7 @@ public static class AspireEndpointExtensions
 
             var response = new VapeCacheEndpointStatusResponse(
                 TimestampUtc: DateTimeOffset.UtcNow,
-                CurrentBackend: BackendTypeResolver.Resolve(
-                    current.CurrentName,
-                    breaker.IsOpen,
-                    failover.IsForcedOpen),
+                CurrentBackend: backendState.EffectiveBackend,
                 Stats: new VapeCacheEndpointStatsResponse(
                     GetCalls: snapshot.GetCalls,
                     Hits: snapshot.Hits,

@@ -23,6 +23,8 @@ public static class CacheEntryOptionsTagExtensions
         var normalized = CacheTagPolicy.NormalizeTags(existingTags, tags);
         if (normalized.Length == 0)
             return options;
+        if (TagsMatch(existingTags, normalized))
+            return options;
 
         var intent = options.Intent ?? new CacheIntent(
             CacheIntentKind.Unspecified,
@@ -37,7 +39,7 @@ public static class CacheEntryOptionsTagExtensions
     /// Zone invalidation is backed by reserved tag names.
     /// </summary>
     public static CacheEntryOptions WithZone(this CacheEntryOptions options, string zone)
-        => options.WithZones([zone]);
+        => options.WithTag(CacheTagPolicy.ToZoneTag(zone));
 
     /// <summary>
     /// Applies cache zones to the cache entry options.
@@ -47,11 +49,27 @@ public static class CacheEntryOptionsTagExtensions
     {
         if (zones is null || zones.Length == 0)
             return options;
+        if (zones.Length == 1)
+            return options.WithTag(CacheTagPolicy.ToZoneTag(zones[0]));
 
         var zoneTags = new string[zones.Length];
         for (var i = 0; i < zones.Length; i++)
             zoneTags[i] = CacheTagPolicy.ToZoneTag(zones[i]);
 
         return options.WithTags(zoneTags);
+    }
+
+    private static bool TagsMatch(string[]? existingTags, string[] normalizedTags)
+    {
+        if (existingTags is null || existingTags.Length != normalizedTags.Length)
+            return false;
+
+        for (var i = 0; i < normalizedTags.Length; i++)
+        {
+            if (!string.Equals(existingTags[i], normalizedTags[i], StringComparison.Ordinal))
+                return false;
+        }
+
+        return true;
     }
 }

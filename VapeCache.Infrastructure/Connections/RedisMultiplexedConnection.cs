@@ -197,7 +197,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisMultiplexedConnection));
 
-        if (_inFlight.Wait(0))
+        if (_inFlight.Wait(0, ct))
             return EnqueueAfterSlot(command, poolBulk, ct);
 
         return EnqueueAfterSlotAsync(command, poolBulk, ct);
@@ -265,7 +265,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisMultiplexedConnection));
 
-        if (_inFlight.Wait(0))
+        if (_inFlight.Wait(0, ct))
             return EnqueueAfterSlot(
                 header,
                 payload,
@@ -809,19 +809,19 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         var sendHeader = await conn.SendAsync(req.Command, ct).ConfigureAwait(false);
         if (!sendHeader.IsSuccess)
-            sendHeader.IfFail(static ex => throw ex);
+            _ = sendHeader.IfFail(static ex => throw ex);
         RecordLaneBytesSent(req.Command.Length);
         if (!req.Payload.IsEmpty)
         {
             var sendPayload = await conn.SendAsync(req.Payload, ct).ConfigureAwait(false);
             if (!sendPayload.IsSuccess)
-                sendPayload.IfFail(static ex => throw ex);
+                _ = sendPayload.IfFail(static ex => throw ex);
             RecordLaneBytesSent(req.Payload.Length);
             if (req.AppendCrlf)
             {
                 var sendCrlf = await conn.SendAsync(CrlfMemory, ct).ConfigureAwait(false);
                 if (!sendCrlf.IsSuccess)
-                    sendCrlf.IfFail(static ex => throw ex);
+                    _ = sendCrlf.IfFail(static ex => throw ex);
                 RecordLaneBytesSent(CrlfMemory.Length);
             }
         }
@@ -832,13 +832,13 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             {
                 var sendSegment = await conn.SendAsync(payloads[i], ct).ConfigureAwait(false);
                 if (!sendSegment.IsSuccess)
-                    sendSegment.IfFail(static ex => throw ex);
+                    _ = sendSegment.IfFail(static ex => throw ex);
                 RecordLaneBytesSent(payloads[i].Length);
                 if (req.AppendCrlfPerPayload)
                 {
                     var sendLine = await conn.SendAsync(CrlfMemory, ct).ConfigureAwait(false);
                     if (!sendLine.IsSuccess)
-                    sendLine.IfFail(static ex => throw ex);
+                    _ = sendLine.IfFail(static ex => throw ex);
                     RecordLaneBytesSent(CrlfMemory.Length);
                 }
             }
@@ -1157,7 +1157,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             while (spinner.Count < 10)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_slots.Wait(0))
+                if (_slots.Wait(0, ct))
                 {
                     EnqueueAfterSlot(item);
                     return ValueTask.CompletedTask;
@@ -1261,7 +1261,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             while (spinner.Count < 10)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_items.Wait(0))
+                if (_items.Wait(0, ct))
                     return new ValueTask<T>(DequeueAfterWait());
                 spinner.SpinOnce();
             }
@@ -1444,7 +1444,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             while (spinner.Count < 10)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_slots.Wait(0))
+                if (_slots.Wait(0, ct))
                 {
                     EnqueueAfterSlot(item);
                     return ValueTask.CompletedTask;
@@ -1529,7 +1529,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             while (spinner.Count < 10)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_items.Wait(0))
+                if (_items.Wait(0, ct))
                     return new ValueTask<T>(DequeueAfterWait());
                 spinner.SpinOnce();
             }

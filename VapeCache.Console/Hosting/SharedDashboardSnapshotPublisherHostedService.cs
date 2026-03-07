@@ -8,7 +8,6 @@ namespace VapeCache.Console.Hosting;
 
 internal sealed class SharedDashboardSnapshotPublisherHostedService(
     ICacheStats cacheStats,
-    ICurrentCacheService currentCache,
     IRedisCircuitBreakerState breakerState,
     IRedisFailoverController failoverController,
     IEnumerable<IRedisMultiplexerDiagnostics> diagnostics,
@@ -92,8 +91,7 @@ internal sealed class SharedDashboardSnapshotPublisherHostedService(
 
         return new VapeCacheSharedDashboardSnapshot(
             TimestampUtc: DateTimeOffset.UtcNow,
-            Backend: BackendTypeResolver.Resolve(
-                currentCache.CurrentName,
+            Backend: ResolveDashboardBackend(
                 breakerState.IsOpen,
                 failoverController.IsForcedOpen),
             HitRate: reads <= 0 ? 0d : (double)stats.Hits / reads,
@@ -116,6 +114,9 @@ internal sealed class SharedDashboardSnapshotPublisherHostedService(
             Lanes: lanes,
             Spill: spill);
     }
+
+    private static BackendType ResolveDashboardBackend(bool breakerOpen, bool forcedOpen)
+        => (forcedOpen || breakerOpen) ? BackendType.InMemory : BackendType.Redis;
 
     private static IRedisMultiplexerDiagnostics? GetFirstOrDefault(IEnumerable<IRedisMultiplexerDiagnostics> source)
     {

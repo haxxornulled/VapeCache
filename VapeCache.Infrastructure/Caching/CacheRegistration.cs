@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Abstractions.Diagnostics;
 using VapeCache.Abstractions.Modules;
 using VapeCache.Infrastructure.Caching.Codecs;
 using VapeCache.Infrastructure.Collections;
@@ -34,12 +35,15 @@ public static class CacheRegistration
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, RedisMultiplexerOptionsStartupHostedService>());
 
-        services.AddSingleton<ICurrentCacheService>(sp =>
+        services.AddSingleton<ICurrentCacheService, CurrentCacheService>();
+        services.AddSingleton<ICacheBackendState>(sp =>
         {
-            var currentCacheService = new CurrentCacheService();
-            // Initialize telemetry with current cache service for observable gauge
-            CacheTelemetry.Initialize(currentCacheService);
-            return currentCacheService;
+            var backendState = new CacheBackendState(
+                sp.GetRequiredService<ICurrentCacheService>(),
+                sp.GetService<IRedisCircuitBreakerState>(),
+                sp.GetService<IRedisFailoverController>());
+            CacheTelemetry.Initialize(backendState);
+            return backendState;
         });
         services.AddSingleton<CacheStatsRegistry>();
         services.AddSingleton<ICacheStats, CurrentCacheStats>();

@@ -5,7 +5,7 @@ namespace VapeCache.UI.Features.CacheWorkbench;
 
 public sealed class CacheWorkbenchOrchestrator(
     IVapeCache cache,
-    ICurrentCacheService currentCache,
+    ICacheBackendState backendState,
     ICacheStats cacheStats,
     IRedisCircuitBreakerState breakerState,
     IRedisFailoverController failoverController)
@@ -13,10 +13,7 @@ public sealed class CacheWorkbenchOrchestrator(
     public ValueTask<CacheWorkbenchStatus> GetStatusAsync(CancellationToken ct = default)
     {
         var snapshot = cacheStats.Snapshot;
-        var backend = BackendTypeResolver.Resolve(
-            currentCache.CurrentName,
-            breakerState.IsOpen,
-            failoverController.IsForcedOpen);
+        var backend = backendState.EffectiveBackend;
 
         return ValueTask.FromResult(new CacheWorkbenchStatus(
             backend,

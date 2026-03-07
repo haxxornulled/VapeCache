@@ -6,6 +6,9 @@ namespace VapeCache.Infrastructure.Connections;
 
 internal sealed class RedisMultiplexedBufferCaches
 {
+    private const byte OwnershipInFlight = 1;
+    private const byte OwnershipReleasedByMux = 2;
+
     [ThreadStatic] private static byte[]? _tlsHeaderCache;
     [ThreadStatic] private static byte[]? _tlsSmallHeaderCache;
     [ThreadStatic] private static ReadOnlyMemory<byte>[]? _tlsPayloadArrayCache;
@@ -15,6 +18,8 @@ internal sealed class RedisMultiplexedBufferCaches
     private static readonly ConcurrentBag<byte[]> SharedSmallHeaderCache = new();
     private static readonly ConcurrentBag<ReadOnlyMemory<byte>[]> SharedPayloadArrayCache = new();
     private static readonly ConcurrentBag<ReadOnlyMemory<byte>[]> SharedSmallPayloadArrayCache = new();
+    private static readonly ConcurrentDictionary<byte[], byte> InFlightHeaderBuffers = new();
+    private static readonly ConcurrentDictionary<ReadOnlyMemory<byte>[], byte> InFlightPayloadArrays = new();
 
     private const int MaxSharedCacheSize = 64;
 
@@ -28,11 +33,15 @@ internal sealed class RedisMultiplexedBufferCaches
             if (_tlsSmallHeaderCache is { } buf && buf.Length >= minLength)
             {
                 _tlsSmallHeaderCache = null;
+                InFlightHeaderBuffers.TryRemove(buf, out _);
                 return buf;
             }
 
             if (SharedSmallHeaderCache.TryTake(out var poolBuf) && poolBuf.Length >= minLength)
+            {
+                InFlightHeaderBuffers.TryRemove(poolBuf, out _);
                 return poolBuf;
+            }
 
             return new byte[512];
         }
@@ -40,11 +49,15 @@ internal sealed class RedisMultiplexedBufferCaches
         if (_tlsHeaderCache is { } largeBuf && largeBuf.Length >= minLength)
         {
             _tlsHeaderCache = null;
+            InFlightHeaderBuffers.TryRemove(largeBuf, out _);
             return largeBuf;
         }
 
         if (SharedHeaderCache.TryTake(out var largePoolBuf) && largePoolBuf.Length >= minLength)
+        {
+            InFlightHeaderBuffers.TryRemove(largePoolBuf, out _);
             return largePoolBuf;
+        }
 
         return ArrayPool<byte>.Shared.Rent(Math.Max(2048, minLength));
     }
@@ -53,7 +66,13 @@ internal sealed class RedisMultiplexedBufferCaches
     /// Executes value.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void MarkHeaderBufferInFlight(byte[]? buffer) => _ = buffer;
+    public static void MarkHeaderBufferInFlight(byte[]? buffer)
+    {
+        if (buffer is null)
+            return;
+
+        InFlightHeaderBuffers[buffer] = OwnershipInFlight;
+    }
 
     /// <summary>
     /// Executes value.
@@ -68,6 +87,13 @@ internal sealed class RedisMultiplexedBufferCaches
         if (buffer is null)
             return;
 
+        if (InFlightHeaderBuffers.TryGetValue(buffer, out var ownership))
+        {
+            if (ownership == OwnershipReleasedByMux)
+                InFlightHeaderBuffers.TryRemove(buffer, out _);
+            return;
+        }
+
         ReturnHeaderBufferCore(buffer);
     }
 
@@ -79,6 +105,7 @@ internal sealed class RedisMultiplexedBufferCaches
         if (buffer is null)
             return;
 
+        InFlightHeaderBuffers[buffer] = OwnershipReleasedByMux;
         ReturnHeaderBufferCore(buffer);
     }
 
@@ -116,7 +143,13 @@ internal sealed class RedisMultiplexedBufferCaches
     /// Executes value.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void MarkPayloadArrayInFlight(ReadOnlyMemory<byte>[]? payloads) => _ = payloads;
+    public static void MarkPayloadArrayInFlight(ReadOnlyMemory<byte>[]? payloads)
+    {
+        if (payloads is null)
+            return;
+
+        InFlightPayloadArrays[payloads] = OwnershipInFlight;
+    }
 
     /// <summary>
     /// Executes value.
@@ -128,11 +161,15 @@ internal sealed class RedisMultiplexedBufferCaches
             if (_tlsSmallPayloadArrayCache is { } arr && arr.Length >= minLength)
             {
                 _tlsSmallPayloadArrayCache = null;
+                InFlightPayloadArrays.TryRemove(arr, out _);
                 return arr;
             }
 
             if (SharedSmallPayloadArrayCache.TryTake(out var poolArr) && poolArr.Length >= minLength)
+            {
+                InFlightPayloadArrays.TryRemove(poolArr, out _);
                 return poolArr;
+            }
 
             return new ReadOnlyMemory<byte>[16];
         }
@@ -140,11 +177,15 @@ internal sealed class RedisMultiplexedBufferCaches
         if (_tlsPayloadArrayCache is { } largeArr && largeArr.Length >= minLength)
         {
             _tlsPayloadArrayCache = null;
+            InFlightPayloadArrays.TryRemove(largeArr, out _);
             return largeArr;
         }
 
         if (SharedPayloadArrayCache.TryTake(out var largePoolArr) && largePoolArr.Length >= minLength)
+        {
+            InFlightPayloadArrays.TryRemove(largePoolArr, out _);
             return largePoolArr;
+        }
 
         return ArrayPool<ReadOnlyMemory<byte>>.Shared.Rent(Math.Max(64, minLength));
     }
@@ -162,6 +203,13 @@ internal sealed class RedisMultiplexedBufferCaches
         if (payloads is null)
             return;
 
+        if (InFlightPayloadArrays.TryGetValue(payloads, out var ownership))
+        {
+            if (ownership == OwnershipReleasedByMux)
+                InFlightPayloadArrays.TryRemove(payloads, out _);
+            return;
+        }
+
         ReturnPayloadArrayCore(payloads);
     }
 
@@ -173,6 +221,7 @@ internal sealed class RedisMultiplexedBufferCaches
         if (payloads is null)
             return;
 
+        InFlightPayloadArrays[payloads] = OwnershipReleasedByMux;
         ReturnPayloadArrayCore(payloads);
     }
 

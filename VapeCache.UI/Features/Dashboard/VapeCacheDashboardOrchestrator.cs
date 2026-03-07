@@ -7,7 +7,6 @@ namespace VapeCache.UI.Features.Dashboard;
 public sealed class VapeCacheDashboardOrchestrator
 {
     private readonly ICacheStats _cacheStats;
-    private readonly ICurrentCacheService _currentCache;
     private readonly IRedisCircuitBreakerState _breakerState;
     private readonly IRedisFailoverController _failoverController;
     private readonly IRedisCommandExecutor _redis;
@@ -32,7 +31,6 @@ public sealed class VapeCacheDashboardOrchestrator
 
     public VapeCacheDashboardOrchestrator(
         ICacheStats cacheStats,
-        ICurrentCacheService currentCache,
         IRedisCircuitBreakerState breakerState,
         IRedisFailoverController failoverController,
         IRedisCommandExecutor redis,
@@ -40,7 +38,6 @@ public sealed class VapeCacheDashboardOrchestrator
         ISpillStoreDiagnostics? spillDiagnostics = null)
     {
         _cacheStats = cacheStats;
-        _currentCache = currentCache;
         _breakerState = breakerState;
         _failoverController = failoverController;
         _redis = redis;
@@ -66,7 +63,6 @@ public sealed class VapeCacheDashboardOrchestrator
         var breakerForcedOpen = _failoverController.IsForcedOpen;
         var breakerReason = _failoverController.Reason;
         var backend = ResolveDisplayBackend(
-            _currentCache.CurrentName,
             breakerOpen,
             breakerForcedOpen);
 
@@ -280,17 +276,15 @@ public sealed class VapeCacheDashboardOrchestrator
                AreEquivalentLanes(current.Lanes, previous.Lanes);
     }
 
-    private static BackendType ResolveDisplayBackend(string? currentBackend, bool breakerOpen, bool forcedOpen)
+    private static BackendType ResolveDisplayBackend(bool breakerOpen, bool forcedOpen)
     {
-        return BackendTypeResolver.Resolve(currentBackend, breakerOpen, forcedOpen);
+        return (forcedOpen || breakerOpen) ? BackendType.InMemory : BackendType.Redis;
     }
 
     private static BackendType ResolveDisplayBackend(BackendType currentBackend, bool breakerOpen, bool forcedOpen)
     {
-        if (forcedOpen || breakerOpen)
-            return BackendType.InMemory;
-
-        return currentBackend;
+        _ = currentBackend;
+        return (forcedOpen || breakerOpen) ? BackendType.InMemory : BackendType.Redis;
     }
 
     private static IRedisMultiplexerDiagnostics? GetFirstOrDefault(IEnumerable<IRedisMultiplexerDiagnostics> source)

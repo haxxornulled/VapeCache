@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Abstractions.Diagnostics;
 using VapeCache.Abstractions.Modules;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Caching.Codecs;
@@ -24,6 +25,9 @@ public sealed class VapeCacheCachingModule : Module
 
         builder.RegisterType<CurrentCacheService>()
             .As<ICurrentCacheService>()
+            .SingleInstance();
+        builder.RegisterType<CacheBackendState>()
+            .As<ICacheBackendState>()
             .SingleInstance()
             .OnActivated(e => CacheTelemetry.Initialize(e.Instance));
         builder.RegisterType<CacheStatsRegistry>().AsSelf().SingleInstance();

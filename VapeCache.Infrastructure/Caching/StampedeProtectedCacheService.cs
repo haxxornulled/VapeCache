@@ -14,11 +14,13 @@ internal sealed class StampedeProtectedCacheService : ICacheService, ICacheTagSe
         public long RetryAfterUtcTicks;
     }
 
-    private sealed class LockEntry
+    private sealed class LockEntry : IDisposable
     {
         public readonly SemaphoreSlim Semaphore = new(1, 1);
         public int RefCount;
         public int Disposed; // 0 = active, 1 = disposed (prevents race on disposal)
+
+        public void Dispose() => Semaphore.Dispose();
     }
 
     private readonly ICacheService _inner;
@@ -199,7 +201,7 @@ internal sealed class StampedeProtectedCacheService : ICacheService, ICacheTagSe
                     if (_locks.TryRemove(new KeyValuePair<string, LockEntry>(key, entry)))
                     {
                         Interlocked.Decrement(ref _lockKeyCount);
-                        entry.Semaphore.Dispose();
+                        entry.Dispose();
                     }
                 }
             }

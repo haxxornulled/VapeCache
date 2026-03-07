@@ -4,7 +4,7 @@ using VapeCache.Abstractions.Modules;
 
 namespace VapeCache.Infrastructure.Modules;
 
-internal sealed partial class RedisBloomService : IRedisBloomService
+internal sealed partial class RedisBloomService : IRedisBloomService, IDisposable
 {
     private readonly IRedisCommandExecutor _redis;
     private readonly IRedisFallbackCommandExecutor _fallback;
@@ -78,4 +78,6 @@ internal sealed partial class RedisBloomService : IRedisBloomService
         Level = LogLevel.Debug,
         Message = "RedisBloom unavailable; using in-memory fallback for {Key}.")]
     private static partial void LogFallbackToMemory(ILogger logger, string key);
+
+    public void Dispose() => _gate.Dispose();
 }

@@ -20,7 +20,7 @@ public static class BenchmarkSuiteCatalog
             "cache",
             BenchmarkSuiteAudience.FeatureSet,
             "Cache API surface, typed collections, and stampede protection",
-            ["*CacheServiceApiBenchmarks*", "*TypedCollectionsBenchmarks*", "*StampedeProtectedCacheServiceBenchmarks*"],
+            ["*CacheServiceApiBenchmarks*", "*TypedCollectionsBenchmarks*", "*StampedeProtectedCacheServiceBenchmarks*", "*CacheTagPolicyBenchmarks*"],
             []),
         new(
             "resilience",

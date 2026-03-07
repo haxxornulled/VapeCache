@@ -9,6 +9,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.Core\VapeCache.Core.csproj" />
+    <ProjectReference Include="..\VapeCache.Features.Invalidation\VapeCache.Features.Invalidation.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" Version="9.0.0" />
   </ItemGroup>
 
 </Project>

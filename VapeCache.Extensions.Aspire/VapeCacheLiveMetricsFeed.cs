@@ -33,7 +33,8 @@ public sealed record VapeCacheLiveSample(
 
 internal sealed class VapeCacheLiveMetricsFeed(
     ICacheStats stats,
-    ICurrentCacheService current,
+    IRedisCircuitBreakerState? breakerState,
+    IRedisFailoverController? failoverController,
     IOptions<VapeCacheEndpointOptions> options,
     ISpillStoreDiagnostics? spillDiagnostics = null,
     IRedisMultiplexerDiagnostics? diagnostics = null) : BackgroundService, IVapeCacheLiveMetricsFeed
@@ -86,7 +87,9 @@ internal sealed class VapeCacheLiveMetricsFeed(
             var reads = snapshot.Hits + snapshot.Misses;
             var sample = new VapeCacheLiveSample(
                 TimestampUtc: DateTimeOffset.UtcNow,
-                CurrentBackend: BackendTypeResolver.Resolve(current.CurrentName, breakerOpen: false, forcedOpen: false),
+                CurrentBackend: ResolveDashboardBackend(
+                    breakerState?.IsOpen ?? false,
+                    failoverController?.IsForcedOpen ?? false),
                 Hits: snapshot.Hits,
                 Misses: snapshot.Misses,
                 SetCalls: snapshot.SetCalls,
@@ -140,4 +143,7 @@ internal sealed class VapeCacheLiveMetricsFeed(
     }
 
     private sealed record SubscriberCancellationState(VapeCacheLiveMetricsFeed Owner, int Id);
+
+    private static BackendType ResolveDashboardBackend(bool breakerOpen, bool forcedOpen)
+        => (forcedOpen || breakerOpen) ? BackendType.InMemory : BackendType.Redis;
 }
