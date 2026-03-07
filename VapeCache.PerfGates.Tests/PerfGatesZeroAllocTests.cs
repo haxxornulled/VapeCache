@@ -33,7 +33,11 @@ public class PerfGatesZeroAllocTests
         for (var i = 0; i < iterations; i++)
         {
             foreach (var frame in frames)
-                RespParserLite.TryParse(frame, out _, out _);
+            {
+                var ok = RespParserLite.TryParse(frame, out var consumed, out _);
+                if (!ok || consumed != frame.Length)
+                    throw new InvalidOperationException("RESP parse failed in zero-allocation gate.");
+            }
         }
         var allocated = GC.GetAllocatedBytesForCurrentThread() - baseline;
         Assert.Equal(0, allocated);
