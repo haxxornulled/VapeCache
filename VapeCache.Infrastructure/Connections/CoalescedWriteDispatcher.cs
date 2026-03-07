@@ -24,8 +24,11 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     private readonly SocketSendSegmentWindow _socketSendWindow = new();
     private readonly ReadOnlyMemory<byte>[][] _coalesceSegmentsPool8 = new ReadOnlyMemory<byte>[8][];
     private int _coalesceSegmentsPool8Count;
+    private readonly long[][] _commitOffsetsPool8 = new long[8][];
+    private int _commitOffsetsPool8Count;
     private readonly ArrayPool<ReadOnlyMemory<byte>> _coalesceSegmentArrayPool = ArrayPool<ReadOnlyMemory<byte>>.Shared;
     private readonly ArrayPool<ArraySegment<byte>> _socketSendSegmentArrayPool = ArrayPool<ArraySegment<byte>>.Shared;
+    private readonly ArrayPool<long> _commitOffsetsArrayPool = ArrayPool<long>.Shared;
     private readonly ReadOnlyMemory<byte> _crlfMemory;
 
     private readonly TryDequeuePendingRequestDelegate _tryDequeueWrite;
@@ -134,7 +137,9 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
                 break;
         }
 
-        var requestCommitOffsets = BuildRequestCommitOffsets(_coalesceDrained);
+        var requestCount = _coalesceDrained.Count;
+        var requestCommitOffsets = RentRequestCommitOffsets(requestCount);
+        BuildRequestCommitOffsets(_coalesceDrained, requestCommitOffsets);
         var enqueuedToPending = 0;
         long committedBytes = 0;
 
@@ -147,7 +152,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             RedisTelemetry.BytesSent.Add(sentBytes);
             _recordBytesSent?.Invoke(sentBytes);
 
-            while (enqueuedToPending < requestCommitOffsets.Length &&
+            while (enqueuedToPending < requestCount &&
                    committedBytes >= requestCommitOffsets[enqueuedToPending])
             {
                 var op = _coalesceDrained[enqueuedToPending].Op;
@@ -223,20 +228,46 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
 
             for (var i = 0; i < _coalesceCaptured.Count; i++)
                 ReturnCoalesceSegments(_coalesceCaptured[i].Segments);
+
+            ReturnRequestCommitOffsets(requestCommitOffsets);
         }
     }
 
-    private long[] BuildRequestCommitOffsets(List<PendingRequest> requests)
+    private void BuildRequestCommitOffsets(List<PendingRequest> requests, long[] offsets)
     {
-        var offsets = new long[requests.Count];
         long running = 0;
         for (var i = 0; i < requests.Count; i++)
         {
             running += GetRequestWireLength(requests[i]);
             offsets[i] = running;
         }
+    }
 
-        return offsets;
+    private long[] RentRequestCommitOffsets(int minLength)
+    {
+        if (minLength <= 8 && _commitOffsetsPool8Count > 0)
+        {
+            var idx = --_commitOffsetsPool8Count;
+            var cached = _commitOffsetsPool8[idx];
+            _commitOffsetsPool8[idx] = Array.Empty<long>();
+            if (cached.Length >= minLength)
+                return cached;
+            _commitOffsetsArrayPool.Return(cached, clearArray: false);
+        }
+
+        var size = minLength <= 8 ? 8 : minLength;
+        return _commitOffsetsArrayPool.Rent(size);
+    }
+
+    private void ReturnRequestCommitOffsets(long[] offsets)
+    {
+        if (offsets.Length == 8 && _commitOffsetsPool8Count < _commitOffsetsPool8.Length)
+        {
+            _commitOffsetsPool8[_commitOffsetsPool8Count++] = offsets;
+            return;
+        }
+
+        _commitOffsetsArrayPool.Return(offsets, clearArray: false);
     }
 
     /// <summary>
@@ -250,6 +281,13 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             var arr = _coalesceSegmentsPool8[--_coalesceSegmentsPool8Count];
             if (arr.Length > 0)
                 _coalesceSegmentArrayPool.Return(arr, clearArray: true);
+        }
+
+        while (_commitOffsetsPool8Count > 0)
+        {
+            var arr = _commitOffsetsPool8[--_commitOffsetsPool8Count];
+            if (arr.Length > 0)
+                _commitOffsetsArrayPool.Return(arr, clearArray: false);
         }
     }
 

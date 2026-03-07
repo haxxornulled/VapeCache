@@ -62,7 +62,7 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
             var prefix = await ReadByteAsync(ct).ConfigureAwait(false);
             return prefix switch
             {
-                (byte)'+' => RedisRespReader.RespValue.SimpleString(await ReadLineAsync(ct).ConfigureAwait(false)),
+                (byte)'+' => RedisRespReader.RespValue.SimpleString(await ReadSimpleStringAsync(ct).ConfigureAwait(false)),
                 (byte)'-' => RedisRespReader.RespValue.Error(await ReadLineAsync(ct).ConfigureAwait(false)),
                 (byte)':' => RedisRespReader.RespValue.Integer(await ReadInt64LineAsync(ct).ConfigureAwait(false)),
                 (byte)'$' => await ReadBulkStringAsync(poolBulk, ct).ConfigureAwait(false),
@@ -91,6 +91,38 @@ internal sealed class RedisRespReaderState : IAsyncDisposable
         if (_pos >= _len)
             await FillAsync(ct).ConfigureAwait(false);
         return _buffer[_pos++];
+    }
+
+    private async ValueTask<string> ReadSimpleStringAsync(CancellationToken ct)
+    {
+        if (_pos >= _len)
+            await FillAsync(ct).ConfigureAwait(false);
+
+        var span = _buffer.AsSpan(_pos, _len - _pos);
+        var lf = span.IndexOf((byte)'\n');
+        if (lf < 0)
+            return await ReadLineAsync(ct).ConfigureAwait(false);
+
+        var lineLen = lf > 0 && span[lf - 1] == (byte)'\r' ? lf - 1 : lf;
+        if (lineLen == 2 && span[0] == (byte)'O' && span[1] == (byte)'K')
+        {
+            _pos += lf + 1;
+            return RedisRespReader.OkSimpleString;
+        }
+
+        if (lineLen == 4 &&
+            span[0] == (byte)'P' &&
+            span[1] == (byte)'O' &&
+            span[2] == (byte)'N' &&
+            span[3] == (byte)'G')
+        {
+            _pos += lf + 1;
+            return RedisRespReader.PongSimpleString;
+        }
+
+        var value = Encoding.UTF8.GetString(_buffer, _pos, lineLen);
+        _pos += lf + 1;
+        return value;
     }
 
     private async ValueTask FillAsync(CancellationToken ct)
