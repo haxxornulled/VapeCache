@@ -86,7 +86,7 @@ jobs:
                   $sha = if ($commit.id.Length -ge 7) { $commit.id.Substring(0, 7) } else { $commit.id }
                   $message = ($commit.message -split "`r?`n")[0]
                   $author = if ($commit.author.name) { $commit.author.name } else { 'unknown' }
-                  $commitLines.Add("- $sha $author: $message")
+                  $commitLines.Add("- $sha ${author}: $message")
               }
           }
 

@@ -113,9 +113,16 @@ jobs:
           pwsh -File tools/audit-vulnerabilities.ps1 -Projects $projects
 
       - name: Vulnerability scan (private feeds)
-        if: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN != '' }}
         shell: pwsh
+        env:
+          VAPECACHE_LICENSING_PACKAGES_TOKEN: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:VAPECACHE_LICENSING_PACKAGES_TOKEN))
+          {
+              Write-Host "Private feed token not set; skipping private feed vulnerability scan."
+              exit 0
+          }
+
           . ./tools/release-package-manifest.ps1
           $projects = Get-ReleasePackageProjects
           pwsh -File tools/audit-vulnerabilities.ps1 -Projects $projects -IncludePrivateFeeds -FailOnPrivateFeedAuthError
