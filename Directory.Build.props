@@ -29,5 +29,7 @@
   <PropertyGroup Condition="'$(VapeCacheAnalyzerAudience)' == 'nonruntime'">
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
+    <!-- Test/demo naming patterns intentionally use underscores for readability. -->
+    <NoWarn>$(NoWarn);CA1707;xUnit2013</NoWarn>
   </PropertyGroup>
 </Project>

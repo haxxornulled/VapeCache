@@ -8,6 +8,9 @@ using VapeCache.Extensions.Aspire;
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseServiceProviderFactory(new AutofacServiceProviderFactory());
 builder.Host.ConfigureContainer<ContainerBuilder>(static _ => { });
+var enableBreakerControlEndpoints =
+    builder.Environment.IsDevelopment()
+    || builder.Configuration.GetValue<bool>("VapeCache:Endpoints:EnableBreakerControl");
 
 builder.AddServiceDefaults();
 
@@ -30,6 +33,8 @@ builder.AddVapeCacheClientBuilder(registerCoreServices: false)
     .WithHealthChecks()
     // AddServiceDefaults already wires UseOtlpExporter; keep VapeCache meter/source registration only.
     .WithAspireTelemetry(options => options.DisableOtlpExporter())
+    // Optional server-side Redis view from redis_exporter; toggle via VapeCache:RedisExporter options.
+    .WithRedisExporterMetrics()
     .WithAutoMappedEndpoints(options =>
     {
         options.Enabled = false;
@@ -48,7 +53,7 @@ var app = builder.Build();
 app.MapDefaultEndpoints();
 app.MapVapeCacheEndpoints(
     prefix: "/vapecache",
-    includeBreakerControlEndpoints: true,
+    includeBreakerControlEndpoints: enableBreakerControlEndpoints,
     includeLiveStreamEndpoint: true,
     includeIntentEndpoints: true,
     includeDashboardEndpoint: false);
