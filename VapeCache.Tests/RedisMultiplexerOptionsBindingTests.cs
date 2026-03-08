@@ -14,6 +14,7 @@ public sealed class RedisMultiplexerOptionsBindingTests
         var o = new RedisMultiplexerOptions();
 
         Assert.Equal(RedisTransportProfile.FullTilt, o.TransportProfile);
+        Assert.False(o.EnableCommandInstrumentation);
         Assert.False(o.EnableSocketRespReader);
         Assert.False(o.UseDedicatedLaneWorkers);
         Assert.Equal(512 * 1024, o.CoalescedWriteMaxBytes);

@@ -11,15 +11,15 @@ public sealed record RedisMultiplexerOptions
     public RedisTransportProfile TransportProfile { get; init; } = RedisTransportProfile.FullTilt;
 
     /// <summary>
-    /// Enables OpenTelemetry metrics and distributed tracing for all Redis commands.
-    /// Provides production-grade observability with minimal overhead (~1-2% CPU).
+    /// Enables OpenTelemetry command metrics and distributed tracing.
+    /// Leave disabled on strict zero-allocation hot paths unless command-level telemetry is required.
     ///
     /// Metrics: redis.cmd.calls, redis.cmd.failures, redis.cmd.ms, redis.bytes.sent/received
     /// Traces: Activity spans for each command with db.system=redis tags
     ///
-    /// Default: true (observability is critical for production systems)
+    /// Default: false (favor hot-path allocation stability; opt in when needed)
     /// </summary>
-    public bool EnableCommandInstrumentation { get; init; } = true;
+    public bool EnableCommandInstrumentation { get; init; } = false;
 
     /// <summary>
     /// Enables scatter/gather coalesced writes via SocketAsyncEventArgs when available.
