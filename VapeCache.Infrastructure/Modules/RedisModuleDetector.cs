@@ -7,7 +7,7 @@ namespace VapeCache.Infrastructure.Modules;
 /// Detects installed Redis modules by querying MODULE LIST.
 /// Results are cached to avoid repeated network calls.
 /// </summary>
-internal sealed class RedisModuleDetector : IRedisModuleDetector
+internal sealed class RedisModuleDetector : IRedisModuleDetector, IDisposable
 {
     private static readonly TimeSpan FailureRetryBackoff = TimeSpan.FromSeconds(5);
 
@@ -99,4 +99,6 @@ internal sealed class RedisModuleDetector : IRedisModuleDetector
         // RedisJSON module is named "ReJSON"
         return await IsModuleInstalledAsync("ReJSON", ct).ConfigureAwait(false);
     }
+
+    public void Dispose() => _gate.Dispose();
 }

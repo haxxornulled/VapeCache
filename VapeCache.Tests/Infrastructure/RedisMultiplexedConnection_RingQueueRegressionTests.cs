@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Linq;
 using LanguageExt.Common;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Connections;
@@ -31,6 +32,70 @@ public sealed class RedisMultiplexedConnection_RingQueueRegressionTests
         await InvokeEnqueueAsync(queue, item: 456);
         var dequeued = await InvokeDequeueAsync(queue);
         Assert.Equal(456, dequeued);
+    }
+
+    [Fact]
+    public async Task MpscRingQueue_HighContention_DoesNotDropOrDuplicateItems()
+    {
+        const int producerCount = 8;
+        const int itemsPerProducer = 500;
+        const int totalItems = producerCount * itemsPerProducer;
+
+        var queue = CreatePrivateNestedQueue("MpscRingQueue`1", typeof(int), capacity: 8);
+        var seen = new bool[totalItems + 1];
+        var duplicateCount = 0;
+        var missingDefaultCount = 0;
+        var outOfRangeCount = 0;
+
+        var consumer = Task.Run(async () =>
+        {
+            for (var i = 0; i < totalItems; i++)
+            {
+                var value = await InvokeDequeueAsync(queue);
+                if (value == 0)
+                {
+                    Interlocked.Increment(ref missingDefaultCount);
+                    continue;
+                }
+
+                if (value > totalItems)
+                {
+                    Interlocked.Increment(ref outOfRangeCount);
+                    continue;
+                }
+
+                lock (seen)
+                {
+                    if (seen[value])
+                    {
+                        duplicateCount++;
+                    }
+                    else
+                    {
+                        seen[value] = true;
+                    }
+                }
+            }
+        });
+
+        var producers = Enumerable.Range(0, producerCount).Select(async producerIndex =>
+        {
+            var baseId = producerIndex * itemsPerProducer;
+            for (var i = 1; i <= itemsPerProducer; i++)
+            {
+                await InvokeEnqueueAsync(queue, baseId + i);
+            }
+        });
+
+        await Task.WhenAll(producers);
+        await consumer;
+
+        Assert.Equal(0, missingDefaultCount);
+        Assert.Equal(0, duplicateCount);
+        Assert.Equal(0, outOfRangeCount);
+
+        for (var i = 1; i <= totalItems; i++)
+            Assert.True(seen[i], $"Missing id {i}");
     }
 
     private static object CreatePrivateNestedQueue(string nestedGenericTypeName, Type elementType, int capacity)

@@ -15,23 +15,30 @@ using Microsoft.Extensions.Options;
 
 namespace VapeCache.Infrastructure.Connections;
 
-internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultiplexerDiagnostics
+internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultiplexerDiagnostics
 {
     private static readonly ReadOnlyMemory<byte> CrlfMemory = "\r\n"u8.ToArray();
+    private static readonly long StopwatchUtcAnchorTimestamp = Stopwatch.GetTimestamp();
+    private static readonly long StopwatchUtcAnchorDateTicks = DateTimeOffset.UtcNow.UtcTicks;
+    private static readonly long ScaleEventWindowStopwatchTicks = ToStopwatchTicks(TimeSpan.FromMinutes(1));
     private RedisMultiplexedConnection[] _conns = Array.Empty<RedisMultiplexedConnection>();
     private RedisMultiplexedConnection[] _readConns = Array.Empty<RedisMultiplexedConnection>();
     private RedisMultiplexedConnection[] _writeConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _bulkConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _bulkReadConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _bulkWriteConns = Array.Empty<RedisMultiplexedConnection>();
     private readonly System.Threading.Lock _connGate = new();
     private int _rr;
     private int _readRr;
     private int _writeRr;
-    private readonly bool _instrument;
-    private readonly bool _coalesce;
+    private int _bulkRr;
+    private int _bulkReadRr;
+    private int _bulkWriteRr;
+    private RuntimeConfig _runtimeConfig = RuntimeConfig.Empty;
     private readonly IRedisConnectionFactory _factory;
     private readonly RedisConnectionOptions _connectionOptions;
     private readonly bool _clusterRedirectsEnabled;
     private readonly int _maxClusterRedirects;
-    private RedisMultiplexerOptions _muxOptions;
     private bool _autoscaleEnabled;
     private int _minConnections;
     private int _maxConnections;
@@ -86,6 +93,11 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private bool _autoscaleAdvisorMode;
     private double _emergencyScaleUpTimeoutRatePerSecThreshold;
     private TimeSpan _scaleDownDrainTimeout;
+    private int _configuredBulkLaneConnections;
+    private bool _autoAdjustBulkLanes;
+    private double _bulkLaneTargetRatio;
+    private int _bulkLaneConnections;
+    private TimeSpan _bulkLaneResponseTimeout;
     private (string Key, int ValueLen)[]? _msetLengthsCache;
     private JsonSetHeaderCacheEntry? _jsonSetHeaderCache;
     private HGetHeaderCacheEntry? _hgetHeaderCache;
@@ -118,9 +130,10 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         _muxOptionsChangeRegistration = options.OnChange((updated, _) =>
         {
             var applied = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(updated);
-            _muxOptions = applied;
+            var runtime = BuildRuntimeConfig(applied);
+            Volatile.Write(ref _runtimeConfig, runtime);
             LogNormalizationIfChanged("RedisMultiplexer", updated, applied);
-            ApplyAutoscaleOptions(applied);
+            ApplyAutoscaleOptions(runtime.Multiplexer);
         });
     }
 
@@ -134,21 +147,34 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
         var o = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(configuredMuxOptions);
         var connOpts = RedisRuntimeOptionsNormalizer.NormalizeConnection(configuredConnectionOptions);
+        ValidateTlsConfiguration(connOpts);
         _factory = factory;
         _connectionOptions = connOpts;
         _clusterRedirectsEnabled = connOpts.EnableClusterRedirection;
         _maxClusterRedirects = Math.Max(0, connOpts.MaxClusterRedirects);
-        _muxOptions = o;
-        var count = Math.Max(1, o.Connections);
-        _conns = new RedisMultiplexedConnection[count];
-        for (var i = 0; i < count; i++)
-            _conns[i] = CreateConnection();
+        var runtime = BuildRuntimeConfig(o);
+        _runtimeConfig = runtime;
+        _bulkLaneResponseTimeout = runtime.BulkLaneResponseTimeout;
+        var count = Math.Max(1, runtime.Multiplexer.Connections);
+        _configuredBulkLaneConnections = Math.Max(0, runtime.Multiplexer.BulkLaneConnections);
+        _autoAdjustBulkLanes = runtime.Multiplexer.AutoAdjustBulkLanes;
+        _bulkLaneTargetRatio = NormalizeBulkLaneTargetRatio(runtime.Multiplexer.BulkLaneTargetRatio);
+        var laneBudget = ResolveLaneBudget(
+            _configuredBulkLaneConnections,
+            _autoAdjustBulkLanes,
+            _bulkLaneTargetRatio,
+            count);
+        _bulkLaneConnections = laneBudget.BulkConnections;
+        _conns = new RedisMultiplexedConnection[laneBudget.FastConnections];
+        for (var i = 0; i < _conns.Length; i++)
+            _conns[i] = CreateFastConnection();
+        _bulkConns = new RedisMultiplexedConnection[laneBudget.BulkConnections];
+        for (var i = 0; i < _bulkConns.Length; i++)
+            _bulkConns[i] = CreateBulkConnection();
         RebuildLanesUnsafe();
-        _instrument = o.EnableCommandInstrumentation;
-        _coalesce = o.EnableCoalescedSocketWrites;
         LogNormalizationIfChanged("RedisMultiplexer", configuredMuxOptions, o);
         LogNormalizationIfChanged("RedisConnection", configuredConnectionOptions, connOpts);
-        ApplyAutoscaleOptions(o);
+        ApplyAutoscaleOptions(runtime.Multiplexer);
         _autoscaleTask = Task.Run(AutoscaleLoopAsync);
     }
 
@@ -156,6 +182,103 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         => Enum.IsDefined(typeof(RedisTransportProfile), profile)
             ? profile
             : RedisTransportProfile.FullTilt;
+
+    private static double NormalizeBulkLaneTargetRatio(double configuredRatio)
+    {
+        if (double.IsNaN(configuredRatio) || double.IsInfinity(configuredRatio))
+            return 0.25d;
+
+        return Math.Clamp(configuredRatio, 0d, 0.90d);
+    }
+
+    private static int ResolveBulkLaneConnections(
+        int configuredBulkLaneConnections,
+        bool autoAdjustBulkLanes,
+        double bulkLaneTargetRatio,
+        int totalConnectionBudget)
+    {
+        var normalizedTotalConnections = Math.Max(1, totalConnectionBudget);
+        if (normalizedTotalConnections <= 1)
+            return 0;
+
+        var maxBulkLanes = normalizedTotalConnections - 1;
+
+        if (autoAdjustBulkLanes)
+        {
+            var normalizedRatio = NormalizeBulkLaneTargetRatio(bulkLaneTargetRatio);
+            if (normalizedRatio <= 0d)
+                return 0;
+
+            var targetByRatio = (int)Math.Round(
+                normalizedTotalConnections * normalizedRatio,
+                MidpointRounding.AwayFromZero);
+            if (targetByRatio <= 0)
+                targetByRatio = 1;
+            return Math.Clamp(targetByRatio, 1, maxBulkLanes);
+        }
+
+        var requested = Math.Max(0, configuredBulkLaneConnections);
+        return Math.Min(requested, maxBulkLanes);
+    }
+
+    private static (int FastConnections, int BulkConnections) ResolveLaneBudget(
+        int configuredBulkLaneConnections,
+        bool autoAdjustBulkLanes,
+        double bulkLaneTargetRatio,
+        int totalConnectionBudget)
+    {
+        var normalizedTotalConnections = Math.Max(1, totalConnectionBudget);
+        var bulkConnections = ResolveBulkLaneConnections(
+            configuredBulkLaneConnections,
+            autoAdjustBulkLanes,
+            bulkLaneTargetRatio,
+            normalizedTotalConnections);
+        var fastConnections = Math.Max(1, normalizedTotalConnections - bulkConnections);
+        return (fastConnections, bulkConnections);
+    }
+
+    private static TimeSpan ResolveBulkLaneResponseTimeout(RedisMultiplexerOptions options)
+    {
+        if (options.BulkLaneResponseTimeout > TimeSpan.Zero)
+            return options.BulkLaneResponseTimeout;
+
+        return TimeSpan.FromSeconds(5);
+    }
+
+    private static RuntimeConfig BuildRuntimeConfig(RedisMultiplexerOptions options)
+        => new(
+            options,
+            options.EnableCommandInstrumentation,
+            ResolveBulkLaneResponseTimeout(options));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int GetTotalConnectionCountUnsafe()
+        => _conns.Length + _bulkConns.Length;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private RuntimeConfig ReadRuntimeConfig()
+        => Volatile.Read(ref _runtimeConfig);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool IsCommandInstrumentationEnabled()
+        => ReadRuntimeConfig().EnableCommandInstrumentation;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long ToStopwatchTicks(TimeSpan duration)
+    {
+        if (duration <= TimeSpan.Zero)
+            return 0;
+
+        var ticks = duration.TotalSeconds * Stopwatch.Frequency;
+        return ticks >= long.MaxValue ? long.MaxValue : Math.Max(1L, (long)Math.Ceiling(ticks));
+    }
+
+    private static DateTimeOffset ToUtcTimestamp(long stopwatchTicks)
+    {
+        var deltaStopwatchTicks = stopwatchTicks - StopwatchUtcAnchorTimestamp;
+        var deltaUtcTicks = (long)(deltaStopwatchTicks * ((double)TimeSpan.TicksPerSecond / Stopwatch.Frequency));
+        return new DateTimeOffset(StopwatchUtcAnchorDateTicks + deltaUtcTicks, TimeSpan.Zero);
+    }
 
     private void LogNormalizationIfChanged(
         string optionsName,
@@ -171,9 +294,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         if (profiled == effective)
             return;
 
-        _logger.LogWarning(
-            "{OptionsName} options were normalized at runtime to enforce safe performance guardrails. Review configured values for invalid or out-of-range settings.",
-            optionsName);
+        LogOptionsNormalized(_logger, optionsName);
     }
 
     private void LogNormalizationIfChanged(
@@ -190,9 +311,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         if (profiled == effective)
             return;
 
-        _logger.LogWarning(
-            "{OptionsName} options were normalized at runtime to enforce safe performance guardrails. Review configured values for invalid or out-of-range settings.",
-            optionsName);
+        LogOptionsNormalized(_logger, optionsName);
     }
 
     /// <summary>
@@ -225,43 +344,37 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         if (value.Kind is not RedisRespReader.RespKind.BulkString)
             throw new InvalidOperationException($"Unexpected SCAN cursor kind: {value.Kind}");
+
         var length = GetBulkLength(value);
         var span = (value.Bulk ?? Array.Empty<byte>()).AsSpan(0, length);
-        if (Utf8Parser.TryParse(span, out long cursor, out var consumed) && consumed == length)
+        if (TryParseInt64Utf8(span, out var cursor))
             return cursor;
-        var text = Encoding.UTF8.GetString(span);
-        if (!long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out cursor))
-            throw new InvalidOperationException($"Invalid SCAN cursor: {text}");
-        return cursor;
+
+        throw new InvalidOperationException("Invalid SCAN cursor value.");
     }
 
     private static double ParseDouble(RedisRespReader.RespValue value)
     {
-        string text;
         if (value.Kind == RedisRespReader.RespKind.SimpleString)
         {
-            text = value.Text ?? throw new InvalidOperationException("Unexpected score value: empty simple string.");
+            var text = value.Text ?? throw new InvalidOperationException("Unexpected score value: empty simple string.");
+            if (TryParseDoubleText(text, out var score))
+                return score;
+
+            throw new InvalidOperationException($"Invalid score value: {text}");
         }
-        else if (value.Kind == RedisRespReader.RespKind.BulkString)
+
+        if (value.Kind == RedisRespReader.RespKind.BulkString)
         {
             var length = GetBulkLength(value);
             var span = (value.Bulk ?? Array.Empty<byte>()).AsSpan(0, length);
-            if (Utf8Parser.TryParse(span, out double parsed, out var consumed) && consumed == length)
+            if (TryParseDoubleUtf8(span, out var parsed))
                 return parsed;
-            text = Encoding.UTF8.GetString(span);
-        }
-        else
-        {
-            throw new InvalidOperationException($"Unexpected score kind: {value.Kind}");
+
+            throw new InvalidOperationException("Invalid score value.");
         }
 
-        if (string.Equals(text, "+inf", StringComparison.OrdinalIgnoreCase))
-            return double.PositiveInfinity;
-        if (string.Equals(text, "-inf", StringComparison.OrdinalIgnoreCase))
-            return double.NegativeInfinity;
-        if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var score))
-            throw new InvalidOperationException($"Invalid score value: {text}");
-        return score;
+        throw new InvalidOperationException($"Unexpected score kind: {value.Kind}");
     }
 
     private static long ParseLong(RedisRespReader.RespValue value)
@@ -273,12 +386,102 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
         var length = GetBulkLength(value);
         var span = (value.Bulk ?? Array.Empty<byte>()).AsSpan(0, length);
-        if (Utf8Parser.TryParse(span, out long parsed, out var consumed) && consumed == length)
+        if (TryParseInt64Utf8(span, out var parsed))
             return parsed;
-        var text = Encoding.UTF8.GetString(span);
-        if (!long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed))
-            throw new InvalidOperationException($"Invalid integer value: {text}");
-        return parsed;
+
+        throw new InvalidOperationException("Invalid integer value.");
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryParseInt64Utf8(ReadOnlySpan<byte> value, out long parsed)
+        => Utf8Parser.TryParse(value, out parsed, out var consumed) && consumed == value.Length;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryParseDoubleUtf8(ReadOnlySpan<byte> value, out double parsed)
+    {
+        if (Utf8Parser.TryParse(value, out parsed, out var consumed) && consumed == value.Length)
+            return true;
+
+        return TryParseRedisSpecialDoubleUtf8(value, out parsed);
+    }
+
+    private static bool TryParseDoubleText(string value, out double parsed)
+    {
+        if (string.Equals(value, "+inf", StringComparison.OrdinalIgnoreCase))
+        {
+            parsed = double.PositiveInfinity;
+            return true;
+        }
+
+        if (string.Equals(value, "-inf", StringComparison.OrdinalIgnoreCase))
+        {
+            parsed = double.NegativeInfinity;
+            return true;
+        }
+
+        return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed);
+    }
+
+    private static bool TryParseRedisSpecialDoubleUtf8(ReadOnlySpan<byte> value, out double parsed)
+    {
+        parsed = default;
+
+        if (value.Length == 4 &&
+            value[0] == (byte)'+' &&
+            IsAsciiI(value[1]) &&
+            IsAsciiN(value[2]) &&
+            IsAsciiF(value[3]))
+        {
+            parsed = double.PositiveInfinity;
+            return true;
+        }
+
+        if (value.Length == 4 &&
+            value[0] == (byte)'-' &&
+            IsAsciiI(value[1]) &&
+            IsAsciiN(value[2]) &&
+            IsAsciiF(value[3]))
+        {
+            parsed = double.NegativeInfinity;
+            return true;
+        }
+
+        if (value.Length == 3 &&
+            IsAsciiN(value[0]) &&
+            IsAsciiA(value[1]) &&
+            IsAsciiN(value[2]))
+        {
+            parsed = double.NaN;
+            return true;
+        }
+
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsAsciiI(byte value) => (value | 0x20) == (byte)'i';
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsAsciiN(byte value) => (value | 0x20) == (byte)'n';
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsAsciiF(byte value) => (value | 0x20) == (byte)'f';
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsAsciiA(byte value) => (value | 0x20) == (byte)'a';
+
+    private static bool IsRedisIndexAlreadyExists(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException!)
+        {
+            if (current.Message.Contains("index already exists", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (current.InnerException is null)
+                break;
+        }
+
+        return false;
     }
 
     private readonly record struct RedisClusterRedirectTarget(bool IsAsk, int Slot, string Host, int Port)
@@ -295,56 +498,108 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         if (string.IsNullOrWhiteSpace(message))
             return false;
 
-        var text = message.Trim();
+        var text = message.AsSpan().Trim();
         const string prefix = "Redis error:";
         if (text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            text = text[prefix.Length..].Trim();
+            text = text[prefix.Length..].TrimStart();
 
-        if (!(text.StartsWith("MOVED ", StringComparison.OrdinalIgnoreCase) ||
-              text.StartsWith("ASK ", StringComparison.OrdinalIgnoreCase)))
+        if (!TryReadToken(ref text, out var redirectToken))
             return false;
 
-        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length < 3)
+        var isAsk = false;
+        if (redirectToken.Equals("ASK", StringComparison.OrdinalIgnoreCase))
+        {
+            isAsk = true;
+        }
+        else if (!redirectToken.Equals("MOVED", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!TryReadToken(ref text, out var slotToken) ||
+            !int.TryParse(slotToken, NumberStyles.Integer, CultureInfo.InvariantCulture, out var slot))
             return false;
 
-        if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var slot))
+        if (!TryReadToken(ref text, out var endpointToken) ||
+            !TryParseHostPort(endpointToken, out var host, out var port))
             return false;
 
-        if (!TryParseHostPort(parts[2], out var host, out var port))
-            return false;
-
-        var isAsk = parts[0].Equals("ASK", StringComparison.OrdinalIgnoreCase);
         redirect = new RedisClusterRedirectTarget(isAsk, slot, host, port);
         return true;
     }
 
-    private static bool TryParseHostPort(string endpoint, out string host, out int port)
+    private static bool TryParseHostPort(ReadOnlySpan<char> endpoint, out string host, out int port)
     {
         host = string.Empty;
         port = 0;
-        if (string.IsNullOrWhiteSpace(endpoint))
+        endpoint = endpoint.Trim();
+        if (endpoint.IsEmpty)
             return false;
 
-        var text = endpoint.Trim();
-        if (text[0] == '[')
+        if (endpoint[0] == '[')
         {
-            var closeBracket = text.IndexOf(']');
-            if (closeBracket <= 1 || closeBracket + 2 >= text.Length || text[closeBracket + 1] != ':')
+            var closeBracket = endpoint.IndexOf(']');
+            if (closeBracket <= 1 || closeBracket + 2 >= endpoint.Length || endpoint[closeBracket + 1] != ':')
                 return false;
 
-            host = text[1..closeBracket];
-            return int.TryParse(text[(closeBracket + 2)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out port)
-                && port is >= 1 and <= 65535;
+            var hostSpan = endpoint[1..closeBracket];
+            if (!TryParsePort(endpoint[(closeBracket + 2)..], out port))
+                return false;
+
+            host = hostSpan.ToString();
+            return host.Length != 0;
         }
 
-        var lastColon = text.LastIndexOf(':');
-        if (lastColon <= 0 || lastColon == text.Length - 1)
+        var lastColon = endpoint.LastIndexOf(':');
+        if (lastColon <= 0 || lastColon == endpoint.Length - 1)
             return false;
 
-        host = text[..lastColon];
-        return int.TryParse(text[(lastColon + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out port)
+        var hostCandidate = endpoint[..lastColon];
+        if (!TryParsePort(endpoint[(lastColon + 1)..], out port))
+            return false;
+
+        host = hostCandidate.ToString();
+        return host.Length != 0;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryParsePort(ReadOnlySpan<char> value, out int port)
+        => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out port)
             && port is >= 1 and <= 65535;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryReadToken(ref ReadOnlySpan<char> input, out ReadOnlySpan<char> token)
+    {
+        input = input.TrimStart();
+        if (input.IsEmpty)
+        {
+            token = default;
+            return false;
+        }
+
+        var splitIndex = IndexOfWhitespace(input);
+        if (splitIndex < 0)
+        {
+            token = input;
+            input = ReadOnlySpan<char>.Empty;
+            return true;
+        }
+
+        token = input[..splitIndex];
+        input = input[(splitIndex + 1)..];
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int IndexOfWhitespace(ReadOnlySpan<char> value)
+    {
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (char.IsWhiteSpace(value[i]))
+                return i;
+        }
+
+        return -1;
     }
 
     private async ValueTask<RedisRespReader.RespValue> ExecuteWithClusterRedirectsAsync(
@@ -412,7 +667,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             var ssl = new SslStream(
                 stream,
                 leaveInnerStreamOpen: false,
-                _connectionOptions.AllowInvalidCert ? static (_, _, _, _) => true : null);
+                GetServerCertificateValidationCallback(_connectionOptions));
 
             await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
             {
@@ -433,6 +688,36 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             token,
             maxBulkStringBytes: _connectionOptions.MaxBulkStringBytes,
             maxArrayDepth: _connectionOptions.MaxArrayDepth).ConfigureAwait(false);
+    }
+
+    private static RemoteCertificateValidationCallback? GetServerCertificateValidationCallback(RedisConnectionOptions options)
+    {
+        if (!options.AllowInvalidCert)
+            return null;
+
+        if (options.UseTls && IsProductionEnvironment())
+        {
+            throw new InvalidOperationException(
+                "AllowInvalidCert=true is not permitted in production environments. " +
+                "This setting bypasses TLS certificate validation and creates a critical security vulnerability. " +
+                "Use proper CA-signed certificates or set ASPNETCORE_ENVIRONMENT/DOTNET_ENVIRONMENT to Development.");
+        }
+
+        return static (_, _, _, errors) => errors == SslPolicyErrors.None || !IsProductionEnvironment();
+    }
+
+    private static void ValidateTlsConfiguration(RedisConnectionOptions options)
+    {
+        _ = GetServerCertificateValidationCallback(options);
+    }
+
+    private static bool IsProductionEnvironment()
+    {
+        var aspNetEnv = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        var dotnetEnv = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var env = aspNetEnv ?? dotnetEnv ?? "Production";
+        return !string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(env, "Staging", StringComparison.OrdinalIgnoreCase);
     }
 
     private void TryConfigureSocket(Socket socket)
@@ -504,7 +789,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && !_clusterRedirectsEnabled && TryGetAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryGetAsync(key, ct, out var fastTask))
             return fastTask;
 
         return GetAsyncSlow(key, ct);
@@ -514,7 +799,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("GET");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetGetCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -559,13 +844,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -575,7 +860,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TryGetAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetGetCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -603,7 +888,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -617,7 +902,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> GetLeaseAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && !_clusterRedirectsEnabled && TryGetLeaseAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryGetLeaseAsync(key, ct, out var fastTask))
             return fastTask;
 
         return GetLeaseAsyncSlow(key, ct);
@@ -627,13 +912,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("GET");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetGetCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextRead();
+            conn = NextBulkRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
             var command = rented.AsMemory(0, written);
@@ -657,13 +942,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -673,13 +958,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TryGetLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetGetCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextRead();
+            conn = NextBulkRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
@@ -701,7 +986,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -715,7 +1000,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> GetExAsync(string key, TimeSpan? ttl, CancellationToken ct)
     {
-        if (!_instrument)
+        if (!IsCommandInstrumentationEnabled())
         {
             int? ttlMs = null;
             if (ttl is not null)
@@ -736,7 +1021,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("GETEX");
         activity?.SetTag("db.redis.ttl_ms", ttl is null ? null : (long)ttl.Value.TotalMilliseconds);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         int? ttlMs = null;
         if (ttl is not null)
@@ -765,13 +1050,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -781,7 +1066,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TryGetExAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<byte[]?> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         int? ttlMs = null;
         if (ttl is not null)
         {
@@ -816,7 +1101,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -830,7 +1115,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> GetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct)
     {
-        if (!_instrument && TryGetExLeaseAsync(key, ttl, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryGetExLeaseAsync(key, ttl, ct, out var fastTask))
             return fastTask;
 
         return GetExLeaseAsyncSlow(key, ttl, ct);
@@ -841,7 +1126,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("GETEX");
         activity?.SetTag("db.redis.ttl_ms", ttl is null ? null : (long)ttl.Value.TotalMilliseconds);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         int? ttlMs = null;
         if (ttl is not null)
@@ -855,7 +1140,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         try
         {
             var len = RedisRespProtocol.GetGetExCommandLength(key, ttlMs);
-            conn = Next();
+            conn = NextBulk();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetExCommand(rented.AsSpan(0, len), key, ttlMs);
             var resp = await conn.ExecuteAsync(
@@ -870,13 +1155,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -888,7 +1173,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("GETRANGE");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetGetRangeCommandLength(key, start, end);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -909,13 +1194,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -928,7 +1213,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("MGET");
         activity?.SetTag("db.redis.key_count", keys.Length);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetMGetCommandLength(keys);
         if (len == 0) return Array.Empty<byte[]?>();
@@ -984,13 +1269,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -998,12 +1283,20 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// <summary>
     /// Sets value.
     /// </summary>
-    public async ValueTask<bool> SetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct)
+    public ValueTask<bool> SetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TrySetAsync(key, value, ttl, ct, out var fastTask))
+            return fastTask;
+
+        return SetAsyncSlow(key, value, ttl, ct);
+    }
+
+    private async ValueTask<bool> SetAsyncSlow(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct)
     {
         using var activity = StartCommandActivity("SET");
         activity?.SetTag("db.redis.ttl_ms", ttl is null ? null : (long)ttl.Value.TotalMilliseconds);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         int? ttlMs = null;
         if (ttl is not null)
         {
@@ -1107,13 +1400,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null)
             {
                 if (ttlMs is not null)
@@ -1143,7 +1436,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private static string FormatUnexpectedSetResponse(RedisRespReader.RespValue response)
         => FormatUnexpectedResponse("SET", response);
 
-    private async ValueTask<T> ThrowUnexpectedResponseAndResetAsync<T>(
+    private static async ValueTask<T> ThrowUnexpectedResponseAndResetAsync<T>(
         RedisMultiplexedConnection conn,
         string operation,
         RedisRespReader.RespValue response,
@@ -1156,7 +1449,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         throw ex;
     }
 
-    private async ValueTask<byte[]?> ReadOptionalBytesResponseAsync(
+    private static async ValueTask<byte[]?> ReadOptionalBytesResponseAsync(
         RedisMultiplexedConnection conn,
         string operation,
         RedisRespReader.RespValue resp,
@@ -1175,7 +1468,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         return await ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, operation, resp).ConfigureAwait(false);
     }
 
-    private async ValueTask<RedisValueLease> ReadOptionalLeaseResponseAsync(
+    private static async ValueTask<RedisValueLease> ReadOptionalLeaseResponseAsync(
         RedisMultiplexedConnection conn,
         string operation,
         RedisRespReader.RespValue resp)
@@ -1184,12 +1477,12 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             return RedisValueLease.Null;
 
         if (resp.Kind == RedisRespReader.RespKind.BulkString && resp.Bulk is not null)
-            return new RedisValueLease(resp.Bulk, resp.BulkLength, pooled: resp.BulkIsPooled);
+            return RedisValueLease.Create(resp.Bulk, resp.BulkLength, pooled: resp.BulkIsPooled);
 
         return await ThrowUnexpectedResponseAndResetAsync<RedisValueLease>(conn, operation, resp).ConfigureAwait(false);
     }
 
-    private async ValueTask<long> ReadIntegerResponseAsync(
+    private static async ValueTask<long> ReadIntegerResponseAsync(
         RedisMultiplexedConnection conn,
         string operation,
         RedisRespReader.RespValue resp)
@@ -1200,7 +1493,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         return await ThrowUnexpectedResponseAndResetAsync<long>(conn, operation, resp).ConfigureAwait(false);
     }
 
-    private async ValueTask<string> ReadSimpleStringResponseAsync(
+    private static async ValueTask<string> ReadSimpleStringResponseAsync(
         RedisMultiplexedConnection conn,
         string operation,
         RedisRespReader.RespValue resp)
@@ -1211,7 +1504,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         return await ThrowUnexpectedResponseAndResetAsync<string>(conn, operation, resp).ConfigureAwait(false);
     }
 
-    private async ValueTask<bool> ReadSetResponseAsync(
+    private static async ValueTask<bool> ReadSetResponseAsync(
         RedisMultiplexedConnection conn,
         RedisRespReader.RespValue resp)
     {
@@ -1235,7 +1528,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("MSET");
         activity?.SetTag("db.redis.key_count", items.Length);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         if (items.Length == 0) return true;
 
@@ -1255,13 +1548,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null)
                 ArrayPool<byte>.Shared.Return(rented);
         }
@@ -1274,7 +1567,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("DEL");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetDelCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -1304,13 +1597,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1322,7 +1615,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("UNLINK");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetUnlinkCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -1343,13 +1636,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1361,7 +1654,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("TTL");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetTtlCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -1382,13 +1675,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1400,7 +1693,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("PTTL");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetPTtlCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -1421,13 +1714,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1439,7 +1732,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("HSET");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -1485,13 +1778,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1501,7 +1794,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> HGetLeaseAsync(string key, string field, CancellationToken ct)
     {
-        if (!_instrument && TryQueueHGetLeaseFast(key, field, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryQueueHGetLeaseFast(key, field, ct, out var fastTask))
             return fastTask;
 
         return HGetLeaseAsyncSlow(key, field, ct);
@@ -1511,13 +1804,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("HGET");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextRead();
+            conn = NextBulkRead();
             var cached = Volatile.Read(ref _hgetHeaderCache);
             byte[]? headerBuffer;
             ReadOnlyMemory<byte> header;
@@ -1556,13 +1849,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1572,7 +1865,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> HGetAsync(string key, string field, CancellationToken ct)
     {
-        if (!_instrument && TryHGetAsync(key, field, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryHGetAsync(key, field, ct, out var fastTask))
             return fastTask;
 
         return HGetAsyncSlow(key, field, ct);
@@ -1582,7 +1875,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("HGET");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -1627,13 +1920,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1646,7 +1939,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("HMGET");
         activity?.SetTag("db.redis.field_count", fields.Length);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetHMGetCommandLength(key, fields);
         if (len == 0) return Array.Empty<byte[]?>();
@@ -1702,13 +1995,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1720,7 +2013,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("LPUSH");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetLPushCommandLength(key, value.Length);
         byte[]? rented = null;
@@ -1743,13 +2036,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1759,7 +2052,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> LPopAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && TryLPopAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryLPopAsync(key, ct, out var fastTask))
             return fastTask;
 
         return LPopAsyncSlow(key, ct);
@@ -1769,7 +2062,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("LPOP");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetLPopCommandLength(key);
         byte[]? rented = null;
@@ -1791,13 +2084,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1810,7 +2103,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("EXPIRE");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var seconds = (long)Math.Ceiling(ttl.TotalSeconds);
         seconds = Math.Clamp(seconds, 0L, int.MaxValue);
@@ -1837,13 +2130,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1853,7 +2146,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TryHGetAsync(string key, string field, CancellationToken ct, out ValueTask<byte[]?> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
@@ -1904,7 +2197,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -1918,7 +2211,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TrySetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct, out ValueTask<bool> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         int? ttlMs = null;
         if (ttl is not null)
         {
@@ -1976,7 +2269,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -1996,7 +2289,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TryGetExLeaseAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         int? ttlMs = null;
         if (ttl is not null)
         {
@@ -2009,7 +2302,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetExCommand(rented.AsSpan(0, len), key, ttlMs);
             if (!conn.TryExecuteAsync(
@@ -2031,7 +2324,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -2045,7 +2338,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TryLPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetLPopCommandLength(key);
         byte[]? rented = null;
@@ -2074,7 +2367,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -2088,7 +2381,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> LPopLeaseAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && TryLPopLeaseAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryLPopLeaseAsync(key, ct, out var fastTask))
             return fastTask;
 
         return LPopLeaseAsyncSlow(key, ct);
@@ -2098,13 +2391,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("LPOP");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetLPopCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteLPopCommand(rented.AsSpan(0, len), key);
             var resp = await conn.ExecuteAsync(
@@ -2119,13 +2412,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2135,7 +2428,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> LIndexAsync(string key, long index, CancellationToken ct)
     {
-        if (!_instrument && TryQueueLIndexFast(key, index, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryQueueLIndexFast(key, index, ct, out var fastTask))
             return fastTask;
 
         return LIndexAsyncSlow(key, index, ct);
@@ -2145,7 +2438,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("LINDEX");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetLIndexCommandLength(key, index);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -2166,13 +2459,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2184,7 +2477,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("LRANGE");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetLRangeCommandLength(key, start, stop);
         byte[]? rented = null;
@@ -2238,13 +2531,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2268,37 +2561,61 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
         foreach (var c in _conns)
             await c.DisposeAsync().ConfigureAwait(false);
+
+        foreach (var c in _bulkConns)
+            await c.DisposeAsync().ConfigureAwait(false);
     }
 
-    private RedisMultiplexedConnection CreateConnection()
-        => new(
+    private RedisMultiplexedConnection CreateConnection(RuntimeConfig runtime, TimeSpan responseTimeout)
+    {
+        var mux = runtime.Multiplexer;
+        return new(
             _factory,
-            _muxOptions.MaxInFlightPerConnection,
-            _muxOptions.EnableCoalescedSocketWrites,
-            _muxOptions.EnableSocketRespReader,
-            _muxOptions.UseDedicatedLaneWorkers,
-            _connectionOptions.MaxBulkStringBytes,
-            _connectionOptions.MaxArrayDepth,
-            _muxOptions.ResponseTimeout,
-            _muxOptions.CoalescedWriteMaxBytes,
-            _muxOptions.CoalescedWriteMaxSegments,
-            _muxOptions.CoalescedWriteSmallCopyThresholdBytes,
-            _muxOptions.EnableAdaptiveCoalescing,
-            _muxOptions.AdaptiveCoalescingLowDepth,
-            _muxOptions.AdaptiveCoalescingHighDepth,
-            _muxOptions.AdaptiveCoalescingMinWriteBytes,
-            _muxOptions.AdaptiveCoalescingMinSegments,
-            _muxOptions.AdaptiveCoalescingMinSmallCopyThresholdBytes,
-            RecordAutoscaleLatencyStopwatchTicks,
-            ShouldRecordAutoscaleLatency);
+            maxInFlight: mux.MaxInFlightPerConnection,
+            coalesceWrites: mux.EnableCoalescedSocketWrites,
+            enableSocketRespReader: mux.EnableSocketRespReader,
+            useDedicatedLaneWorkers: mux.UseDedicatedLaneWorkers,
+            maxBulkStringBytes: _connectionOptions.MaxBulkStringBytes,
+            maxArrayDepth: _connectionOptions.MaxArrayDepth,
+            responseTimeout: responseTimeout,
+            coalescedWriteMaxBytes: mux.CoalescedWriteMaxBytes,
+            coalescedWriteMaxSegments: mux.CoalescedWriteMaxSegments,
+            coalescedWriteSmallCopyThresholdBytes: mux.CoalescedWriteSmallCopyThresholdBytes,
+            enableAdaptiveCoalescing: mux.EnableAdaptiveCoalescing,
+            adaptiveCoalescingLowDepth: mux.AdaptiveCoalescingLowDepth,
+            adaptiveCoalescingHighDepth: mux.AdaptiveCoalescingHighDepth,
+            adaptiveCoalescingMinWriteBytes: mux.AdaptiveCoalescingMinWriteBytes,
+            adaptiveCoalescingMinSegments: mux.AdaptiveCoalescingMinSegments,
+            adaptiveCoalescingMinSmallCopyThresholdBytes: mux.AdaptiveCoalescingMinSmallCopyThresholdBytes,
+            coalescingEnterQueueDepth: mux.CoalescingEnterQueueDepth,
+            coalescingExitQueueDepth: mux.CoalescingExitQueueDepth,
+            coalescedWriteMaxOperations: mux.CoalescedWriteMaxOperations,
+            coalescingSpinBudget: mux.CoalescingSpinBudget,
+            recordLatencyStopwatchTicks: RecordAutoscaleLatencyStopwatchTicks,
+            shouldRecordLatency: ShouldRecordAutoscaleLatency);
+    }
+
+    private RedisMultiplexedConnection CreateFastConnection()
+    {
+        var runtime = ReadRuntimeConfig();
+        return CreateConnection(runtime, runtime.Multiplexer.ResponseTimeout);
+    }
+
+    private RedisMultiplexedConnection CreateBulkConnection()
+    {
+        var runtime = ReadRuntimeConfig();
+        return CreateConnection(runtime, runtime.BulkLaneResponseTimeout);
+    }
 
     private void RebuildLanesUnsafe()
     {
-        // Use a shared lane pool for reads and writes.
-        // Static read/write partitioning amplified tail latency on write-heavy workloads because
-        // half the lanes could sit underutilized while write lanes queued.
+        // Fast group remains shared read/write and is the only autoscaled group.
         _readConns = _conns;
         _writeConns = _conns;
+
+        // Bulk group is fixed-size and isolated from autoscaler pressure signals.
+        _bulkReadConns = _bulkConns;
+        _bulkWriteConns = _bulkConns;
     }
 
     private async Task AutoscaleLoopAsync()
@@ -2325,14 +2642,15 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         if (!_autoscaleEnabled)
         {
+            var disabledConnections = GetTotalConnectionCountUnsafe();
             Interlocked.Exchange(ref _highPressureStreakTicks, 0);
             Interlocked.Exchange(ref _lowPressureStreakTicks, 0);
-            Volatile.Write(ref _lastTargetConnections, _conns.Length);
+            Volatile.Write(ref _lastTargetConnections, disabledConnections);
             LogTickTrace(
                 action: "disabled",
                 reason: "autoscaling-disabled",
-                currentConnections: _conns.Length,
-                targetConnections: _conns.Length,
+                currentConnections: disabledConnections,
+                targetConnections: disabledConnections,
                 highSignals: 0,
                 avgInflightUtil: 0d,
                 maxInflightUtil: 0d,
@@ -2357,9 +2675,10 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         var conns = _conns;
         if (conns.Length == 0)
             return;
+        var currentConnections = conns.Length + _bulkConns.Length;
 
-        var now = DateTime.UtcNow.Ticks;
-        var minuteWindowTicks = TimeSpan.FromMinutes(1).Ticks;
+        var now = Stopwatch.GetTimestamp();
+        var minuteWindowTicks = ScaleEventWindowStopwatchTicks;
         var currentWindowStart = Interlocked.Read(ref _scaleEventWindowStartTicks);
         if (currentWindowStart != 0 && now - currentWindowStart >= minuteWindowTicks)
         {
@@ -2398,14 +2717,18 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
         var lastTicks = Interlocked.Read(ref _lastTimeoutSampleTicks);
         var lastCount = Interlocked.Read(ref _lastTimeoutSampleCount);
-        var elapsedSec = lastTicks == 0 ? _autoscaleSampleInterval.TotalSeconds : Math.Max(0.001, TimeSpan.FromTicks(now - lastTicks).TotalSeconds);
+        var elapsedSec = lastTicks == 0
+            ? _autoscaleSampleInterval.TotalSeconds
+            : Math.Max(0.001, (now - lastTicks) / (double)Stopwatch.Frequency);
         var timeoutRatePerSec = Math.Max(0, timeoutTotal - lastCount) / elapsedSec;
         Interlocked.Exchange(ref _lastTimeoutSampleCount, timeoutTotal);
         Interlocked.Exchange(ref _lastTimeoutSampleTicks, now);
 
         var lastFailureTicks = Interlocked.Read(ref _lastFailureSampleTicks);
         var lastFailureCount = Interlocked.Read(ref _lastFailureSampleCount);
-        var failureElapsedSec = lastFailureTicks == 0 ? _autoscaleSampleInterval.TotalSeconds : Math.Max(0.001, TimeSpan.FromTicks(now - lastFailureTicks).TotalSeconds);
+        var failureElapsedSec = lastFailureTicks == 0
+            ? _autoscaleSampleInterval.TotalSeconds
+            : Math.Max(0.001, (now - lastFailureTicks) / (double)Stopwatch.Frequency);
         var reconnectFailureRatePerSec = Math.Max(0, failureTotal - lastFailureCount) / failureElapsedSec;
         Interlocked.Exchange(ref _lastFailureSampleCount, failureTotal);
         Interlocked.Exchange(ref _lastFailureSampleTicks, now);
@@ -2443,11 +2766,11 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
 
         var isFrozen = TryGetFreezeState(now, out var frozenReason, out var frozenUntilUtc);
-        var sampleTicks = _autoscaleSampleInterval.Ticks;
+        var sampleTicks = ToStopwatchTicks(_autoscaleSampleInterval);
         var highStreakTicks = Interlocked.Read(ref _highPressureStreakTicks);
         var lowStreakTicks = Interlocked.Read(ref _lowPressureStreakTicks);
-        var upCooldownActive = now - Interlocked.Read(ref _lastScaleUpTicks) < _scaleUpCooldown.Ticks;
-        var downCooldownActive = now - Interlocked.Read(ref _lastScaleDownTicks) < _scaleDownCooldown.Ticks;
+        var upCooldownActive = now - Interlocked.Read(ref _lastScaleUpTicks) < ToStopwatchTicks(_scaleUpCooldown);
+        var downCooldownActive = now - Interlocked.Read(ref _lastScaleDownTicks) < ToStopwatchTicks(_scaleDownCooldown);
         if (highPressure)
         {
             Interlocked.Exchange(ref _lowPressureStreakTicks, 0);
@@ -2470,11 +2793,11 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             lowStreakTicks = 0;
         }
 
-        var upWindowSatisfied = highStreakTicks >= _scaleUpWindow.Ticks;
-        var downWindowSatisfied = lowStreakTicks >= _scaleDownWindow.Ticks;
+        var upWindowSatisfied = highStreakTicks >= ToStopwatchTicks(_scaleUpWindow);
+        var downWindowSatisfied = lowStreakTicks >= ToStopwatchTicks(_scaleDownWindow);
         var action = "hold";
         var reason = "steady-state";
-        var targetConnections = conns.Length;
+        var targetConnections = currentConnections;
 
         if (isFrozen)
         {
@@ -2483,7 +2806,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             LogTickTrace(
                 action,
                 reason,
-                conns.Length,
+                currentConnections,
                 targetConnections,
                 highSignals,
                 avgInflightUtil,
@@ -2509,7 +2832,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         var emergencyEligible =
             timeoutRatePerSec >= _emergencyScaleUpTimeoutRatePerSecThreshold &&
             !upCooldownActive &&
-            conns.Length < _maxConnections &&
+            currentConnections < _maxConnections &&
             unhealthyConnections < conns.Length;
         if (emergencyEligible)
         {
@@ -2518,8 +2841,8 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             {
                 action = "up(advisor)";
                 reason = emergencyReason;
-                targetConnections = conns.Length + 1;
-                LogDecision(action, reason, conns.Length, targetConnections, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                targetConnections = currentConnections + 1;
+                LogDecision(action, reason, currentConnections, targetConnections, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
             }
             else if (!CanScaleEventNow(now, out var blockReason))
             {
@@ -2529,10 +2852,10 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             {
                 action = "up";
                 reason = emergencyReason;
-                targetConnections = Math.Min(_maxConnections, conns.Length + 1);
+                targetConnections = Math.Min(_maxConnections, currentConnections + 1);
                 ScaleUp(reason);
                 RegisterScaleEvent(direction: "up", now);
-                LogDecision(action, reason, conns.Length, targetConnections, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                LogDecision(action, reason, currentConnections, targetConnections, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
                 Interlocked.Exchange(ref _lastScaleUpTicks, now);
             }
 
@@ -2540,7 +2863,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             LogTickTrace(
                 action,
                 reason,
-                conns.Length,
+                currentConnections,
                 targetConnections,
                 highSignals,
                 avgInflightUtil,
@@ -2566,7 +2889,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         if (highPressure &&
             upWindowSatisfied &&
             !upCooldownActive &&
-            conns.Length < _maxConnections)
+            currentConnections < _maxConnections)
         {
             var scaleReason = BuildScaleReason(
                 avgInflightUtil >= _scaleUpInflightUtilization,
@@ -2575,10 +2898,10 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 p99Ms >= _scaleUpP99LatencyMsThreshold);
             if (_autoscaleAdvisorMode)
             {
-                LogDecision("up(advisor)", scaleReason, conns.Length, conns.Length + 1, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                LogDecision("up(advisor)", scaleReason, currentConnections, currentConnections + 1, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
                 action = "up(advisor)";
                 reason = scaleReason;
-                targetConnections = conns.Length + 1;
+                targetConnections = currentConnections + 1;
             }
             else if (!CanScaleEventNow(now, out var blockReason))
             {
@@ -2588,29 +2911,29 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             {
                 ScaleUp(scaleReason);
                 RegisterScaleEvent(direction: "up", now);
-                LogDecision("up", scaleReason, conns.Length, Math.Min(_maxConnections, conns.Length + 1), highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                LogDecision("up", scaleReason, currentConnections, Math.Min(_maxConnections, currentConnections + 1), highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
                 action = "up";
                 reason = scaleReason;
-                targetConnections = Math.Min(_maxConnections, conns.Length + 1);
+                targetConnections = Math.Min(_maxConnections, currentConnections + 1);
                 Interlocked.Exchange(ref _lastScaleUpTicks, now);
             }
             Interlocked.Exchange(ref _highPressureStreakTicks, 0);
             Volatile.Write(ref _lastTargetConnections, targetConnections);
-            LogTickTrace(action, reason, conns.Length, targetConnections, highSignals, avgInflightUtil, maxInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms, unhealthyConnections, reconnectFailureRatePerSec, Volatile.Read(ref _scaleEventsInCurrentMinute), _maxScaleEventsPerMinute, upCooldownActive, downCooldownActive, upWindowSatisfied, downWindowSatisfied, false, null);
+            LogTickTrace(action, reason, currentConnections, targetConnections, highSignals, avgInflightUtil, maxInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms, unhealthyConnections, reconnectFailureRatePerSec, Volatile.Read(ref _scaleEventsInCurrentMinute), _maxScaleEventsPerMinute, upCooldownActive, downCooldownActive, upWindowSatisfied, downWindowSatisfied, false, null);
             return;
         }
 
         if (lowPressure &&
             downWindowSatisfied &&
             !downCooldownActive &&
-            conns.Length > _minConnections)
+            currentConnections > _minConnections)
         {
             if (_autoscaleAdvisorMode)
             {
-                LogDecision("down(advisor)", "low-pressure", conns.Length, conns.Length - 1, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                LogDecision("down(advisor)", "low-pressure", currentConnections, currentConnections - 1, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
                 action = "down(advisor)";
                 reason = "low-pressure";
-                targetConnections = conns.Length - 1;
+                targetConnections = currentConnections - 1;
             }
             else if (!CanScaleEventNow(now, out var blockReason))
             {
@@ -2620,20 +2943,20 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             {
                 _ = ScaleDownAsync("low-pressure");
                 RegisterScaleEvent(direction: "down", now);
-                LogDecision("down", "low-pressure", conns.Length, Math.Max(_minConnections, conns.Length - 1), highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                LogDecision("down", "low-pressure", currentConnections, Math.Max(_minConnections, currentConnections - 1), highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
                 action = "down";
                 reason = "low-pressure";
-                targetConnections = Math.Max(_minConnections, conns.Length - 1);
+                targetConnections = Math.Max(_minConnections, currentConnections - 1);
                 Interlocked.Exchange(ref _lastScaleDownTicks, now);
             }
             Interlocked.Exchange(ref _lowPressureStreakTicks, 0);
             Volatile.Write(ref _lastTargetConnections, targetConnections);
-            LogTickTrace(action, reason, conns.Length, targetConnections, highSignals, avgInflightUtil, maxInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms, unhealthyConnections, reconnectFailureRatePerSec, Volatile.Read(ref _scaleEventsInCurrentMinute), _maxScaleEventsPerMinute, upCooldownActive, downCooldownActive, upWindowSatisfied, downWindowSatisfied, false, null);
+            LogTickTrace(action, reason, currentConnections, targetConnections, highSignals, avgInflightUtil, maxInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms, unhealthyConnections, reconnectFailureRatePerSec, Volatile.Read(ref _scaleEventsInCurrentMinute), _maxScaleEventsPerMinute, upCooldownActive, downCooldownActive, upWindowSatisfied, downWindowSatisfied, false, null);
             return;
         }
 
         reason = BuildNoScaleReason(
-            conns.Length,
+            currentConnections,
             highPressure,
             lowPressure,
             unhealthyConnections,
@@ -2646,7 +2969,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         LogTickTrace(
             action,
             reason,
-            conns.Length,
+            currentConnections,
             targetConnections,
             highSignals,
             avgInflightUtil,
@@ -2670,11 +2993,30 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     private void ApplyAutoscaleOptions(RedisMultiplexerOptions o)
     {
+        RedisMultiplexedConnection[]? fastConnsToDispose = null;
+        RedisMultiplexedConnection[]? bulkConnsToDispose = null;
         lock (_connGate)
         {
             _autoscaleEnabled = o.EnableAutoscaling;
             _minConnections = Math.Max(1, Math.Min(o.MinConnections, o.MaxConnections));
             _maxConnections = Math.Max(_minConnections, o.MaxConnections);
+            _configuredBulkLaneConnections = Math.Max(0, o.BulkLaneConnections);
+            _autoAdjustBulkLanes = o.AutoAdjustBulkLanes;
+            _bulkLaneTargetRatio = NormalizeBulkLaneTargetRatio(o.BulkLaneTargetRatio);
+            var desiredBulkLaneResponseTimeout = ResolveBulkLaneResponseTimeout(o);
+            var bulkTimeoutChanged = desiredBulkLaneResponseTimeout != _bulkLaneResponseTimeout;
+            var configuredTotalConnections = Math.Max(1, o.Connections);
+            var currentTotalConnections = GetTotalConnectionCountUnsafe();
+            var desiredTotalConnections = _autoscaleEnabled
+                ? Math.Clamp(currentTotalConnections, _minConnections, _maxConnections)
+                : configuredTotalConnections;
+            var laneBudget = ResolveLaneBudget(
+                _configuredBulkLaneConnections,
+                _autoAdjustBulkLanes,
+                _bulkLaneTargetRatio,
+                desiredTotalConnections);
+
+            _bulkLaneResponseTimeout = desiredBulkLaneResponseTimeout;
             _autoscaleSampleInterval = o.AutoscaleSampleInterval <= TimeSpan.Zero ? TimeSpan.FromSeconds(1) : o.AutoscaleSampleInterval;
             _scaleUpWindow = o.ScaleUpWindow <= TimeSpan.Zero ? TimeSpan.FromSeconds(10) : o.ScaleUpWindow;
             _scaleDownWindow = o.ScaleDownWindow <= TimeSpan.Zero ? TimeSpan.FromMinutes(2) : o.ScaleDownWindow;
@@ -2694,6 +3036,11 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             _autoscaleFreezeDuration = o.AutoscaleFreezeDuration <= TimeSpan.Zero ? TimeSpan.FromMinutes(2) : o.AutoscaleFreezeDuration;
             _reconnectStormFailureRatePerSecThreshold = Math.Max(0.01, o.ReconnectStormFailureRatePerSecThreshold);
 
+            fastConnsToDispose = ReconcileFastConnectionsUnsafe(laneBudget.FastConnections);
+            bulkConnsToDispose = ReconcileBulkConnectionsUnsafe(laneBudget.BulkConnections, bulkTimeoutChanged);
+
+            RebuildLanesUnsafe();
+
             if (!_autoscaleEnabled)
             {
                 Interlocked.Exchange(ref _autoscaleFrozenUntilTicks, 0);
@@ -2704,6 +3051,98 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 Volatile.Write(ref _flapToggleCount, 0);
                 _lastScaleDirectionForFlap = null;
                 Interlocked.Exchange(ref _lastScaleDirectionTicks, 0);
+            }
+        }
+
+        if (fastConnsToDispose is { Length: > 0 })
+            _ = DisposeConnectionsAsync(fastConnsToDispose);
+
+        if (bulkConnsToDispose is { Length: > 0 })
+            _ = DisposeConnectionsAsync(bulkConnsToDispose);
+    }
+
+    private RedisMultiplexedConnection[]? ReconcileFastConnectionsUnsafe(int desiredFastConnections)
+    {
+        desiredFastConnections = Math.Max(1, desiredFastConnections);
+
+        if (_conns.Length == desiredFastConnections)
+            return null;
+
+        if (_conns.Length < desiredFastConnections)
+        {
+            var next = new RedisMultiplexedConnection[desiredFastConnections];
+            Array.Copy(_conns, next, _conns.Length);
+            for (var i = _conns.Length; i < next.Length; i++)
+                next[i] = CreateFastConnection();
+            _conns = next;
+            return null;
+        }
+
+        var removedCount = _conns.Length - desiredFastConnections;
+        var removed = new RedisMultiplexedConnection[removedCount];
+        Array.Copy(_conns, desiredFastConnections, removed, 0, removedCount);
+
+        var resized = new RedisMultiplexedConnection[desiredFastConnections];
+        Array.Copy(_conns, resized, desiredFastConnections);
+        _conns = resized;
+
+        return removed;
+    }
+
+    private RedisMultiplexedConnection[]? ReconcileBulkConnectionsUnsafe(int desiredBulkLaneConnections, bool timeoutChanged)
+    {
+        RedisMultiplexedConnection[]? bulkConnsToDispose = null;
+
+        if (_bulkConns.Length > 0 && (desiredBulkLaneConnections == 0 || timeoutChanged))
+        {
+            bulkConnsToDispose = _bulkConns;
+            _bulkConns = Array.Empty<RedisMultiplexedConnection>();
+        }
+
+        if (desiredBulkLaneConnections > 0)
+        {
+            if (_bulkConns.Length == 0)
+            {
+                _bulkConns = new RedisMultiplexedConnection[desiredBulkLaneConnections];
+                for (var i = 0; i < _bulkConns.Length; i++)
+                    _bulkConns[i] = CreateBulkConnection();
+            }
+            else if (_bulkConns.Length != desiredBulkLaneConnections)
+            {
+                var oldBulk = _bulkConns;
+                var nextBulk = new RedisMultiplexedConnection[desiredBulkLaneConnections];
+                var retained = Math.Min(oldBulk.Length, nextBulk.Length);
+                Array.Copy(oldBulk, nextBulk, retained);
+                for (var i = retained; i < nextBulk.Length; i++)
+                    nextBulk[i] = CreateBulkConnection();
+                _bulkConns = nextBulk;
+
+                if (oldBulk.Length > retained)
+                {
+                    var removed = new RedisMultiplexedConnection[oldBulk.Length - retained];
+                    Array.Copy(oldBulk, retained, removed, 0, removed.Length);
+                    bulkConnsToDispose = bulkConnsToDispose is null
+                        ? removed
+                        : [.. bulkConnsToDispose, .. removed];
+                }
+            }
+        }
+
+        _bulkLaneConnections = desiredBulkLaneConnections;
+        return bulkConnsToDispose;
+    }
+
+    private static async Task DisposeConnectionsAsync(RedisMultiplexedConnection[] connections)
+    {
+        for (var i = 0; i < connections.Length; i++)
+        {
+            try
+            {
+                await connections[i].DisposeAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Best effort cleanup; lane recreation already succeeded.
             }
         }
     }
@@ -2841,48 +3280,78 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     private void ScaleUp(string reason)
     {
+        RedisMultiplexedConnection[]? fastConnsToDispose = null;
+        RedisMultiplexedConnection[]? bulkConnsToDispose = null;
         lock (_connGate)
         {
-            if (_conns.Length >= _maxConnections)
+            var currentConnections = GetTotalConnectionCountUnsafe();
+            if (currentConnections >= _maxConnections)
                 return;
 
-            var next = new RedisMultiplexedConnection[_conns.Length + 1];
-            Array.Copy(_conns, next, _conns.Length);
-            next[^1] = CreateConnection();
-            _conns = next;
+            var targetConnections = currentConnections + 1;
+            var laneBudget = ResolveLaneBudget(
+                _configuredBulkLaneConnections,
+                _autoAdjustBulkLanes,
+                _bulkLaneTargetRatio,
+                targetConnections);
+            fastConnsToDispose = ReconcileFastConnectionsUnsafe(laneBudget.FastConnections);
+            bulkConnsToDispose = ReconcileBulkConnectionsUnsafe(laneBudget.BulkConnections, timeoutChanged: false);
+
             RebuildLanesUnsafe();
-            Volatile.Write(ref _lastScaleEventTicks, DateTimeOffset.UtcNow.UtcTicks);
+            Volatile.Write(ref _lastScaleEventTicks, Stopwatch.GetTimestamp());
             _lastScaleDirection = "up";
             _lastScaleReason = reason;
         }
+
+        if (fastConnsToDispose is { Length: > 0 })
+            _ = DisposeConnectionsAsync(fastConnsToDispose);
+
+        if (bulkConnsToDispose is { Length: > 0 })
+            _ = DisposeConnectionsAsync(bulkConnsToDispose);
     }
 
     private async Task ScaleDownAsync(string reason)
     {
-        RedisMultiplexedConnection? removed = null;
+        RedisMultiplexedConnection[]? fastConnsToDispose = null;
+        RedisMultiplexedConnection[]? bulkConnsToDispose = null;
         lock (_connGate)
         {
-            if (_conns.Length <= _minConnections)
+            var currentConnections = GetTotalConnectionCountUnsafe();
+            if (currentConnections <= _minConnections)
                 return;
 
-            var next = new RedisMultiplexedConnection[_conns.Length - 1];
-            Array.Copy(_conns, next, next.Length);
-            removed = _conns[^1];
-            _conns = next;
+            var targetConnections = currentConnections - 1;
+            var laneBudget = ResolveLaneBudget(
+                _configuredBulkLaneConnections,
+                _autoAdjustBulkLanes,
+                _bulkLaneTargetRatio,
+                targetConnections);
+            fastConnsToDispose = ReconcileFastConnectionsUnsafe(laneBudget.FastConnections);
+            bulkConnsToDispose = ReconcileBulkConnectionsUnsafe(laneBudget.BulkConnections, timeoutChanged: false);
+
             RebuildLanesUnsafe();
-            Volatile.Write(ref _lastScaleEventTicks, DateTimeOffset.UtcNow.UtcTicks);
+            Volatile.Write(ref _lastScaleEventTicks, Stopwatch.GetTimestamp());
             _lastScaleDirection = "down";
             _lastScaleReason = reason;
         }
 
-        if (removed is not null)
+        if (fastConnsToDispose is { Length: > 0 })
         {
-            await WaitForDrainAsync(removed, _scaleDownDrainTimeout, _autoscaleCts.Token).ConfigureAwait(false);
-            await removed.DisposeAsync().ConfigureAwait(false);
+            for (var i = 0; i < fastConnsToDispose.Length; i++)
+            {
+                await WaitForDrainAsync(fastConnsToDispose[i], _scaleDownDrainTimeout, _autoscaleCts.Token).ConfigureAwait(false);
+                await fastConnsToDispose[i].DisposeAsync().ConfigureAwait(false);
+            }
+        }
+
+        if (bulkConnsToDispose is not null)
+        {
+            for (var i = 0; i < bulkConnsToDispose.Length; i++)
+                await bulkConnsToDispose[i].DisposeAsync().ConfigureAwait(false);
         }
     }
 
-    private async ValueTask WaitForDrainAsync(RedisMultiplexedConnection conn, TimeSpan timeout, CancellationToken ct)
+    private static async ValueTask WaitForDrainAsync(RedisMultiplexedConnection conn, TimeSpan timeout, CancellationToken ct)
     {
         if (timeout <= TimeSpan.Zero)
             return;
@@ -2909,8 +3378,8 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         double p95Ms,
         double p99Ms)
     {
-        _logger.LogInformation(
-            "Autoscaler decision: {Action} {From}->{To} reason={Reason} signals={Signals} inflight={Inflight:F3} avgQueue={AvgQueue:F2} maxQueue={MaxQueue} timeoutRate={TimeoutRate:F3}/s p95={P95:F2}ms p99={P99:F2}ms",
+        LogAutoscalerDecision(
+            _logger,
             action,
             fromConnections,
             toConnections,
@@ -2963,7 +3432,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         if (TryGetFreezeState(nowTicks, out blockedReason, out _))
             return false;
 
-        var minuteWindowTicks = TimeSpan.FromMinutes(1).Ticks;
+        var minuteWindowTicks = ScaleEventWindowStopwatchTicks;
         var windowStartTicks = Interlocked.Read(ref _scaleEventWindowStartTicks);
         if (windowStartTicks == 0 || nowTicks - windowStartTicks >= minuteWindowTicks)
         {
@@ -2985,7 +3454,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
     private void RegisterScaleEvent(string direction, long nowTicks)
     {
-        var minuteWindowTicks = TimeSpan.FromMinutes(1).Ticks;
+        var minuteWindowTicks = ScaleEventWindowStopwatchTicks;
         var windowStartTicks = Interlocked.Read(ref _scaleEventWindowStartTicks);
         if (windowStartTicks == 0 || nowTicks - windowStartTicks >= minuteWindowTicks)
         {
@@ -2994,7 +3463,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             Volatile.Write(ref _flapToggleCount, 0);
         }
 
-        Volatile.Write(ref _scaleEventsInCurrentMinute, Volatile.Read(ref _scaleEventsInCurrentMinute) + 1);
+        Interlocked.Increment(ref _scaleEventsInCurrentMinute);
 
         var previousDirection = _lastScaleDirectionForFlap;
         var previousDirectionTicks = Interlocked.Read(ref _lastScaleDirectionTicks);
@@ -3005,7 +3474,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             nowTicks - previousDirectionTicks <= minuteWindowTicks;
 
         if (isRapidToggle)
-            Volatile.Write(ref _flapToggleCount, Volatile.Read(ref _flapToggleCount) + 1);
+            Interlocked.Increment(ref _flapToggleCount);
 
         _lastScaleDirectionForFlap = direction;
         Interlocked.Exchange(ref _lastScaleDirectionTicks, nowTicks);
@@ -3017,16 +3486,16 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     private void FreezeAutoscaler(string reason, long nowTicks)
     {
         var freezeDuration = _autoscaleFreezeDuration <= TimeSpan.Zero ? TimeSpan.FromMinutes(2) : _autoscaleFreezeDuration;
-        var untilTicks = nowTicks + freezeDuration.Ticks;
+        var untilTicks = nowTicks + ToStopwatchTicks(freezeDuration);
         var existingUntil = Interlocked.Read(ref _autoscaleFrozenUntilTicks);
         if (untilTicks > existingUntil)
             Interlocked.Exchange(ref _autoscaleFrozenUntilTicks, untilTicks);
         _freezeReason = reason;
 
-        _logger.LogWarning(
-            "Autoscaler freeze: reason={Reason} until={UntilUtc:o}",
+        LogAutoscalerFreeze(
+            _logger,
             reason,
-            new DateTimeOffset(Interlocked.Read(ref _autoscaleFrozenUntilTicks), TimeSpan.Zero));
+            ToUtcTimestamp(Interlocked.Read(ref _autoscaleFrozenUntilTicks)));
     }
 
     private bool TryGetFreezeState(long nowTicks, out string reason, out DateTimeOffset? frozenUntilUtc)
@@ -3044,7 +3513,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             reason = string.IsNullOrWhiteSpace(_freezeReason)
                 ? "blocked:frozen"
                 : $"blocked:frozen:{_freezeReason}";
-            frozenUntilUtc = new DateTimeOffset(frozenUntilTicks, TimeSpan.Zero);
+            frozenUntilUtc = ToUtcTimestamp(frozenUntilTicks);
             return true;
         }
 
@@ -3079,8 +3548,8 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         bool frozen,
         DateTimeOffset? frozenUntilUtc)
     {
-        _logger.LogDebug(
-            "Autoscaler tick: action={Action} reason={Reason} current={Current} target={Target} signals={Signals} inflight.avg={InflightAvg:F3} inflight.max={InflightMax:F3} queue.avg={QueueAvg:F2} queue.max={QueueMax} p95={P95:F2}ms p99={P99:F2}ms timeoutRate={TimeoutRate:F3}/s unhealthy={Unhealthy} reconnectFailureRate={ReconnectFailureRate:F3}/s events={Events}/{MaxEvents} cooldown.up={CooldownUp} cooldown.down={CooldownDown} window.up={WindowUp} window.down={WindowDown} frozen={Frozen} frozenUntil={FrozenUntilUtc}",
+        LogAutoscalerTick(
+            _logger,
             action,
             reason,
             currentConnections,
@@ -3105,6 +3574,65 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             frozenUntilUtc);
     }
 
+    [LoggerMessage(
+        EventId = 11000,
+        Level = LogLevel.Warning,
+        Message = "{OptionsName} options were normalized at runtime to enforce safe performance guardrails. Review configured values for invalid or out-of-range settings.")]
+    private static partial void LogOptionsNormalized(ILogger logger, string optionsName);
+
+    [LoggerMessage(
+        EventId = 11001,
+        Level = LogLevel.Information,
+        Message = "Autoscaler decision: {Action} {From}->{To} reason={Reason} signals={Signals} inflight={Inflight:F3} avgQueue={AvgQueue:F2} maxQueue={MaxQueue} timeoutRate={TimeoutRate:F3}/s p95={P95:F2}ms p99={P99:F2}ms")]
+    private static partial void LogAutoscalerDecision(
+        ILogger logger,
+        string action,
+        int from,
+        int to,
+        string reason,
+        int signals,
+        double inflight,
+        double avgQueue,
+        int maxQueue,
+        double timeoutRate,
+        double p95,
+        double p99);
+
+    [LoggerMessage(
+        EventId = 11002,
+        Level = LogLevel.Warning,
+        Message = "Autoscaler freeze: reason={Reason} until={UntilUtc:o}")]
+    private static partial void LogAutoscalerFreeze(ILogger logger, string reason, DateTimeOffset untilUtc);
+
+    [LoggerMessage(
+        EventId = 11003,
+        Level = LogLevel.Debug,
+        Message = "Autoscaler tick: action={Action} reason={Reason} current={Current} target={Target} signals={Signals} inflight.avg={InflightAvg:F3} inflight.max={InflightMax:F3} queue.avg={QueueAvg:F2} queue.max={QueueMax} p95={P95:F2}ms p99={P99:F2}ms timeoutRate={TimeoutRate:F3}/s unhealthy={Unhealthy} reconnectFailureRate={ReconnectFailureRate:F3}/s events={Events}/{MaxEvents} cooldown.up={CooldownUp} cooldown.down={CooldownDown} window.up={WindowUp} window.down={WindowDown} frozen={Frozen} frozenUntil={FrozenUntilUtc}")]
+    private static partial void LogAutoscalerTick(
+        ILogger logger,
+        string action,
+        string reason,
+        int current,
+        int target,
+        int signals,
+        double inflightAvg,
+        double inflightMax,
+        double queueAvg,
+        int queueMax,
+        double p95,
+        double p99,
+        double timeoutRate,
+        int unhealthy,
+        double reconnectFailureRate,
+        int events,
+        int maxEvents,
+        bool cooldownUp,
+        bool cooldownDown,
+        bool windowUp,
+        bool windowDown,
+        bool frozen,
+        DateTimeOffset? frozenUntilUtc);
+
     /// <summary>
     /// Gets value.
     /// </summary>
@@ -3112,12 +3640,14 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         var eventTicks = Volatile.Read(ref _lastScaleEventTicks);
         var frozenUntilTicks = Interlocked.Read(ref _autoscaleFrozenUntilTicks);
-        var nowTicks = DateTimeOffset.UtcNow.UtcTicks;
+        var nowTicks = Stopwatch.GetTimestamp();
         var frozen = frozenUntilTicks > nowTicks;
+        var currentConnections = GetTotalConnectionCountUnsafe();
+        var targetConnections = Volatile.Read(ref _lastTargetConnections);
         return new RedisAutoscalerSnapshot(
             Enabled: _autoscaleEnabled,
-            CurrentConnections: _conns.Length,
-            TargetConnections: Volatile.Read(ref _lastTargetConnections) <= 0 ? _conns.Length : Volatile.Read(ref _lastTargetConnections),
+            CurrentConnections: currentConnections,
+            TargetConnections: targetConnections <= 0 ? currentConnections : targetConnections,
             MinConnections: _minConnections,
             MaxConnections: _maxConnections,
             CurrentReadLanes: _readConns.Length,
@@ -3134,9 +3664,9 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             ScaleEventsInCurrentMinute: Volatile.Read(ref _scaleEventsInCurrentMinute),
             MaxScaleEventsPerMinute: _maxScaleEventsPerMinute,
             Frozen: frozen,
-            FrozenUntilUtc: frozen ? new DateTimeOffset(frozenUntilTicks, TimeSpan.Zero) : null,
+            FrozenUntilUtc: frozen ? ToUtcTimestamp(frozenUntilTicks) : null,
             FreezeReason: frozen ? _freezeReason : null,
-            LastScaleEventUtc: eventTicks == 0 ? null : new DateTimeOffset(eventTicks, TimeSpan.Zero),
+            LastScaleEventUtc: eventTicks == 0 ? null : ToUtcTimestamp(eventTicks),
             LastScaleDirection: _lastScaleDirection,
             LastScaleReason: _lastScaleReason);
     }
@@ -3146,25 +3676,46 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public IReadOnlyList<RedisMuxLaneSnapshot> GetMuxLaneSnapshots()
     {
-        var conns = _conns;
-        if (conns.Length == 0)
+        var fastGroup = new LaneGroupSnapshot("fast", _conns, _readConns, _writeConns);
+        var bulkGroup = new LaneGroupSnapshot("bulk", _bulkConns, _bulkReadConns, _bulkWriteConns);
+        var total = fastGroup.Connections.Length + bulkGroup.Connections.Length;
+        if (total == 0)
             return Array.Empty<RedisMuxLaneSnapshot>();
 
-        var readConns = _readConns;
-        var writeConns = _writeConns;
-        var lanes = new RedisMuxLaneSnapshot[conns.Length];
+        var lanes = new RedisMuxLaneSnapshot[total];
+        var index = 0;
+        index = FillLaneGroupSnapshots(fastGroup, includeGroupPrefix: false, lanes, index);
+        _ = FillLaneGroupSnapshots(bulkGroup, includeGroupPrefix: true, lanes, index);
+        return lanes;
+    }
 
-        for (var i = 0; i < conns.Length; i++)
+    private readonly record struct LaneGroupSnapshot(
+        string Name,
+        RedisMultiplexedConnection[] Connections,
+        RedisMultiplexedConnection[] ReadConnections,
+        RedisMultiplexedConnection[] WriteConnections);
+
+    private static int FillLaneGroupSnapshots(
+        LaneGroupSnapshot group,
+        bool includeGroupPrefix,
+        RedisMuxLaneSnapshot[] destination,
+        int startIndex)
+    {
+        for (var i = 0; i < group.Connections.Length; i++)
         {
-            var conn = conns[i];
+            var conn = group.Connections[i];
             var usage = conn.CaptureMuxLaneUsageSnapshot();
             var maxInFlight = usage.MaxInFlight;
             var utilization = maxInFlight <= 0 ? 0d : (double)usage.InFlight / maxInFlight;
 
-            lanes[i] = new RedisMuxLaneSnapshot(
-                LaneIndex: i,
+            destination[startIndex + i] = new RedisMuxLaneSnapshot(
+                LaneIndex: startIndex + i,
                 ConnectionId: conn.ConnectionId,
-                Role: ResolveLaneRole(conn, readConns, writeConns),
+                Role: ResolveLaneRole(
+                    conn,
+                    group.ReadConnections,
+                    group.WriteConnections,
+                    includeGroupPrefix ? group.Name : null),
                 WriteQueueDepth: conn.WriteQueueDepth,
                 InFlight: usage.InFlight,
                 MaxInFlight: maxInFlight,
@@ -3180,24 +3731,29 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 Healthy: conn.IsHealthy);
         }
 
-        return lanes;
+        return startIndex + group.Connections.Length;
     }
 
     private static string ResolveLaneRole(
         RedisMultiplexedConnection lane,
         RedisMultiplexedConnection[] readConns,
-        RedisMultiplexedConnection[] writeConns)
+        RedisMultiplexedConnection[] writeConns,
+        string? groupPrefix = null)
     {
         var isRead = ContainsConnection(readConns, lane);
         var isWrite = ContainsConnection(writeConns, lane);
 
+        var role = "unassigned";
         if (isRead && isWrite)
-            return "read-write";
-        if (isRead)
-            return "read";
-        if (isWrite)
-            return "write";
-        return "unassigned";
+            role = "read-write";
+        else if (isRead)
+            role = "read";
+        else if (isWrite)
+            role = "write";
+
+        return string.IsNullOrEmpty(groupPrefix)
+            ? role
+            : $"{groupPrefix}-{role}";
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -3279,15 +3835,62 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         return aScore <= bScore ? a : b;
     }
 
+    private RedisMultiplexedConnection NextBulk()
+    {
+        var conns = _bulkConns;
+        if (conns.Length == 0)
+            return Next();
+        if (conns.Length == 1)
+            return conns[0];
+
+        var idx = Interlocked.Increment(ref _bulkRr) & int.MaxValue;
+        return conns[SelectLaneIndex(idx, conns.Length)];
+    }
+
+    private RedisMultiplexedConnection NextBulkRead()
+    {
+        var readConns = _bulkReadConns;
+        var laneCount = readConns.Length;
+        if (laneCount == 0)
+            return NextRead();
+        if (laneCount == 1)
+            return readConns[0];
+
+        var idx = Interlocked.Increment(ref _bulkReadRr) & int.MaxValue;
+        var aIndex = SelectLaneIndex(idx, laneCount);
+        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
+        var a = readConns[aIndex];
+        var b = readConns[bIndex];
+
+        var aScore = a.GetLaneSelectionScore();
+        var bScore = b.GetLaneSelectionScore();
+        return aScore <= bScore ? a : b;
+    }
+
+    private RedisMultiplexedConnection NextBulkWrite()
+    {
+        var writeConns = _bulkWriteConns;
+        var laneCount = writeConns.Length;
+        if (laneCount == 0)
+            return NextWrite();
+        if (laneCount == 1)
+            return writeConns[0];
+
+        var idx = Interlocked.Increment(ref _bulkWriteRr) & int.MaxValue;
+        var aIndex = SelectLaneIndex(idx, laneCount);
+        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
+        var a = writeConns[aIndex];
+        var b = writeConns[bIndex];
+
+        var aScore = a.GetLaneSelectionScore();
+        var bScore = b.GetLaneSelectionScore();
+        return aScore <= bScore ? a : b;
+    }
+
     private Activity? StartCommandActivity(string op)
     {
-        if (!_instrument) return null;
-        if (!RedisTelemetry.ActivitySource.HasListeners()) return null;
-        var a = RedisTelemetry.ActivitySource.StartActivity("redis.command", ActivityKind.Client);
-        if (a is null) return null;
-        a.SetTag("db.system", "redis");
-        a.SetTag("db.operation", op);
-        return a;
+        var runtime = ReadRuntimeConfig();
+        return RedisTracing.StartCommand(op, runtime.EnableCommandInstrumentation);
     }
 
     private static bool TryGetJsonSetCachedHeader(
@@ -3354,7 +3957,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextRead();
+            conn = NextBulkRead();
             var cached = Volatile.Read(ref _hgetHeaderCache);
             byte[]? headerBuffer;
             ReadOnlyMemory<byte> header;
@@ -3641,7 +4244,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 return resp.Bulk;
             if (resp.Kind == RedisRespReader.RespKind.Error)
                 throw new InvalidOperationException($"Redis error: {resp.Text}");
-            return await executor.ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, op, resp).ConfigureAwait(false);
+            return await ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, op, resp).ConfigureAwait(false);
         }
     }
 
@@ -3663,7 +4266,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
                 return RedisValueLease.Null;
             if (resp.Kind == RedisRespReader.RespKind.BulkString && resp.Bulk is not null)
-                return new RedisValueLease(resp.Bulk, resp.BulkLength, pooled: resp.BulkIsPooled);
+                return RedisValueLease.Create(resp.Bulk, resp.BulkLength, pooled: resp.BulkIsPooled);
 
             RedisRespReader.ReturnBuffers(resp);
             throw new InvalidOperationException($"Unexpected {op} response: {resp.Kind}");
@@ -3681,7 +4284,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
                 return new ValueTask<RedisValueLease>(RedisValueLease.Null);
             if (resp.Kind == RedisRespReader.RespKind.BulkString && resp.Bulk is not null)
-                return new ValueTask<RedisValueLease>(new RedisValueLease(resp.Bulk, resp.BulkLength, pooled: resp.BulkIsPooled));
+                return new ValueTask<RedisValueLease>(RedisValueLease.Create(resp.Bulk, resp.BulkLength, pooled: resp.BulkIsPooled));
             return ThrowUnexpectedResponseAndResetAsync<RedisValueLease>(conn, op, resp);
         }
 
@@ -3697,8 +4300,8 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
                 return RedisValueLease.Null;
             if (resp.Kind == RedisRespReader.RespKind.BulkString && resp.Bulk is not null)
-                return new RedisValueLease(resp.Bulk, resp.BulkLength, pooled: resp.BulkIsPooled);
-            return await executor.ThrowUnexpectedResponseAndResetAsync<RedisValueLease>(conn, op, resp).ConfigureAwait(false);
+                return RedisValueLease.Create(resp.Bulk, resp.BulkLength, pooled: resp.BulkIsPooled);
+            return await ThrowUnexpectedResponseAndResetAsync<RedisValueLease>(conn, op, resp).ConfigureAwait(false);
         }
     }
 
@@ -3771,7 +4374,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             try
             {
                 var resp = await task.ConfigureAwait(false);
-                return await executor.ReadSetResponseAsync(conn, resp).ConfigureAwait(false);
+                return await ReadSetResponseAsync(conn, resp).ConfigureAwait(false);
             }
             finally
             {
@@ -3820,7 +4423,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             var resp = await task.ConfigureAwait(false);
             if (resp.Kind == RedisRespReader.RespKind.Integer)
                 return resp.IntegerValue == 1;
-            return await executor.ThrowUnexpectedResponseAndResetAsync<bool>(conn, "SISMEMBER", resp).ConfigureAwait(false);
+            return await ThrowUnexpectedResponseAndResetAsync<bool>(conn, "SISMEMBER", resp).ConfigureAwait(false);
         }
     }
 
@@ -3874,7 +4477,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                 return null;
             if (resp.Kind == RedisRespReader.RespKind.BulkString)
                 return resp.Bulk;
-            return await executor.ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, "LPOP", resp).ConfigureAwait(false);
+            return await ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, "LPOP", resp).ConfigureAwait(false);
         }
     }
 
@@ -3883,13 +4486,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TryLPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetLPopCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextRead();
+            conn = NextBulkRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteLPopCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
@@ -3911,7 +4514,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -3985,7 +4588,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
             if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
                 return null;
 
-            return await executor.ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, "RPOP", resp).ConfigureAwait(false);
+            return await ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, "RPOP", resp).ConfigureAwait(false);
         }
     }
 
@@ -3999,7 +4602,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("RPUSH");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetRPushCommandLength(key, value.Length);
         byte[]? rented = null;
@@ -4022,13 +4625,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4046,7 +4649,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("RPUSH");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var commandPrefixLen = RedisRespProtocol.GetRPushManyPrefixLength(key, count);
         var bulkPrefixTotalLen = 0;
@@ -4094,13 +4697,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (headerBuffer is not null && conn is not null) conn.ReturnHeaderBuffer(headerBuffer);
             if (payloadArrayBuffer is not null && conn is not null) conn.ReturnPayloadArray(payloadArrayBuffer);
         }
@@ -4111,7 +4714,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && TryRPopAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryRPopAsync(key, ct, out var fastTask))
             return fastTask;
 
         return RPopAsyncSlow(key, ct);
@@ -4122,14 +4725,14 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("RPOP");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetRPopCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             var resp = await conn.ExecuteAsync(
@@ -4145,13 +4748,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4161,14 +4764,14 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TryRPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetRPopCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
@@ -4190,7 +4793,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -4204,7 +4807,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> RPopLeaseAsync(string key, CancellationToken ct)
     {
-        if (!_instrument && TryRPopLeaseAsync(key, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryRPopLeaseAsync(key, ct, out var fastTask))
             return fastTask;
 
         return RPopLeaseAsyncSlow(key, ct);
@@ -4215,14 +4818,14 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("RPOP");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetRPopCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             var resp = await conn.ExecuteAsync(
@@ -4238,13 +4841,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4254,13 +4857,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TryRPopLeaseAsync(string key, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetRPopCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextWrite();
+            conn = NextBulkWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
@@ -4282,7 +4885,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -4299,7 +4902,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("LLEN");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetLLenCommandLength(key);
         byte[]? rented = null;
@@ -4322,13 +4925,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4343,7 +4946,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("SADD");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetSAddCommandLength(key, member.Length);
         byte[]? rented = null;
@@ -4366,13 +4969,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4385,7 +4988,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("SREM");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetSRemCommandLength(key, member.Length);
         byte[]? rented = null;
@@ -4408,13 +5011,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4427,7 +5030,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("SISMEMBER");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetSIsMemberCommandLength(key, member.Length);
         byte[]? rented = null;
@@ -4450,13 +5053,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4466,7 +5069,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TrySIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct, out ValueTask<bool> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetSIsMemberCommandLength(key, member.Length);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -4494,7 +5097,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -4511,7 +5114,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("SMEMBERS");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetSMembersCommandLength(key);
         byte[]? rented = null;
@@ -4566,13 +5169,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4585,7 +5188,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("SCARD");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetSCardCommandLength(key);
         byte[]? rented = null;
@@ -4608,13 +5211,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4629,7 +5232,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("ZADD");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var scoreText = FormatDouble(score);
         var len = RedisRespProtocol.GetZAddCommandLength(key, scoreText, member.Length);
@@ -4653,13 +5256,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4672,7 +5275,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("ZREM");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetZRemCommandLength(key, member.Length);
         byte[]? rented = null;
@@ -4695,13 +5298,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4714,7 +5317,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("ZCARD");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetZCardCommandLength(key);
         byte[]? rented = null;
@@ -4737,13 +5340,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4756,7 +5359,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("ZSCORE");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetZScoreCommandLength(key, member.Length);
         byte[]? rented = null;
@@ -4784,13 +5387,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4803,7 +5406,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity(descending ? "ZREVRANK" : "ZRANK");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetZRankCommandLength(key, member.Length, descending);
         byte[]? rented = null;
@@ -4831,13 +5434,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4850,7 +5453,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("ZINCRBY");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var incrementText = FormatDouble(increment);
         var len = RedisRespProtocol.GetZIncrByCommandLength(key, incrementText, member.Length);
@@ -4876,13 +5479,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4892,7 +5495,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity(descending ? "ZREVRANGE" : "ZRANGE");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetZRangeWithScoresCommandLength(key, start, stop, descending);
         byte[]? rented = null;
@@ -4948,13 +5551,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -4971,7 +5574,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity(descending ? "ZREVRANGEBYSCORE" : "ZRANGEBYSCORE");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var minText = FormatDouble(min);
         var maxText = FormatDouble(max);
@@ -5029,13 +5632,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5047,7 +5650,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<byte[]?> JsonGetAsync(string key, string? path, CancellationToken ct)
     {
-        if (!_instrument && TryQueueJsonGetFast(key, path, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryQueueJsonGetFast(key, path, ct, out var fastTask))
             return fastTask;
 
         return JsonGetAsyncSlow(key, path, ct);
@@ -5058,7 +5661,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("JSON.GET");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetJsonGetCommandLength(key, path);
         byte[]? rented = null;
@@ -5081,13 +5684,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5097,7 +5700,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public ValueTask<RedisValueLease> JsonGetLeaseAsync(string key, string? path, CancellationToken ct)
     {
-        if (!_instrument && TryJsonGetLeaseAsync(key, path, ct, out var fastTask))
+        if (!IsCommandInstrumentationEnabled() && TryJsonGetLeaseAsync(key, path, ct, out var fastTask))
             return fastTask;
 
         return JsonGetLeaseAsyncSlow(key, path, ct);
@@ -5108,14 +5711,14 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("JSON.GET");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetJsonGetCommandLength(key, path);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextBulk();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteJsonGetCommand(rented.AsSpan(0, len), key, path);
             var resp = await conn.ExecuteAsync(
@@ -5131,13 +5734,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5147,13 +5750,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     /// </summary>
     public bool TryJsonGetLeaseAsync(string key, string? path, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
         var len = RedisRespProtocol.GetJsonGetCommandLength(key, path);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextBulk();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteJsonGetCommand(rented.AsSpan(0, len), key, path);
             if (!conn.TryExecuteAsync(
@@ -5175,7 +5778,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
@@ -5192,7 +5795,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("JSON.SET");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         path ??= ".";
         byte[]? rented = null;
@@ -5247,13 +5850,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5275,7 +5878,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("JSON.DEL");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetJsonDelCommandLength(key, path);
         byte[]? rented = null;
@@ -5298,13 +5901,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5318,7 +5921,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("FT.CREATE");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetFtCreateCommandLength(index, prefix, fields);
         byte[]? rented = null;
@@ -5339,15 +5942,19 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
 
             return resp.Kind == RedisRespReader.RespKind.SimpleString;
         }
+        catch (Exception ex) when (IsRedisIndexAlreadyExists(ex))
+        {
+            return false;
+        }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5359,7 +5966,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("FT.SEARCH");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetFtSearchCommandLength(index, query, offset, count);
         byte[]? rented = null;
@@ -5388,30 +5995,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
                     if (resp.Kind is not RedisRespReader.RespKind.Array || resp.ArrayItems is null)
                         throw new InvalidOperationException($"Unexpected FT.SEARCH response: {resp.Kind}");
 
-                    var items = resp.ArrayItems;
-                    var itemCount = resp.ArrayLength;
-                    if (itemCount <= 1)
-                        return Array.Empty<string>();
-
-                    var idCount = 0;
-                    for (var i = 1; i < itemCount; i++)
-                    {
-                        if (items[i].Kind == RedisRespReader.RespKind.BulkString)
-                            idCount++;
-                    }
-
-                    if (idCount == 0)
-                        return Array.Empty<string>();
-
-                    var ids = new string[idCount];
-                    var idx = 0;
-                    for (var i = 1; i < itemCount; i++)
-                    {
-                        if (items[i].Kind == RedisRespReader.RespKind.BulkString)
-                            ids[idx++] = Encoding.UTF8.GetString(items[i].Bulk ?? Array.Empty<byte>(), 0, GetBulkLength(items[i]));
-                    }
-
-                    return ids;
+                    return ParseFtSearchDocumentIds(resp);
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -5426,15 +6010,171 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
+    }
+
+    private static string[] ParseFtSearchDocumentIds(RedisRespReader.RespValue response)
+    {
+        if (response.Kind is RedisRespReader.RespKind.NullArray)
+            return Array.Empty<string>();
+
+        if (response.Kind is not RedisRespReader.RespKind.Array || response.ArrayItems is null)
+            throw new InvalidOperationException($"Unexpected FT.SEARCH response: {response.Kind}");
+
+        var ids = new List<string>(Math.Max(0, response.ArrayLength - 1));
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        ExtractFtSearchDocumentIds(response, ids, seen, depth: 0);
+        return ids.Count == 0 ? Array.Empty<string>() : ids.ToArray();
+    }
+
+    private static void ExtractFtSearchDocumentIds(
+        RedisRespReader.RespValue value,
+        List<string> ids,
+        HashSet<string> seen,
+        int depth)
+    {
+        if (depth >= 12 || value.Kind is not RedisRespReader.RespKind.Array || value.ArrayItems is null)
+            return;
+
+        var items = value.ArrayItems;
+        var length = value.ArrayLength;
+        if (length == 0)
+            return;
+
+        // RESP2 canonical shape: [total, docId, [fields...], docId, [fields...]]
+        if (items[0].Kind == RedisRespReader.RespKind.Integer)
+        {
+            for (var i = 1; i < length; i++)
+            {
+                if (TryReadRespText(items[i], out var docId))
+                {
+                    AddFtSearchDocumentId(docId, ids, seen);
+                    continue;
+                }
+
+                if (TryExtractDocumentIdFromTuple(items[i], out docId))
+                    AddFtSearchDocumentId(docId, ids, seen);
+            }
+        }
+
+        // RESP3 map-based payloads can appear as flattened key/value arrays.
+        for (var i = 0; i + 1 < length; i += 2)
+        {
+            if (!TryReadRespText(items[i], out var key))
+                continue;
+
+            var valueItem = items[i + 1];
+            if (key.Equals("id", StringComparison.OrdinalIgnoreCase))
+            {
+                if (TryReadRespText(valueItem, out var docId))
+                    AddFtSearchDocumentId(docId, ids, seen);
+                continue;
+            }
+
+            if (key.Equals("results", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("docs", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("documents", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("value", StringComparison.OrdinalIgnoreCase))
+            {
+                ExtractFtSearchDocumentIds(valueItem, ids, seen, depth + 1);
+                continue;
+            }
+
+            if (valueItem.Kind == RedisRespReader.RespKind.Array)
+                ExtractFtSearchDocumentIds(valueItem, ids, seen, depth + 1);
+        }
+
+        // RESP3 tuple-style entries may appear as [docId, [attrs...]] per result row.
+        if (TryExtractDocumentIdFromTuple(value, out var tupleDocId))
+            AddFtSearchDocumentId(tupleDocId, ids, seen);
+
+        for (var i = 0; i < length; i++)
+        {
+            var child = items[i];
+            if (child.Kind == RedisRespReader.RespKind.Array)
+                ExtractFtSearchDocumentIds(child, ids, seen, depth + 1);
+        }
+    }
+
+    private static bool TryExtractDocumentIdFromTuple(RedisRespReader.RespValue value, out string documentId)
+    {
+        documentId = string.Empty;
+
+        if (value.Kind is not RedisRespReader.RespKind.Array || value.ArrayItems is null || value.ArrayLength == 0)
+            return false;
+
+        var items = value.ArrayItems;
+        var hasAggregateTail = false;
+        for (var i = 1; i < value.ArrayLength; i++)
+        {
+            if (items[i].Kind == RedisRespReader.RespKind.Array)
+            {
+                hasAggregateTail = true;
+                break;
+            }
+        }
+
+        if (!hasAggregateTail)
+            return false;
+
+        if (!TryReadRespText(items[0], out var first))
+            return false;
+
+        if (IsFtSearchMetadataKey(first))
+            return false;
+
+        documentId = first;
+        return true;
+    }
+
+    private static void AddFtSearchDocumentId(string candidate, List<string> ids, HashSet<string> seen)
+    {
+        if (candidate.Length == 0 || IsFtSearchMetadataKey(candidate))
+            return;
+
+        if (seen.Add(candidate))
+            ids.Add(candidate);
+    }
+
+    private static bool IsFtSearchMetadataKey(string text)
+        => text.Equals("total_results", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("results", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("docs", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("documents", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("id", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("payload", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("score", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("scores", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("extra_attributes", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("attributes", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("sortkey", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("values", StringComparison.OrdinalIgnoreCase)
+           || text.Equals("value", StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryReadRespText(RedisRespReader.RespValue value, out string text)
+    {
+        if (value.Kind == RedisRespReader.RespKind.SimpleString)
+        {
+            text = value.Text ?? string.Empty;
+            return true;
+        }
+
+        if (value.Kind == RedisRespReader.RespKind.BulkString)
+        {
+            text = Encoding.UTF8.GetString(value.Bulk ?? Array.Empty<byte>(), 0, GetBulkLength(value));
+            return true;
+        }
+
+        text = string.Empty;
+        return false;
     }
 
     /// <summary>
@@ -5445,7 +6185,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("BF.ADD");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetBfAddCommandLength(key, item.Length);
         byte[]? rented = null;
@@ -5468,13 +6208,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5487,7 +6227,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("BF.EXISTS");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetBfExistsCommandLength(key, item.Length);
         byte[]? rented = null;
@@ -5510,13 +6250,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5529,7 +6269,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("TS.CREATE");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetTsCreateCommandLength(key);
         byte[]? rented = null;
@@ -5552,13 +6292,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5571,7 +6311,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("TS.ADD");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var valueText = FormatDouble(value);
         var len = RedisRespProtocol.GetTsAddCommandLength(key, timestamp, valueText);
@@ -5595,13 +6335,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5611,7 +6351,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         using var activity = StartCommandActivity("TS.RANGE");
         activity?.SetTag("db.redis.key", key);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetTsRangeCommandLength(key, from, to);
         byte[]? rented = null;
@@ -5674,13 +6414,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5778,7 +6518,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity(command);
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         var len = RedisRespProtocol.GetScanCommandLength(command, key, cursor, pattern, count);
         byte[]? rented = null;
@@ -5800,13 +6540,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6023,7 +6763,7 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("PING");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
@@ -6043,13 +6783,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6061,13 +6801,13 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
     {
         using var activity = StartCommandActivity("MODULE");
         var sw = Stopwatch.StartNew();
-        if (_instrument) RedisTelemetry.CommandCalls.Add(1);
+        RedisMetrics.CommandCalls.Add(1);
 
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextBulk();
             var cmd = RedisRespProtocol.ModuleListCommand;
             var resp = await conn.ExecuteAsync(
                 cmd,
@@ -6125,17 +6865,29 @@ internal sealed class RedisCommandExecutor : IRedisCommandExecutor, IRedisMultip
         }
         catch
         {
-            if (_instrument) RedisTelemetry.CommandFailures.Add(1);
+            RedisMetrics.CommandFailures.Add(1);
             throw;
         }
         finally
         {
             sw.Stop();
-            if (_instrument) RedisTelemetry.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.CommandMs.Record(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
+
+    private sealed record RuntimeConfig(
+        RedisMultiplexerOptions Multiplexer,
+        bool EnableCommandInstrumentation,
+        TimeSpan BulkLaneResponseTimeout)
+    {
+        public static RuntimeConfig Empty { get; } = new(
+            new RedisMultiplexerOptions(),
+            EnableCommandInstrumentation: true,
+            BulkLaneResponseTimeout: TimeSpan.FromSeconds(5));
+    }
 }
+
 
 
 

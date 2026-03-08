@@ -34,6 +34,8 @@ public class RedisDatatypeParityHeadToHeadBenchmarks
 
     private static readonly int[] FullPayloadSizes = [256, 1024, 4096, 16384];
     private static readonly int[] QuickPayloadSizes = [256, 4096];
+    private static readonly bool[] FullInstrumentationModes = [false, true];
+    private static readonly bool[] QuickInstrumentationModes = [false];
 
     private const string Field = "field";
     private const double Score = 42.5;
@@ -44,14 +46,24 @@ public class RedisDatatypeParityHeadToHeadBenchmarks
     [ParamsSource(nameof(PayloadSizes))]
     public int PayloadBytes { get; set; }
 
-    [Params(false, true)]
+    [ParamsSource(nameof(InstrumentationModes))]
     public bool EnableInstrumentation { get; set; }
 
     public IEnumerable<RedisDatatypeParityOperation> Operations =>
         BenchmarkRedisConfig.ResolveEnumParams("VAPECACHE_BENCH_DATATYPE_OPERATIONS", FullOperations, QuickOperations);
 
     public IEnumerable<int> PayloadSizes =>
-        BenchmarkRedisConfig.ResolveIntParams("VAPECACHE_BENCH_DATATYPE_PAYLOADS", FullPayloadSizes, QuickPayloadSizes);
+        BenchmarkRedisConfig.ResolveIntParamsWithFallback(
+            "VAPECACHE_BENCH_DATATYPE_PAYLOADS",
+            "VAPECACHE_BENCH_PARITY_PAYLOADS",
+            FullPayloadSizes,
+            QuickPayloadSizes);
+
+    public IEnumerable<bool> InstrumentationModes =>
+        BenchmarkRedisConfig.ResolveBoolParams(
+            "VAPECACHE_BENCH_DATATYPE_INSTRUMENTATION",
+            FullInstrumentationModes,
+            QuickInstrumentationModes);
 
     private readonly Consumer _consumer = new();
     private byte[] _payload = Array.Empty<byte>();

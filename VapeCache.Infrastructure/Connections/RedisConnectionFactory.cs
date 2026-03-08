@@ -2,6 +2,7 @@
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Diagnostics;
 using System.Buffers;
 using System.Buffers.Binary;
@@ -13,7 +14,7 @@ using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
 
-internal sealed class RedisConnectionFactory(
+internal sealed partial class RedisConnectionFactory(
     IOptionsMonitor<RedisConnectionOptions> options,
     ILogger<RedisConnectionFactory> logger,
     IEnumerable<IRedisConnectionObserver> observers) : IRedisConnectionFactory
@@ -44,8 +45,8 @@ internal sealed class RedisConnectionFactory(
             {
                 if (logger.IsEnabled(LogLevel.Debug))
                 {
-                    logger.LogDebug(
-                        "Redis options resolved from ConnectionString: Host={Host} Port={Port} Db={Db} Tls={Tls}",
+                    LogConnectionStringResolved(
+                        logger,
                         effective.Host,
                         effective.Port,
                         effective.Database,
@@ -55,8 +56,8 @@ internal sealed class RedisConnectionFactory(
             catch { }
         }
 
-        RedisTelemetry.ConnectAttempts.Add(1);
-        using var activity = RedisTelemetry.ActivitySource.StartActivity("redis.connect");
+        RedisMetrics.ConnectAttempts.Add(1);
+        using var activity = RedisTracing.StartConnect();
         var sw = Stopwatch.StartNew();
 
         Socket? socket = null;
@@ -87,7 +88,7 @@ internal sealed class RedisConnectionFactory(
                 var ssl = new SslStream(
                     stream,
                     leaveInnerStreamOpen: false,
-                    effective.AllowInvalidCert ? static (_, _, _, _) => true : null
+                    effective.AllowInvalidCert ? AllowInvalidCertificateInNonProduction : null
                 );
 
                 await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
@@ -103,22 +104,25 @@ internal sealed class RedisConnectionFactory(
             await AuthenticateAndSelectAsync(id, stream, effective, cts.Token).ConfigureAwait(false);
 
             sw.Stop();
-            RedisTelemetry.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
 
             var conn = (IRedisConnection)new RedisConnection(id, socket, stream);
 
             try
             {
-                logger.LogInformation(
-                    "Redis connected (Id={Id}) {LocalEndPoint} -> {RemoteEndPoint} Tls={Tls} NoDelay={NoDelay} SendBuf={SendBuf} RecvBuf={RecvBuf} Time={Ms}ms",
-                    id,
-                    socket.LocalEndPoint?.ToString() ?? "?",
-                    socket.RemoteEndPoint?.ToString() ?? "?",
-                    effective.UseTls,
-                    socket.NoDelay,
-                    socket.SendBufferSize,
-                    socket.ReceiveBufferSize,
-                    sw.Elapsed.TotalMilliseconds);
+                if (logger.IsEnabled(LogLevel.Information))
+                {
+                    LogRedisConnected(
+                        logger,
+                        id,
+                        socket.LocalEndPoint,
+                        socket.RemoteEndPoint,
+                        effective.UseTls,
+                        socket.NoDelay,
+                        socket.SendBufferSize,
+                        socket.ReceiveBufferSize,
+                        sw.Elapsed.TotalMilliseconds);
+                }
             }
             catch { }
 
@@ -132,8 +136,8 @@ internal sealed class RedisConnectionFactory(
         {
             // Likely ConnectTimeout/handshake timeout via the linked CTS. Don't spam stack traces for expected timeouts.
             sw.Stop();
-            RedisTelemetry.ConnectFailures.Add(1);
-            RedisTelemetry.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.ConnectFailures.Add(1);
+            RedisMetrics.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
 
             var timeout = new TimeoutException(
                 $"Redis connect timed out to {effective.Host}:{effective.Port} (Tls={effective.UseTls}).",
@@ -141,8 +145,8 @@ internal sealed class RedisConnectionFactory(
 
             try
             {
-                logger.LogWarning(
-                    "Redis connect timed out to {Host}:{Port} Tls={Tls} after {Ms}ms",
+                LogConnectTimedOut(
+                    logger,
                     effective.Host,
                     effective.Port,
                     effective.UseTls,
@@ -160,8 +164,8 @@ internal sealed class RedisConnectionFactory(
         {
             // Host/app shutdown: treat as a canceled attempt without noisy logging.
             sw.Stop();
-            RedisTelemetry.ConnectFailures.Add(1);
-            RedisTelemetry.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.ConnectFailures.Add(1);
+            RedisMetrics.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
             try { stream?.Dispose(); } catch { }
             try { socket?.Dispose(); } catch { }
             return new Result<IRedisConnection>(oce);
@@ -169,11 +173,17 @@ internal sealed class RedisConnectionFactory(
         catch (Exception ex)
         {
             sw.Stop();
-            RedisTelemetry.ConnectFailures.Add(1);
-            RedisTelemetry.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
+            RedisMetrics.ConnectFailures.Add(1);
+            RedisMetrics.ConnectMs.Record(sw.Elapsed.TotalMilliseconds);
             try
             {
-                logger.LogWarning(ex, "Redis connect failed to {Host}:{Port} Tls={Tls} after {Ms}ms", effective.Host, effective.Port, effective.UseTls, sw.Elapsed.TotalMilliseconds);
+                LogConnectFailed(
+                    logger,
+                    ex,
+                    effective.Host,
+                    effective.Port,
+                    effective.UseTls,
+                    sw.Elapsed.TotalMilliseconds);
             }
             catch { }
 
@@ -250,12 +260,7 @@ internal sealed class RedisConnectionFactory(
 
     private async Task AuthenticateAndSelectAsync(long id, Stream stream, RedisConnectionOptions o, CancellationToken ct)
     {
-        // TODO: HELLO command causes issues with Redis 8.4 - investigate wire protocol
-        // For now, skip HELLO - Redis should default to RESP2 anyway
-        // await WriteHandshakeAsync(stream, ct,
-        //     write => RedisRespProtocol.WriteHelloCommand(write, 2),
-        //     () => RedisRespProtocol.GetHelloCommandLength(2)).ConfigureAwait(false);
-        // await RedisRespProtocol.SkipHelloResponseAsync(stream, ct).ConfigureAwait(false);
+        await TryNegotiateHelloAsync(stream, o.RespProtocolVersion, ct).ConfigureAwait(false);
 
         var usedFallback = false;
         if (!string.IsNullOrEmpty(o.Password))
@@ -288,7 +293,7 @@ internal sealed class RedisConnectionFactory(
                 if (o.LogWhoAmIOnConnect)
                 {
                     var user = await RedisRespProtocol.ReadBulkStringAsync(stream, ct).ConfigureAwait(false);
-                    logger.LogInformation("Redis ACL WHOAMI={User}", user);
+                    LogAclWhoAmI(logger, user);
                 }
 
                 NotifyAuthenticated(id, o.Username, usedFallback);
@@ -325,7 +330,7 @@ internal sealed class RedisConnectionFactory(
                     if (o.LogWhoAmIOnConnect)
                     {
                         var user = await RedisRespProtocol.ReadBulkStringAsync(stream, ct).ConfigureAwait(false);
-                        logger.LogInformation("Redis ACL WHOAMI={User}", user);
+                        LogAclWhoAmI(logger, user);
                     }
 
                     NotifyAuthenticated(id, o.Username, usedFallback);
@@ -339,7 +344,7 @@ internal sealed class RedisConnectionFactory(
                     usedFallback = true;
                     try
                     {
-                        logger.LogWarning("AUTH with username failed; attempting password-only AUTH as fallback (default user).");
+                        LogAuthUsernameFallback(logger);
                     }
                     catch { }
 
@@ -375,7 +380,7 @@ internal sealed class RedisConnectionFactory(
                     if (o.LogWhoAmIOnConnect)
                     {
                         var user = await RedisRespProtocol.ReadBulkStringAsync(stream, ct).ConfigureAwait(false);
-                        logger.LogInformation("Redis ACL WHOAMI={User}", user);
+                        LogAclWhoAmI(logger, user);
                     }
                 }
 
@@ -411,11 +416,90 @@ internal sealed class RedisConnectionFactory(
                 if (o.LogWhoAmIOnConnect)
                 {
                     var user = await RedisRespProtocol.ReadBulkStringAsync(stream, ct).ConfigureAwait(false);
-                    logger.LogInformation("Redis ACL WHOAMI={User}", user);
+                    LogAclWhoAmI(logger, user);
                 }
             }
         }
     }
+
+    private async ValueTask TryNegotiateHelloAsync(Stream stream, int protocolVersion, CancellationToken ct)
+    {
+        try
+        {
+            await WriteHandshakeAsync(
+                stream,
+                ct,
+                write => RedisRespProtocol.WriteHelloCommand(write, protocolVersion),
+                () => RedisRespProtocol.GetHelloCommandLength(protocolVersion)).ConfigureAwait(false);
+
+            await RedisRespProtocol.SkipHelloResponseAsync(stream, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or FormatException)
+        {
+            try
+            {
+                LogHelloNegotiationFallback(logger, ex);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [LoggerMessage(
+        EventId = 5201,
+        Level = LogLevel.Debug,
+        Message = "Redis options resolved from ConnectionString: Host={Host} Port={Port} Db={Db} Tls={Tls}")]
+    private static partial void LogConnectionStringResolved(ILogger logger, string host, int port, int db, bool tls);
+
+    [LoggerMessage(
+        EventId = 5202,
+        Level = LogLevel.Information,
+        Message = "Redis connected (Id={Id}) {LocalEndPoint} -> {RemoteEndPoint} Tls={Tls} NoDelay={NoDelay} SendBuf={SendBuf} RecvBuf={RecvBuf} Time={Ms}ms")]
+    private static partial void LogRedisConnected(
+        ILogger logger,
+        long id,
+        object? localEndPoint,
+        object? remoteEndPoint,
+        bool tls,
+        bool noDelay,
+        int sendBuf,
+        int recvBuf,
+        double ms);
+
+    [LoggerMessage(
+        EventId = 5203,
+        Level = LogLevel.Warning,
+        Message = "Redis connect timed out to {Host}:{Port} Tls={Tls} after {Ms}ms")]
+    private static partial void LogConnectTimedOut(ILogger logger, string host, int port, bool tls, double ms);
+
+    [LoggerMessage(
+        EventId = 5204,
+        Level = LogLevel.Warning,
+        Message = "Redis connect failed to {Host}:{Port} Tls={Tls} after {Ms}ms")]
+    private static partial void LogConnectFailed(ILogger logger, Exception exception, string host, int port, bool tls, double ms);
+
+    [LoggerMessage(
+        EventId = 5205,
+        Level = LogLevel.Information,
+        Message = "Redis ACL WHOAMI={User}")]
+    private static partial void LogAclWhoAmI(ILogger logger, string? user);
+
+    [LoggerMessage(
+        EventId = 5206,
+        Level = LogLevel.Warning,
+        Message = "AUTH with username failed; attempting password-only AUTH as fallback (default user).")]
+    private static partial void LogAuthUsernameFallback(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 5207,
+        Level = LogLevel.Debug,
+        Message = "Redis HELLO negotiation failed; falling back to legacy AUTH/SELECT handshake.")]
+    private static partial void LogHelloNegotiationFallback(ILogger logger, Exception exception);
 
     private static async Task<bool> AuthUsernamePasswordAsync(Stream stream, string username, string password, CancellationToken ct)
     {
@@ -592,6 +676,13 @@ internal sealed class RedisConnectionFactory(
         return !string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase) &&
                !string.Equals(env, "Staging", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool AllowInvalidCertificateInNonProduction(
+        object sender,
+        X509Certificate? certificate,
+        X509Chain? chain,
+        SslPolicyErrors sslPolicyErrors)
+        => sslPolicyErrors == SslPolicyErrors.None || !IsProductionEnvironment();
 
     /// <summary>
     /// Asynchronously releases resources used by the current instance.

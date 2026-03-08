@@ -41,6 +41,18 @@ public sealed class GroceryStoreComparisonStressTestTests
         Assert.Equal(300, service.BatchedItemCount);
     }
 
+    [Fact]
+    public async Task RunStressTestAsync_honors_cancellation_before_start()
+    {
+        await using var h = Harness.Create();
+        var sut = new GroceryStoreComparisonStressTest(h.Service, NullLogger<GroceryStoreComparisonStressTest>.Instance, "VapeCache");
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => sut.RunStressTestAsync(shopperCount: 20, maxCartSize: 15, cancellationToken: cts.Token));
+    }
+
     private sealed class Harness : IAsyncDisposable
     {
         private readonly InMemoryCommandExecutor _executor;
@@ -68,7 +80,7 @@ public sealed class GroceryStoreComparisonStressTestTests
             var cacheService = new InMemoryCacheService(memory, current, stats, spillOptions, new NoopSpillStore());
             var client = new VapeCacheClient(cacheService, codecs);
 
-            var service = new GroceryStoreService(collections, client, NullLogger<GroceryStoreService>.Instance);
+            var service = new GroceryStoreService(collections, client, codecs, executor, NullLogger<GroceryStoreService>.Instance);
             return new Harness(service, executor, memory);
         }
 

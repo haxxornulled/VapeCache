@@ -18,6 +18,16 @@ Benchmark suite for the VapeCache public API using BenchmarkDotNet.
 
 ```powershell
 dotnet run -c Release --project VapeCache.Benchmarks -- --filter "*RedisClientHeadToHeadBenchmarks*"
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare client --job Short
+```
+
+### Organized suite runner
+
+```powershell
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- list-suites
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- featuresets cache --job Short
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare hotpath --job Short
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare all --job Short
 ```
 
 ### All head-to-head suites (recommended)
@@ -68,6 +78,13 @@ Use `EnableInstrumentation=false` for client-core comparisons and run `true` sep
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite client -Job Short -Mode fair -ContentionMatrix -ContentionProcessorCounts "4,16,32"
 ```
 
+## Reporting Audiences
+
+- **Hot-path comparison claims:** `compare hotpath` (or `compare client|throughput|endtoend`)
+- **Feature/fallback behavior claims:** `featuresets cache`
+- **Extended parity behavior:** `compare modules|datatypes`
+- **Mixed coverage:** `compare all`
+
 ## Enterprise Interpretation Rules
 
 1. Use medians from repeated runs (N>=3).
@@ -84,6 +101,7 @@ powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -
 - ratio (Vape/SER)
 - winner
 - allocation stats
+- reporting audience (`VAPECACHE_BENCH_REPORT_AUDIENCE`)
 
 Look under `BenchmarkDotNet.Artifacts/`.
 
@@ -94,7 +112,7 @@ Look under `BenchmarkDotNet.Artifacts/`.
 - net10 jobs
 - memory diagnoser
 - p50/p90/p95 percentile columns
-- markdown/html/csv/json/openmetrics exporters
+- markdown/html/csv/json exporters
 - compact console logger for signal-focused output
 - optional env-tuned run controls:
   - `VAPECACHE_BENCH_LAUNCH_COUNT`

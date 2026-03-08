@@ -10,11 +10,13 @@ namespace VapeCache.Console.GroceryStore;
 public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICartBatchWriter
 {
     private readonly IDatabase _db;
+    private readonly string _keyPrefix;
     private static readonly GroceryStoreJsonContext JsonContext = new(new());
 
-    public StackExchangeRedisGroceryStoreService(IConnectionMultiplexer redis)
+    public StackExchangeRedisGroceryStoreService(IConnectionMultiplexer redis, string? keyPrefix = null)
     {
         _db = redis.GetDatabase();
+        _keyPrefix = NormalizeKeyPrefix(keyPrefix);
     }
 
     /// <summary>
@@ -22,7 +24,7 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
     /// </summary>
     public async ValueTask<Product?> GetProductAsync(string productId)
     {
-        var value = await _db.StringGetAsync($"product:{productId}");
+        var value = await _db.StringGetAsync(Key($"product:{productId}"));
         if (!value.HasValue)
             return null;
         return JsonSerializer.Deserialize((byte[])value!, JsonContext.Product);
@@ -34,7 +36,7 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
     public ValueTask CacheProductAsync(Product product, TimeSpan ttl)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(product, JsonContext.Product);
-        return new ValueTask(_db.StringSetAsync($"product:{product.Id}", payload, ttl));
+        return new ValueTask(_db.StringSetAsync(Key($"product:{product.Id}"), payload, ttl));
     }
 
     /// <summary>
@@ -43,7 +45,7 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
     public ValueTask AddToCartAsync(string userId, CartItem item)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(item, JsonContext.CartItem);
-        return new ValueTask(_db.ListRightPushAsync($"cart:{userId}", payload));
+        return new ValueTask(_db.ListRightPushAsync(Key($"cart:{userId}"), payload));
     }
 
     /// <summary>
@@ -55,7 +57,7 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
             return;
 
         var batch = _db.CreateBatch();
-        var key = $"cart:{userId}";
+        var key = Key($"cart:{userId}");
         var operations = new ValueTask<long>[items.Count];
         for (var i = 0; i < items.Count; i++)
         {
@@ -75,7 +77,7 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
     /// </summary>
     public async ValueTask<CartItem[]> GetCartAsync(string userId)
     {
-        var values = await _db.ListRangeAsync($"cart:{userId}");
+        var values = await _db.ListRangeAsync(Key($"cart:{userId}"));
         if (values.Length == 0)
             return Array.Empty<CartItem>();
 
@@ -92,7 +94,7 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
     /// </summary>
     public ValueTask<long> GetCartCountAsync(string userId)
     {
-        return new ValueTask<long>(_db.ListLengthAsync($"cart:{userId}"));
+        return new ValueTask<long>(_db.ListLengthAsync(Key($"cart:{userId}")));
     }
 
     /// <summary>
@@ -100,7 +102,7 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
     /// </summary>
     public ValueTask ClearCartAsync(string userId)
     {
-        return new ValueTask(_db.KeyDeleteAsync($"cart:{userId}"));
+        return new ValueTask(_db.KeyDeleteAsync(Key($"cart:{userId}")));
     }
 
     /// <summary>
@@ -108,7 +110,7 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
     /// </summary>
     public ValueTask JoinFlashSaleAsync(string saleId, string userId)
     {
-        return new ValueTask(_db.SetAddAsync($"sale:{saleId}:participants", userId));
+        return new ValueTask(_db.SetAddAsync(Key($"sale:{saleId}:participants"), userId));
     }
 
     /// <summary>
@@ -116,7 +118,7 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
     /// </summary>
     public ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId)
     {
-        return new ValueTask<bool>(_db.SetContainsAsync($"sale:{saleId}:participants", userId));
+        return new ValueTask<bool>(_db.SetContainsAsync(Key($"sale:{saleId}:participants"), userId));
     }
 
     /// <summary>
@@ -124,7 +126,7 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
     /// </summary>
     public ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId)
     {
-        return new ValueTask<long>(_db.SetLengthAsync($"sale:{saleId}:participants"));
+        return new ValueTask<long>(_db.SetLengthAsync(Key($"sale:{saleId}:participants")));
     }
 
     /// <summary>
@@ -133,7 +135,7 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
     public ValueTask SaveSessionAsync(string sessionId, UserSession session)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(session, JsonContext.UserSession);
-        return new ValueTask(_db.StringSetAsync($"session:{sessionId}", payload, TimeSpan.FromHours(1)));
+        return new ValueTask(_db.StringSetAsync(Key($"session:{sessionId}"), payload, TimeSpan.FromHours(1)));
     }
 
     /// <summary>
@@ -141,10 +143,22 @@ public class StackExchangeRedisGroceryStoreService : IGroceryStoreService, ICart
     /// </summary>
     public async ValueTask<UserSession?> GetSessionAsync(string sessionId)
     {
-        var value = await _db.StringGetAsync($"session:{sessionId}");
+        var value = await _db.StringGetAsync(Key($"session:{sessionId}"));
         if (!value.HasValue)
             return null;
         return JsonSerializer.Deserialize((byte[])value!, JsonContext.UserSession);
+    }
+
+    private string Key(string suffix)
+        => _keyPrefix.Length == 0 ? suffix : string.Concat(_keyPrefix, suffix);
+
+    private static string NormalizeKeyPrefix(string? prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix))
+            return string.Empty;
+
+        var trimmed = prefix.Trim();
+        return trimmed.EndsWith(':') ? trimmed : string.Concat(trimmed, ":");
     }
 }
 

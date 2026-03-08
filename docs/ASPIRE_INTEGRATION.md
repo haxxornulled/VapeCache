@@ -13,15 +13,18 @@ No service locator patterns and no route clutter in `Program.cs`.
 
 ## Minimal API Endpoints (Wrapper Surface)
 
-When you enable endpoint mapping (`WithAutoMappedEndpoints(...)` or `MapVapeCacheEndpoints(...)`), the wrapper surface is:
+When you enable endpoint mapping (`WithAutoMappedEndpoints(...)` with `options.Enabled = true` or `MapVapeCacheEndpoints(...)`), the wrapper surface is:
 
 - `GET /vapecache/status`
 - `GET /vapecache/stats`
 - `GET /vapecache/stream` (SSE)
+- `GET /vapecache/dashboard` (built-in realtime UI)
 - `GET /vapecache/intent/{key}`
 - `GET /vapecache/intent?take=50`
 - optional admin: `POST /vapecache/breaker/force-open`
 - optional admin: `POST /vapecache/breaker/clear`
+
+The built-in dashboard is implemented as a Vite + TypeScript frontend under `VapeCache.Extensions.Aspire/dashboard-ui` and served by Aspire endpoints from embedded assets.
 
 Autoscaler diagnostics and per-lane mux diagnostics are included in `status`, `stats`, and stream samples when diagnostics are registered.
 See:
@@ -83,7 +86,8 @@ See:
 │     .WithFailoverAffinityHints()    // Cluster failover hint │
 │     .WithCacheStampedeProfile(      // Stampede defaults    │
 │         CacheStampedeProfile.Balanced)                      │
-│     .WithAutoMappedEndpoints();     // + status/stats/stream│
+│     .WithAutoMappedEndpoints(       // opt in to status/stats/stream
+│         options => options.Enabled = true)                 │
 │                                                              │
 │ var app = builder.Build();                                  │
 │ app.MapHealthChecks("/health");                             │
@@ -383,7 +387,10 @@ builder.AddVapeCache()
     .WithHealthChecks()             // Registers Redis + VapeCache health checks
     .WithAspireTelemetry()          // Sends to Aspire Dashboard
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
-    .WithAutoMappedEndpoints();     // /vapecache/status + /vapecache/stats + /vapecache/stream
+    .WithAutoMappedEndpoints(options =>
+    {
+        options.Enabled = true;
+    });     // /vapecache/status + /vapecache/stats + /vapecache/stream
 
 var app = builder.Build();
 

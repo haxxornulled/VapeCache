@@ -63,4 +63,22 @@ public class ComparisonReportTests
         Assert.Contains("- StackExchange.Redis faster: 1", markdown, StringComparison.Ordinal);
         Assert.Contains("|SuiteA|StringSetGet|PayloadBytes=256|100.00|80.00|0.800|-20.0%|VapeCache|1024|2300|", markdown, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void BuildMarkdown_EmitsConfiguredReportingAudience()
+    {
+        const string varName = "VAPECACHE_BENCH_REPORT_AUDIENCE";
+        var prior = Environment.GetEnvironmentVariable(varName);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(varName, "hot-path comparison");
+            var markdown = ComparisonReport.BuildMarkdown(Array.Empty<ComparisonSample>());
+            Assert.Contains("Reporting audience: hot-path comparison", markdown, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(varName, prior);
+        }
+    }
 }

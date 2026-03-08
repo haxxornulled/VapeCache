@@ -77,7 +77,7 @@ public sealed class CoalescedWriteDispatcherTests
             expectedPayloadArrayReturns += requests.Count(static r => r.PayloadArrayBuffer is not null);
 
             var expected = FlattenRequests(requests);
-            var sendTask = dispatcher.SendAsync(requests[0], client, cts.Token);
+            var sendTask = dispatcher.SendAsync(requests[0], client, generation: 1, cts.Token);
             var received = await ReceiveExactAsync(server, expected.Length, cts.Token);
             await sendTask;
 
@@ -137,7 +137,7 @@ public sealed class CoalescedWriteDispatcherTests
         var request = CreateSAddRequest(42);
         var expected = FlattenRequests([request]);
 
-        var sendTask = dispatcher.SendAsync(request, client, cts.Token);
+        var sendTask = dispatcher.SendAsync(request, client, generation: 1, cts.Token);
         var received = await ReceiveExactAsync(server, expected.Length, cts.Token);
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () => await sendTask);
 

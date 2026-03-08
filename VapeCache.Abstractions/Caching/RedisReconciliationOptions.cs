@@ -18,8 +18,8 @@ public sealed class RedisReconciliationOptions
     public TimeSpan MaxOperationAge { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// Maximum number of tracked operations to keep in memory.
-    /// New operations are dropped when the limit is reached.
+    /// Advisory threshold for pending operations (persisted + queued + deferred).
+    /// Tracking continues past this threshold to preserve no-drop behavior; warnings are emitted when exceeded.
     /// Default: 100000.
     /// </summary>
     public int MaxPendingOperations { get; set; } = 100_000;

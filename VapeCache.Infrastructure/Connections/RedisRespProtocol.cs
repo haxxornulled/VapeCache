@@ -707,7 +707,7 @@ internal static class RedisRespProtocol
         await ExpectExactAsync(stream, PongLine, ct).ConfigureAwait(false);
     }
 
-    // HELLO response is a map/array in RESP2 - just skip it recursively
+    // HELLO response can be RESP2/RESP3 and may include maps/attributes.
     /// <summary>
     /// Executes value.
     /// </summary>
@@ -716,38 +716,75 @@ internal static class RedisRespProtocol
         await SkipRespValueAsync(stream, ct).ConfigureAwait(false);
     }
 
-    // Recursively skip any RESP value (array, bulk string, simple string, integer, error)
+    // Recursively skip any RESP2/RESP3 value.
     private static async Task SkipRespValueAsync(Stream stream, CancellationToken ct)
     {
         var line = await ReadLineAsync(stream, ct).ConfigureAwait(false);
+        if (line.Length == 0)
+            throw new InvalidOperationException("Unexpected empty Redis response line.");
 
-        if (line.StartsWith("-", StringComparison.Ordinal))
+        var prefix = line[0];
+        if (prefix == '-')
             throw new InvalidOperationException($"Redis error: {line}");
+        if (prefix == '!')
+        {
+            if (!int.TryParse(line.AsSpan(1), out var errorLen))
+                throw new InvalidOperationException($"Invalid blob error length: {line}");
 
-        if (line.StartsWith("*", StringComparison.Ordinal)) // Array
+            if (errorLen >= 0)
+            {
+                var skipError = new byte[errorLen + 2];
+                await ReadExactAsync(stream, skipError, ct).ConfigureAwait(false);
+            }
+
+            throw new InvalidOperationException("Redis blob error response.");
+        }
+
+        if (prefix == '*' || prefix == '~' || prefix == '>') // Array/Set/Push
         {
             if (!int.TryParse(line.AsSpan(1), out var count))
                 throw new InvalidOperationException($"Invalid array response: {line}");
 
-            // Recursively skip all array elements
+            if (count < 0)
+                return;
+
             for (int i = 0; i < count; i++)
-            {
                 await SkipRespValueAsync(stream, ct).ConfigureAwait(false);
-            }
         }
-        else if (line.StartsWith("$", StringComparison.Ordinal)) // Bulk string
+        else if (prefix == '%' || prefix == '|') // Map/Attribute
+        {
+            if (!int.TryParse(line.AsSpan(1), out var pairCount))
+                throw new InvalidOperationException($"Invalid map/attribute response: {line}");
+
+            if (pairCount < 0)
+                return;
+
+            for (int i = 0; i < pairCount * 2; i++)
+                await SkipRespValueAsync(stream, ct).ConfigureAwait(false);
+
+            // RESP3 attributes wrap a following value; consume that as well.
+            if (prefix == '|')
+                await SkipRespValueAsync(stream, ct).ConfigureAwait(false);
+        }
+        else if (prefix == '$' || prefix == '=') // Bulk / Verbatim string
         {
             if (!int.TryParse(line.AsSpan(1), out var len))
-                throw new InvalidOperationException($"Invalid bulk string length: {line}");
+                throw new InvalidOperationException($"Invalid bulk/verbatim length: {line}");
 
             if (len >= 0)
             {
-                // Read the bulk string data + CRLF
                 var skip = new byte[len + 2];
                 await ReadExactAsync(stream, skip, ct).ConfigureAwait(false);
             }
         }
-        // Simple string (+), integer (:), and null ($-1) are already consumed by ReadLineAsync
+        else if (prefix == '+' || prefix == ':' || prefix == '_' || prefix == '#' || prefix == ',' || prefix == '(')
+        {
+            // Simple string / integer / null / boolean / double / big number are consumed by ReadLineAsync.
+        }
+        else
+        {
+            throw new InvalidOperationException($"Unsupported Redis response prefix: {prefix}");
+        }
     }
 
     /// <summary>
@@ -1530,7 +1567,7 @@ internal static class RedisRespProtocol
         var command = descending ? "ZREVRANGEBYSCORE" : "ZRANGEBYSCORE";
         var parts = 5;
         if (offset.HasValue && count.HasValue)
-            parts += 2;
+            parts += 3;
 
         var len = GetHeaderLen(parts)
                   + GetBulkStringLen(command) + 2
@@ -1565,7 +1602,7 @@ internal static class RedisRespProtocol
     {
         var parts = 5;
         if (offset.HasValue && count.HasValue)
-            parts += 2;
+            parts += 3;
 
         var idx = 0;
         idx += WriteArrayHeader(destination.Slice(idx), parts);

@@ -1,12 +1,14 @@
 namespace VapeCache.Abstractions.Caching;
 
+using VapeCache.Core.Policies;
+
 /// <summary>
 /// Helpers for applying named stampede-protection presets.
 /// </summary>
 public static class CacheStampedeProfiles
 {
     /// <summary>
-    /// Creates value.
+    /// Creates stampede options using a named profile.
     /// </summary>
     public static CacheStampedeOptions Create(CacheStampedeProfile profile)
     {
@@ -16,46 +18,26 @@ public static class CacheStampedeProfiles
     }
 
     /// <summary>
-    /// Executes value.
+    /// Applies a named profile to an existing options instance.
     /// </summary>
     public static void Apply(CacheStampedeOptions options, CacheStampedeProfile profile)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        switch (profile)
+        var settings = profile switch
         {
-            case CacheStampedeProfile.Strict:
-                options.Enabled = true;
-                options.MaxKeys = 25_000;
-                options.RejectSuspiciousKeys = true;
-                options.MaxKeyLength = 256;
-                options.LockWaitTimeout = TimeSpan.FromMilliseconds(500);
-                options.EnableFailureBackoff = true;
-                options.FailureBackoff = TimeSpan.FromSeconds(1);
-                break;
+            CacheStampedeProfile.Strict => StampedePolicyDefaults.Strict,
+            CacheStampedeProfile.Balanced => StampedePolicyDefaults.Balanced,
+            CacheStampedeProfile.Relaxed => StampedePolicyDefaults.Relaxed,
+            _ => throw new ArgumentOutOfRangeException(nameof(profile), profile, "Unknown cache stampede profile.")
+        };
 
-            case CacheStampedeProfile.Balanced:
-                options.Enabled = true;
-                options.MaxKeys = 50_000;
-                options.RejectSuspiciousKeys = true;
-                options.MaxKeyLength = 512;
-                options.LockWaitTimeout = TimeSpan.FromMilliseconds(750);
-                options.EnableFailureBackoff = true;
-                options.FailureBackoff = TimeSpan.FromMilliseconds(500);
-                break;
-
-            case CacheStampedeProfile.Relaxed:
-                options.Enabled = true;
-                options.MaxKeys = 100_000;
-                options.RejectSuspiciousKeys = true;
-                options.MaxKeyLength = 1024;
-                options.LockWaitTimeout = TimeSpan.FromMilliseconds(1500);
-                options.EnableFailureBackoff = true;
-                options.FailureBackoff = TimeSpan.FromMilliseconds(250);
-                break;
-
-            default:
-                throw new ArgumentOutOfRangeException(nameof(profile), profile, "Unknown cache stampede profile.");
-        }
+        options.Enabled = settings.Enabled;
+        options.MaxKeys = settings.MaxKeys;
+        options.RejectSuspiciousKeys = settings.RejectSuspiciousKeys;
+        options.MaxKeyLength = settings.MaxKeyLength;
+        options.LockWaitTimeout = settings.LockWaitTimeout;
+        options.EnableFailureBackoff = settings.EnableFailureBackoff;
+        options.FailureBackoff = settings.FailureBackoff;
     }
 }

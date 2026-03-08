@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <UiFrontendDir>$(MSBuildProjectDirectory)\ui</UiFrontendDir>
+    <UiFrontendStamp>$(MSBuildProjectDirectory)\obj\ui-vite.stamp</UiFrontendStamp>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj" />
+    <ProjectReference Include="..\VapeCache.ServiceDefaults\VapeCache.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <UiFrontendInput Include="$(UiFrontendDir)\package.json" />
+    <UiFrontendInput Include="$(UiFrontendDir)\package-lock.json" />
+    <UiFrontendInput Include="$(UiFrontendDir)\tsconfig.json" />
+    <UiFrontendInput Include="$(UiFrontendDir)\vite.config.ts" />
+    <UiFrontendInput Include="$(UiFrontendDir)\src\**\*" />
+  </ItemGroup>
+
+  <Target Name="BuildUiFrontend"
+          BeforeTargets="Build"
+          Inputs="@(UiFrontendInput)"
+          Outputs="$(UiFrontendStamp)"
+          Condition="'$(SkipUiViteBuild)' != 'true' and '$(DesignTimeBuild)' != 'true'">
+    <Exec Command="npm ci --no-audit --no-fund" WorkingDirectory="$(UiFrontendDir)" />
+    <Exec Command="npm run build" WorkingDirectory="$(UiFrontendDir)" />
+    <WriteLinesToFile File="$(UiFrontendStamp)"
+                      Overwrite="true"
+                      Lines="$([System.DateTime]::UtcNow.ToString('O'))" />
+  </Target>
+
+</Project>

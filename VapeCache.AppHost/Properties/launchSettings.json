@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "https": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "https://localhost:17119;http://localhost:15054",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "DOTNET_ENVIRONMENT": "Development",
+        "VAPECACHE_USE_CONTAINER_REDIS": "false",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+        "ConnectionStrings__redis": "redis://192.168.100.50:6379/0",
+        "ASPIRE_DASHBOARD_FRONTEND_BROWSERTOKEN": "vapecache-local-dev",
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "https://localhost:21095",
+        "ASPIRE_DASHBOARD_MCP_ENDPOINT_URL": "https://localhost:23137",
+        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "https://localhost:22175"
+      }
+    },
+    "http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:15054",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "DOTNET_ENVIRONMENT": "Development",
+        "VAPECACHE_USE_CONTAINER_REDIS": "false",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+        "ConnectionStrings__redis": "redis://192.168.100.50:6379/0",
+        "ASPIRE_DASHBOARD_FRONTEND_BROWSERTOKEN": "vapecache-local-dev",
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "http://localhost:19037",
+        "ASPIRE_DASHBOARD_MCP_ENDPOINT_URL": "http://localhost:18085",
+        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "http://localhost:20207"
+      }
+    }
+  }
+}

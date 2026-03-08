@@ -57,10 +57,28 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         Volatile.Write(ref _cleanupOffset, nextOffset);
     }
 
-    private bool IsExpired(CacheEntry entry)
+    private static bool IsExpired(CacheEntry entry)
     {
         return entry.ExpiresAt.HasValue && entry.ExpiresAt <= DateTimeOffset.UtcNow;
     }
+
+    private static byte[] CopyBuffer(byte[] source)
+    {
+        if (source.Length == 0)
+            return Array.Empty<byte>();
+
+        var buffer = GC.AllocateUninitializedArray<byte>(source.Length);
+        source.AsSpan().CopyTo(buffer);
+        return buffer;
+    }
+
+    private static byte[]? CopyNullableBuffer(byte[]? source)
+        => source is null ? null : CopyBuffer(source);
+
+    private static RedisValueLease CreateCopiedLease(byte[]? source)
+        => source is null
+            ? RedisValueLease.Null
+            : RedisValueLease.Create(CopyBuffer(source), source.Length, pooled: false);
 
     // ========== String Commands ==========
 
@@ -70,7 +88,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
     public ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.String)
-            return ValueTask.FromResult<byte[]?>(entry.StringValue);
+            return ValueTask.FromResult(CopyNullableBuffer(entry.StringValue));
         return ValueTask.FromResult<byte[]?>(null);
     }
 
@@ -93,7 +111,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
             // Refresh TTL if specified
             if (ttl.HasValue)
                 entry.ExpiresAt = DateTimeOffset.UtcNow.Add(ttl.Value);
-            return ValueTask.FromResult<byte[]?>(entry.StringValue);
+            return ValueTask.FromResult(CopyNullableBuffer(entry.StringValue));
         }
         return ValueTask.FromResult<byte[]?>(null);
     }
@@ -187,7 +205,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         for (var i = 0; i < keys.Length; i++)
         {
             if (_store.TryGetValue(keys[i], out var entry) && !IsExpired(entry) && entry.Type == EntryType.String)
-                result[i] = entry.StringValue;
+                result[i] = CopyNullableBuffer(entry.StringValue);
         }
         return ValueTask.FromResult(result);
     }
@@ -314,10 +332,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
     public ValueTask<RedisValueLease> GetLeaseAsync(string key, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.String && entry.StringValue != null)
-        {
-            // Return non-pooled lease (data is already in memory, no need for ArrayPool)
-            return ValueTask.FromResult(new RedisValueLease(entry.StringValue, entry.StringValue.Length, pooled: false));
-        }
+            return ValueTask.FromResult(CreateCopiedLease(entry.StringValue));
         return ValueTask.FromResult(RedisValueLease.Null);
     }
 
@@ -340,7 +355,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
             if (ttl.HasValue)
                 entry.ExpiresAt = DateTimeOffset.UtcNow.Add(ttl.Value);
 
-            return ValueTask.FromResult(new RedisValueLease(entry.StringValue, entry.StringValue.Length, pooled: false));
+            return ValueTask.FromResult(CreateCopiedLease(entry.StringValue));
         }
         return ValueTask.FromResult(RedisValueLease.Null);
     }
@@ -390,7 +405,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.Hash)
         {
             entry.HashValue!.TryGetValue(field, out var value);
-            return ValueTask.FromResult(value);
+            return ValueTask.FromResult(CopyNullableBuffer(value));
         }
         return ValueTask.FromResult<byte[]?>(null);
     }
@@ -414,7 +429,8 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         {
             for (var i = 0; i < fields.Length; i++)
             {
-                entry.HashValue!.TryGetValue(fields[i], out result[i]);
+                entry.HashValue!.TryGetValue(fields[i], out var value);
+                result[i] = CopyNullableBuffer(value);
             }
         }
         return ValueTask.FromResult(result);
@@ -428,9 +444,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.Hash)
         {
             if (entry.HashValue!.TryGetValue(field, out var value))
-            {
-                return ValueTask.FromResult(new RedisValueLease(value, value.Length, pooled: false));
-            }
+                return ValueTask.FromResult(CreateCopiedLease(value));
         }
         return ValueTask.FromResult(RedisValueLease.Null);
     }
@@ -568,14 +582,14 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                     var node = list.First;
                     for (var i = 0; i < index; i++)
                         node = node!.Next;
-                    return ValueTask.FromResult<byte[]?>(node!.Value);
+                    return ValueTask.FromResult<byte[]?>(CopyBuffer(node!.Value));
                 }
 
                 var fromEnd = count - 1;
                 var tail = list.Last;
                 for (var i = fromEnd; i > index; i--)
                     tail = tail!.Previous;
-                return ValueTask.FromResult<byte[]?>(tail!.Value);
+                return ValueTask.FromResult<byte[]?>(CopyBuffer(tail!.Value));
             }
         }
         return ValueTask.FromResult<byte[]?>(null);
@@ -675,7 +689,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                 foreach (var item in list)
                 {
                     if (currentIndex >= start && currentIndex <= stop)
-                        result[index++] = item;
+                        result[index++] = CopyBuffer(item);
                     if (currentIndex > stop) break;
                     currentIndex++;
                 }
@@ -726,7 +740,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                 {
                     var value = entry.ListValue.First!.Value;
                     entry.ListValue.RemoveFirst();
-                    return ValueTask.FromResult(new RedisValueLease(value, value.Length, pooled: false));
+                    return ValueTask.FromResult(RedisValueLease.Create(value, value.Length, pooled: false));
                 }
             }
         }
@@ -754,7 +768,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                     entry.ListValue.RemoveLast();
                     if (entry.ListValue.Count == 0)
                         _store.TryRemove(key, out _);
-                    return ValueTask.FromResult(new RedisValueLease(value, value.Length, pooled: false));
+                    return ValueTask.FromResult(RedisValueLease.Create(value, value.Length, pooled: false));
                 }
             }
         }
@@ -881,7 +895,11 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                 if (entry.Type != EntryType.Set)
                     return ValueTask.FromResult(Array.Empty<byte[]?>());
 
-                return ValueTask.FromResult(entry.SetValue!.Keys.ToArray<byte[]?>());
+                var result = new byte[]?[entry.SetValue!.Count];
+                var index = 0;
+                foreach (var member in entry.SetValue.Keys)
+                    result[index++] = CopyBuffer(member);
+                return ValueTask.FromResult(result);
             }
         }
         return ValueTask.FromResult(Array.Empty<byte[]?>());
@@ -1155,7 +1173,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
             foreach (var item in source)
             {
                 if (idx >= start && idx <= stop)
-                    result.Add((item.Member, item.Score));
+                    result.Add((CopyBuffer(item.Member), item.Score));
                 if (idx > stop)
                     break;
                 idx++;
@@ -1203,7 +1221,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                     continue;
                 }
 
-                result.Add((item.Member, item.Score));
+                result.Add((CopyBuffer(item.Member), item.Score));
                 taken++;
 
                 if (count.HasValue && taken >= count.Value)
@@ -1408,7 +1426,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
             if (IsExpired(entry) || entry.Type != EntryType.Set)
                 yield break;
 
-            members = entry.SetValue!.Keys.ToArray();
+            members = entry.SetValue!.Keys.Select(CopyBuffer).ToArray();
         }
 
         foreach (var member in members)
@@ -1437,7 +1455,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
             if (IsExpired(entry) || entry.Type != EntryType.Hash)
                 yield break;
 
-            fields = entry.HashValue!.ToArray();
+            fields = entry.HashValue!
+                .Select(static pair => new KeyValuePair<string, byte[]>(pair.Key, CopyBuffer(pair.Value)))
+                .ToArray();
         }
 
         foreach (var pair in fields)
@@ -1466,7 +1486,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
             if (IsExpired(entry) || entry.Type != EntryType.SortedSet)
                 yield break;
 
-            items = entry.SortedSetValue!.ToArray();
+            items = entry.SortedSetValue!
+                .Select(static item => new SortedSetEntry(CopyBuffer(item.Member), item.Score))
+                .ToArray();
         }
 
         foreach (var item in items)

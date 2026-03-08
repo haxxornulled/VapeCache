@@ -102,4 +102,21 @@ public sealed class VapeCacheRawGroceryStoreServiceTests
         Assert.Equal(0, await sut.GetCartCountAsync(userId));
         Assert.Empty(await sut.GetCartAsync(userId));
     }
+
+    [Fact]
+    public async Task Flash_sale_count_cache_tracks_sadd_updates_when_enabled()
+    {
+        await using var executor = new InMemoryCommandExecutor();
+        var sut = new VapeCacheRawGroceryStoreService(
+            executor,
+            useLocalFlashSaleCountCache: true);
+
+        await sut.JoinFlashSaleAsync("sale-cache", "user-1");
+        await sut.JoinFlashSaleAsync("sale-cache", "user-2");
+        await sut.JoinFlashSaleAsync("sale-cache", "user-2");
+
+        var count = await sut.GetFlashSaleParticipantCountAsync("sale-cache");
+
+        Assert.Equal(2, count);
+    }
 }

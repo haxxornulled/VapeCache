@@ -16,16 +16,25 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.Equal(RedisTransportProfile.FullTilt, o.TransportProfile);
         Assert.False(o.EnableSocketRespReader);
         Assert.False(o.UseDedicatedLaneWorkers);
-        Assert.Equal(1024 * 1024, o.CoalescedWriteMaxBytes);
-        Assert.Equal(256, o.CoalescedWriteMaxSegments);
-        Assert.Equal(2048, o.CoalescedWriteSmallCopyThresholdBytes);
+        Assert.Equal(512 * 1024, o.CoalescedWriteMaxBytes);
+        Assert.Equal(192, o.CoalescedWriteMaxSegments);
+        Assert.Equal(1536, o.CoalescedWriteSmallCopyThresholdBytes);
         Assert.True(o.EnableAdaptiveCoalescing);
-        Assert.Equal(4, o.AdaptiveCoalescingLowDepth);
-        Assert.Equal(64, o.AdaptiveCoalescingHighDepth);
+        Assert.Equal(6, o.AdaptiveCoalescingLowDepth);
+        Assert.Equal(56, o.AdaptiveCoalescingHighDepth);
         Assert.Equal(64 * 1024, o.AdaptiveCoalescingMinWriteBytes);
-        Assert.Equal(64, o.AdaptiveCoalescingMinSegments);
-        Assert.Equal(512, o.AdaptiveCoalescingMinSmallCopyThresholdBytes);
+        Assert.Equal(48, o.AdaptiveCoalescingMinSegments);
+        Assert.Equal(384, o.AdaptiveCoalescingMinSmallCopyThresholdBytes);
+        Assert.Equal(8, o.CoalescingEnterQueueDepth);
+        Assert.Equal(3, o.CoalescingExitQueueDepth);
+        Assert.Equal(128, o.CoalescedWriteMaxOperations);
+        Assert.Equal(8, o.CoalescingSpinBudget);
         Assert.False(o.EnableAutoscaling);
+        Assert.True(o.Connections >= 2);
+        Assert.Equal(1, o.BulkLaneConnections);
+        Assert.False(o.AutoAdjustBulkLanes);
+        Assert.Equal(0.25, o.BulkLaneTargetRatio);
+        Assert.Equal(TimeSpan.FromSeconds(5), o.BulkLaneResponseTimeout);
         Assert.Equal(2, o.MaxScaleEventsPerMinute);
         Assert.Equal(4, o.FlapToggleThreshold);
         Assert.Equal(TimeSpan.FromMinutes(2), o.AutoscaleFreezeDuration);
@@ -54,7 +63,15 @@ public sealed class RedisMultiplexerOptionsBindingTests
             "AdaptiveCoalescingMinWriteBytes": 16384,
             "AdaptiveCoalescingMinSegments": 16,
             "AdaptiveCoalescingMinSmallCopyThresholdBytes": 256,
+            "CoalescingEnterQueueDepth": 12,
+            "CoalescingExitQueueDepth": 5,
+            "CoalescedWriteMaxOperations": 96,
+            "CoalescingSpinBudget": 10,
             "ResponseTimeout": "00:00:01.500",
+            "BulkLaneConnections": 2,
+            "AutoAdjustBulkLanes": true,
+            "BulkLaneTargetRatio": 0.3,
+            "BulkLaneResponseTimeout": "00:00:06",
             "MaxScaleEventsPerMinute": 3,
             "FlapToggleThreshold": 5,
             "AutoscaleFreezeDuration": "00:03:00",
@@ -91,7 +108,15 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.Equal(16384, o.AdaptiveCoalescingMinWriteBytes);
         Assert.Equal(16, o.AdaptiveCoalescingMinSegments);
         Assert.Equal(256, o.AdaptiveCoalescingMinSmallCopyThresholdBytes);
+        Assert.Equal(12, o.CoalescingEnterQueueDepth);
+        Assert.Equal(5, o.CoalescingExitQueueDepth);
+        Assert.Equal(96, o.CoalescedWriteMaxOperations);
+        Assert.Equal(10, o.CoalescingSpinBudget);
         Assert.Equal(TimeSpan.FromMilliseconds(1500), o.ResponseTimeout);
+        Assert.Equal(2, o.BulkLaneConnections);
+        Assert.True(o.AutoAdjustBulkLanes);
+        Assert.Equal(0.3, o.BulkLaneTargetRatio);
+        Assert.Equal(TimeSpan.FromSeconds(6), o.BulkLaneResponseTimeout);
         Assert.Equal(3, o.MaxScaleEventsPerMinute);
         Assert.Equal(5, o.FlapToggleThreshold);
         Assert.Equal(TimeSpan.FromMinutes(3), o.AutoscaleFreezeDuration);

@@ -27,9 +27,12 @@
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
     <ProjectReference Include="..\VapeCache.Application\VapeCache.Application.csproj" />
+    <ProjectReference Include="..\VapeCache.Core\VapeCache.Core.csproj" />
     <ProjectReference Include="..\VapeCache.Benchmarks\VapeCache.Benchmarks.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
     <ProjectReference Include="..\VapeCache.Console\VapeCache.Console.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.AspNetCore\VapeCache.Extensions.AspNetCore.csproj" />
+    <ProjectReference Include="..\VapeCache.Features.Invalidation\VapeCache.Features.Invalidation.csproj" />
   </ItemGroup>
 </Project>

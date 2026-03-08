@@ -1,9 +1,12 @@
 using System.Buffers;
+using System.Buffers.Binary;
+using System.Text.Json;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Core.Policies;
 
 namespace VapeCache.Infrastructure.Caching;
 
@@ -12,7 +15,7 @@ namespace VapeCache.Infrastructure.Caching;
 /// automatic failover to in-memory caching when Redis is unavailable.
 /// Uses a circuit breaker pattern to detect failures and gradually recover.
 /// </summary>
-internal sealed class HybridCacheService(
+internal sealed partial class HybridCacheService(
     RedisCacheService redis,
     ICacheFallbackService fallback,
     ICurrentCacheService current,
@@ -20,7 +23,9 @@ internal sealed class HybridCacheService(
     IOptionsMonitor<RedisCircuitBreakerOptions> breakerOptions,
     CacheStatsRegistry statsRegistry,
     ILogger<HybridCacheService> logger,
+    IOptionsMonitor<HybridFailoverOptions>? failoverOptions = null,
     IRedisReconciliationService? reconciliation = null) : ICacheService
+    , ICacheTagService
     , IRedisCircuitBreakerState
     , IRedisFailoverController
 {
@@ -29,7 +34,9 @@ internal sealed class HybridCacheService(
 
     private readonly CacheStats _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
     private readonly IOptionsMonitor<RedisCircuitBreakerOptions> _breakerOptions = breakerOptions;
+    private readonly IOptionsMonitor<HybridFailoverOptions> _failoverOptions = failoverOptions ?? DefaultHybridFailoverOptionsMonitor.Instance;
     private RedisCircuitBreakerOptions _breaker => _breakerOptions.CurrentValue;
+    private HybridFailoverOptions _failover => _failoverOptions.CurrentValue;
     private int _failures;
     private long _openUntilTicks;
     private int _halfOpenProbeInFlight;
@@ -37,6 +44,35 @@ internal sealed class HybridCacheService(
     private string? _forcedReason;
     private int _openAttempts;
     private int _reconcileInFlight;
+    private static readonly JsonSerializerOptions TagJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly byte[] TagEnvelopePrefix = "VCTAG1:"u8.ToArray();
+    private static readonly string[] ReadWarmTags = ["hybrid-failover", "read-warm"];
+    private static readonly string[] WriteMirrorTags = ["hybrid-failover", "write-mirror"];
+    private const string TagVersionKeyPrefix = "vapecache:tag:v1:";
+    private static readonly Action<ILogger, string, Exception?> LogDiscardedStaleTaggedCacheEntry = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7001, nameof(LogDiscardedStaleTaggedCacheEntry)),
+        "Discarded stale tagged cache entry for key {Key}.");
+    private static readonly Action<ILogger, string, Exception?> LogTagVersionReadFallback = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7002, nameof(LogTagVersionReadFallback)),
+        "Tag version read failed for tag {Tag}; falling back to local version.");
+    private static readonly Action<ILogger, string, Exception?> LogRedisTagVersionWriteQueued = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7003, nameof(LogRedisTagVersionWriteQueued)),
+        "Redis tag version write failed for tag {Tag}; queuing reconciliation write.");
+    private static readonly Action<ILogger, string, Exception?> LogFallbackTagVersionWarmFailed = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7004, nameof(LogFallbackTagVersionWarmFailed)),
+        "Fallback tag version warm failed for key {TagVersionKey}.");
+    private static readonly Action<ILogger, string, Exception?> LogFallbackReadWarmFailed = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7005, nameof(LogFallbackReadWarmFailed)),
+        "Fallback read-warm failed for key {Key}.");
+    private static readonly Action<ILogger, string, Exception?> LogFallbackWriteMirrorFailed = LoggerMessage.Define<string>(
+        LogLevel.Debug,
+        new EventId(7006, nameof(LogFallbackWriteMirrorFailed)),
+        "Fallback write-mirror failed for key {Key}.");
 
     public bool Enabled => _breaker.Enabled;
     public bool IsOpen => _breaker.Enabled && (IsForcedOpen || (Volatile.Read(ref _openUntilTicks) != 0 && !IsRedisAllowedNow()));
@@ -121,7 +157,7 @@ internal sealed class HybridCacheService(
             if (breaker.MaxConsecutiveRetries > 0 && attempts > breaker.MaxConsecutiveRetries)
             {
                 Volatile.Write(ref _openUntilTicks, long.MaxValue);
-                logger.LogWarning("Redis circuit breaker reached MaxConsecutiveRetries ({Attempts}); holding open indefinitely until manual reset.", attempts);
+                LogBreakerMaxRetriesReached(logger, attempts);
             }
             else
             {
@@ -132,7 +168,7 @@ internal sealed class HybridCacheService(
             {
                 _stats.IncBreakerOpened();
                 CacheTelemetry.RedisBreakerOpened.Add(1, new TagList { { "backend", Name } });
-                logger.LogWarning("Circuit breaker opened after {Failures} consecutive failures. Switching to {Fallback} mode for {Duration} seconds.", failures, fallback.Name, breakDuration.TotalSeconds);
+                LogBreakerOpened(logger, failures, fallback.Name, breakDuration.TotalSeconds);
             }
         }
     }
@@ -181,6 +217,7 @@ internal sealed class HybridCacheService(
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
 
                 var bytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
+                bytes = await ResolveTaggedPayloadAsync(key, bytes, ct).ConfigureAwait(false);
                 if (bytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
                 else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
                 return bytes;
@@ -194,20 +231,25 @@ internal sealed class HybridCacheService(
                     current.SetCurrent(fallback.Name);
                     _stats.IncFallbackToMemory();
                     CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
-                    return await fallback.GetAsync(key, ct).ConfigureAwait(false);
+                    var fallbackProbeBytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
+                    return await ResolveTaggedPayloadAsync(key, fallbackProbeBytes, ct).ConfigureAwait(false);
                 }
 
                 using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
 
                 var v = await redis.GetAsync(key, probeCts?.Token ?? ct).ConfigureAwait(false);
+                v = await ResolveTaggedPayloadAsync(key, v, ct).ConfigureAwait(false);
                 MarkRedisSuccess();
                 current.SetCurrent(redis.Name);
                 if (v is not null)
                 {
+                    await TryWarmFallbackFromReadAsync(key, v, ct).ConfigureAwait(false);
                     _stats.IncHit();
                     CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
                     return v;
                 }
+
+                await TryRemoveStaleFallbackOnMissAsync(key, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -219,10 +261,11 @@ internal sealed class HybridCacheService(
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
-                logger.LogWarning(ex, "Redis GET failed; falling back to {Fallback}.", fallback.Name);
+                LogRedisGetFallback(logger, ex, fallback.Name);
             }
 
             var fallbackBytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
+            fallbackBytes = await ResolveTaggedPayloadAsync(key, fallbackBytes, ct).ConfigureAwait(false);
             if (fallbackBytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
             else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
             return fallbackBytes;
@@ -251,6 +294,7 @@ internal sealed class HybridCacheService(
         if (value.Length > 65536)
             CacheTelemetry.LargeKeyWrites.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
+        var valueToStore = await WrapPayloadWithTagVersionsAsync(value, options, ct).ConfigureAwait(false);
 
         var probeTaken = false;
         try
@@ -260,10 +304,10 @@ internal sealed class HybridCacheService(
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
-                await fallback.SetAsync(key, value, options, ct).ConfigureAwait(false);
+                await fallback.SetAsync(key, valueToStore, options, ct).ConfigureAwait(false);
 
                 // Track write for reconciliation when Redis recovers
-                reconciliation?.TrackWrite(key, value, options.Ttl);
+                reconciliation?.TrackWrite(key, valueToStore, options.Ttl);
                 return;
             }
 
@@ -275,16 +319,17 @@ internal sealed class HybridCacheService(
                     current.SetCurrent(fallback.Name);
                     _stats.IncFallbackToMemory();
                     CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
-                    await fallback.SetAsync(key, value, options, ct).ConfigureAwait(false);
-                    reconciliation?.TrackWrite(key, value, options.Ttl);
+                    await fallback.SetAsync(key, valueToStore, options, ct).ConfigureAwait(false);
+                    reconciliation?.TrackWrite(key, valueToStore, options.Ttl);
                     return;
                 }
 
                 using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
 
-                await redis.SetAsync(key, value, options, probeCts?.Token ?? ct).ConfigureAwait(false);
+                await redis.SetAsync(key, valueToStore, options, probeCts?.Token ?? ct).ConfigureAwait(false);
                 MarkRedisSuccess();
                 current.SetCurrent(redis.Name);
+                await TryMirrorFallbackWriteAsync(key, valueToStore, options, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -296,9 +341,9 @@ internal sealed class HybridCacheService(
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
-                logger.LogWarning(ex, "Redis SET failed; writing to {Fallback}.", fallback.Name);
-                await fallback.SetAsync(key, value, options, ct).ConfigureAwait(false);
-                reconciliation?.TrackWrite(key, value, options.Ttl);
+                LogRedisSetFallback(logger, ex, fallback.Name);
+                await fallback.SetAsync(key, valueToStore, options, ct).ConfigureAwait(false);
+                reconciliation?.TrackWrite(key, valueToStore, options.Ttl);
             }
         }
         finally
@@ -360,7 +405,7 @@ internal sealed class HybridCacheService(
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
-                logger.LogWarning(ex, "Redis DEL failed; using {Fallback} only.", fallback.Name);
+                LogRedisDeleteFallback(logger, ex, fallback.Name);
                 reconciliation?.TrackDelete(key);
                 return ok;
             }
@@ -390,6 +435,7 @@ internal sealed class HybridCacheService(
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
 
                 var fallbackBytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
+                fallbackBytes = await ResolveTaggedPayloadAsync(key, fallbackBytes, ct).ConfigureAwait(false);
                 if (fallbackBytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
                 else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
                 return fallbackBytes is null ? default : deserialize(fallbackBytes);
@@ -403,6 +449,7 @@ internal sealed class HybridCacheService(
                     _stats.IncFallbackToMemory();
                     CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
                     var fallbackBytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
+                    fallbackBytes = await ResolveTaggedPayloadAsync(key, fallbackBytes, ct).ConfigureAwait(false);
                     if (fallbackBytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
                     else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
                     return fallbackBytes is null ? default : deserialize(fallbackBytes);
@@ -410,15 +457,19 @@ internal sealed class HybridCacheService(
 
                 using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
 
-                var redisValue = await redis.GetAsync(key, deserialize, probeCts?.Token ?? ct).ConfigureAwait(false);
+                var redisBytes = await redis.GetAsync(key, probeCts?.Token ?? ct).ConfigureAwait(false);
+                redisBytes = await ResolveTaggedPayloadAsync(key, redisBytes, ct).ConfigureAwait(false);
                 MarkRedisSuccess();
                 current.SetCurrent(redis.Name);
-                if (redisValue is not null)
+                if (redisBytes is not null)
                 {
+                    await TryWarmFallbackFromReadAsync(key, redisBytes, ct).ConfigureAwait(false);
                     _stats.IncHit();
                     CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
-                    return redisValue;
+                    return deserialize(redisBytes);
                 }
+
+                await TryRemoveStaleFallbackOnMissAsync(key, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -430,10 +481,11 @@ internal sealed class HybridCacheService(
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
-                logger.LogWarning(ex, "Redis GET failed; falling back to {Fallback}.", fallback.Name);
+                LogRedisGetFallback(logger, ex, fallback.Name);
             }
 
             var bytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
+            bytes = await ResolveTaggedPayloadAsync(key, bytes, ct).ConfigureAwait(false);
             if (bytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
             else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
             return bytes is null ? default : deserialize(bytes);
@@ -473,6 +525,413 @@ internal sealed class HybridCacheService(
     /// <summary>
     /// Executes value.
     /// </summary>
+    public async ValueTask<long> InvalidateTagAsync(string tag, CancellationToken ct = default)
+    {
+        var normalizedTag = CacheTagPolicy.NormalizeTag(tag);
+        var currentVersion = await GetCurrentTagVersionAsync(normalizedTag, ct).ConfigureAwait(false);
+        var nextVersion = currentVersion == long.MaxValue ? 1 : currentVersion + 1;
+        await WriteTagVersionAsync(normalizedTag, nextVersion, ct).ConfigureAwait(false);
+        return nextVersion;
+    }
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public ValueTask<long> GetTagVersionAsync(string tag, CancellationToken ct = default)
+        => GetCurrentTagVersionAsync(CacheTagPolicy.NormalizeTag(tag), ct);
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<long> InvalidateZoneAsync(string zone, CancellationToken ct = default)
+        => InvalidateTagAsync(CacheTagConventions.ToZoneTag(zone), ct);
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public ValueTask<long> GetZoneVersionAsync(string zone, CancellationToken ct = default)
+        => GetTagVersionAsync(CacheTagConventions.ToZoneTag(zone), ct);
+
+    private async ValueTask<ReadOnlyMemory<byte>> WrapPayloadWithTagVersionsAsync(
+        ReadOnlyMemory<byte> payload,
+        CacheEntryOptions options,
+        CancellationToken ct)
+    {
+        var tags = CacheTagPolicy.NormalizeTags(existingTags: null, additionalTags: options.Intent?.Tags);
+        if (tags.Length == 0)
+            return payload;
+
+        var tagVersions = await CaptureTagVersionsAsync(tags, ct).ConfigureAwait(false);
+        return SerializeTagEnvelope(payload, tagVersions);
+    }
+
+    private async ValueTask<Dictionary<string, long>> CaptureTagVersionsAsync(string[] normalizedTags, CancellationToken ct)
+    {
+        var result = new Dictionary<string, long>(normalizedTags.Length, StringComparer.Ordinal);
+        foreach (var tag in normalizedTags)
+            result[tag] = await GetCurrentTagVersionAsync(tag, ct).ConfigureAwait(false);
+
+        return result;
+    }
+
+    private async ValueTask<byte[]?> ResolveTaggedPayloadAsync(string key, byte[]? payload, CancellationToken ct)
+    {
+        if (payload is null)
+            return null;
+
+        if (!TryDeserializeTagEnvelope(payload, out var envelope))
+            return payload;
+
+        var tagVersions = envelope.TagVersions;
+        if (tagVersions is null || tagVersions.Count == 0)
+            return envelope.Payload;
+
+        if (await AreTagVersionsCurrentAsync(tagVersions, ct).ConfigureAwait(false))
+            return envelope.Payload;
+
+        await TryRemoveTaggedStaleEntryAsync(key, ct).ConfigureAwait(false);
+        LogDiscardedStaleTaggedCacheEntry(logger, key, null);
+        return null;
+    }
+
+    private async ValueTask<bool> AreTagVersionsCurrentAsync(
+        IReadOnlyDictionary<string, long> expectedVersions,
+        CancellationToken ct)
+    {
+        foreach (var expected in expectedVersions)
+        {
+            var currentVersion = await GetCurrentTagVersionAsync(expected.Key, ct).ConfigureAwait(false);
+            if (currentVersion != expected.Value)
+                return false;
+        }
+
+        return true;
+    }
+
+    private async ValueTask<long> GetCurrentTagVersionAsync(string normalizedTag, CancellationToken ct)
+    {
+        var tagVersionKey = BuildTagVersionKey(normalizedTag);
+        var fallbackVersion = await GetTagVersionFromBackendAsync(fallback, tagVersionKey, ct).ConfigureAwait(false);
+
+        var breaker = _breaker;
+        if (breaker.Enabled && !IsRedisAllowedNow())
+            return fallbackVersion;
+
+        var probeTaken = false;
+        try
+        {
+            if (!TryEnterHalfOpenProbe(breaker, out probeTaken))
+                return fallbackVersion;
+
+            using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
+            var redisVersion = await GetTagVersionFromBackendAsync(redis, tagVersionKey, probeCts?.Token ?? ct).ConfigureAwait(false);
+            MarkRedisSuccess();
+            if (redisVersion <= fallbackVersion)
+                return fallbackVersion;
+
+            await TrySetFallbackTagVersionAsync(tagVersionKey, redisVersion, ct).ConfigureAwait(false);
+            return redisVersion;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            MarkRedisFailure();
+            LogTagVersionReadFallback(logger, normalizedTag, ex);
+            return fallbackVersion;
+        }
+        finally
+        {
+            if (probeTaken)
+                Interlocked.Decrement(ref _halfOpenProbeInFlight);
+        }
+    }
+
+    private static async ValueTask<long> GetTagVersionFromBackendAsync(ICacheService backend, string tagVersionKey, CancellationToken ct)
+    {
+        var payload = await backend.GetAsync(tagVersionKey, ct).ConfigureAwait(false);
+        return TryDeserializeTagVersion(payload, out var version) ? version : 0;
+    }
+
+    private async ValueTask WriteTagVersionAsync(string normalizedTag, long version, CancellationToken ct)
+    {
+        var tagVersionKey = BuildTagVersionKey(normalizedTag);
+        var payload = SerializeTagVersion(version);
+        var writeOptions = new CacheEntryOptions(
+            Intent: new CacheIntent(
+                CacheIntentKind.ComputedView,
+                Reason: "cache-tag-version",
+                Owner: Name,
+                Tags: [normalizedTag]));
+
+        await fallback.SetAsync(tagVersionKey, payload, writeOptions, ct).ConfigureAwait(false);
+
+        var breaker = _breaker;
+        if (breaker.Enabled && !IsRedisAllowedNow())
+        {
+            reconciliation?.TrackWrite(tagVersionKey, payload, expiry: null);
+            return;
+        }
+
+        var probeTaken = false;
+        try
+        {
+            if (!TryEnterHalfOpenProbe(breaker, out probeTaken))
+            {
+                reconciliation?.TrackWrite(tagVersionKey, payload, expiry: null);
+                return;
+            }
+
+            using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
+            await redis.SetAsync(tagVersionKey, payload, writeOptions, probeCts?.Token ?? ct).ConfigureAwait(false);
+            MarkRedisSuccess();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            MarkRedisFailure();
+            LogRedisTagVersionWriteQueued(logger, normalizedTag, ex);
+            reconciliation?.TrackWrite(tagVersionKey, payload, expiry: null);
+        }
+        finally
+        {
+            if (probeTaken)
+                Interlocked.Decrement(ref _halfOpenProbeInFlight);
+        }
+    }
+
+    private async ValueTask TrySetFallbackTagVersionAsync(string tagVersionKey, long version, CancellationToken ct)
+    {
+        var payload = SerializeTagVersion(version);
+        var writeOptions = new CacheEntryOptions(
+            Intent: new CacheIntent(
+                CacheIntentKind.ComputedView,
+                Reason: "cache-tag-version-fallback-warm",
+                Owner: Name));
+        try
+        {
+            await fallback.SetAsync(tagVersionKey, payload, writeOptions, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogFallbackTagVersionWarmFailed(logger, tagVersionKey, ex);
+        }
+    }
+
+    private async ValueTask TryRemoveTaggedStaleEntryAsync(string key, CancellationToken ct)
+    {
+        try
+        {
+            await fallback.RemoveAsync(key, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogFallbackStaleTagCleanupFailed(logger, ex, key);
+        }
+
+        var breaker = _breaker;
+        if (breaker.Enabled && !IsRedisAllowedNow())
+        {
+            reconciliation?.TrackDelete(key);
+            return;
+        }
+
+        var probeTaken = false;
+        try
+        {
+            if (!TryEnterHalfOpenProbe(breaker, out probeTaken))
+            {
+                reconciliation?.TrackDelete(key);
+                return;
+            }
+
+            using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
+            await redis.RemoveAsync(key, probeCts?.Token ?? ct).ConfigureAwait(false);
+            MarkRedisSuccess();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            MarkRedisFailure();
+            LogRedisStaleTagCleanupQueued(logger, ex, key);
+            reconciliation?.TrackDelete(key);
+        }
+        finally
+        {
+            if (probeTaken)
+                Interlocked.Decrement(ref _halfOpenProbeInFlight);
+        }
+    }
+
+    private static string BuildTagVersionKey(string normalizedTag)
+        => $"{TagVersionKeyPrefix}{normalizedTag}";
+
+    private static byte[] SerializeTagVersion(long version)
+    {
+        var bytes = GC.AllocateUninitializedArray<byte>(sizeof(long));
+        BinaryPrimitives.WriteInt64LittleEndian(bytes, version);
+        return bytes;
+    }
+
+    private static bool TryDeserializeTagVersion(byte[]? payload, out long version)
+    {
+        version = 0;
+        if (payload is null || payload.Length != sizeof(long))
+            return false;
+
+        version = BinaryPrimitives.ReadInt64LittleEndian(payload);
+        return true;
+    }
+
+    private static byte[] SerializeTagEnvelope(ReadOnlyMemory<byte> payload, Dictionary<string, long> tagVersions)
+    {
+        var envelope = new TaggedCacheEnvelope
+        {
+            Payload = payload.ToArray(),
+            TagVersions = tagVersions
+        };
+
+        var json = JsonSerializer.SerializeToUtf8Bytes(envelope, TagJsonOptions);
+        var buffer = GC.AllocateUninitializedArray<byte>(TagEnvelopePrefix.Length + json.Length);
+        TagEnvelopePrefix.AsSpan().CopyTo(buffer);
+        json.AsSpan().CopyTo(buffer.AsSpan(TagEnvelopePrefix.Length));
+        return buffer;
+    }
+
+    private static bool TryDeserializeTagEnvelope(byte[] payload, out TaggedCacheEnvelope envelope)
+    {
+        envelope = default!;
+        if (!payload.AsSpan().StartsWith(TagEnvelopePrefix))
+            return false;
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<TaggedCacheEnvelope>(
+                payload.AsSpan(TagEnvelopePrefix.Length),
+                TagJsonOptions);
+            if (parsed is null || parsed.Payload is null)
+                return false;
+
+            parsed.TagVersions ??= new Dictionary<string, long>(StringComparer.Ordinal);
+            envelope = parsed;
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private async ValueTask TryWarmFallbackFromReadAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)
+    {
+        var options = _failover;
+        if (!options.WarmFallbackOnRedisReadHit || !ShouldMirrorPayload(options, value.Length))
+            return;
+
+        try
+        {
+            var writeOptions = new CacheEntryOptions(
+                Ttl: options.FallbackWarmReadTtl,
+                Intent: new CacheIntent(
+                    CacheIntentKind.ReadThrough,
+                    Reason: "hybrid-failover-read-warm",
+                    Owner: Name,
+                    Tags: ReadWarmTags));
+            await fallback.SetAsync(key, value, writeOptions, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogFallbackReadWarmFailed(logger, key, ex);
+        }
+    }
+
+    private async ValueTask TryMirrorFallbackWriteAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions sourceOptions, CancellationToken ct)
+    {
+        var options = _failover;
+        if (!options.MirrorWritesToFallbackWhenRedisHealthy)
+        {
+            await TryRemoveFallbackEntryAsync(key, ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (!ShouldMirrorPayload(options, value.Length))
+        {
+            await TryRemoveFallbackEntryAsync(key, ct).ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            var ttl = sourceOptions.Ttl ?? options.FallbackMirrorWriteTtlWhenMissing;
+            var writeOptions = new CacheEntryOptions(
+                Ttl: ttl,
+                Intent: sourceOptions.Intent ?? new CacheIntent(
+                    CacheIntentKind.ReadThrough,
+                    Reason: "hybrid-failover-write-mirror",
+                    Owner: Name,
+                    Tags: WriteMirrorTags));
+            await fallback.SetAsync(key, value, writeOptions, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogFallbackWriteMirrorFailed(logger, key, ex);
+        }
+    }
+
+    private async ValueTask TryRemoveStaleFallbackOnMissAsync(string key, CancellationToken ct)
+    {
+        if (!_failover.RemoveStaleFallbackOnRedisMiss)
+            return;
+
+        await TryRemoveFallbackEntryAsync(key, ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask TryRemoveFallbackEntryAsync(string key, CancellationToken ct)
+    {
+        try
+        {
+            await fallback.RemoveAsync(key, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogFallbackRemoveFailed(logger, ex, key);
+        }
+    }
+
+    private static bool ShouldMirrorPayload(HybridFailoverOptions options, int payloadBytes)
+        => options.MaxMirrorPayloadBytes <= 0 || payloadBytes <= options.MaxMirrorPayloadBytes;
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public void ForceOpen(string reason)
     {
         if (!_breaker.Enabled) return;
@@ -506,7 +965,7 @@ internal sealed class HybridCacheService(
 
         _ = Task.Run(async () =>
         {
-            logger.LogInformation("Starting Redis reconciliation after breaker close.");
+            LogReconciliationStart(logger);
             var sw = Stopwatch.StartNew();
             try
             {
@@ -514,13 +973,103 @@ internal sealed class HybridCacheService(
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Redis reconciliation failed.");
+                LogReconciliationFailed(logger, ex);
             }
             finally
             {
-                logger.LogInformation("Redis reconciliation finished in {Duration}ms.", sw.Elapsed.TotalMilliseconds);
+                LogReconciliationFinished(logger, sw.Elapsed.TotalMilliseconds);
                 Interlocked.Exchange(ref _reconcileInFlight, 0);
             }
         });
+    }
+
+    [LoggerMessage(
+        EventId = 7007,
+        Level = LogLevel.Warning,
+        Message = "Redis circuit breaker reached MaxConsecutiveRetries ({Attempts}); holding open indefinitely until manual reset.")]
+    private static partial void LogBreakerMaxRetriesReached(ILogger logger, int attempts);
+
+    [LoggerMessage(
+        EventId = 7008,
+        Level = LogLevel.Warning,
+        Message = "Circuit breaker opened after {Failures} consecutive failures. Switching to {Fallback} mode for {Duration} seconds.")]
+    private static partial void LogBreakerOpened(ILogger logger, int failures, string fallback, double duration);
+
+    [LoggerMessage(
+        EventId = 7009,
+        Level = LogLevel.Warning,
+        Message = "Redis GET failed; falling back to {Fallback}.")]
+    private static partial void LogRedisGetFallback(ILogger logger, Exception exception, string fallback);
+
+    [LoggerMessage(
+        EventId = 7010,
+        Level = LogLevel.Warning,
+        Message = "Redis SET failed; writing to {Fallback}.")]
+    private static partial void LogRedisSetFallback(ILogger logger, Exception exception, string fallback);
+
+    [LoggerMessage(
+        EventId = 7011,
+        Level = LogLevel.Warning,
+        Message = "Redis DEL failed; using {Fallback} only.")]
+    private static partial void LogRedisDeleteFallback(ILogger logger, Exception exception, string fallback);
+
+    [LoggerMessage(
+        EventId = 7012,
+        Level = LogLevel.Debug,
+        Message = "Fallback stale-tag cleanup failed for key {Key}.")]
+    private static partial void LogFallbackStaleTagCleanupFailed(ILogger logger, Exception exception, string key);
+
+    [LoggerMessage(
+        EventId = 7013,
+        Level = LogLevel.Debug,
+        Message = "Redis stale-tag cleanup failed for key {Key}; queued for reconciliation.")]
+    private static partial void LogRedisStaleTagCleanupQueued(ILogger logger, Exception exception, string key);
+
+    [LoggerMessage(
+        EventId = 7014,
+        Level = LogLevel.Debug,
+        Message = "Fallback remove failed for key {Key}.")]
+    private static partial void LogFallbackRemoveFailed(ILogger logger, Exception exception, string key);
+
+    [LoggerMessage(
+        EventId = 7015,
+        Level = LogLevel.Information,
+        Message = "Starting Redis reconciliation after breaker close.")]
+    private static partial void LogReconciliationStart(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 7016,
+        Level = LogLevel.Warning,
+        Message = "Redis reconciliation failed.")]
+    private static partial void LogReconciliationFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        EventId = 7017,
+        Level = LogLevel.Information,
+        Message = "Redis reconciliation finished in {Duration}ms.")]
+    private static partial void LogReconciliationFinished(ILogger logger, double duration);
+
+    private sealed class DefaultHybridFailoverOptionsMonitor : IOptionsMonitor<HybridFailoverOptions>
+    {
+        public static readonly DefaultHybridFailoverOptionsMonitor Instance = new();
+        private static readonly HybridFailoverOptions ValueInstance = new();
+
+        public HybridFailoverOptions CurrentValue => ValueInstance;
+        public HybridFailoverOptions Get(string? name) => ValueInstance;
+        public IDisposable OnChange(Action<HybridFailoverOptions, string?> listener) => NoopDisposable.Instance;
+
+        private sealed class NoopDisposable : IDisposable
+        {
+            public static readonly NoopDisposable Instance = new();
+            public void Dispose()
+            {
+            }
+        }
+    }
+
+    private sealed class TaggedCacheEnvelope
+    {
+        public byte[] Payload { get; set; } = Array.Empty<byte>();
+        public Dictionary<string, long>? TagVersions { get; set; }
     }
 }

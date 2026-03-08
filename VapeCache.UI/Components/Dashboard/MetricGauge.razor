@@ -1,0 +1,21 @@
+<article class="metric-gauge" style="@GaugeStyle">
+    <header class="metric-gauge-head">
+        <span class="metric-gauge-label">@Label</span>
+        @if (!string.IsNullOrWhiteSpace(Caption))
+        {
+            <span class="metric-gauge-caption">@Caption</span>
+        }
+    </header>
+
+    <section class="metric-gauge-body">
+        <div class="metric-gauge-dial" role="img" aria-label="@($"{Label}: {DisplayValue}")">
+            <div class="metric-gauge-core">
+                <strong>@DisplayValue</strong>
+                <small>@RangeDisplay</small>
+            </div>
+        </div>
+        <div class="metric-gauge-rail" aria-hidden="true">
+            <div class="metric-gauge-rail-fill" style="width:@FillPercentCss"></div>
+        </div>
+    </section>
+</article>

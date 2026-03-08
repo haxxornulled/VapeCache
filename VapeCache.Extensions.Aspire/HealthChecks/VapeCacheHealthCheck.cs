@@ -1,15 +1,29 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Extensions.Aspire.HealthChecks;
 
 public sealed class VapeCacheHealthCheck : IHealthCheck
 {
     private readonly ICacheService _cache;
+    private readonly ICacheBackendState _backendState;
+    private readonly ICacheStats _stats;
+    private readonly IRedisCircuitBreakerState _breaker;
+    private readonly IRedisFailoverController _failover;
 
-    public VapeCacheHealthCheck(ICacheService cache)
+    public VapeCacheHealthCheck(
+        ICacheService cache,
+        ICacheBackendState backendState,
+        ICacheStats stats,
+        IRedisCircuitBreakerState breaker,
+        IRedisFailoverController failover)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _backendState = backendState ?? throw new ArgumentNullException(nameof(backendState));
+        _stats = stats ?? throw new ArgumentNullException(nameof(stats));
+        _breaker = breaker ?? throw new ArgumentNullException(nameof(breaker));
+        _failover = failover ?? throw new ArgumentNullException(nameof(failover));
     }
 
     /// <summary>
@@ -23,7 +37,36 @@ public sealed class VapeCacheHealthCheck : IHealthCheck
         {
             var healthCheckKey = "__health__:vapecache";
             _ = await _cache.GetAsync(healthCheckKey, cancellationToken);
-            return HealthCheckResult.Healthy("VapeCache is operational.");
+            var snapshot = _stats.Snapshot;
+            var reads = snapshot.Hits + snapshot.Misses;
+            var currentBackend = _backendState.EffectiveBackend;
+            var currentBackendIsRedis = currentBackend == BackendType.Redis;
+            var data = new Dictionary<string, object>
+            {
+                ["current_backend"] = currentBackend,
+                ["current_backend_is_redis"] = currentBackendIsRedis,
+                ["breaker_open"] = _breaker.IsOpen,
+                ["forced_open"] = _failover.IsForcedOpen,
+                ["consecutive_failures"] = _breaker.ConsecutiveFailures,
+                ["get_calls"] = snapshot.GetCalls,
+                ["hit_rate"] = reads <= 0 ? 0d : (double)snapshot.Hits / reads
+            };
+
+            // Backend state is authoritative from breaker/failover status and does not
+            // oscillate based on transient per-operation fallback paths.
+            if (_failover.IsForcedOpen || _breaker.IsOpen)
+            {
+                if (_breaker.OpenRemaining is { } remaining)
+                    data["open_remaining_ms"] = remaining.TotalMilliseconds;
+                if (!string.IsNullOrWhiteSpace(_failover.Reason))
+                    data["forced_open_reason"] = _failover.Reason;
+
+                return HealthCheckResult.Degraded(
+                    "VapeCache is operational but serving through fallback mode.",
+                    data: data);
+            }
+
+            return HealthCheckResult.Healthy("VapeCache is operational.", data);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

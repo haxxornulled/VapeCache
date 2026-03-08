@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Infrastructure.Caching;
 
@@ -10,7 +11,7 @@ internal sealed class CacheIntentRegistry : ICacheIntentRegistry
     /// <summary>
     /// Executes value.
     /// </summary>
-    public void RecordSet(string key, string backend, in CacheEntryOptions options, int payloadBytes)
+    public void RecordSet(string key, BackendType backend, in CacheEntryOptions options, int payloadBytes)
     {
         if (string.IsNullOrWhiteSpace(key))
             return;

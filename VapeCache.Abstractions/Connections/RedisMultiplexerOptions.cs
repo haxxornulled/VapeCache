@@ -2,7 +2,7 @@ namespace VapeCache.Abstractions.Connections;
 
 public sealed record RedisMultiplexerOptions
 {
-    public int Connections { get; init; } = Math.Max(1, Environment.ProcessorCount / 2);
+    public int Connections { get; init; } = Math.Max(2, Environment.ProcessorCount / 2);
     public int MaxInFlightPerConnection { get; init; } = 4096;
 
     /// <summary>
@@ -41,21 +41,21 @@ public sealed record RedisMultiplexerOptions
 
     /// <summary>
     /// Maximum bytes to include in one coalesced socket write batch.
-    /// Defaults to a full-tilt profile (1MB). Decrease for lower single-command latency.
+    /// Defaults to a tuned full-tilt profile (512KB). Decrease for lower single-command latency.
     /// </summary>
-    public int CoalescedWriteMaxBytes { get; init; } = 1024 * 1024;
+    public int CoalescedWriteMaxBytes { get; init; } = 512 * 1024;
 
     /// <summary>
     /// Maximum segment count to include in one coalesced write batch.
-    /// Defaults to a full-tilt profile (256 segments).
+    /// Defaults to a tuned full-tilt profile (192 segments).
     /// </summary>
-    public int CoalescedWriteMaxSegments { get; init; } = 256;
+    public int CoalescedWriteMaxSegments { get; init; } = 192;
 
     /// <summary>
     /// Segments up to this size are copied into scratch buffers to reduce scatter/gather overhead.
-    /// Defaults to a full-tilt profile (2KB).
+    /// Defaults to a tuned full-tilt profile (1536B).
     /// </summary>
-    public int CoalescedWriteSmallCopyThresholdBytes { get; init; } = 2048;
+    public int CoalescedWriteSmallCopyThresholdBytes { get; init; } = 1536;
 
     /// <summary>
     /// Enables adaptive coalescing. Low queue depths bias for latency, high depths bias for throughput.
@@ -65,12 +65,12 @@ public sealed record RedisMultiplexerOptions
     /// <summary>
     /// Queue depth at or below this value uses the adaptive minimum limits.
     /// </summary>
-    public int AdaptiveCoalescingLowDepth { get; init; } = 4;
+    public int AdaptiveCoalescingLowDepth { get; init; } = 6;
 
     /// <summary>
     /// Queue depth at or above this value uses the configured max coalescing limits.
     /// </summary>
-    public int AdaptiveCoalescingHighDepth { get; init; } = 64;
+    public int AdaptiveCoalescingHighDepth { get; init; } = 56;
 
     /// <summary>
     /// Minimum bytes used when adaptive coalescing is in low-depth mode.
@@ -80,18 +80,64 @@ public sealed record RedisMultiplexerOptions
     /// <summary>
     /// Minimum segment count used when adaptive coalescing is in low-depth mode.
     /// </summary>
-    public int AdaptiveCoalescingMinSegments { get; init; } = 64;
+    public int AdaptiveCoalescingMinSegments { get; init; } = 48;
 
     /// <summary>
     /// Minimum scratch-copy threshold used when adaptive coalescing is in low-depth mode.
     /// </summary>
-    public int AdaptiveCoalescingMinSmallCopyThresholdBytes { get; init; } = 512;
+    public int AdaptiveCoalescingMinSmallCopyThresholdBytes { get; init; } = 384;
+
+    /// <summary>
+    /// Queue depth that enables burst coalescing mode.
+    /// </summary>
+    public int CoalescingEnterQueueDepth { get; init; } = 8;
+
+    /// <summary>
+    /// Queue depth that exits burst coalescing mode.
+    /// Must be less than or equal to <see cref="CoalescingEnterQueueDepth"/>.
+    /// </summary>
+    public int CoalescingExitQueueDepth { get; init; } = 3;
+
+    /// <summary>
+    /// Maximum pending operations included in a single coalesced write batch.
+    /// </summary>
+    public int CoalescedWriteMaxOperations { get; init; } = 128;
+
+    /// <summary>
+    /// Spin iterations used to catch burst followers after the first coalesced dequeue.
+    /// </summary>
+    public int CoalescingSpinBudget { get; init; } = 8;
 
     /// <summary>
     /// Maximum time to wait for a Redis response before treating the connection as unhealthy.
     /// Set to TimeSpan.Zero to disable.
     /// </summary>
     public TimeSpan ResponseTimeout { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Number of dedicated bulk lanes used for pooled bulk responses (for example GET lease/MGET-style flows).
+    /// This count is carved out of the total <see cref="Connections"/> budget.
+    /// Set to 0 to disable isolation and share fast lanes.
+    /// </summary>
+    public int BulkLaneConnections { get; init; } = 1;
+
+    /// <summary>
+    /// When true, bulk lane count is derived from <see cref="BulkLaneTargetRatio"/> and recomputed from the total lane budget.
+    /// When false, <see cref="BulkLaneConnections"/> is treated as the fixed target count.
+    /// </summary>
+    public bool AutoAdjustBulkLanes { get; init; } = false;
+
+    /// <summary>
+    /// Target ratio of total lanes reserved as bulk lanes when <see cref="AutoAdjustBulkLanes"/> is enabled.
+    /// Example: 0.25 keeps roughly 25% of all lanes as bulk-read-write.
+    /// </summary>
+    public double BulkLaneTargetRatio { get; init; } = 0.25;
+
+    /// <summary>
+    /// Response timeout applied to dedicated bulk lanes.
+    /// This should generally be longer than fast-lane <see cref="ResponseTimeout"/>.
+    /// </summary>
+    public TimeSpan BulkLaneResponseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Enables bounded autoscaling of long-lived multiplexed connections.

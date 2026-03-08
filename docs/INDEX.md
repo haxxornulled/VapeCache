@@ -6,9 +6,11 @@ This index tracks the current feature set and supported APIs.
 - [QUICKSTART.md](QUICKSTART.md) - Copy/paste setup from zero to first endpoint
 - [CONFIGURATION.md](CONFIGURATION.md) - Every knob, sane defaults, and limits
 - [API_REFERENCE.md](API_REFERENCE.md) - Exact interfaces and endpoint contracts
+- [CACHE_INVALIDATION.md](CACHE_INVALIDATION.md) - Autofac-first, no-custom-code invalidation guide
 
 ## Getting Started
 - [README.md](../README.md) - Project overview and quick start
+- [WORKFLOWS.md](WORKFLOWS.md) - CI/CD workflow maps with Mermaid diagrams
 - [QUICKSTART.md](QUICKSTART.md) - Junior-friendly setup walkthrough
 - [CONFIGURATION.md](CONFIGURATION.md) - Options and appsettings.json
 - [NUGET_PACKAGES.md](NUGET_PACKAGES.md) - Package overview
@@ -16,22 +18,30 @@ This index tracks the current feature set and supported APIs.
 - [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md) - Detailed Aspire guide
 - [WRAPPER_PLUGIN_GUIDE.md](WRAPPER_PLUGIN_GUIDE.md) - Wrapper endpoints + plugin pattern
 - [BLAZOR_DASHBOARD_EXAMPLE.md](BLAZOR_DASHBOARD_EXAMPLE.md) - Realtime dashboard wiring from `/vapecache/stream`
-- [Sample app](../samples/VapeCache.Sample) - Buildable usage example
+- [ASPNETCORE_PIPELINE_CACHING.md](ASPNETCORE_PIPELINE_CACHING.md) - Output-cache pipeline hooks for MVC/Minimal API/Blazor
 
 ## API Reference
 - [API_REFERENCE.md](API_REFERENCE.md) - Core APIs, intent model, stampede profiles, Aspire endpoints
+- [HYBRID_CACHING_API_SURFACE.md](HYBRID_CACHING_API_SURFACE.md) - Integration contract for hybrid caching APIs and behavior
+- [CACHE_TAGS_AND_ZONES.md](CACHE_TAGS_AND_ZONES.md) - Versioned tag invalidation and zone patterns (EF second-level cache)
+- [CACHE_INVALIDATION.md](CACHE_INVALIDATION.md) - Policy-driven invalidation profiles and canned command usage
 - [TYPED_COLLECTIONS.md](TYPED_COLLECTIONS.md) - Lists, sets, hashes, sorted sets
 - [REDIS_PROTOCOL_SUPPORT.md](REDIS_PROTOCOL_SUPPORT.md) - Supported Redis commands
 - [REDIS_MODULES.md](REDIS_MODULES.md) - Module detection + RedisJSON/RediSearch/Bloom/TimeSeries
 - [FAQ.md](FAQ.md) - Common questions and behavior clarifications
 
 ## Architecture & Performance
+- [CLEAN_ARCHITECTURE.md](CLEAN_ARCHITECTURE.md) - Layer boundaries, dependency rules, and enforcement tests
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System design and data flow
+- [MUX_FAST_PATH_ARCHITECTURE.md](MUX_FAST_PATH_ARCHITECTURE.md) - Fast-path mux flowcharts, lane management, and tuning playbook
 - [COALESCED_WRITES.md](COALESCED_WRITES.md) - Coalesced write strategy
 - [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md) - Multiplexed lanes + autoscaler architecture and tuning
 - [INMEMORY_PERSISTENCE.md](INMEMORY_PERSISTENCE.md) - In-memory fallback spill design
 - [PERFORMANCE.md](PERFORMANCE.md) - Benchmark methodology and results
+- [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) - Current benchmark snapshot (environment + latest comparison)
 - [BENCHMARKING.md](BENCHMARKING.md) - How to run benchmarks
+- [BENCHMARK_CLAIMS_POLICY.md](BENCHMARK_CLAIMS_POLICY.md) - Strict vs tuned reporting rules and claim language policy
+- [HOT_PATH_BENCHMARK_CHECKLIST.md](HOT_PATH_BENCHMARK_CHECKLIST.md) - Hot-path benchmark audience split, tuning checklist, and gate criteria
 - [ENGINEERING_PLAYBOOK.md](ENGINEERING_PLAYBOOK.md) - Analyzer, profiling, and capture workflow
 
 ## Observability & Operations
@@ -40,6 +50,10 @@ This index tracks the current feature set and supported APIs.
 - [CURRENT_BACKEND_METRIC.md](CURRENT_BACKEND_METRIC.md) - Active backend metric
 - [FAILURE_SCENARIOS.md](FAILURE_SCENARIOS.md) - Redis outage behavior
 - [TLS_SECURITY.md](TLS_SECURITY.md) - TLS guidance
+- [LICENSE_OPERATIONS_RUNBOOK.md](LICENSE_OPERATIONS_RUNBOOK.md) - Key rotation, revocation, and incident flow
+- [LICENSE_CONTROL_PLANE.md](LICENSE_CONTROL_PLANE.md) - Online revocation/kill-switch service
+- [LICENSE_GENERATOR_EXTERNALIZATION.md](LICENSE_GENERATOR_EXTERNALIZATION.md) - Moving issuance/signing out of this repo
+- [UPGRADE_NOTES.md](UPGRADE_NOTES.md) - Release-critical behavior changes and migration notes
 
 ## Roadmap & Risk
 - [FUTURE_PROOFING.md](FUTURE_PROOFING.md) - Hardening notes and risk assessment
@@ -62,6 +76,11 @@ dotnet add package VapeCache.Extensions.Aspire
 
 ### Basic Registration (Microsoft DI)
 ```csharp
+using VapeCache.Abstractions.Connections;
+
+builder.Services.AddOptions<RedisConnectionOptions>()
+    .Bind(builder.Configuration.GetSection("RedisConnection"));
+
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
 

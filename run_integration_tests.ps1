@@ -1,54 +1,56 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Runs VapeCache integration tests against a local or remote Redis instance.
+    Runs VapeCache integration tests against a local or remote Redis endpoint.
 
 .DESCRIPTION
-    This script sets up environment variables and runs integration tests.
-    It can optionally start a Docker Redis container for local testing.
+    Sets integration environment variables and executes the Redis integration
+    xUnit tests. Optionally starts/stops a local Docker Redis container.
 
 .PARAMETER StartRedis
-    Start a local Redis container using Docker before running tests.
+    Starts a local Docker Redis container named vapecache-redis.
 
 .PARAMETER StopRedis
-    Stop and remove the Redis container after tests complete.
+    Stops/removes the local Docker Redis container after the run.
 
 .PARAMETER Host
-    Redis server hostname (default: localhost)
+    Redis host for integration tests (default: localhost).
 
 .PARAMETER Port
-    Redis server port (default: 6379)
+    Redis port for integration tests (default: 6379).
 
 .PARAMETER Password
-    Redis password (optional)
+    Optional Redis password.
+
+.PARAMETER Username
+    Optional Redis ACL username.
 
 .PARAMETER UseTls
-    Enable TLS/SSL connection (default: false)
+    Enables TLS by setting VAPECACHE_REDIS_USE_TLS=true.
 
 .PARAMETER TestFilter
-    Specific test filter (default: "FullyQualifiedName~Integration")
+    dotnet test filter expression.
 
-.EXAMPLE
-    .\run_integration_tests.ps1 -StartRedis -StopRedis
-    Starts Redis in Docker, runs all integration tests, then stops Redis
+.PARAMETER Configuration
+    Build configuration passed to dotnet test.
 
-.EXAMPLE
-    .\run_integration_tests.ps1 -Host "redis.example.com" -Port 6380 -Password "secret" -UseTls
-    Runs tests against a remote Redis server with authentication and TLS
-
-.EXAMPLE
-    .\run_integration_tests.ps1 -TestFilter "FullyQualifiedName~CoalescedWrites"
-    Runs only coalesced writes integration tests
+.PARAMETER Project
+    Test project path passed to dotnet test.
 #>
 
 param(
     [switch]$StartRedis,
     [switch]$StopRedis,
-    [string]$Host = "localhost",
+    [Alias("Host")]
+    [string]$RedisHost = "localhost",
     [int]$Port = 6379,
+    [string]$Username = "",
     [string]$Password = "",
     [switch]$UseTls,
-    [string]$TestFilter = "FullyQualifiedName~Integration"
+    [string]$TestFilter = "FullyQualifiedName~VapeCache.Tests.Integration",
+    [ValidateSet("Debug", "Release")]
+    [string]$Configuration = "Release",
+    [string]$Project = "VapeCache.Tests/VapeCache.Tests.csproj"
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,9 +58,9 @@ $ErrorActionPreference = "Stop"
 function Write-Header {
     param([string]$Message)
     Write-Host ""
-    Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Cyan
     Write-Host " $Message" -ForegroundColor Cyan
-    Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Cyan
     Write-Host ""
 }
 
@@ -72,105 +74,141 @@ function Test-DockerInstalled {
     }
 }
 
+function Get-ContainerName {
+    return "vapecache-redis"
+}
+
 function Start-RedisContainer {
-    Write-Header "Starting Redis Container"
+    Write-Header "Starting Redis Docker Container"
 
     if (-not (Test-DockerInstalled)) {
-        Write-Error "Docker is not installed. Please install Docker Desktop or use -Host to connect to an existing Redis instance."
+        throw "Docker is not installed. Install Docker Desktop or run against an existing Redis host."
     }
 
-    # Check if container already exists
-    $existing = docker ps -a --filter "name=vapecache-redis" --format "{{.Names}}"
-    if ($existing -eq "vapecache-redis") {
-        Write-Host "ℹ Redis container already exists. Starting it..." -ForegroundColor Yellow
-        docker start vapecache-redis | Out-Null
+    $containerName = Get-ContainerName
+    $existing = docker ps -a --filter "name=$containerName" --format "{{.Names}}"
+    if ($existing -eq $containerName) {
+        Write-Host "Container exists, starting: $containerName" -ForegroundColor Yellow
+        docker start $containerName | Out-Null
     }
     else {
-        Write-Host "� Creating new Redis 7 container..." -ForegroundColor Green
-        docker run --name vapecache-redis -d -p 6379:6379 redis:7-alpine | Out-Null
+        Write-Host "Creating container: $containerName" -ForegroundColor Yellow
+        docker run --name $containerName -d -p "$Port`:6379" redis:7-alpine | Out-Null
     }
 
-    # Wait for Redis to be ready
-    Write-Host "⏳ Waiting for Redis to be ready..." -ForegroundColor Yellow
+    Write-Host "Waiting for Redis readiness..." -ForegroundColor Yellow
     $retries = 0
     $maxRetries = 30
     while ($retries -lt $maxRetries) {
         try {
-            $result = docker exec vapecache-redis redis-cli ping 2>$null
-            if ($result -eq "PONG") {
-                Write-Host "✓ Redis is ready!" -ForegroundColor Green
+            $pong = docker exec $containerName redis-cli ping 2>$null
+            if ($pong -eq "PONG") {
+                Write-Host "Redis is ready." -ForegroundColor Green
                 return
             }
         }
         catch {
-            # Ignore errors while waiting
+            # Keep retrying until timeout.
         }
+
         Start-Sleep -Seconds 1
         $retries++
     }
 
-    Write-Error "Redis failed to start within $maxRetries seconds"
+    throw "Redis did not become ready within $maxRetries seconds."
 }
 
 function Stop-RedisContainer {
-    Write-Header "Stopping Redis Container"
+    Write-Header "Stopping Redis Docker Container"
 
-    $existing = docker ps -a --filter "name=vapecache-redis" --format "{{.Names}}"
-    if ($existing -eq "vapecache-redis") {
-        Write-Host "� Stopping Redis container..." -ForegroundColor Yellow
-        docker stop vapecache-redis | Out-Null
-        Write-Host "🗑 Removing Redis container..." -ForegroundColor Yellow
-        docker rm vapecache-redis | Out-Null
-        Write-Host "✓ Redis container removed" -ForegroundColor Green
+    if (-not (Test-DockerInstalled)) {
+        Write-Host "Docker not found; skipping container stop." -ForegroundColor Yellow
+        return
+    }
+
+    $containerName = Get-ContainerName
+    $existing = docker ps -a --filter "name=$containerName" --format "{{.Names}}"
+    if ($existing -eq $containerName) {
+        Write-Host "Stopping container: $containerName" -ForegroundColor Yellow
+        docker stop $containerName | Out-Null
+        Write-Host "Removing container: $containerName" -ForegroundColor Yellow
+        docker rm $containerName | Out-Null
+        Write-Host "Container removed." -ForegroundColor Green
     }
     else {
-        Write-Host "ℹ No Redis container found to stop" -ForegroundColor Yellow
+        Write-Host "Container not found; nothing to stop." -ForegroundColor Yellow
     }
 }
 
-function Set-TestEnvironment {
-    Write-Header "Setting Environment Variables"
+function Set-IntegrationEnvironment {
+    Write-Header "Setting Integration Environment"
 
-    $env:VAPECACHE_REDIS_HOST = $Host
+    $env:VAPECACHE_REDIS_HOST = $RedisHost
     $env:VAPECACHE_REDIS_PORT = $Port.ToString()
 
-    Write-Host "VAPECACHE_REDIS_HOST      = $Host"
-    Write-Host "VAPECACHE_REDIS_PORT      = $Port"
+    Write-Host "VAPECACHE_REDIS_HOST=$env:VAPECACHE_REDIS_HOST"
+    Write-Host "VAPECACHE_REDIS_PORT=$env:VAPECACHE_REDIS_PORT"
 
-    if ($Password) {
+    if (-not [string]::IsNullOrWhiteSpace($Username)) {
+        $env:VAPECACHE_REDIS_USERNAME = $Username
+        Write-Host "VAPECACHE_REDIS_USERNAME=$env:VAPECACHE_REDIS_USERNAME"
+    }
+    else {
+        Remove-Item Env:VAPECACHE_REDIS_USERNAME -ErrorAction SilentlyContinue
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Password)) {
         $env:VAPECACHE_REDIS_PASSWORD = $Password
-        Write-Host "VAPECACHE_REDIS_PASSWORD  = ********" -ForegroundColor Yellow
+        Write-Host "VAPECACHE_REDIS_PASSWORD=********" -ForegroundColor Yellow
+    }
+    else {
+        Remove-Item Env:VAPECACHE_REDIS_PASSWORD -ErrorAction SilentlyContinue
     }
 
     if ($UseTls) {
         $env:VAPECACHE_REDIS_USE_TLS = "true"
-        Write-Host "VAPECACHE_REDIS_USE_TLS   = true" -ForegroundColor Yellow
     }
-
-    Write-Host ""
+    else {
+        Remove-Item Env:VAPECACHE_REDIS_USE_TLS -ErrorAction SilentlyContinue
+    }
+    Write-Host "VAPECACHE_REDIS_USE_TLS=$($env:VAPECACHE_REDIS_USE_TLS)"
 }
 
 function Invoke-IntegrationTests {
     Write-Header "Running Integration Tests"
-
-    Write-Host "Test Filter: $TestFilter" -ForegroundColor Cyan
+    Write-Host "Project: $Project"
+    Write-Host "Configuration: $Configuration"
+    Write-Host "Filter: $TestFilter"
     Write-Host ""
 
     $testArgs = @(
-        "test"
-        "--filter", $TestFilter
-        "--nologo"
+        "test", $Project,
+        "-c", $Configuration,
+        "--filter", $TestFilter,
+        "--nologo",
         "--verbosity", "normal"
     )
 
-    & dotnet $testArgs
+    $testOutput = & dotnet @testArgs 2>&1
+    $testOutput | ForEach-Object { Write-Host $_ }
 
     if ($LASTEXITCODE -ne 0) {
-        throw "Integration tests failed with exit code $LASTEXITCODE"
+        throw "Integration tests failed with exit code $LASTEXITCODE."
+    }
+
+    $noMatch = $false
+    foreach ($line in $testOutput) {
+        if ($line -match "No test matches the given testcase filter") {
+            $noMatch = $true
+            break
+        }
+    }
+
+    if ($noMatch) {
+        throw "Integration test filter matched zero tests. Adjust -TestFilter to include at least one integration test."
     }
 }
 
-# Main execution
 try {
     Write-Header "VapeCache Integration Test Runner"
 
@@ -178,14 +216,14 @@ try {
         Start-RedisContainer
     }
 
-    Set-TestEnvironment
+    Set-IntegrationEnvironment
     Invoke-IntegrationTests
 
-    Write-Header "✓ Integration Tests Completed Successfully"
+    Write-Header "Integration Tests Completed Successfully"
 }
 catch {
     Write-Host ""
-    Write-Host "❌ ERROR: $_" -ForegroundColor Red
+    Write-Host "Integration runner error: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host ""
     exit 1
 }

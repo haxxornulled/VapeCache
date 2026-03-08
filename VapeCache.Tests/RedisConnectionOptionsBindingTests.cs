@@ -33,6 +33,9 @@ public sealed class RedisConnectionOptionsBindingTests
             "TcpReceiveBufferBytes": 524288,
             "MaxBulkStringBytes": 8388608,
             "MaxArrayDepth": 32,
+            "RespProtocolVersion": 3,
+            "EnableClusterRedirection": true,
+            "MaxClusterRedirects": 7,
             "ConnectTimeout": "00:00:05",
             "AcquireTimeout": "00:00:06"
           }
@@ -70,5 +73,8 @@ public sealed class RedisConnectionOptionsBindingTests
         Assert.Equal(524288, o.TcpReceiveBufferBytes);
         Assert.Equal(8 * 1024 * 1024, o.MaxBulkStringBytes);
         Assert.Equal(32, o.MaxArrayDepth);
+        Assert.Equal(3, o.RespProtocolVersion);
+        Assert.True(o.EnableClusterRedirection);
+        Assert.Equal(7, o.MaxClusterRedirects);
     }
 }

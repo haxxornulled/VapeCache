@@ -1,5 +1,4 @@
 using VapeCache.Abstractions.Connections;
-using VapeCache.Application.Guards;
 
 namespace VapeCache.Infrastructure.Connections;
 
@@ -33,9 +32,18 @@ internal static class RedisRuntimeOptionsNormalizer
     private const int MaxAdaptiveDepth = 8192;
     private const int MinAdaptiveWriteBytes = 4 * 1024;
     private const int MinAdaptiveSegments = 1;
+    private const int MinCoalescedWriteOperations = 1;
+    private const int MaxCoalescedWriteOperations = 2048;
+    private const int MinCoalescingSpinBudget = 0;
+    private const int MaxCoalescingSpinBudget = 256;
     private const int MinAutoscaleConnections = 1;
     private const int MaxAutoscaleConnections = 256;
+    private const int MinBulkLaneConnections = 0;
+    private const int MaxBulkLaneConnections = MaxMultiplexerConnections - 1;
     private const double MinPositiveThreshold = 0.01d;
+    private const double MinBulkLaneTargetRatio = 0d;
+    private const double MaxBulkLaneTargetRatio = 0.90d;
+    private const double DefaultBulkLaneTargetRatio = 0.25d;
 
     private static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan DefaultAcquireTimeout = TimeSpan.FromSeconds(2);
@@ -48,6 +56,7 @@ internal static class RedisRuntimeOptionsNormalizer
     private static readonly TimeSpan DefaultScaleDownCooldown = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan DefaultScaleDownDrainTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan DefaultAutoscaleFreezeDuration = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan DefaultBulkLaneResponseTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Normalizes value.
@@ -156,8 +165,33 @@ internal static class RedisRuntimeOptionsNormalizer
             MinSmallCopyThresholdBytes,
             coalescedWriteSmallCopyThresholdBytes,
             fallbackWhenInvalid: MinSmallCopyThresholdBytes);
+        var coalescingEnterQueueDepth = NormalizeInt(
+            profiled.CoalescingEnterQueueDepth,
+            MinAdaptiveDepth,
+            MaxAdaptiveDepth,
+            fallbackWhenInvalid: 8);
+        var coalescingExitQueueDepth = NormalizeInt(
+            profiled.CoalescingExitQueueDepth,
+            MinAdaptiveDepth,
+            coalescingEnterQueueDepth,
+            fallbackWhenInvalid: Math.Min(3, coalescingEnterQueueDepth));
+        var coalescedWriteMaxOperations = NormalizeInt(
+            profiled.CoalescedWriteMaxOperations,
+            MinCoalescedWriteOperations,
+            MaxCoalescedWriteOperations,
+            fallbackWhenInvalid: 128);
+        var coalescingSpinBudget = NormalizeInt(
+            profiled.CoalescingSpinBudget,
+            MinCoalescingSpinBudget,
+            MaxCoalescingSpinBudget,
+            fallbackWhenInvalid: 8,
+            fallbackWhenNonPositive: 0);
 
         var responseTimeout = NormalizeTimeout(profiled.ResponseTimeout);
+        var bulkLaneConnections = NormalizeBulkLaneConnections(profiled.BulkLaneConnections);
+        var autoAdjustBulkLanes = profiled.AutoAdjustBulkLanes;
+        var bulkLaneTargetRatio = NormalizeBulkLaneTargetRatio(profiled.BulkLaneTargetRatio);
+        var bulkLaneResponseTimeout = NormalizePositive(profiled.BulkLaneResponseTimeout, DefaultBulkLaneResponseTimeout);
         var autoscaleSampleInterval = NormalizePositive(profiled.AutoscaleSampleInterval, DefaultAutoscaleSampleInterval);
         var scaleUpWindow = NormalizePositive(profiled.ScaleUpWindow, DefaultScaleUpWindow);
         var scaleDownWindow = NormalizePositive(profiled.ScaleDownWindow, DefaultScaleDownWindow);
@@ -188,7 +222,15 @@ internal static class RedisRuntimeOptionsNormalizer
             AdaptiveCoalescingMinWriteBytes = adaptiveCoalescingMinWriteBytes,
             AdaptiveCoalescingMinSegments = adaptiveCoalescingMinSegments,
             AdaptiveCoalescingMinSmallCopyThresholdBytes = adaptiveCoalescingMinSmallCopyThresholdBytes,
+            CoalescingEnterQueueDepth = coalescingEnterQueueDepth,
+            CoalescingExitQueueDepth = coalescingExitQueueDepth,
+            CoalescedWriteMaxOperations = coalescedWriteMaxOperations,
+            CoalescingSpinBudget = coalescingSpinBudget,
             ResponseTimeout = responseTimeout,
+            BulkLaneConnections = bulkLaneConnections,
+            AutoAdjustBulkLanes = autoAdjustBulkLanes,
+            BulkLaneTargetRatio = bulkLaneTargetRatio,
+            BulkLaneResponseTimeout = bulkLaneResponseTimeout,
             MinConnections = minConnections,
             MaxConnections = maxConnections,
             AutoscaleSampleInterval = autoscaleSampleInterval,
@@ -213,36 +255,16 @@ internal static class RedisRuntimeOptionsNormalizer
 
     private static RedisTransportProfile NormalizeTransportProfile(RedisTransportProfile profile)
     {
-        try
-        {
-            return Guard.Against.ValidEnumValue(profile);
-        }
-        catch (ArgumentException)
-        {
-            return RedisTransportProfile.FullTilt;
-        }
+        return Enum.IsDefined(profile)
+            ? profile
+            : RedisTransportProfile.FullTilt;
     }
 
-    private static bool HasText(string? value)
-    {
-        try
-        {
-            Guard.Against.NotNullOrWhiteSpace(value);
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
+    private static bool HasText(string? value) => !string.IsNullOrWhiteSpace(value);
 
     private static int NormalizeInt(int value, int min, int max, int fallbackWhenInvalid, int? fallbackWhenNonPositive = null)
     {
-        try
-        {
-            return Guard.Against.NotOutOfRange(value, min, max);
-        }
-        catch (ArgumentOutOfRangeException)
+        if (value < min || value > max)
         {
             if (value <= 0)
             {
@@ -252,6 +274,8 @@ internal static class RedisRuntimeOptionsNormalizer
 
             return Math.Clamp(value, min, max);
         }
+
+        return value;
     }
 
     private static int NormalizeTcpBufferBytes(int configuredBytes)
@@ -307,4 +331,20 @@ internal static class RedisRuntimeOptionsNormalizer
 
     private static TimeSpan NormalizeTimeout(TimeSpan value)
         => value == Timeout.InfiniteTimeSpan || value < TimeSpan.Zero ? TimeSpan.Zero : value;
+
+    private static int NormalizeBulkLaneConnections(int value)
+    {
+        if (value < MinBulkLaneConnections)
+            return 1;
+
+        return Math.Clamp(value, MinBulkLaneConnections, MaxBulkLaneConnections);
+    }
+
+    private static double NormalizeBulkLaneTargetRatio(double value)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+            return DefaultBulkLaneTargetRatio;
+
+        return Math.Clamp(value, MinBulkLaneTargetRatio, MaxBulkLaneTargetRatio);
+    }
 }

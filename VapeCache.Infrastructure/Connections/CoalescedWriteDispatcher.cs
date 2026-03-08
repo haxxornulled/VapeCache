@@ -24,8 +24,11 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     private readonly SocketSendSegmentWindow _socketSendWindow = new();
     private readonly ReadOnlyMemory<byte>[][] _coalesceSegmentsPool8 = new ReadOnlyMemory<byte>[8][];
     private int _coalesceSegmentsPool8Count;
+    private readonly long[][] _commitOffsetsPool8 = new long[8][];
+    private int _commitOffsetsPool8Count;
     private readonly ArrayPool<ReadOnlyMemory<byte>> _coalesceSegmentArrayPool = ArrayPool<ReadOnlyMemory<byte>>.Shared;
     private readonly ArrayPool<ArraySegment<byte>> _socketSendSegmentArrayPool = ArrayPool<ArraySegment<byte>>.Shared;
+    private readonly ArrayPool<long> _commitOffsetsArrayPool = ArrayPool<long>.Shared;
     private readonly ReadOnlyMemory<byte> _crlfMemory;
 
     private readonly TryDequeuePendingRequestDelegate _tryDequeueWrite;
@@ -36,6 +39,10 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     private readonly ReturnPayloadArrayDelegate _returnPayloadArray;
     private readonly AbortPendingRequestDelegate _abortPendingRequest;
     private readonly Action<int>? _recordBytesSent;
+    private readonly int _coalescingEnterQueueDepth;
+    private readonly int _coalescingExitQueueDepth;
+    private readonly int _coalescingSpinBudget;
+    private bool _burstCoalescingActive;
 
     public CoalescedWriteDispatcher(
         int coalescedWriteMaxBytes,
@@ -55,7 +62,11 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         ReturnHeaderBufferDelegate returnHeaderBuffer,
         ReturnPayloadArrayDelegate returnPayloadArray,
         AbortPendingRequestDelegate abortPendingRequest,
-        Action<int>? recordBytesSent = null)
+        Action<int>? recordBytesSent = null,
+        int coalescingEnterQueueDepth = 8,
+        int coalescingExitQueueDepth = 3,
+        int coalescedWriteMaxOperations = 128,
+        int coalescingSpinBudget = 8)
     {
         _crlfMemory = crlfMemory;
         _tryDequeueWrite = tryDequeueWrite;
@@ -66,6 +77,9 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         _returnPayloadArray = returnPayloadArray;
         _abortPendingRequest = abortPendingRequest;
         _recordBytesSent = recordBytesSent;
+        _coalescingEnterQueueDepth = Math.Max(1, coalescingEnterQueueDepth);
+        _coalescingExitQueueDepth = Math.Clamp(coalescingExitQueueDepth, 1, _coalescingEnterQueueDepth);
+        _coalescingSpinBudget = Math.Max(0, coalescingSpinBudget);
         _coalescer = new Coalescer(
             _coalesceQueue,
             coalescedWriteMaxBytes,
@@ -77,35 +91,55 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             adaptiveCoalescingMinWriteBytes,
             adaptiveCoalescingMinSegments,
             adaptiveCoalescingMinSmallCopyThresholdBytes,
+            coalescedWriteMaxOperations,
             () => _getWriteQueueDepth());
     }
 
     /// <summary>
     /// Executes value.
     /// </summary>
-    public async Task SendAsync(PendingRequest first, Socket socket, CancellationToken ct)
+    public async Task SendAsync(PendingRequest first, Socket socket, long generation, CancellationToken ct)
     {
         _coalesceQueue.Clear();
         _coalesceDrained.Clear();
         _coalesceCaptured.Clear();
         _coalesceDrained.Add(first);
         var queuedDepth = _getWriteQueueDepth();
+        var burstMode = UpdateBurstCoalescingMode(queuedDepth);
         var drainLimit = GetTailAwareDrainLimit(queuedDepth);
 
         var firstCoalesced = ToCoalesced(first);
         _coalesceQueue.Enqueue(firstCoalesced);
         _coalesceCaptured.Add(firstCoalesced);
 
-        while (_tryDequeueWrite(out var nextReq))
+        var drainedFollower = false;
+        var spinAttempts = 0;
+        while (true)
         {
+            if (!_tryDequeueWrite(out var nextReq))
+            {
+                // Flush immediately when this was a lone request.
+                if (!burstMode || !drainedFollower || spinAttempts >= _coalescingSpinBudget)
+                    break;
+
+                Thread.SpinWait(64 << Math.Min(spinAttempts, 6));
+                spinAttempts++;
+                continue;
+            }
+
+            drainedFollower = true;
+            spinAttempts = 0;
             _coalesceDrained.Add(nextReq);
             var coalesced = ToCoalesced(nextReq);
             _coalesceQueue.Enqueue(coalesced);
             _coalesceCaptured.Add(coalesced);
-            if (_coalesceQueue.Count >= drainLimit) break;
+            if (_coalesceQueue.Count >= drainLimit)
+                break;
         }
 
-        var requestCommitOffsets = BuildRequestCommitOffsets(_coalesceDrained);
+        var requestCount = _coalesceDrained.Count;
+        var requestCommitOffsets = RentRequestCommitOffsets(requestCount);
+        BuildRequestCommitOffsets(_coalesceDrained, requestCommitOffsets);
         var enqueuedToPending = 0;
         long committedBytes = 0;
 
@@ -118,10 +152,11 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             RedisTelemetry.BytesSent.Add(sentBytes);
             _recordBytesSent?.Invoke(sentBytes);
 
-            while (enqueuedToPending < requestCommitOffsets.Length &&
+            while (enqueuedToPending < requestCount &&
                    committedBytes >= requestCommitOffsets[enqueuedToPending])
             {
                 var op = _coalesceDrained[enqueuedToPending].Op;
+                op.AssignGeneration(generation);
                 op.AssignSequenceId(_nextPendingSequence());
                 await _enqueuePendingOperation(op, ct).ConfigureAwait(false);
                 enqueuedToPending++;
@@ -175,9 +210,10 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         }
         catch (Exception ex)
         {
+            var transportFailure = NormalizeTransportException(ex);
             for (var i = enqueuedToPending; i < _coalesceDrained.Count; i++)
-                _abortPendingRequest(_coalesceDrained[i], ex);
-            throw;
+                _abortPendingRequest(_coalesceDrained[i], transportFailure);
+            throw transportFailure;
         }
         finally
         {
@@ -192,20 +228,46 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
 
             for (var i = 0; i < _coalesceCaptured.Count; i++)
                 ReturnCoalesceSegments(_coalesceCaptured[i].Segments);
+
+            ReturnRequestCommitOffsets(requestCommitOffsets);
         }
     }
 
-    private long[] BuildRequestCommitOffsets(List<PendingRequest> requests)
+    private void BuildRequestCommitOffsets(List<PendingRequest> requests, long[] offsets)
     {
-        var offsets = new long[requests.Count];
         long running = 0;
         for (var i = 0; i < requests.Count; i++)
         {
             running += GetRequestWireLength(requests[i]);
             offsets[i] = running;
         }
+    }
 
-        return offsets;
+    private long[] RentRequestCommitOffsets(int minLength)
+    {
+        if (minLength <= 8 && _commitOffsetsPool8Count > 0)
+        {
+            var idx = --_commitOffsetsPool8Count;
+            var cached = _commitOffsetsPool8[idx];
+            _commitOffsetsPool8[idx] = Array.Empty<long>();
+            if (cached.Length >= minLength)
+                return cached;
+            _commitOffsetsArrayPool.Return(cached, clearArray: false);
+        }
+
+        var size = minLength <= 8 ? 8 : minLength;
+        return _commitOffsetsArrayPool.Rent(size);
+    }
+
+    private void ReturnRequestCommitOffsets(long[] offsets)
+    {
+        if (offsets.Length == 8 && _commitOffsetsPool8Count < _commitOffsetsPool8.Length)
+        {
+            _commitOffsetsPool8[_commitOffsetsPool8Count++] = offsets;
+            return;
+        }
+
+        _commitOffsetsArrayPool.Return(offsets, clearArray: false);
     }
 
     /// <summary>
@@ -219,6 +281,13 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             var arr = _coalesceSegmentsPool8[--_coalesceSegmentsPool8Count];
             if (arr.Length > 0)
                 _coalesceSegmentArrayPool.Return(arr, clearArray: true);
+        }
+
+        while (_commitOffsetsPool8Count > 0)
+        {
+            var arr = _commitOffsetsPool8[--_commitOffsetsPool8Count];
+            if (arr.Length > 0)
+                _commitOffsetsArrayPool.Return(arr, clearArray: false);
         }
     }
 
@@ -317,7 +386,16 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     {
         while (!buffer.IsEmpty)
         {
-            var sent = await socket.SendAsync(buffer, SocketFlags.None, ct).ConfigureAwait(false);
+            int sent;
+            try
+            {
+                sent = await socket.SendAsync(buffer, SocketFlags.None, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                throw NormalizeTransportException(ex);
+            }
+
             if (sent <= 0)
                 throw new IOException("Socket send returned 0.");
             await onBytesCommitted(sent).ConfigureAwait(false);
@@ -365,7 +443,16 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             while (_socketSendWindow.Count > 0)
             {
                 ct.ThrowIfCancellationRequested();
-                var sent = await socket.SendAsync(_socketSendWindow, SocketFlags.None).ConfigureAwait(false);
+                int sent;
+                try
+                {
+                    sent = await socket.SendAsync(_socketSendWindow, SocketFlags.None).WaitAsync(ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    throw NormalizeTransportException(ex);
+                }
+
                 if (sent <= 0)
                     throw new IOException("Socket send returned 0.");
                 await onBytesCommitted(sent).ConfigureAwait(false);
@@ -391,6 +478,38 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         if (writeQueueDepth >= 64) return 5;
         if (writeQueueDepth >= 32) return 6;
         return 7;
+    }
+
+    private bool UpdateBurstCoalescingMode(int queueDepth)
+    {
+        if (_burstCoalescingActive)
+        {
+            if (queueDepth <= _coalescingExitQueueDepth)
+                _burstCoalescingActive = false;
+        }
+        else if (queueDepth >= _coalescingEnterQueueDepth)
+        {
+            _burstCoalescingActive = true;
+        }
+
+        return _burstCoalescingActive;
+    }
+
+    private static Exception NormalizeTransportException(Exception ex)
+    {
+        if (ex is ObjectDisposedException)
+            return new IOException("Socket was disposed during coalesced write send.", ex);
+
+        if (ex is SocketException se &&
+            (se.SocketErrorCode == SocketError.OperationAborted ||
+             se.SocketErrorCode == SocketError.ConnectionReset ||
+             se.SocketErrorCode == SocketError.ConnectionAborted ||
+             se.SocketErrorCode == SocketError.NotConnected))
+        {
+            return new IOException($"Socket write failed: {se.SocketErrorCode}.", se);
+        }
+
+        return ex;
     }
 
     private sealed class SocketSendSegmentWindow : IList<ArraySegment<byte>>

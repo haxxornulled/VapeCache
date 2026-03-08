@@ -4,7 +4,6 @@
 
 # User / IDE
 .vs/
-.claude/
 *.user
 *.suo
 *.userosscache
@@ -33,6 +32,7 @@ BenchmarkDotNet.Artifacts/
 nupkg/
 *.nupkg
 *.snupkg
+**/node_modules/
 
 # Test/debug scripts and artifacts
 test_*.csx
@@ -48,12 +48,39 @@ run_comparison.ps1
 *.tar.gz
 *.7z
 
-# Temporary files
-nul
-
 # Reference and sample scratch work (Grocery Store is the primary real example)
 /Reference/
 /Ref/
 /Samples/
 /samples/
 
+# Temporary files
+nul
+tmp/
+.tmp/
+artifacts/
+**/TestResults/
+tools/VapeCache.DocCommenter/
+VapeCache.UI/wwwroot/js/reconnect-modal.js
+.tools/
+AspireIntSample/
+pending_status.txt
+
+# ===================================
+# ENTERPRISE / PRIVATE CODE
+# ===================================
+# Do not ignore tracked enterprise source folders in the private repository.
+# OSS publishing must be done via the dedicated sync workflow/remotes.
+
+# Enterprise strategy and business docs
+ENTERPRISE_STRATEGY.md
+BUSINESS_MODEL.md
+REVENUE_PROJECTIONS.md
+
+# License keys and customer data
+*.license
+*.key
+licenses/
+customers/
+VapeCache.Licensing.ControlPlane/data/
+VapeCahe.Core/

@@ -42,6 +42,7 @@ public static class RedisTransportProfiles
         {
             RedisTransportProfile.FullTilt => options with
             {
+                // Preserve explicit feature toggles while applying profile sizing defaults.
                 EnableCoalescedSocketWrites = options.EnableCoalescedSocketWrites,
                 CoalescedWriteMaxBytes = 512 * 1024,
                 CoalescedWriteMaxSegments = 192,

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Console.GroceryStore;
 
@@ -7,6 +8,13 @@ namespace VapeCache.Console.GroceryStore;
 /// </summary>
 public static class MenuRunner
 {
+    private readonly record struct RedisComparisonSettings(
+        string Host,
+        int Port,
+        string? Username,
+        string Password,
+        string Source);
+
     /// <summary>
     /// Runs value.
     /// </summary>
@@ -18,17 +26,26 @@ public static class MenuRunner
         System.Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
         System.Console.WriteLine();
 
-        // Get Redis connection details from configuration
-        var redisHost = configuration["RedisConnection:Host"] ?? "192.168.100.50";
-        var redisPassword = configuration["RedisConnection:Password"] ?? "redis4me!!";
+        // Resolve Redis endpoint/auth from the same source used by the host runtime.
+        var redis = ResolveRedisSettings(configuration);
+        var redisHost = redis.Host;
+        var redisPort = redis.Port;
+        var redisUsername = redis.Username;
+        var redisPassword = redis.Password;
 
-        System.Console.WriteLine($"Redis Host: {redisHost}");
-        // SECURITY FIX: Don't log authentication status to prevent credential enumeration attacks
+        var authMode = string.IsNullOrWhiteSpace(redisPassword)
+            ? "none"
+            : (string.IsNullOrWhiteSpace(redisUsername) ? "password-only" : "acl");
+        System.Console.WriteLine($"Redis Endpoint: {redisHost}:{redisPort}");
+        System.Console.WriteLine($"Redis Auth: {authMode}");
+        System.Console.WriteLine($"Redis Source: {redis.Source}");
         System.Console.WriteLine();
 
         // Auto-run with default settings when running in non-interactive mode
         var autoRun = Environment.GetEnvironmentVariable("VAPECACHE_RUN_COMPARISON")?.ToLowerInvariant() == "true";
         int shopperCount = 10_000;
+        if (int.TryParse(Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SHOPPERS"), out var envShoppers) && envShoppers > 0)
+            shopperCount = envShoppers;
         var maxCartSize = 35;
         if (int.TryParse(Environment.GetEnvironmentVariable("VAPECACHE_MAX_CART_SIZE"), out var envMaxCartSize) && envMaxCartSize > 0)
             maxCartSize = envMaxCartSize;
@@ -54,7 +71,14 @@ public static class MenuRunner
 
             try
             {
-                await ComparisonRunner.RunComparisonAsync(configuration, redisHost, redisPassword, shopperCount, maxCartSize);
+                await ComparisonRunner.RunComparisonAsync(
+                    configuration,
+                    redisHost,
+                    redisPort,
+                    redisUsername,
+                    redisPassword,
+                    shopperCount,
+                    maxCartSize);
             }
             catch (Exception ex)
             {
@@ -94,5 +118,31 @@ public static class MenuRunner
 
         System.Console.WriteLine("Invalid input. Using default: 10,000");
         return 10_000;
+    }
+
+    private static RedisComparisonSettings ResolveRedisSettings(IConfiguration configuration)
+    {
+        var connectionString = configuration["RedisConnection:ConnectionString"];
+        if (!string.IsNullOrWhiteSpace(connectionString))
+        {
+            if (RedisConnectionStringParser.TryParse(connectionString, out var parsed, out _))
+            {
+                var password = parsed.Password ?? string.Empty;
+                return new RedisComparisonSettings(
+                    parsed.Host,
+                    parsed.Port,
+                    parsed.Username,
+                    password,
+                    "connection-string");
+            }
+        }
+
+        var host = configuration["RedisConnection:Host"] ?? "127.0.0.1";
+        var port = 6379;
+        if (int.TryParse(configuration["RedisConnection:Port"], out var configuredPort) && configuredPort > 0)
+            port = configuredPort;
+        var username = configuration["RedisConnection:Username"];
+        var configuredPassword = configuration["RedisConnection:Password"] ?? string.Empty;
+        return new RedisComparisonSettings(host, port, username, configuredPassword, "host-port");
     }
 }

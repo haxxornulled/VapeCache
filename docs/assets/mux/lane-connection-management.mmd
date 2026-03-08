@@ -1,0 +1,30 @@
+flowchart TD
+    A[Startup] --> B[Normalize options + apply transport profile]
+    B --> C[Create N RedisMultiplexedConnection lanes]
+    C --> D[Rebuild lanes]
+    D --> E[Read lanes = all lanes]
+    D --> F[Write lanes = all lanes]
+    E --> G[AutoscaleLoopAsync tick]
+    F --> G
+
+    G --> H[Collect lane signals<br/>inflight, queue depth, timeouts,<br/>p95/p99, failures, health]
+    H --> I{EnableAutoscaling}
+    I -->|No| J[Hold current lanes]
+    I -->|Yes| K{Frozen / guardrail hit?}
+    K -->|Yes| L[Hold + emit blocked reason]
+    K -->|No| M{Pressure decision}
+
+    M -->|High pressure + windows + cooldown| N[ScaleUp +1 lane]
+    M -->|Low pressure + windows + cooldown| O[ScaleDown -1 lane]
+    M -->|No action| J
+
+    N --> P[Create new connection]
+    P --> D
+
+    O --> Q[Remove one lane from active arrays]
+    Q --> R[Drain in-flight + queue<br/>timeout bounded]
+    R --> S[Dispose removed connection]
+    S --> D
+
+    T[IOptionsMonitor update] --> U[ApplyAutoscaleOptions]
+    U --> G

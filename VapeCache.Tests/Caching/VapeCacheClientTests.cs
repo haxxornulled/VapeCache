@@ -3,6 +3,7 @@ using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Caching.Codecs;
 using VapeCache.Tests.Infrastructure;
+using System.Buffers;
 
 namespace VapeCache.Tests.Caching;
 
@@ -82,6 +83,27 @@ public sealed class VapeCacheClientTests
         await Assert.ThrowsAsync<ArgumentException>(() => region.RemoveAsync(" ").AsTask());
     }
 
+    [Fact]
+    public async Task Tag_and_zone_operations_delegate_to_backend_service()
+    {
+        var backend = new FakeTaggableCacheService();
+        var client = new VapeCacheClient(backend, new SystemTextJsonCodecProvider());
+
+        Assert.Equal(1L, await client.InvalidateTagAsync("catalog"));
+        Assert.Equal(1L, await client.GetTagVersionAsync("catalog"));
+        Assert.Equal(1L, await client.InvalidateZoneAsync("ef:products"));
+        Assert.Equal(1L, await client.GetZoneVersionAsync("ef:products"));
+    }
+
+    [Fact]
+    public async Task Tag_operations_throw_when_backend_does_not_support_tags()
+    {
+        var client = CreateClient();
+
+        await Assert.ThrowsAsync<NotSupportedException>(() => client.InvalidateTagAsync("catalog").AsTask());
+        await Assert.ThrowsAsync<NotSupportedException>(() => client.InvalidateZoneAsync("ef:products").AsTask());
+    }
+
     private static VapeCacheClient CreateClient()
     {
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
@@ -96,5 +118,57 @@ public sealed class VapeCacheClientTests
     {
         public int Id { get; init; }
         public string Name { get; init; } = string.Empty;
+    }
+
+    private sealed class FakeTaggableCacheService : ICacheService, ICacheTagService
+    {
+        private readonly Dictionary<string, long> _versions = new(StringComparer.Ordinal);
+
+        public string Name => "fake-tags";
+
+        public ValueTask<long> InvalidateTagAsync(string tag, CancellationToken ct = default)
+        {
+            var normalized = tag.Trim();
+            var current = _versions.TryGetValue(normalized, out var version) ? version : 0;
+            var next = current + 1;
+            _versions[normalized] = next;
+            return ValueTask.FromResult(next);
+        }
+
+        public ValueTask<long> GetTagVersionAsync(string tag, CancellationToken ct = default)
+        {
+            var normalized = tag.Trim();
+            return ValueTask.FromResult(_versions.TryGetValue(normalized, out var version) ? version : 0L);
+        }
+
+        public ValueTask<long> InvalidateZoneAsync(string zone, CancellationToken ct = default)
+            => InvalidateTagAsync(CacheTagConventions.ToZoneTag(zone), ct);
+
+        public ValueTask<long> GetZoneVersionAsync(string zone, CancellationToken ct = default)
+            => GetTagVersionAsync(CacheTagConventions.ToZoneTag(zone), ct);
+
+        public ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
+            => ValueTask.FromResult<byte[]?>(null);
+
+        public ValueTask SetAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions options, CancellationToken ct)
+            => ValueTask.CompletedTask;
+
+        public ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
+            => ValueTask.FromResult(false);
+
+        public ValueTask<T?> GetAsync<T>(string key, SpanDeserializer<T> deserialize, CancellationToken ct)
+            => ValueTask.FromResult<T?>(default);
+
+        public ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
+            => ValueTask.CompletedTask;
+
+        public async ValueTask<T> GetOrSetAsync<T>(
+            string key,
+            Func<CancellationToken, ValueTask<T>> factory,
+            Action<IBufferWriter<byte>, T> serialize,
+            SpanDeserializer<T> deserialize,
+            CacheEntryOptions options,
+            CancellationToken ct)
+            => await factory(ct).ConfigureAwait(false);
     }
 }

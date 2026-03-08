@@ -53,7 +53,10 @@ builder.AddVapeCache()
     .WithAspNetCoreOutputCaching()     // Replace output-cache store with VapeCache
     .WithFailoverAffinityHints()       // Emit sticky-session hints during failover
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
-    .WithAutoMappedEndpoints();        // Auto-maps /vapecache/status + /vapecache/stats + /vapecache/stream
+    .WithAutoMappedEndpoints(options =>
+    {
+        options.Enabled = true;        // Explicitly opt in to wrapper endpoint mapping
+    });
 
 var app = builder.Build();
 
@@ -94,7 +97,7 @@ Navigate to `http://localhost:15888` to view:
 
 ### Metrics
 
-- `cache.current.backend` - **Current active backend** (1=redis, 0=in-memory) - Real-time visibility
+- `cache.current.backend` - **Current active backend** (1=redis, 0=in-memory, -1=unknown) - Real-time visibility
 - `cache.get.hits` - Cache hits (by backend: redis, in-memory, hybrid)
 - `cache.get.misses` - Cache misses
 - `cache.fallback.to_memory` - Circuit breaker fallback events
@@ -217,13 +220,16 @@ var app = builder.Build();
 app.UseVapeCacheFailoverAffinityHints();
 ```
 
-### `MapVapeCacheEndpoints(prefix, includeBreakerControlEndpoints, includeLiveStreamEndpoint, includeIntentEndpoints)`
+### `MapVapeCacheEndpoints(prefix, includeBreakerControlEndpoints, includeLiveStreamEndpoint, includeIntentEndpoints, includeDashboardEndpoint)`
 
 Maps wrapper-facing HTTP endpoints:
 
 - `GET {prefix}/status`
 - `GET {prefix}/stats`
 - `GET {prefix}/stream` (Server-Sent Events realtime channel)
+- `GET {prefix}/dashboard` (built-in realtime dashboard UI, optional)
+- `GET {prefix}/dashboard/dashboard.js` (dashboard script)
+- `GET {prefix}/dashboard/dashboard.css` (dashboard styles)
 - `POST {prefix}/breaker/force-open` (optional)
 - `POST {prefix}/breaker/clear` (optional)
 
@@ -243,7 +249,8 @@ app.MapVapeCacheEndpoints(
     prefix: "/vapecache-admin",
     includeBreakerControlEndpoints: true,
     includeLiveStreamEndpoint: true,
-    includeIntentEndpoints: true);
+    includeIntentEndpoints: true,
+    includeDashboardEndpoint: true);
 ```
 
 `GET {prefix}/status` and `GET {prefix}/stats` include the stampede hardening counters:
@@ -349,17 +356,29 @@ Example payload:
 ### `WithAutoMappedEndpoints(options => ...)`
 
 Registers a startup filter that maps VapeCache endpoints automatically so you don't need to wire them in `Program.cs`.
+Endpoint mapping is disabled until `options.Enabled = true`.
 
 ```csharp
 builder.AddVapeCache()
     .WithAutoMappedEndpoints(options =>
     {
+        options.Enabled = true;
         options.Prefix = "/cache";
         options.IncludeBreakerControlEndpoints = false;
         options.EnableLiveStream = true;
+        options.EnableDashboard = true;
         options.LiveSampleInterval = TimeSpan.FromMilliseconds(500);
         options.LiveChannelCapacity = 512;
     });
+```
+
+Dashboard UI frontend source is maintained in `VapeCache.Extensions.Aspire/dashboard-ui` (Vite + TypeScript).
+To rebuild the shipped dashboard assets (`DashboardAssets/`):
+
+```bash
+cd VapeCache.Extensions.Aspire/dashboard-ui
+npm install
+npm run build
 ```
 
 Enterprise transport/autoscaler architecture and tuning:
@@ -394,9 +413,9 @@ builder.AddVapeCache()
 
 ### VapeCache Health Check (`vapecache`)
 
-- **Healthy**: Circuit breaker closed, no failures
-- **Degraded**: Circuit breaker open (using in-memory fallback) OR consecutive failures
-- **Unhealthy**: N/A (degraded is worst case)
+- **Healthy**: Redis is the active backend and the circuit breaker is closed
+- **Degraded**: Manual failover is enabled, the breaker is open, or the current backend is not Redis
+- **Unhealthy**: The health probe itself failed while reading cache state or dependencies
 
 **Diagnostic Data:**
 ```json

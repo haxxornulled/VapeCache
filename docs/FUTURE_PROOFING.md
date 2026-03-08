@@ -30,7 +30,6 @@ These notes cover:
 - Rebuilt docs index and aligned API/config docs with current feature set.
 - Updated README examples to compile and match real options.
 - Replaced speculative API expansion claims with a scoped backlog.
-- Added a buildable sample (`samples/VapeCache.Sample`) to validate examples.
 
 ### Spill Support
 - Implemented async spill-to-disk for large fallback payloads with pluggable encryption.
@@ -42,7 +41,7 @@ We design the library so consumer code is predictable, boring, and buildable:
 - **Explicit behavior**: documented fallbacks and command coverage.
 - **Buildable examples**: sample app compiles against the current API.
 - **Autofac‑first**: registrations follow the real DI pattern used in the repo.
-- **Clear non‑goals**: no Pub/Sub, Lua scripting, RESP3, or cluster support.
+- **Clear non‑goals**: no Pub/Sub/Lua/Streams; RESP3 and cluster support are cache-path focused, not full protocol orchestration.
 
 ## Security Risk Assessment
 

@@ -19,6 +19,7 @@ using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.DependencyInjection;
 using VapeCache.Console.Stress;
 using VapeCache.Console.Secrets;
+using VapeCache.Console.Pos;
 
 var hostBuilder = Host.CreateDefaultBuilder(args)
     .UseServiceProviderFactory(new AutofacServiceProviderFactory())
@@ -49,6 +50,19 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             {
                 ["RedisConnection:ConnectionString"] = secret
             });
+        }
+        else
+        {
+            // Aspire references provide connection strings via ConnectionStrings:{name}.
+            // Use this as a fallback when no explicit secret env var is set.
+            var aspireRedisConnectionString = temp.GetConnectionString("redis");
+            if (!string.IsNullOrWhiteSpace(aspireRedisConnectionString))
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["RedisConnection:ConnectionString"] = aspireRedisConnectionString
+                });
+            }
         }
         // Never throw here; Redis can be unavailable or not configured. Startup preflight/failover controls behavior.
     })
@@ -130,6 +144,31 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.CheckoutChancePercent is >= 0 and <= 100, "GroceryStoreStress:CheckoutChancePercent must be 0..100.")
             .Validate(static o => o.RemoveFromCartChancePercent is >= 0 and <= 100, "GroceryStoreStress:RemoveFromCartChancePercent must be 0..100.")
             .Validate(static o => o.StatsIntervalSeconds > 0, "GroceryStoreStress:StatsIntervalSeconds must be > 0.")
+            .Validate(static o => o.HotProductBiasPercent is >= 0 and <= 100, "GroceryStoreStress:HotProductBiasPercent must be 0..100.")
+            .ValidateOnStart();
+        services.AddOptions<PosSearchDemoOptions>()
+            .Bind(context.Configuration.GetSection("PosSearchDemo"))
+            .Validate(static o => !o.Enabled || !string.IsNullOrWhiteSpace(o.SqlitePath), "PosSearchDemo:SqlitePath is required when enabled.")
+            .Validate(static o => !o.Enabled || !string.IsNullOrWhiteSpace(o.RedisIndexName), "PosSearchDemo:RedisIndexName is required when enabled.")
+            .Validate(static o => !o.Enabled || !string.IsNullOrWhiteSpace(o.RedisKeyPrefix), "PosSearchDemo:RedisKeyPrefix is required when enabled.")
+            .Validate(static o => o.TopResults > 0 && o.TopResults <= 100, "PosSearchDemo:TopResults must be in range 1..100.")
+            .Validate(static o => o.SeedProductCount >= 5, "PosSearchDemo:SeedProductCount must be >= 5.")
+            .ValidateOnStart();
+        services.AddOptions<PosSearchLoadOptions>()
+            .Bind(context.Configuration.GetSection("PosSearchLoad"))
+            .Validate(static o => !o.Enabled || o.Duration > TimeSpan.Zero, "PosSearchLoad:Duration must be > 0 when enabled.")
+            .Validate(static o => !o.Enabled || o.Concurrency > 0, "PosSearchLoad:Concurrency must be > 0 when enabled.")
+            .Validate(static o => !o.Enabled || o.LogEvery > TimeSpan.Zero, "PosSearchLoad:LogEvery must be > 0 when enabled.")
+            .Validate(static o => !o.Enabled || o.TargetShoppersPerSecond >= 0, "PosSearchLoad:TargetShoppersPerSecond must be >= 0 when enabled.")
+            .Validate(static o => !o.Enabled || !o.EnableAutoRamp || o.RampStepDuration > TimeSpan.Zero, "PosSearchLoad:RampStepDuration must be > 0 when auto ramp is enabled.")
+            .Validate(static o => !o.Enabled || !o.EnableAutoRamp || !string.IsNullOrWhiteSpace(o.RampSteps), "PosSearchLoad:RampSteps is required when auto ramp is enabled.")
+            .Validate(static o => !o.Enabled || o.MaxFailurePercent is >= 0 and <= 100, "PosSearchLoad:MaxFailurePercent must be in range 0..100 when enabled.")
+            .Validate(static o => !o.Enabled || o.MaxP95Ms >= 0, "PosSearchLoad:MaxP95Ms must be >= 0 when enabled.")
+            .Validate(static o => !o.Enabled || o.HotQueryPercent is >= 0 and <= 100, "PosSearchLoad:HotQueryPercent must be 0..100 when enabled.")
+            .Validate(static o => !o.Enabled || o.CashierQueryPercent is >= 0 and <= 100, "PosSearchLoad:CashierQueryPercent must be 0..100 when enabled.")
+            .Validate(static o => !o.Enabled || o.LookupUpcPercent is >= 0 and <= 100, "PosSearchLoad:LookupUpcPercent must be 0..100 when enabled.")
+            .Validate(static o => !o.Enabled || (o.HotQueryPercent + o.CashierQueryPercent + o.LookupUpcPercent) <= 100, "PosSearchLoad percentages must sum to <= 100 when enabled.")
+            .Validate(static o => !o.Enabled || o.LatencySampleSize >= 256, "PosSearchLoad:LatencySampleSize must be >= 256 when enabled.")
             .ValidateOnStart();
 
         services
@@ -155,6 +194,8 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.ReaperPeriod >= TimeSpan.Zero, "RedisConnection:ReaperPeriod must be >= 0.")
             .Validate(static o => o.TcpSendBufferBytes >= 0, "RedisConnection:TcpSendBufferBytes must be >= 0.")
             .Validate(static o => o.TcpReceiveBufferBytes >= 0, "RedisConnection:TcpReceiveBufferBytes must be >= 0.")
+            .Validate(static o => o.RespProtocolVersion is 2 or 3, "RedisConnection:RespProtocolVersion must be 2 or 3.")
+            .Validate(static o => o.MaxClusterRedirects >= 0 && o.MaxClusterRedirects <= 16, "RedisConnection:MaxClusterRedirects must be in range 0..16.")
             .ValidateOnStart();
 
         services
@@ -199,6 +240,8 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.ScaleUpTimeoutRatePerSecThreshold > 0, "RedisMultiplexer:ScaleUpTimeoutRatePerSecThreshold must be > 0.")
             .Validate(static o => o.ScaleUpP99LatencyMsThreshold > 0, "RedisMultiplexer:ScaleUpP99LatencyMsThreshold must be > 0.")
             .Validate(static o => o.ScaleDownP95LatencyMsThreshold > 0, "RedisMultiplexer:ScaleDownP95LatencyMsThreshold must be > 0.")
+            .Validate(static o => o.BulkLaneConnections >= 0, "RedisMultiplexer:BulkLaneConnections must be >= 0.")
+            .Validate(static o => !o.AutoAdjustBulkLanes || (o.BulkLaneTargetRatio >= 0 && o.BulkLaneTargetRatio <= 0.90), "RedisMultiplexer:BulkLaneTargetRatio must be in [0,0.90] when AutoAdjustBulkLanes is enabled.")
             .Validate(static o => o.EmergencyScaleUpTimeoutRatePerSecThreshold > 0, "RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold must be > 0.")
             .Validate(static o => o.ScaleDownDrainTimeout > TimeSpan.Zero, "RedisMultiplexer:ScaleDownDrainTimeout must be > 0.")
             .Validate(static o => o.MaxScaleEventsPerMinute > 0, "RedisMultiplexer:MaxScaleEventsPerMinute must be > 0.")
@@ -230,14 +273,27 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.HalfOpenProbeTimeout >= TimeSpan.Zero, "RedisCircuitBreaker:HalfOpenProbeTimeout must be >= 0.")
             .ValidateOnStart();
 
+        services
+            .AddOptions<HybridFailoverOptions>()
+            .Bind(context.Configuration.GetSection("HybridFailover"))
+            .Validate(static o => o.FallbackWarmReadTtl > TimeSpan.Zero, "HybridFailover:FallbackWarmReadTtl must be > 0.")
+            .Validate(static o => o.FallbackMirrorWriteTtlWhenMissing > TimeSpan.Zero, "HybridFailover:FallbackMirrorWriteTtlWhenMissing must be > 0.")
+            .Validate(static o => o.MaxMirrorPayloadBytes >= 0, "HybridFailover:MaxMirrorPayloadBytes must be >= 0.")
+            .ValidateOnStart();
+
         // Grocery Store Demo Services
         services.AddSingleton<VapeCache.Console.GroceryStore.GroceryStoreService>();
         services.AddHostedService<VapeCache.Console.GroceryStore.GroceryStoreStressTest>();
+        services.AddSingleton<SqlitePosCatalogStore>();
+        services.AddSingleton<PosCatalogSearchService>();
+        services.AddHostedService<PosSearchDemoHostedService>();
+        services.AddHostedService<PosSearchLoadHostedService>();
         services.AddSingleton<IVapeCachePlugin, SampleCatalogPlugin>();
 
         services.AddHostedService<StartupPreflightHostedService>();
         services.AddHostedService<RedisSanityCheckHostedService>();
         services.AddHostedService<RedisConnectionPoolReaperHostedService>();
+        services.AddHostedService<SharedDashboardSnapshotPublisherHostedService>();
         services.AddHostedService<PluginDemoHostedService>();
         // services.AddHostedService<RedisStressHostedService>();  // Disabled in favor of grocery store test
         // services.AddHostedService<LiveDemoHostedService>();     // Disabled in favor of grocery store test
@@ -311,6 +367,21 @@ static void ConfigureOtlpForSignal(string endpoint, OtlpExporterOptions otlp, st
     if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
         return;
 
+    var configuredProtocol = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_PROTOCOL");
+    if (TryParseOtlpProtocol(configuredProtocol, out var explicitProtocol))
+    {
+        if (explicitProtocol == OtlpExportProtocol.HttpProtobuf)
+        {
+            otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
+            otlp.Endpoint = ResolveSignalEndpoint(endpointUri, signal);
+            return;
+        }
+
+        otlp.Protocol = OtlpExportProtocol.Grpc;
+        otlp.Endpoint = endpointUri;
+        return;
+    }
+
     var isHttpProtobuf = endpointUri.Port == 5341 ||
                          endpointUri.Port == 4318 ||
                          endpointUri.AbsolutePath.Contains("/ingest/otlp", StringComparison.OrdinalIgnoreCase) ||
@@ -345,6 +416,28 @@ static Uri ResolveSignalEndpoint(Uri endpoint, string signal)
         return endpoint;
 
     return new Uri($"{endpointText}{signalSuffix}", UriKind.Absolute);
+}
+
+static bool TryParseOtlpProtocol(string? configured, out OtlpExportProtocol protocol)
+{
+    protocol = default;
+    if (string.IsNullOrWhiteSpace(configured))
+        return false;
+
+    var normalized = configured.Trim().ToLowerInvariant();
+    if (normalized is "http/protobuf" or "http-protobuf" or "httpprotobuf")
+    {
+        protocol = OtlpExportProtocol.HttpProtobuf;
+        return true;
+    }
+
+    if (normalized is "grpc")
+    {
+        protocol = OtlpExportProtocol.Grpc;
+        return true;
+    }
+
+    return Enum.TryParse(configured, ignoreCase: true, out protocol);
 }
 
 static CacheStampedeProfile ResolveCacheStampedeProfile(IConfiguration configuration)

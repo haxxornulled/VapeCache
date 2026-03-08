@@ -1,45 +1,72 @@
 using System.Buffers;
+using System.Collections.Concurrent;
+using System.Threading;
 
 namespace VapeCache.Abstractions.Connections;
 
 /// <summary>
 /// Represents a leased Redis value buffer.
-/// Reference type by design so disposal state cannot be bypassed via struct copies.
 /// </summary>
 public sealed class RedisValueLease : IDisposable
 {
-    private static readonly RedisValueLease NullInstance = new(buffer: null, length: 0, pooled: false);
+    private static readonly ConcurrentBag<RedisValueLease> LeasePool = new();
+    private static readonly RedisValueLease NullInstance = new(isNullLease: true);
 
-    private readonly byte[]? _buffer;
-    private readonly int _length;
-    private readonly bool _pooled;
+    private byte[]? _buffer;
+    private int _length;
+    private bool _pooledBuffer;
+    private readonly bool _isNullLease;
     private int _disposed; // 0 = not disposed, 1 = disposed
 
-    internal RedisValueLease(byte[]? buffer, int length, bool pooled)
+    private RedisValueLease(bool isNullLease = false)
     {
-        _buffer = buffer;
-        _length = length;
-        _pooled = pooled;
-        _disposed = 0;
+        _isNullLease = isNullLease;
+        _disposed = isNullLease ? 1 : 0;
+    }
+
+    internal static RedisValueLease Create(byte[]? buffer, int length, bool pooled)
+    {
+        if (buffer is null || length <= 0)
+            return Null;
+
+        if (!LeasePool.TryTake(out var lease))
+            lease = new RedisValueLease();
+
+        lease._buffer = buffer;
+        lease._length = length;
+        lease._pooledBuffer = pooled;
+        Volatile.Write(ref lease._disposed, 0);
+        return lease;
     }
 
     public static RedisValueLease Null => NullInstance;
 
-    public bool IsNull => _buffer is null;
-    public int Length => _buffer is null ? 0 : _length;
+    public bool IsNull => Volatile.Read(ref _disposed) != 0 || _buffer is null;
+    public int Length => Volatile.Read(ref _disposed) != 0 || _buffer is null ? 0 : _length;
 
-    public ReadOnlyMemory<byte> Memory => _buffer is null ? ReadOnlyMemory<byte>.Empty : _buffer.AsMemory(0, _length);
-    public ReadOnlySpan<byte> Span => _buffer is null ? ReadOnlySpan<byte>.Empty : _buffer.AsSpan(0, _length);
+    public ReadOnlyMemory<byte> Memory => Volatile.Read(ref _disposed) != 0 || _buffer is null ? ReadOnlyMemory<byte>.Empty : _buffer.AsMemory(0, _length);
+    public ReadOnlySpan<byte> Span => Volatile.Read(ref _disposed) != 0 || _buffer is null ? ReadOnlySpan<byte>.Empty : _buffer.AsSpan(0, _length);
 
     /// <summary>
     /// Releases resources used by the current instance.
     /// </summary>
     public void Dispose()
     {
-        if (_pooled && _buffer is not null)
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 0)
-                ArrayPool<byte>.Shared.Return(_buffer);
-        }
+        if (_isNullLease)
+            return;
+
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        var buffer = _buffer;
+        var pooled = _pooledBuffer;
+        _buffer = null;
+        _length = 0;
+        _pooledBuffer = false;
+
+        if (pooled && buffer is not null)
+            ArrayPool<byte>.Shared.Return(buffer);
+
+        LeasePool.Add(this);
     }
 }

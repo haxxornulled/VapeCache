@@ -1,10 +1,12 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Abstractions.Diagnostics;
 using VapeCache.Abstractions.Modules;
 using VapeCache.Infrastructure.Caching.Codecs;
 using VapeCache.Infrastructure.Collections;
@@ -20,15 +22,28 @@ public static class CacheRegistration
     /// </summary>
     public static IServiceCollection AddVapecacheCaching(this IServiceCollection services)
     {
+        CacheTelemetry.EnsureInitialized();
+
         services.AddMemoryCache();
         services.AddOptions<InMemorySpillOptions>();
+        services.AddOptions<HybridFailoverOptions>();
+        services.AddOptions<RedisMultiplexerOptions>()
+            .ValidateOnStart();
+        services.TryAddSingleton<RedisMultiplexerOptionsValidator>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<RedisMultiplexerOptions>, RedisMultiplexerOptionsValidator>());
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, RedisMultiplexerOptionsStartupHostedService>());
 
-        services.AddSingleton<ICurrentCacheService>(sp =>
+        services.AddSingleton<ICurrentCacheService, CurrentCacheService>();
+        services.AddSingleton<ICacheBackendState>(sp =>
         {
-            var currentCacheService = new CurrentCacheService();
-            // Initialize telemetry with current cache service for observable gauge
-            CacheTelemetry.Initialize(currentCacheService);
-            return currentCacheService;
+            var backendState = new CacheBackendState(
+                sp.GetRequiredService<ICurrentCacheService>(),
+                sp.GetService<IRedisCircuitBreakerState>(),
+                sp.GetService<IRedisFailoverController>());
+            CacheTelemetry.Initialize(backendState);
+            return backendState;
         });
         services.AddSingleton<CacheStatsRegistry>();
         services.AddSingleton<ICacheStats, CurrentCacheStats>();
@@ -44,6 +59,13 @@ public static class CacheRegistration
         services.TryAddSingleton<IRedisFallbackCommandExecutor, InMemoryCommandExecutor>();
 
         services.TryAddSingleton<IInMemorySpillStore, NoopSpillStore>();
+        services.TryAddSingleton<ISpillStoreDiagnostics>(sp =>
+        {
+            var spillStore = sp.GetRequiredService<IInMemorySpillStore>();
+            var diagnostics = spillStore as ISpillStoreDiagnostics ?? FallbackSpillDiagnostics.Instance;
+            CacheTelemetry.InitializeSpillDiagnostics(diagnostics);
+            return diagnostics;
+        });
 
         // Cache services
         // IMPORTANT: RedisCacheService gets the RAW RedisCommandExecutor (no hybrid wrapper)
@@ -82,27 +104,54 @@ public static class CacheRegistration
             .Validate(o => o.FailureBackoff >= TimeSpan.Zero, "FailureBackoff must be greater than or equal to zero.")
             .Validate(o => o.FailureBackoff <= TimeSpan.FromSeconds(30), "FailureBackoff must be less than or equal to 30 seconds.")
             .ValidateOnStart();
+        services.AddOptions<HybridFailoverOptions>()
+            .Validate(o => o.FallbackWarmReadTtl > TimeSpan.Zero, "FallbackWarmReadTtl must be greater than zero.")
+            .Validate(o => o.FallbackMirrorWriteTtlWhenMissing > TimeSpan.Zero, "FallbackMirrorWriteTtlWhenMissing must be greater than zero.")
+            .Validate(o => o.MaxMirrorPayloadBytes >= 0, "MaxMirrorPayloadBytes must be greater than or equal to zero.")
+            .ValidateOnStart();
         // Default cache service is the hybrid implementation with stampede protection applied directly.
-        services.AddSingleton<ICacheService>(sp => new StampedeProtectedCacheService(
+        services.AddSingleton<StampedeProtectedCacheService>(sp => new StampedeProtectedCacheService(
             sp.GetRequiredService<HybridCacheService>(),
             sp.GetRequiredService<IOptionsMonitor<CacheStampedeOptions>>(),
             sp.GetRequiredService<CacheStatsRegistry>().GetOrCreate(CacheStatsNames.Hybrid)));
+        services.AddSingleton<ICacheService>(sp => sp.GetRequiredService<StampedeProtectedCacheService>());
+        services.AddSingleton<ICacheTagService>(sp => sp.GetRequiredService<StampedeProtectedCacheService>());
 
         // Ergonomic typed caching API with codec-based serialization
         services.TryAddSingleton<ICacheCodecProvider>(sp =>
             new SystemTextJsonCodecProvider(new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         services.AddSingleton<IVapeCache, VapeCacheClient>();
         services.AddSingleton<IJsonCache, JsonCacheService>();
+        services.AddSingleton<ICacheChunkStreamService, ChunkedCacheStreamService>();
 
         // Typed collection APIs (LIST, SET, HASH)
         services.AddSingleton<ICacheCollectionFactory, CacheCollectionFactory>();
 
         // Redis module detection (for RedisJSON, RediSearch, etc.)
-        services.AddSingleton<IRedisModuleDetector, RedisModuleDetector>();
+        services.AddSingleton<IRedisModuleDetector>(sp =>
+            new RedisModuleDetector(sp.GetRequiredService<RedisCommandExecutor>()));
         services.AddSingleton<IRedisSearchService, RedisSearchService>();
         services.AddSingleton<IRedisBloomService, RedisBloomService>();
         services.AddSingleton<IRedisTimeSeriesService, RedisTimeSeriesService>();
 
         return services;
+    }
+
+    private sealed class FallbackSpillDiagnostics : ISpillStoreDiagnostics
+    {
+        public static readonly FallbackSpillDiagnostics Instance = new();
+
+        public SpillStoreDiagnosticsSnapshot GetSnapshot()
+            => new(
+                SupportsDiskSpill: false,
+                SpillToDiskConfigured: false,
+                Mode: "unknown",
+                TotalSpillFiles: 0,
+                ActiveShards: 0,
+                MaxFilesInShard: 0,
+                AvgFilesPerActiveShard: 0d,
+                ImbalanceRatio: 0d,
+                TopShards: Array.Empty<SpillShardLoad>(),
+                SampledAtUtc: DateTimeOffset.UtcNow);
     }
 }

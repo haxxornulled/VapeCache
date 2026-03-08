@@ -1,0 +1,65 @@
+@page "/cache-workbench"
+
+<PageTitle>Cache Workbench</PageTitle>
+
+<h1>Cache Workbench</h1>
+<p>Presentation-layer orchestration over VapeCache abstractions.</p>
+
+<div style="display:grid;gap:0.75rem;max-width:44rem;">
+    <label>
+        Key
+        <input style="display:block;width:100%" @bind="_key" />
+    </label>
+
+    <label>
+        Value
+        <textarea style="display:block;width:100%;min-height:5rem" @bind="_value"></textarea>
+    </label>
+
+    <label>
+        TTL (seconds, 0 = no expiry)
+        <input type="number" min="0" @bind="_ttlSeconds" />
+    </label>
+
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+        <button @onclick="SetAsync">Set</button>
+        <button @onclick="GetAsync">Get</button>
+        <button @onclick="RemoveAsync">Remove</button>
+        <button @onclick="RefreshAsync">Refresh Status</button>
+    </div>
+
+    <label>
+        Breaker reason
+        <input style="display:block;width:100%" @bind="_breakerReason" />
+    </label>
+
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+        <button @onclick="ForceOpenBreakerAsync">Force Open Breaker</button>
+        <button @onclick="ClearForcedOpenBreakerAsync">Clear Forced Open</button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_message))
+    {
+        <p><strong>Status:</strong> @_message</p>
+    }
+
+    <h2>Runtime Status</h2>
+    <dl>
+        <dt>Current backend</dt>
+        <dd>@_status.Backend</dd>
+        <dt>Breaker open</dt>
+        <dd>@_status.BreakerOpen</dd>
+        <dt>Breaker remaining</dt>
+        <dd>@(_status.BreakerOpenRemaining?.ToString() ?? "n/a")</dd>
+        <dt>Breaker forced open</dt>
+        <dd>@_status.BreakerForcedOpen</dd>
+        <dt>Breaker reason</dt>
+        <dd>@(_status.BreakerReason ?? "n/a")</dd>
+        <dt>Consecutive failures</dt>
+        <dd>@_status.ConsecutiveFailures</dd>
+        <dt>Get/Hit/Miss</dt>
+        <dd>@_status.GetCalls / @_status.Hits / @_status.Misses</dd>
+        <dt>Set/Remove/Fallback</dt>
+        <dd>@_status.SetCalls / @_status.RemoveCalls / @_status.FallbackToMemory</dd>
+    </dl>
+</div>

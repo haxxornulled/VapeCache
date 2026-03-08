@@ -10,6 +10,13 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $violations = New-Object System.Collections.Generic.List[string]
+$comparisonLinePattern = '^\|(?<suite>[^|]+)\|(?<scenario>[^|]+)\|(?<params>[^|]*)\|(?<ser>[^|]+)\|(?<vape>[^|]+)\|(?<ratio>[^|]+)\|'
+$requiredRatioSuites = @(
+    "RedisClientHeadToHeadBenchmarks",
+    "RedisEndToEndHeadToHeadBenchmarks",
+    "RedisModuleHeadToHeadBenchmarks"
+)
+$ratioSummaries = New-Object System.Collections.Generic.List[object]
 
 $hotPathSignatureFiles = @(
     "VapeCache.Abstractions/Connections/IRedisCommandExecutor.cs",
@@ -39,16 +46,46 @@ if ($EnforceBenchmarkRatios.IsPresent) {
     }
     else {
         $candidates = @(
-            Join-Path $repoRoot "BenchmarkDotNet.Artifacts/head-to-head",
-            Join-Path $repoRoot "BenchmarkDotNet.Artifacts/results",
-            Join-Path $repoRoot "BenchmarkDotNet.Artifacts"
+            (Join-Path -Path $repoRoot -ChildPath "BenchmarkDotNet.Artifacts/head-to-head")
+            (Join-Path -Path $repoRoot -ChildPath "BenchmarkDotNet.Artifacts/results")
+            (Join-Path -Path $repoRoot -ChildPath "BenchmarkDotNet.Artifacts")
         )
 
-        $latest = $candidates |
+        $comparisonFiles = $candidates |
             Where-Object { Test-Path $_ } |
             ForEach-Object { Get-ChildItem -Path $_ -Filter comparison.md -Recurse -ErrorAction SilentlyContinue } |
-            Sort-Object LastWriteTimeUtc -Descending |
+            Sort-Object LastWriteTimeUtc -Descending
+
+        $latest = $comparisonFiles |
+            ForEach-Object {
+                $lines = Get-Content $_.FullName -ErrorAction SilentlyContinue
+                $hasRows = $lines | Select-String -Pattern $comparisonLinePattern -Quiet
+                if (-not $hasRows) {
+                    return
+                }
+
+                $coverage = 0
+                foreach ($suite in $requiredRatioSuites) {
+                    if ($lines | Select-String -SimpleMatch -Pattern "|$suite|" -Quiet) {
+                        $coverage++
+                    }
+                }
+
+                [pscustomobject]@{
+                    File = $_
+                    Coverage = $coverage
+                }
+            } |
+            Sort-Object -Property @{ Expression = "Coverage"; Descending = $true }, @{ Expression = { $_.File.LastWriteTimeUtc }; Descending = $true } |
             Select-Object -First 1
+
+        if ($null -eq $latest) {
+            $latest = $comparisonFiles |
+            Select-Object -First 1
+        }
+        else {
+            $latest = $latest.File
+        }
 
         if ($null -ne $latest) {
             $ComparisonPath = $latest.FullName
@@ -66,7 +103,7 @@ if ($EnforceBenchmarkRatios.IsPresent) {
         }
         $seenSuites = New-Object 'System.Collections.Generic.HashSet[string]'
         $rawLines = Get-Content $ComparisonPath
-        $linePattern = '^\|(?<suite>[^|]+)\|(?<scenario>[^|]+)\|(?<params>[^|]*)\|(?<ser>[^|]+)\|(?<vape>[^|]+)\|(?<ratio>[^|]+)\|'
+        $linePattern = $comparisonLinePattern
 
         foreach ($line in $rawLines) {
             $match = [regex]::Match($line, $linePattern)
@@ -95,6 +132,14 @@ if ($EnforceBenchmarkRatios.IsPresent) {
             }
 
             $threshold = [double]$thresholdBySuite[$suite]
+            $ratioSummaries.Add([pscustomobject]@{
+                Suite = $suite
+                Scenario = $scenario
+                Ratio = [Math]::Round($ratio, 3)
+                Threshold = $threshold
+                Status = if ($ratio -gt $threshold) { "FAIL" } else { "PASS" }
+            }) | Out-Null
+
             if ($ratio -gt $threshold) {
                 $violations.Add("Benchmark ratio regression in ${suite}/${scenario}: Vape/SER ratio $ratioText exceeded threshold $threshold (source: $ComparisonPath).")
             }
@@ -105,6 +150,13 @@ if ($EnforceBenchmarkRatios.IsPresent) {
                 $violations.Add("Benchmark ratio gate enabled but suite '$suite' was not found in $ComparisonPath.")
             }
         }
+    }
+
+    if ($ratioSummaries.Count -gt 0) {
+        Write-Host "Perf ratio summary:"
+        $ratioSummaries |
+            Sort-Object Suite, Scenario |
+            Format-Table Suite, Scenario, Ratio, Threshold, Status -AutoSize
     }
 }
 

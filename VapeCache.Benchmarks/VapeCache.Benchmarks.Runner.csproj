@@ -4,6 +4,7 @@
     <AssemblyName>VapeCache.Benchmarks.Runner</AssemblyName>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -11,13 +12,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.15.0" />
-    <PackageReference Include="StackExchange.Redis" Version="2.9.11" />
+    <Compile Include="Runner\Program.cs" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
-    <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
+    <ProjectReference Include=".\VapeCache.Benchmarks.csproj" />
   </ItemGroup>
 
 </Project>

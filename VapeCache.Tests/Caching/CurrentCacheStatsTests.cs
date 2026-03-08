@@ -8,8 +8,9 @@ public sealed class CurrentCacheStatsTests
     public void Snapshot_returns_default_when_current_backend_has_no_stats()
     {
         var current = new CurrentCacheService();
+        var backendState = new CacheBackendState(current, breaker: null, failover: null);
         var registry = new CacheStatsRegistry();
-        var sut = new CurrentCacheStats(current, registry);
+        var sut = new CurrentCacheStats(backendState, registry);
 
         current.SetCurrent("nonexistent");
         var snapshot = sut.Snapshot;
@@ -23,6 +24,7 @@ public sealed class CurrentCacheStatsTests
     public void Snapshot_reads_stats_from_current_backend()
     {
         var current = new CurrentCacheService();
+        var backendState = new CacheBackendState(current, breaker: null, failover: null);
         var registry = new CacheStatsRegistry();
         var memoryStats = registry.GetOrCreate("memory");
         memoryStats.IncGet();
@@ -32,7 +34,7 @@ public sealed class CurrentCacheStatsTests
         redisStats.IncGet();
         redisStats.IncMiss();
 
-        var sut = new CurrentCacheStats(current, registry);
+        var sut = new CurrentCacheStats(backendState, registry);
 
         current.SetCurrent("memory");
         var memory = sut.Snapshot;

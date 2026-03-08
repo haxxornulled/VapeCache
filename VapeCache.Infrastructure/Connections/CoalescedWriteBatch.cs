@@ -89,6 +89,7 @@ internal sealed class Coalescer
     private readonly int _adaptiveMinWriteBytes;
     private readonly int _adaptiveMinSegments;
     private readonly int _adaptiveMinSmallCopyThreshold;
+    private readonly int _maxOperations;
 
     private readonly Queue<CoalescedPendingRequest> _queue;
     private readonly Func<int>? _queueDepthProvider;
@@ -104,6 +105,7 @@ internal sealed class Coalescer
         int adaptiveMinWriteBytes = 64 * 1024,
         int adaptiveMinSegments = 64,
         int adaptiveMinSmallCopyThresholdBytes = 512,
+        int maxOperations = 128,
         Func<int>? queueDepthProvider = null)
     {
         ArgumentNullException.ThrowIfNull(queue);
@@ -118,6 +120,7 @@ internal sealed class Coalescer
         _adaptiveMinWriteBytes = Math.Clamp(adaptiveMinWriteBytes, 4 * 1024, _maxWriteBytes);
         _adaptiveMinSegments = Math.Clamp(adaptiveMinSegments, 4, _maxSegments);
         _adaptiveMinSmallCopyThreshold = Math.Clamp(adaptiveMinSmallCopyThresholdBytes, 64, _smallCopyThreshold);
+        _maxOperations = Math.Clamp(maxOperations, 1, 2048);
         _queueDepthProvider = queueDepthProvider;
     }
 
@@ -128,10 +131,17 @@ internal sealed class Coalescer
     {
         batch.Reset();
         var totalBytes = 0;
+        var operationsInBatch = 0;
         var (maxWriteBytes, maxSegments, smallCopyThreshold) = GetEffectiveLimits();
 
         while (_queue.Count > 0)
         {
+            if (operationsInBatch >= _maxOperations && (batch.SegmentsToWrite.Count > 0 || batch.ScratchUsed > 0))
+            {
+                CommitScratch(batch, smallCopyThreshold);
+                return true;
+            }
+
             var req = _queue.Peek();
             var segments = req.Segments;
 
@@ -190,6 +200,7 @@ internal sealed class Coalescer
                 batch.Owners.Add(req.PayloadOwner);
 
             _queue.Dequeue();
+            operationsInBatch++;
         }
 
         CommitScratch(batch, smallCopyThreshold);

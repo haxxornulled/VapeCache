@@ -51,6 +51,32 @@ public sealed class VapeCacheRawParityGroceryStoreServiceTests
     }
 
     [Fact]
+    public async Task AddToCartBatchAsync_stores_entries_in_list_shape_only()
+    {
+        await using var executor = new InMemoryCommandExecutor();
+        var sut = new VapeCacheRawParityGroceryStoreService(executor);
+        var userId = "batch-user";
+        var now = DateTime.UnixEpoch;
+        var items = new[]
+        {
+            new CartItem("prod-001", "Organic Bananas", 2.99m, 1, now),
+            new CartItem("prod-006", "Organic Whole Milk", 4.29m, 2, now)
+        };
+
+        await sut.AddToCartBatchAsync(userId, items);
+
+        var count = await sut.GetCartCountAsync(userId);
+        var cart = await sut.GetCartAsync(userId);
+        using var optimizedCartLease = await executor.GetLeaseAsync($"cart:optimized:{userId}", CancellationToken.None);
+        using var optimizedCountLease = await executor.GetLeaseAsync($"cart:optimized:{userId}:count", CancellationToken.None);
+
+        Assert.Equal(items.Length, count);
+        Assert.Equal(items.Length, cart.Length);
+        Assert.True(optimizedCartLease.IsNull);
+        Assert.True(optimizedCountLease.IsNull);
+    }
+
+    [Fact]
     public async Task GetSessionAsync_supports_legacy_json_payload()
     {
         await using var executor = new InMemoryCommandExecutor();

@@ -14,7 +14,7 @@ namespace VapeCache.Infrastructure.Connections;
 /// Tracks connection-level failures and opens circuit when Redis is unavailable.
 /// Triggers reconciliation service to sync in-memory writes back to Redis on recovery.
 /// </summary>
-internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFactory
+internal sealed partial class CircuitBreakerRedisConnectionFactory : IRedisConnectionFactory
 {
     private readonly IRedisConnectionFactory _inner;
     private readonly ResiliencePipeline<Result<IRedisConnection>> _pipeline;
@@ -63,9 +63,7 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
                         var optionsSnapshot = _options;
                         if (optionsSnapshot.MaxConsecutiveRetries > 0 && _consecutiveRetries >= optionsSnapshot.MaxConsecutiveRetries)
                         {
-                            _logger.LogError(
-                                "Circuit breaker: Max retries ({MaxRetries}) exceeded. Staying in OPEN state indefinitely.",
-                                optionsSnapshot.MaxConsecutiveRetries);
+                            LogMaxRetriesExceeded(_logger, optionsSnapshot.MaxConsecutiveRetries);
                             // Keep open effectively forever until operator intervention.
                             return ValueTask.FromResult(TimeSpan.FromDays(365));
                         }
@@ -102,12 +100,7 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
                         duration = _currentBreakDuration;
                     }
 
-                    _logger.LogWarning(
-                        "Circuit breaker OPENED - Redis connections failing (retry #{Retry}). Switching to in-memory mode for {Duration} seconds. State: {Previous}->{Current}",
-                        retries,
-                        duration.TotalSeconds,
-                        previous,
-                        current);
+                    LogCircuitOpened(_logger, retries, duration.TotalSeconds, previous, current);
 
                     return ValueTask.CompletedTask;
                 },
@@ -127,11 +120,7 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
                         _currentBreakDuration = optionsSnapshot.BreakDuration;
                     }
 
-                    _logger.LogInformation(
-                        "Circuit breaker CLOSED. Redis operations resumed after {Retries} retries. State: {Previous}->{Current}",
-                        totalRetries,
-                        previous,
-                        current);
+                    LogCircuitClosed(_logger, totalRetries, previous, current);
                     return ValueTask.CompletedTask;
                 },
                 OnHalfOpened = args =>
@@ -144,7 +133,7 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
                         _currentState = CircuitState.HalfOpen;
                         current = _currentState;
                     }
-                    _logger.LogInformation("Circuit breaker HALF-OPEN. Testing Redis connection. State: {Previous}->{Current}", previous, current);
+                    LogCircuitHalfOpen(_logger, previous, current);
                     return ValueTask.CompletedTask;
                 }
             })
@@ -169,7 +158,7 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
         catch (BrokenCircuitException ex)
         {
             // Circuit is open - return a failure Result
-            _logger.LogDebug("Circuit breaker is open, connection creation blocked");
+            LogConnectionBlockedOpenCircuit(_logger);
             return new Result<IRedisConnection>(ex);
         }
     }
@@ -181,5 +170,44 @@ internal sealed class CircuitBreakerRedisConnectionFactory : IRedisConnectionFac
     {
         return _inner.DisposeAsync();
     }
+
+    [LoggerMessage(
+        EventId = 24100,
+        Level = LogLevel.Error,
+        Message = "Circuit breaker: Max retries ({MaxRetries}) exceeded. Staying in OPEN state indefinitely.")]
+    private static partial void LogMaxRetriesExceeded(ILogger logger, int maxRetries);
+
+    [LoggerMessage(
+        EventId = 24101,
+        Level = LogLevel.Warning,
+        Message = "Circuit breaker OPENED - Redis connections failing (retry #{Retry}). Switching to in-memory mode for {Duration} seconds. State: {Previous}->{Current}")]
+    private static partial void LogCircuitOpened(
+        ILogger logger,
+        int retry,
+        double duration,
+        CircuitState previous,
+        CircuitState current);
+
+    [LoggerMessage(
+        EventId = 24102,
+        Level = LogLevel.Information,
+        Message = "Circuit breaker CLOSED. Redis operations resumed after {Retries} retries. State: {Previous}->{Current}")]
+    private static partial void LogCircuitClosed(
+        ILogger logger,
+        int retries,
+        CircuitState previous,
+        CircuitState current);
+
+    [LoggerMessage(
+        EventId = 24103,
+        Level = LogLevel.Information,
+        Message = "Circuit breaker HALF-OPEN. Testing Redis connection. State: {Previous}->{Current}")]
+    private static partial void LogCircuitHalfOpen(ILogger logger, CircuitState previous, CircuitState current);
+
+    [LoggerMessage(
+        EventId = 24104,
+        Level = LogLevel.Debug,
+        Message = "Circuit breaker is open, connection creation blocked")]
+    private static partial void LogConnectionBlockedOpenCircuit(ILogger logger);
 }
 

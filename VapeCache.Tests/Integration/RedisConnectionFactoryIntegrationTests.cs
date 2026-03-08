@@ -40,6 +40,41 @@ public sealed class RedisConnectionFactoryIntegrationTests
             ex => throw ex);
     }
 
+    [SkippableFact]
+    public async Task CreateAsync_supports_parallel_connections()
+    {
+        var options = RedisIntegrationConfig.TryLoad(out var skipReason);
+        Skip.If(options is null, skipReason);
+
+        await using var factory = new RedisConnectionFactory(
+            RedisIntegrationConfig.Monitor(options),
+            NullLogger<RedisConnectionFactory>.Instance,
+            Array.Empty<IRedisConnectionObserver>());
+
+        var createTasks = Enumerable.Range(0, 4)
+            .Select(_ => factory.CreateAsync(CancellationToken.None).AsTask())
+            .ToArray();
+        var results = await Task.WhenAll(createTasks);
+
+        foreach (var result in results)
+        {
+            Assert.True(result.IsSuccess);
+            await result.Match(
+                async conn =>
+                {
+                    await using var __ = conn.ConfigureAwait(false);
+                    await SendAuthAndSelectIfNeededAsync(conn.Stream, options, CancellationToken.None);
+
+                    var cmd = RedisResp.BuildCommand("PING");
+                    var sent = await conn.SendAsync(cmd, CancellationToken.None);
+                    Assert.True(sent.IsSuccess);
+
+                    await RedisResp.ExpectSimpleStringAsync(conn.Stream, "PONG", CancellationToken.None);
+                },
+                ex => throw ex);
+        }
+    }
+
     private static async Task SendAuthAndSelectIfNeededAsync(Stream stream, RedisConnectionOptions options, CancellationToken ct)
     {
         if (!string.IsNullOrEmpty(options.Password))

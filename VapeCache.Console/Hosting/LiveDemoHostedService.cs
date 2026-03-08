@@ -4,16 +4,25 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Console.Hosting;
 
 internal sealed class LiveDemoHostedService(
     IOptions<LiveDemoOptions> demoOptions,
     ICacheService cache,
-    ICurrentCacheService current,
+    ICacheBackendState backendState,
     IRedisCircuitBreakerState? circuitBreaker,
-    ILogger<LiveDemoHostedService> logger) : BackgroundService
+    ILogger<LiveDemoHostedService> logger) : BackgroundService, IHostedLifecycleService
 {
+    public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var demo = demoOptions.Value;
@@ -48,7 +57,7 @@ internal sealed class LiveDemoHostedService(
                 logger.LogInformation(
                     "Live demo tick: Value={Value} Backend={Backend} BreakerOpen={BreakerOpen} Failures={Failures} RemainingMs={RemainingMs}",
                     value,
-                    current.CurrentName,
+                    backendState.EffectiveBackend.ToWireName(),
                     circuitBreaker?.IsOpen,
                     circuitBreaker?.ConsecutiveFailures,
                     circuitBreaker?.OpenRemaining?.TotalMilliseconds);

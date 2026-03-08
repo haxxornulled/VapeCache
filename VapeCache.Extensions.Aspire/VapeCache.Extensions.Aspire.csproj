@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
+    <LangVersion>14.0</LangVersion>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
@@ -18,7 +18,8 @@
     <Company>HaxxorNulled</Company>
     <Product>VapeCache.Extensions.Aspire</Product>
     <PackageTags>cache;redis;aspire;opentelemetry;service-discovery;health-checks;dotnet</PackageTags>
-    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
     <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
     <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
@@ -34,7 +35,12 @@
 
   <ItemGroup>
     <!-- Core VapeCache Dependencies -->
+    <ProjectReference Include="..\VapeCache.Extensions.AspNetCore\VapeCache.Extensions.AspNetCore.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="VapeCache.Tests" />
   </ItemGroup>
 
   <ItemGroup>
@@ -43,6 +49,7 @@
 
   <ItemGroup>
     <!-- .NET Aspire Service Discovery -->
+    <PackageReference Include="Autofac" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="9.0.0" />
 
     <!-- OpenTelemetry (for Aspire Dashboard integration) - Updated to 1.11.2+ to fix CVE-2025-27513 / GHSA-8785-wc3w-h8q6 -->
@@ -52,8 +59,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="DashboardAssets\*.*" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

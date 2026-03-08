@@ -43,6 +43,46 @@ public sealed class MenuRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_prefers_connection_string_for_endpoint_and_auth()
+    {
+        var previousIn = System.Console.In;
+        var previousOut = System.Console.Out;
+        var previousEnv = Environment.GetEnvironmentVariable("VAPECACHE_RUN_COMPARISON");
+
+        try
+        {
+            System.Console.SetIn(new StringReader("0" + Environment.NewLine));
+            using var output = new StringWriter();
+            System.Console.SetOut(output);
+            Environment.SetEnvironmentVariable("VAPECACHE_RUN_COMPARISON", null);
+
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["RedisConnection:ConnectionString"] = "redis://bench-user:bench-pass@10.20.30.40:6380/0",
+                    ["RedisConnection:Host"] = "127.0.0.1",
+                    ["RedisConnection:Port"] = "6379",
+                    ["RedisConnection:Username"] = "",
+                    ["RedisConnection:Password"] = ""
+                })
+                .Build();
+
+            await MenuRunner.RunAsync(config);
+
+            var text = output.ToString();
+            Assert.Contains("Redis Endpoint: 10.20.30.40:6380", text);
+            Assert.Contains("Redis Auth: acl", text);
+            Assert.Contains("Redis Source: connection-string", text);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("VAPECACHE_RUN_COMPARISON", previousEnv);
+            System.Console.SetIn(previousIn);
+            System.Console.SetOut(previousOut);
+        }
+    }
+
+    [Fact]
     public void GetCustomShopperCount_returns_default_for_invalid_input()
     {
         var previousIn = System.Console.In;

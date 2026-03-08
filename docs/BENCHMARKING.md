@@ -20,6 +20,17 @@ Use `docs/ENGINEERING_PLAYBOOK.md` for profiler/Wireshark workflow.
 - Never claim a win from a single run; use repeated runs and median reporting.
 - Evaluate throughput + allocations + tail latency together.
 
+## Claim Classes (Required)
+
+Use explicit report classes for every benchmark publication:
+
+- **Strict/Fair (authoritative):** same knobs across tracks/providers.
+- **Tuned/Showcase (engineering):** workload-specific tuning.
+
+For grocery comparisons, `-DisableTrackDefaults` enforces strict/fair mode.
+
+Policy reference: [BENCHMARK_CLAIMS_POLICY.md](BENCHMARK_CLAIMS_POLICY.md)
+
 ## Quick Start
 
 ```powershell
@@ -33,6 +44,18 @@ powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -
 ```
 
 `fair` mode disables instrumentation overhead for apples-to-apples client benchmarking.
+
+Strict/fair grocery report command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
+  -Trials 5 `
+  -Track both `
+  -DisableTrackDefaults `
+  -ShopperCount 50000 `
+  -MaxCartSize 40 `
+  -FailBelowRatio 1.0
+```
 
 ## Modes
 
@@ -54,6 +77,11 @@ Run both for a complete story.
 ### Head-to-head suites
 
 ```powershell
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- list-suites compare
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare hotpath --job Short
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare all --job Short
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare client --job Short
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite hotpath -Job Short -Mode fair
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode fair
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Short -Mode realworld
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Job Medium -Mode fair -Profile aggressive
@@ -62,10 +90,19 @@ powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -
 ### Focus one suite
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite hotpath -Job Short -Mode fair
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite client -Job Short -Mode fair
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite endtoend -Job Short -Mode fair
 powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -Suite modules -Job Short -Mode fair
 ```
+
+## Audience-Labeled Reporting
+
+- Hot-path comparison claims: run `compare hotpath` (or `-Suite hotpath`).
+- Feature/fallback claims: run `featuresets cache`.
+- Keep these report streams separate in status docs and PR summaries.
+
+See [HOT_PATH_BENCHMARK_CHECKLIST.md](HOT_PATH_BENCHMARK_CHECKLIST.md) for the full tuning and gating checklist.
 
 ### Bigger payload pass (example)
 
@@ -103,13 +140,14 @@ Use median-of-N gating, not single-run gating:
 
 The repo uses:
 - `BenchmarkDotNet` package in `VapeCache.Benchmarks/VapeCache.Benchmarks.csproj`
+- `VapeCache.Benchmarks.Runner.csproj` as the suite-oriented launcher
 - `EnterpriseBenchmarkConfig` in `VapeCache.Benchmarks/EnterpriseBenchmarkConfig.cs`
 
 `EnterpriseBenchmarkConfig` currently includes:
 - net10 jobs
 - memory diagnoser
 - p50/p90/p95 percentile columns
-- markdown/html/csv/json/openmetrics exporters
+- markdown/html/csv/json exporters
 - compact results logger
 - configurable launch/warmup/iteration counts via env:
   - `VAPECACHE_BENCH_LAUNCH_COUNT`

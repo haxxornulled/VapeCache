@@ -95,7 +95,8 @@ Add counters and gauges:
 ## Decisions
 - Spill reads and writes are fully async.
 - Encryption at rest is supported via `ISpillEncryptionProvider`.
-- Default thresholds: `SpillThresholdBytes = 262144`, `InlinePrefixBytes = 4096`, `EnableSpillToDisk = true`.
+- Default thresholds: `SpillThresholdBytes = 262144`, `InlinePrefixBytes = 4096`, `EnableSpillToDisk = false`.
+- OSS/default wiring uses a no-op spill store; register `VapeCache.Persistence` (`AddVapeCachePersistence(...)`) to enable file-backed scatter spill.
 - Orphan cleanup is opt-in (`EnableOrphanCleanup = false`, `OrphanMaxAge = 7 days`).
 
 ## Tests to Add

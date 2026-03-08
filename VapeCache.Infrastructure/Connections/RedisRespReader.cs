@@ -7,6 +7,7 @@ namespace VapeCache.Infrastructure.Connections;
 internal static class RedisRespReader
 {
     internal static readonly string OkSimpleString = "OK";
+    internal static readonly string PongSimpleString = "PONG";
     private const int MaxCachedArrayLength = 16;
 
     // PERFORMANCE FIX P2-2: Replace global lock with ThreadStatic cache to eliminate contention
@@ -48,17 +49,17 @@ internal static class RedisRespReader
     internal static void ReturnArray(RespValue[] array, int length)
     {
         // Clear references to avoid holding onto nested pooled buffers.
-        Array.Clear(array, 0, Math.Min(length, array.Length));
+        Array.Clear(array, 0, array.Length);
 
         // PERFORMANCE FIX P2-2: Use ThreadStatic cache for lock-free fast path
         // Only cache one array per thread to keep TLS overhead minimal
-        if (length <= MaxCachedArrayLength && _tlsCachedArray is null)
+        if (array.Length <= MaxCachedArrayLength && _tlsCachedArray is null)
         {
             _tlsCachedArray = array;
             return;
         }
 
-        ArrayPool<RespValue>.Shared.Return(array, clearArray: true);
+        ArrayPool<RespValue>.Shared.Return(array, clearArray: false);
     }
 
     /// <summary>
@@ -83,12 +84,7 @@ internal static class RedisRespReader
         var prefix = await ReadByteAsync(stream, ct).ConfigureAwait(false);
         return prefix switch
         {
-            (byte)'+' =>
-                await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false) is { } s
-                    ? (ReferenceEquals(s, OkSimpleString) || s == OkSimpleString
-                        ? RespValue.SimpleString(OkSimpleString)
-                        : RespValue.SimpleString(s))
-                    : throw new InvalidOperationException("Invalid simple string"),
+            (byte)'+' => await ReadSimpleStringValueAsync(stream, ct).ConfigureAwait(false),
             (byte)'-' => RespValue.Error(await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false)),
             (byte)':' => RespValue.Integer(ReadInt64(await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false))),
             (byte)'$' => await ReadBulkStringAsync(stream, ct, maxBulkStringBytes).ConfigureAwait(false),
@@ -105,6 +101,18 @@ internal static class RedisRespReader
             (byte)'|' => await ReadAttributeWrappedAsync(stream, ct, maxBulkStringBytes, maxArrayDepth, currentArrayDepth).ConfigureAwait(false),
             _ => throw new InvalidOperationException($"Unsupported RESP type: {(char)prefix}")
         };
+    }
+
+    private static async ValueTask<RespValue> ReadSimpleStringValueAsync(Stream stream, CancellationToken ct)
+    {
+        var s = await RedisRespProtocol.ReadLineAsync(stream, ct).ConfigureAwait(false);
+        if (ReferenceEquals(s, OkSimpleString) || s == OkSimpleString)
+            return RespValue.SimpleString(OkSimpleString);
+
+        if (ReferenceEquals(s, PongSimpleString) || s == PongSimpleString)
+            return RespValue.SimpleString(PongSimpleString);
+
+        return RespValue.SimpleString(s);
     }
 
     private static async ValueTask<byte> ReadByteAsync(Stream stream, CancellationToken ct)
@@ -367,7 +375,7 @@ internal static class RedisRespReader
         };
     }
 
-    internal sealed class RespValue
+    internal readonly struct RespValue
     {
         private RespValue(RespKind kind, string? text, byte[]? bulk, int bulkLength, bool bulkIsPooled, long integer, RespValue[]? array, int arrayLength, bool arrayIsPooled)
         {

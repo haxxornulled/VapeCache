@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Infrastructure.Caching;
 
@@ -28,26 +29,50 @@ public static class CacheTelemetry
     public static readonly Counter<long> SpillOrphanScanned = Meter.CreateCounter<long>("cache.spill.orphan.scanned", description: "Spill files scanned for orphan cleanup");
     public static readonly Counter<long> SpillOrphanCleanupCount = Meter.CreateCounter<long>("cache.spill.orphan.cleanup.count", description: "Spill files deleted during orphan cleanup");
     public static readonly Counter<long> SpillOrphanCleanupBytes = Meter.CreateCounter<long>("cache.spill.orphan.cleanup.bytes", unit: "bytes", description: "Spill bytes deleted during orphan cleanup");
+    public static readonly Counter<long> SpillStoreUnavailable = Meter.CreateCounter<long>("cache.spill.store_unavailable", description: "Spill-to-disk requested but no writable spill store is registered");
     public static readonly Histogram<long> SetPayloadBytes = Meter.CreateHistogram<long>("cache.set.payload.bytes", unit: "bytes", description: "Payload size for cache SET operations");
     public static readonly Counter<long> LargeKeyWrites = Meter.CreateCounter<long>("cache.set.large_key", description: "Large payload cache writes");
     public static readonly Counter<long> Evictions = Meter.CreateCounter<long>("cache.evictions", description: "In-memory cache evictions");
 
-    private static ICurrentCacheService? _currentCacheService;
+    private static ICacheBackendState? _backendState;
+    private static ISpillStoreDiagnostics? _spillStoreDiagnostics;
 
-    internal static int MapBackendName(string current) => current switch
+    internal static void EnsureInitialized()
     {
-        "redis" => 1,
-        "memory" => 0,
-        "in-memory" => 0,
-        _ => -1
-    };
+        _ = CurrentBackend;
+        _ = SpillActiveShards;
+        _ = SpillMaxFilesInShard;
+        _ = SpillImbalanceRatio;
+    }
+
+    internal static int MapBackendName(string current)
+    {
+        if (!BackendTypeResolver.TryParseName(current, out var backend))
+            return -1;
+
+        return backend.ToGaugeValue();
+    }
 
     /// <summary>
     /// Initializes the current backend observable gauge. Called during service registration.
     /// </summary>
-    internal static void Initialize(ICurrentCacheService currentCacheService)
+    internal static void Initialize(ICacheBackendState backendState)
     {
-        _currentCacheService = currentCacheService;
+        _backendState = backendState;
+    }
+
+    /// <summary>
+    /// Initializes spill diagnostics observables.
+    /// </summary>
+    internal static void InitializeSpillDiagnostics(ISpillStoreDiagnostics spillStoreDiagnostics)
+    {
+        _spillStoreDiagnostics = spillStoreDiagnostics;
+    }
+
+    internal static void ResetForTesting()
+    {
+        _backendState = null;
+        _spillStoreDiagnostics = null;
     }
 
     internal static string GetPayloadBucket(int bytes) => bytes switch
@@ -60,23 +85,71 @@ public static class CacheTelemetry
         _ => "gt_256kb"
     };
 
+    internal static Measurement<int> GetCurrentBackendMeasurement()
+    {
+        if (_backendState is null)
+            return new Measurement<int>(-1, new TagList { { "backend", "unknown" } });
+
+        var backend = _backendState.EffectiveBackend;
+        return new Measurement<int>(backend.ToGaugeValue(), new TagList { { "backend", backend.ToWireName() } });
+    }
+
     /// <summary>
     /// Observable gauge that reports the current active backend (1=redis, 0=in-memory).
     /// This allows real-time monitoring of which cache backend is actively serving requests.
     /// </summary>
     public static readonly ObservableGauge<int> CurrentBackend = Meter.CreateObservableGauge(
         "cache.current.backend",
-        observeValue: () =>
-        {
-            if (_currentCacheService is null)
-                return new Measurement<int>(0, new TagList { { "backend", "unknown" } });
-
-            var current = _currentCacheService.CurrentName;
-            var value = MapBackendName(current);
-
-            return new Measurement<int>(value, new TagList { { "backend", current } });
-        },
+        observeValue: static () => GetCurrentBackendMeasurement(),
         unit: "backend",
         description: "Current active cache backend (1=redis, 0=in-memory, -1=unknown)");
+
+    /// <summary>
+    /// Observable gauge for active spill shards.
+    /// </summary>
+    public static readonly ObservableGauge<int> SpillActiveShards = Meter.CreateObservableGauge(
+        "cache.spill.shard.active",
+        observeValue: () =>
+        {
+            var snapshot = _spillStoreDiagnostics?.GetSnapshot();
+            if (snapshot is null)
+                return new Measurement<int>(0, new TagList { { "mode", "unknown" } });
+
+            return new Measurement<int>(snapshot.ActiveShards, new TagList { { "mode", snapshot.Mode } });
+        },
+        unit: "shards",
+        description: "Active spill shard directories that currently hold at least one spill file");
+
+    /// <summary>
+    /// Observable gauge for max files in a single spill shard.
+    /// </summary>
+    public static readonly ObservableGauge<int> SpillMaxFilesInShard = Meter.CreateObservableGauge(
+        "cache.spill.shard.max_files",
+        observeValue: () =>
+        {
+            var snapshot = _spillStoreDiagnostics?.GetSnapshot();
+            if (snapshot is null)
+                return new Measurement<int>(0, new TagList { { "mode", "unknown" } });
+
+            return new Measurement<int>(snapshot.MaxFilesInShard, new TagList { { "mode", snapshot.Mode } });
+        },
+        unit: "files",
+        description: "Maximum spill files observed in any single shard directory");
+
+    /// <summary>
+    /// Observable gauge for spill shard imbalance ratio (max/avg).
+    /// </summary>
+    public static readonly ObservableGauge<double> SpillImbalanceRatio = Meter.CreateObservableGauge(
+        "cache.spill.shard.imbalance_ratio",
+        observeValue: () =>
+        {
+            var snapshot = _spillStoreDiagnostics?.GetSnapshot();
+            if (snapshot is null)
+                return new Measurement<double>(0d, new TagList { { "mode", "unknown" } });
+
+            return new Measurement<double>(snapshot.ImbalanceRatio, new TagList { { "mode", snapshot.Mode } });
+        },
+        unit: "ratio",
+        description: "Spill shard imbalance ratio (max files in shard / average files per active shard)");
 }
 

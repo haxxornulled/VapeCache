@@ -80,15 +80,25 @@ dotnet run
 
 ```powershell
 $env:VAPECACHE_MAX_CART_SIZE = "40"
-$env:VAPECACHE_BENCH_TRACK = "optimized" # optimized | apples | both
-$env:VAPECACHE_BENCH_MUX_CONNECTIONS = "4"
+$env:VAPECACHE_BENCH_TRACK = "both" # optimized | apples | both
+$env:VAPECACHE_BENCH_MAX_DEGREE = "80"
+$env:VAPECACHE_BENCH_MUX_PROFILE = "FullTilt"
+$env:VAPECACHE_BENCH_MUX_CONNECTIONS = "8"
 $env:VAPECACHE_BENCH_MUX_INFLIGHT = "8192"
 $env:VAPECACHE_BENCH_MUX_COALESCE = "true"
 $env:VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS = "0"
+$env:DOTNET_GCServer = "1"
 "2" | dotnet run -c Release -- --compare
 ```
 
 This runs the 50,000 shopper scenario and prints side-by-side throughput and latency.
+Track semantics:
+- `apples`: command/payload parity with StackExchange.Redis (JSON cart/session payloads)
+- `optimized`: VapeCache optimized cart/session path
+- `both`: prints both tracks in one run so hot-path and parity are both visible
+Reporting guidance:
+- Use `optimized` (or `both` -> `OptimizedProductPath`) for hot-path comparison claims.
+- Use `apples` (or `both` -> `ApplesToApples`) for parity/fallback behavior claims.
 
 For repeatable medians + pass/fail gating:
 
@@ -97,8 +107,69 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -Trials 5 `
   -ShopperCount 50000 `
   -MaxCartSize 40 `
-  -Track optimized `
+  -MaxDegree 72 `
+  -Track both `
+  -MuxProfile FullTilt `
+  -MuxConnections 8 `
+  -MuxInFlight 8192 `
+  -ServerGc true `
+  -RedisHost 127.0.0.1 `
+  -RedisPort 6379 `
   -FailBelowRatio 1.0
+```
+`run-grocery-head-to-head.ps1` builds `Release` binaries before running trials unless `-SkipBuild` is provided.
+
+### Claim-Safe Reporting Modes
+
+Use one of these two modes and label reports explicitly:
+
+1. **Strict/Fair (authoritative)**  
+   Use `-DisableTrackDefaults` so both tracks/providers share the same mux knobs.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
+  -Trials 5 `
+  -Track both `
+  -DisableTrackDefaults `
+  -ShopperCount 50000 `
+  -MaxCartSize 40 `
+  -FailBelowRatio 1.0
+```
+
+2. **Tuned/Showcase (engineering)**  
+   Leave track defaults enabled to show workload-tuned potential.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
+  -Trials 5 `
+  -Track both `
+  -ShopperCount 50000 `
+  -MaxCartSize 40 `
+  -FailBelowRatio 1.0
+```
+
+Benchmark defaults tuned for high-core hosts:
+- `MaxDegree=72` (stability-first default for 50k shopper runs on modern multi-core hosts).
+- `MuxProfile=FullTilt`, `MuxInFlight=8192`, `MuxCoalesce=true`.
+- Track-aware mux defaults are enabled by default:
+  - `optimized`: `MuxConnections=8`, `MuxAdaptiveCoalescing=true`
+  - `apples`: `MuxConnections=1`, `MuxAdaptiveCoalescing=false`
+- `CleanupRunKeys=true` to prevent key buildup and Redis memory-pressure drift across trials.
+- `Track=both` runs apples and optimized in isolated passes per trial (no shared-run coupling).
+- `ServerGc=true` (`DOTNET_GCServer=1`) for steadier throughput under load.
+- For a fixed 28-core box, `-MaxDegree 68..80` is the preferred stability window for 50k x 40 runs.
+- For peak throughput sweeps, test `-MaxDegree 80` after stability is confirmed.
+Pass `-DisableTrackDefaults` to force a single mux profile/connection strategy across both tracks.
+To use the exact same Redis setting source as the Grocery Store host, pass the connection string directly:
+- URI style is supported: `redis://user:pass@host:port/db` (or `rediss://...`).
+- StackExchange style is also supported: `host:port,user=...,password=...,ssl=...`.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
+  -Trials 5 `
+  -ShopperCount 50000 `
+  -Track both `
+  -RedisConnectionString "redis://localhost:6379/0"
 ```
 
 ### Fast Dogfood Run (Recommended)
@@ -113,42 +184,54 @@ powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-grocery-dogfood.p
   -EnablePluginDemo
 ```
 
+### Hot-Key Stampede Run (300k / 70 Items)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-grocery-stampede.ps1 `
+  -RedisHost 192.168.100.50 `
+  -RedisPort 6379 `
+  -RedisUsername admin `
+  -RedisPassword "your-password"
+```
+
+This script applies a tuned multiplexer profile and a hot-product workload:
+- 300,000 shoppers
+- 4,000 concurrency
+- 70 cart items per shopper
+- 100% bias to one hot product key
+- host auto-stop on completion
+
 ### Expected Output
 
 ```
 ==================================================
   GROCERY STORE STRESS TEST - BLACK FRIDAY MODE
 ==================================================
-Concurrent Shoppers: 1000
-Total Shoppers: 10000
-Test Duration: 120 seconds
-Redis Modules Detected: (none - vanilla Redis)
+Concurrent Shoppers: 4000
+Total Shoppers: 300000
+Target Duration: 240 seconds
+Redis Modules Detected: timeseries, vectorset, bf, ReJSON, search
 Created 5 flash sales
-Starting stress test in 3 seconds...
-
-[10s] Cache Stats - Gets: 45,234 | Sets: 12,456 | Hits: 38,901 (86.0%) | Misses: 6,333
-[20s] Cache Stats - Gets: 92,567 | Sets: 25,123 | Hits: 79,456 (85.8%) | Misses: 13,111
-[30s] Cache Stats - Gets: 138,234 | Sets: 37,890 | Hits: 118,901 (86.0%) | Misses: 19,333
-...
+Starting stress test in 1 seconds...
 
 ==================================================
   STRESS TEST COMPLETE
 ==================================================
-Total Shoppers Simulated: 10,000
-Total Duration: 120.45 seconds
-Throughput: 83 shoppers/sec
+Total Shoppers Simulated: 300000
+Total Duration: 21.32 seconds
+Throughput: 14071 shoppers/sec
 
 Sample Cached Data:
-  Flash Sale 'Organic Bananas': 2,847 participants
-  Sample Cart (user-000042): 3 items
+  Flash Sale 'Frozen Pizza': 0 participants
+  Sample Cart (user-000042): 301 items
 
 Final Cache Statistics:
-  Total Gets: 547,234
-  Total Sets: 182,456
-  Total Hits: 471,123
-  Total Misses: 76,111
-  Hit Rate: 86.09%
-  Total Removes: 12,456
+  Total Gets: 300006
+  Total Sets: 8
+  Total Hits: 300003
+  Total Misses: 3
+  Hit Rate: 100.00%
+  Total Removes: 0
   Fallback Events: 0
   Circuit Breaker Opens: 0
 ```
@@ -205,16 +288,15 @@ Final Cache Statistics:
 ## Performance Expectations
 
 ### With Redis
-- **Throughput:** 80-100 shoppers/sec
-- **Hit Rate:** 85-90% (products cached after first load)
-- **Latency:** <5ms per operation
-- **Memory:** ~50MB Redis memory usage
+- **Throughput (FullTilt profile):** typically 5,000+ shoppers/sec on tuned settings.
+- **Throughput (hot-key stampede profile):** typically 10,000+ shoppers/sec.
+- **Hit Rate:** can approach 100% when traffic is heavily hot-key biased.
+- **Latency:** low single-digit milliseconds for most operations.
 
 ### In-Memory Fallback
-- **Throughput:** 200-300 shoppers/sec (faster!)
-- **Hit Rate:** 85-90% (same)
-- **Latency:** <1ms per operation (60x faster)
-- **Memory:** ~30MB application memory
+- **Throughput:** generally high, but varies with local CPU and GC pressure.
+- **Hit Rate:** workload-dependent (same logic, different backend).
+- **Latency:** typically lower than remote Redis in local-only mode.
 
 ## Code Highlights
 
@@ -266,6 +348,7 @@ var count = await store.GetFlashSaleParticipantCountAsync(sale.Id);
 | [GroceryStoreStressTest.cs](../VapeCache.Console/GroceryStore/GroceryStoreStressTest.cs) | Stress test simulation (configurable workload) |
 | [GroceryStoreStressOptions.cs](../VapeCache.Console/GroceryStore/GroceryStoreStressOptions.cs) | Runtime knobs for concurrency and workload size |
 | [run-grocery-dogfood.ps1](../VapeCache.Console/run-grocery-dogfood.ps1) | Repeatable dogfood execution script |
+| [run-grocery-stampede.ps1](../VapeCache.Console/run-grocery-stampede.ps1) | Tuned hot-key stampede script (300k/70 baseline) |
 | [PLUGINS.md](../VapeCache.Console/PLUGINS.md) | Plugin extension pattern used by console host |
 | [Program.cs](../VapeCache.Console/Program.cs) | DI registration and startup |
 
@@ -277,12 +360,15 @@ Tune workload intensity directly from `GroceryStoreStress` settings:
 "GroceryStoreStress": {
   "ConcurrentShoppers": 2000,
   "TotalShoppers": 100000,
+  "StopHostOnCompletion": true,
   "BrowseChancePercent": 70,
   "BrowseMinProducts": 10,
   "BrowseMaxProducts": 25,
   "AddToCartChancePercent": 50,
   "CartItemsMin": 15,
-  "CartItemsMax": 35
+  "CartItemsMax": 35,
+  "HotProductId": "prod-025",
+  "HotProductBiasPercent": 100
 }
 ```
 
@@ -340,7 +426,9 @@ docker start <redis-container-id>
 ✅ **Observable** - Real-time metrics and logging
 ✅ **Realistic** - Simulates actual e-commerce patterns
 
-This is what makes VapeCache amazing - you get Redis-level features with in-memory-level resilience and StackExchange.Redis-beating performance! 🚀
+Use both comparison tracks when reporting against StackExchange.Redis:
+- `apples` for parity
+- `optimized` for VapeCache hot-path capability
 
 ---
 

@@ -29,6 +29,18 @@ public class RedisRespProtocolTests
     }
 
     [Fact]
+    public void ZRangeByScoreWithLimit_UsesEightParts()
+    {
+        var len = RedisRespProtocol.GetZRangeByScoreWithScoresCommandLength("scores", "0", "10", descending: false, offset: 1, count: 2);
+        var buffer = new byte[len];
+        _ = RedisRespProtocol.WriteZRangeByScoreWithScoresCommand(buffer, "scores", "0", "10", descending: false, offset: 1, count: 2);
+
+        var text = Encoding.ASCII.GetString(buffer);
+        Assert.StartsWith("*8\r\n", text);
+        Assert.Contains("$5\r\nLIMIT\r\n", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RPushMany_LengthMatchesWriter()
     {
         var values = new ReadOnlyMemory<byte>[]
@@ -48,5 +60,49 @@ public class RedisRespProtocolTests
         Assert.StartsWith($"*{2 + values.Length}\r\n", text);
         Assert.Contains("RPUSH", text, StringComparison.Ordinal);
         Assert.Contains("cart:user-000001", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SkipHelloResponseAsync_ConsumesResp3MapPayload()
+    {
+        var payload = Encoding.UTF8.GetBytes(
+            "%7\r\n" +
+            "+server\r\n$5\r\nredis\r\n" +
+            "+version\r\n$5\r\n7.2.0\r\n" +
+            "+proto\r\n:2\r\n" +
+            "+id\r\n:1\r\n" +
+            "+mode\r\n$10\r\nstandalone\r\n" +
+            "+role\r\n$6\r\nmaster\r\n" +
+            "+modules\r\n*0\r\n");
+
+        await using var stream = new MemoryStream(payload);
+        await RedisRespProtocol.SkipHelloResponseAsync(stream, CancellationToken.None);
+
+        Assert.Equal(stream.Length, stream.Position);
+    }
+
+    [Fact]
+    public async Task SkipHelloResponseAsync_ConsumesAttributeWrappedResponse()
+    {
+        var payload = Encoding.UTF8.GetBytes(
+            "|1\r\n" +
+            "+meta\r\n+warmup\r\n" +
+            "+OK\r\n");
+
+        await using var stream = new MemoryStream(payload);
+        await RedisRespProtocol.SkipHelloResponseAsync(stream, CancellationToken.None);
+
+        Assert.Equal(stream.Length, stream.Position);
+    }
+
+    [Fact]
+    public async Task SkipHelloResponseAsync_ThrowsOnRedisError()
+    {
+        var payload = Encoding.UTF8.GetBytes("-ERR unknown command 'HELLO'\r\n");
+
+        await using var stream = new MemoryStream(payload);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RedisRespProtocol.SkipHelloResponseAsync(stream, CancellationToken.None));
     }
 }

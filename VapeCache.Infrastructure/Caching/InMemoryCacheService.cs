@@ -1,13 +1,15 @@
 using System.Buffers;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Infrastructure.Caching;
 
-internal sealed class InMemoryCacheService : ICacheFallbackService
+internal sealed partial class InMemoryCacheService : ICacheFallbackService
 {
     private readonly IMemoryCache _cache;
     private readonly ICurrentCacheService _current;
@@ -17,6 +19,8 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
     private readonly IInMemorySpillStore _spillStore;
     private readonly bool _spillStoreSupportsWrites;
     private readonly ICacheIntentRegistry _intentRegistry;
+    private readonly ILogger<InMemoryCacheService> _logger;
+    private int _spillStoreWarningIssued;
     private static readonly ICacheIntentRegistry NoopIntentRegistry = new NoopCacheIntentRegistry();
 
     public InMemoryCacheService(
@@ -25,7 +29,8 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         CacheStatsRegistry statsRegistry,
         IOptionsMonitor<InMemorySpillOptions> spillOptions,
         IInMemorySpillStore spillStore,
-        ICacheIntentRegistry? intentRegistry = null)
+        ICacheIntentRegistry? intentRegistry = null,
+        ILogger<InMemoryCacheService>? logger = null)
     {
         _cache = cache;
         _current = current;
@@ -33,9 +38,12 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         _spillOptionsMonitor = spillOptions;
         _spillStore = spillStore;
         _intentRegistry = intentRegistry ?? NoopIntentRegistry;
+        _logger = logger ?? NullLogger<InMemoryCacheService>.Instance;
         // Avoid writing spill references when the no-op store is active.
         // This prevents large entries from becoming unreadable in free-tier/default wiring.
         _spillStoreSupportsWrites = spillStore is not NoopSpillStore;
+        if (spillStore is ISpillStoreDiagnostics spillDiagnostics)
+            CacheTelemetry.InitializeSpillDiagnostics(spillDiagnostics);
     }
 
     public string Name => "memory";
@@ -60,7 +68,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
                     _stats.IncHit();
                     CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
                     CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
-                    return value;
+                    return CopyBuffer(value);
                 }
 
                 if (cached is SpillEntry spill)
@@ -108,6 +116,8 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         var start = Stopwatch.GetTimestamp();
         try
         {
+            await TryDeleteExistingSpillAsync(key, ct).ConfigureAwait(false);
+
             var spillOptions = SpillOptions;
             if (ShouldSpill(value.Length, spillOptions))
             {
@@ -122,7 +132,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
                     {
                         await _spillStore.WriteAsync(spillRef, tail, ct).ConfigureAwait(false);
                         StoreEntry(key, options, new SpillEntry(spillRef, inlinePrefix, inlinePrefixBytes, value.Length));
-                        _intentRegistry.RecordSet(key, Name, options, value.Length);
+                        _intentRegistry.RecordSet(key, BackendType.InMemory, options, value.Length);
                         return;
                     }
                     catch
@@ -133,7 +143,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
             }
 
             StoreEntry(key, options, value);
-            _intentRegistry.RecordSet(key, Name, options, value.Length);
+            _intentRegistry.RecordSet(key, BackendType.InMemory, options, value.Length);
         }
         finally
         {
@@ -144,7 +154,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
     /// <summary>
     /// Removes value.
     /// </summary>
-    public ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
+    public async ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ct.ThrowIfCancellationRequested();
@@ -152,10 +162,18 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         _stats.IncRemove();
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
+        var existed = false;
+        if (_cache.TryGetValue(key, out object? current))
+        {
+            existed = true;
+            if (current is SpillEntry spill)
+                await TryDeleteSpillRefAsync(spill.SpillRef, ct).ConfigureAwait(false);
+        }
+
         _cache.Remove(key);
         _intentRegistry.RecordRemove(key);
         CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "remove" } });
-        return ValueTask.FromResult(true);
+        return existed;
     }
 
     public async ValueTask<T?> GetAsync<T>(string key, SpanDeserializer<T> deserialize, CancellationToken ct)
@@ -193,11 +211,29 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
 
     private bool ShouldSpill(int length, InMemorySpillOptions spillOptions)
     {
+        if (spillOptions.EnableSpillToDisk && !_spillStoreSupportsWrites)
+            ReportSpillStoreUnavailable();
+
         return _spillStoreSupportsWrites &&
                spillOptions.EnableSpillToDisk &&
                spillOptions.SpillThresholdBytes > 0 &&
                length > spillOptions.SpillThresholdBytes;
     }
+
+    private void ReportSpillStoreUnavailable()
+    {
+        if (Interlocked.Exchange(ref _spillStoreWarningIssued, 1) != 0)
+            return;
+
+        CacheTelemetry.SpillStoreUnavailable.Add(1);
+        LogSpillStoreUnavailable(_logger);
+    }
+
+    [LoggerMessage(
+        EventId = 7101,
+        Level = LogLevel.Warning,
+        Message = "InMemory spill-to-disk is enabled, but the active spill store is no-op. Register persistence spill services (AddVapeCachePersistence) to enable file-backed scatter spill.")]
+    private static partial void LogSpillStoreUnavailable(ILogger logger);
 
     private void StoreEntry(string key, CacheEntryOptions options, ReadOnlyMemory<byte> value)
     {
@@ -212,16 +248,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
                 CacheTelemetry.Evictions.Add(1, new TagList { { "backend", "memory" }, { "reason", reason.ToString().ToLowerInvariant() } });
             });
 
-            if (MemoryMarshal.TryGetArray(value, out ArraySegment<byte> segment) &&
-                segment.Array is not null &&
-                segment.Offset == 0 &&
-                segment.Count == segment.Array.Length)
-            {
-                entry.Value = segment.Array;
-                return;
-            }
-
-            entry.Value = value.ToArray();
+            entry.Value = CopyBuffer(value.Span);
         }
         finally
         {
@@ -244,7 +271,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
                 if (value is SpillEntry spill)
                 {
                     var store = (IInMemorySpillStore)state!;
-                    _ = store.DeleteAsync(spill.SpillRef, CancellationToken.None);
+                    _ = DeleteSpillRefBestEffortAsync(store, spill.SpillRef);
                 }
             }, _spillStore);
         }
@@ -262,6 +289,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
             if (tail is null)
             {
                 _cache.Remove(key);
+                await TryDeleteSpillRefAsync(spill.SpillRef, CancellationToken.None).ConfigureAwait(false);
                 return null;
             }
 
@@ -273,6 +301,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
             if (expectedTail != tail.Length)
             {
                 _cache.Remove(key);
+                await TryDeleteSpillRefAsync(spill.SpillRef, CancellationToken.None).ConfigureAwait(false);
                 return null;
             }
 
@@ -284,8 +313,49 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         catch
         {
             _cache.Remove(key);
+            await TryDeleteSpillRefAsync(spill.SpillRef, CancellationToken.None).ConfigureAwait(false);
             return null;
         }
+    }
+
+    private async ValueTask TryDeleteExistingSpillAsync(string key, CancellationToken ct)
+    {
+        if (_cache.TryGetValue(key, out object? existing) && existing is SpillEntry spill)
+            await TryDeleteSpillRefAsync(spill.SpillRef, ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask TryDeleteSpillRefAsync(Guid spillRef, CancellationToken ct)
+    {
+        try
+        {
+            await _spillStore.DeleteAsync(spillRef, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best-effort cleanup only; never fail cache operations on spill delete.
+        }
+    }
+
+    private static async Task DeleteSpillRefBestEffortAsync(IInMemorySpillStore store, Guid spillRef)
+    {
+        try
+        {
+            await store.DeleteAsync(spillRef, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best-effort cleanup only; this runs from an eviction callback.
+        }
+    }
+
+    private static byte[] CopyBuffer(ReadOnlySpan<byte> source)
+    {
+        if (source.IsEmpty)
+            return Array.Empty<byte>();
+
+        var buffer = GC.AllocateUninitializedArray<byte>(source.Length);
+        source.CopyTo(buffer);
+        return buffer;
     }
 
     private sealed class SpillEntry
@@ -317,7 +387,7 @@ internal sealed class InMemoryCacheService : ICacheFallbackService
         /// <summary>
         /// Executes value.
         /// </summary>
-        public void RecordSet(string key, string backend, in CacheEntryOptions options, int payloadBytes) { }
+        public void RecordSet(string key, BackendType backend, in CacheEntryOptions options, int payloadBytes) { }
         /// <summary>
         /// Attempts to value.
         /// </summary>

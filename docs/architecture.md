@@ -22,7 +22,7 @@ High-level architecture and design principles of VapeCache.
 
 VapeCache is an **enterprise-grade Redis caching library for .NET 10** designed for:
 
-1. **Performance**: 5-30% faster than StackExchange.Redis via ordered multiplexing + coalesced writes
+1. **Performance**: cache-path transport optimized for low-overhead Redis workloads
 2. **Reliability**: Hybrid cache with circuit breaker, stampede protection, auto-reconnect
 3. **Observability**: OpenTelemetry metrics + traces, structured logging, production telemetry
 
@@ -126,7 +126,12 @@ See [CONFIGURATION_BEST_PRACTICES.md](CONFIGURATION_BEST_PRACTICES.md) for detai
 
 ## Transport Layer
 
-### Why VapeCache is Faster (5-30% vs StackExchange.Redis)
+### Why VapeCache Can Be Faster on Cache Paths
+
+Performance is workload- and configuration-dependent.  
+Use the benchmark policy and published artifacts for current measured results:
+- [BENCHMARK_CLAIMS_POLICY.md](BENCHMARK_CLAIMS_POLICY.md)
+- [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md)
 
 #### 1. Ordered Multiplexing
 

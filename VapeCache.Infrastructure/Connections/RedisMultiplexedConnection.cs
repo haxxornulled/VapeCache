@@ -6,6 +6,8 @@ using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
@@ -18,10 +20,13 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private readonly bool _coalesceWrites;
     private readonly bool _useSocketReader;
     private readonly bool _useDedicatedLaneWorkers;
+    private readonly int _bulkMgetKeyThreshold;
+    private readonly int _bulkPayloadBytesThreshold;
     private readonly int _maxBulkStringBytes;
     private readonly int _maxArrayDepth;
     private readonly TimeSpan _responseTimeout;
     private readonly int _connectionId;
+    private readonly KeyValuePair<string, object?>[] _writeQueueWaitTags;
 
     private readonly MpscRingQueue<PendingRequest> _writes;
     private readonly SpscRingQueue<PendingOperation> _pending;
@@ -36,7 +41,6 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private readonly Task _reader;
     private static readonly ReadOnlyMemory<byte> CrlfMemory = "\r\n"u8.ToArray();
 
-    private readonly RedisMultiplexedBufferCaches _bufferCaches = new();
     private readonly CoalescedWriteDispatcher _coalescedWriteDispatcher;
 
     private IRedisConnection? _conn;
@@ -55,6 +59,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private long _laneTransportResetCount;
     private long _laneExpectedResponseSequence;
     private long _lanePendingSequenceAssigned;
+    private long _generation;
 
 
     private static int RoundUpToPowerOfTwo(int value)
@@ -92,6 +97,14 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         int adaptiveCoalescingMinWriteBytes = 64 * 1024,
         int adaptiveCoalescingMinSegments = 64,
         int adaptiveCoalescingMinSmallCopyThresholdBytes = 512,
+        int coalescingEnterQueueDepth = 8,
+        int coalescingExitQueueDepth = 3,
+        int coalescedWriteMaxOperations = 128,
+        int coalescingSpinBudget = 8,
+        int bulkMgetKeyThreshold = 32,
+        int bulkPayloadBytesThreshold = 64 * 1024,
+        int fastTimeoutResetThreshold = 3,
+        TimeSpan fastTimeoutResetWindow = default,
         Action<long>? recordLatencyStopwatchTicks = null,
         Func<bool>? shouldRecordLatency = null)
     {
@@ -100,6 +113,10 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         _coalesceWrites = coalesceWrites;
         _useSocketReader = enableSocketRespReader;
         _useDedicatedLaneWorkers = useDedicatedLaneWorkers;
+        _bulkMgetKeyThreshold = Math.Max(1, bulkMgetKeyThreshold);
+        _bulkPayloadBytesThreshold = Math.Max(1, bulkPayloadBytesThreshold);
+        _ = fastTimeoutResetThreshold;
+        _ = fastTimeoutResetWindow;
         _maxBulkStringBytes = maxBulkStringBytes;
         _maxArrayDepth = maxArrayDepth;
         _responseTimeout = responseTimeout <= TimeSpan.Zero || responseTimeout == Timeout.InfiniteTimeSpan
@@ -134,12 +151,17 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             () => _writes.Count,
             _pending.EnqueueAsync,
             NextPendingResponseSequence,
-            ReturnHeaderBuffer,
-            ReturnPayloadArray,
+            ReturnHeaderBufferFromMux,
+            ReturnPayloadArrayFromMux,
             static (req, ex) => req.Op.AbortUnqueued(ex),
-            RecordLaneBytesSent);
+            RecordLaneBytesSent,
+            coalescingEnterQueueDepth,
+            coalescingExitQueueDepth,
+            coalescedWriteMaxOperations,
+            coalescingSpinBudget);
 
         _connectionId = Interlocked.Increment(ref _nextConnectionId);
+        _writeQueueWaitTags = RedisMetrics.CreateWriteQueueWaitTags(_connectionId);
         RedisTelemetry.RegisterQueueDepthProvider(_connectionId, GetQueueDepthSnapshot);
         RedisTelemetry.RegisterMuxLaneUsageProvider(_connectionId, GetMuxLaneUsageSnapshot);
 
@@ -175,7 +197,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisMultiplexedConnection));
 
-        if (_inFlight.Wait(0))
+        if (_inFlight.Wait(0, ct))
             return EnqueueAfterSlot(command, poolBulk, ct);
 
         return EnqueueAfterSlotAsync(command, poolBulk, ct);
@@ -243,7 +265,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisMultiplexedConnection));
 
-        if (_inFlight.Wait(0))
+        if (_inFlight.Wait(0, ct))
             return EnqueueAfterSlot(
                 header,
                 payload,
@@ -340,12 +362,18 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         CancellationToken ct)
     {
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(command, ReadOnlyMemory<byte>.Empty, null, payloadCount: 0);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(command, op);
         if (_writes.TryEnqueue(req))
+        {
+            MarkRequestBuffersOwnedByMux(req);
             return op.ValueTask;
+        }
 
         return EnqueueWithQueueWaitAsync(req, op, ct);
     }
@@ -357,17 +385,21 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         out ValueTask<RedisRespReader.RespValue> task)
     {
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(command, ReadOnlyMemory<byte>.Empty, null, payloadCount: 0);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(command, op);
         if (_writes.TryEnqueue(req))
         {
+            MarkRequestBuffersOwnedByMux(req);
             task = op.ValueTask;
             return true;
         }
 
-        op.AbortEnqueueFailure();
+        op.AbortEnqueueFailure(valueTaskWillBeObserved: false);
         task = default;
         return false;
     }
@@ -385,12 +417,18 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         CancellationToken ct)
     {
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(header, payload, payloads, payloadCount);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(header, op, payload, payloads, payloadCount, appendCrlf, appendCrlfPerPayload, headerBuffer, payloadArrayBuffer);
         if (_writes.TryEnqueue(req))
+        {
+            MarkRequestBuffersOwnedByMux(req);
             return op.ValueTask;
+        }
 
         return EnqueueWithQueueWaitAsync(req, op, ct);
     }
@@ -409,17 +447,21 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         out ValueTask<RedisRespReader.RespValue> task)
     {
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(header, payload, payloads, payloadCount);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(header, op, payload, payloads, payloadCount, appendCrlf, appendCrlfPerPayload, headerBuffer, payloadArrayBuffer);
         if (_writes.TryEnqueue(req))
         {
+            MarkRequestBuffersOwnedByMux(req);
             task = op.ValueTask;
             return true;
         }
 
-        op.AbortEnqueueFailure();
+        op.AbortEnqueueFailure(valueTaskWillBeObserved: false);
         task = default;
         return false;
     }
@@ -431,8 +473,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         await _inFlight.WaitAsync(ct).ConfigureAwait(false);
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(command, ReadOnlyMemory<byte>.Empty, null, payloadCount: 0);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(command, op);
         return await EnqueueWithQueueWaitAsync(req, op, ct).ConfigureAwait(false);
@@ -452,8 +497,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         await _inFlight.WaitAsync(ct).ConfigureAwait(false);
         var op = RentOperation();
+        var operationClass = poolBulk
+            ? OperationClass.Bulk
+            : ClassifyOperation(header, payload, payloads, payloadCount);
         RecordLaneOperationStarted();
-        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0);
+        op.Start(poolBulk, ct, holdsSlot: true, sequenceId: 0, operationClass);
 
         var req = new PendingRequest(header, op, payload, payloads, payloadCount, appendCrlf, appendCrlfPerPayload, headerBuffer, payloadArrayBuffer);
         return await EnqueueWithQueueWaitAsync(req, op, ct).ConfigureAwait(false);
@@ -465,6 +513,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         try
         {
             await _writes.EnqueueAsync(req, ct).ConfigureAwait(false);
+            MarkRequestBuffersOwnedByMux(req);
         }
         catch (Exception ex)
         {
@@ -472,8 +521,104 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             throw;
         }
         var elapsedMs = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
-        RedisTelemetry.QueueWaitMs.Record(elapsedMs, new TagList { { "queue", "writes" }, { "connection.id", _connectionId } });
+        RedisMetrics.QueueWaitMs.Record(elapsedMs, _writeQueueWaitTags);
         return await op.ValueTask.ConfigureAwait(false);
+    }
+
+    private OperationClass ClassifyOperation(
+        ReadOnlyMemory<byte> command,
+        ReadOnlyMemory<byte> payload,
+        ReadOnlyMemory<byte>[]? payloads,
+        int payloadCount)
+    {
+        var totalBytes = command.Length + payload.Length;
+        if (payloadCount > 0 && payloads is not null)
+        {
+            for (var i = 0; i < payloadCount; i++)
+            {
+                totalBytes += payloads[i].Length;
+                if (totalBytes > _bulkPayloadBytesThreshold)
+                    return OperationClass.Bulk;
+            }
+        }
+
+        if (totalBytes > _bulkPayloadBytesThreshold)
+            return OperationClass.Bulk;
+
+        return IsBulkMGetCommand(command)
+            ? OperationClass.Bulk
+            : OperationClass.Fast;
+    }
+
+    private bool IsBulkMGetCommand(ReadOnlyMemory<byte> command)
+    {
+        var span = command.Span;
+        if (span.Length < 16 || span[0] != (byte)'*')
+            return false;
+
+        if (!TryReadRespInteger(span, 1, out var idx, out var arrayLen))
+            return false;
+
+        if (arrayLen <= _bulkMgetKeyThreshold + 1)
+            return false;
+
+        if (idx >= span.Length || span[idx] != (byte)'$')
+            return false;
+
+        if (!TryReadRespInteger(span, idx + 1, out idx, out var tokenLen))
+            return false;
+
+        if (tokenLen != 4 || idx + tokenLen + 2 > span.Length)
+            return false;
+
+        var token = span.Slice(idx, tokenLen);
+        if (!IsMGetToken(token))
+            return false;
+
+        return span[idx + tokenLen] == (byte)'\r' && span[idx + tokenLen + 1] == (byte)'\n';
+    }
+
+    private static bool TryReadRespInteger(ReadOnlySpan<byte> span, int startIndex, out int nextIndex, out int value)
+    {
+        nextIndex = startIndex;
+        value = 0;
+        var sawDigit = false;
+
+        for (var i = startIndex; i < span.Length; i++)
+        {
+            var b = span[i];
+            if (b == (byte)'\r')
+            {
+                if (!sawDigit || i + 1 >= span.Length || span[i + 1] != (byte)'\n')
+                    return false;
+
+                nextIndex = i + 2;
+                return true;
+            }
+
+            if (b is < (byte)'0' or > (byte)'9')
+                return false;
+
+            sawDigit = true;
+            value = checked((value * 10) + (b - (byte)'0'));
+        }
+
+        return false;
+    }
+
+    private static bool IsMGetToken(ReadOnlySpan<byte> token)
+        => token.Length == 4
+            && ((token[0] | 0x20) == (byte)'m')
+            && ((token[1] | 0x20) == (byte)'g')
+            && ((token[2] | 0x20) == (byte)'e')
+            && ((token[3] | 0x20) == (byte)'t');
+
+    private static bool ShouldResetTransportForTimeout(PendingOperation operation)
+    {
+        _ = operation;
+        // Timeout handling can interrupt a RESP frame mid-parse. Always recycle transport
+        // to guarantee framing integrity for the next operation.
+        return true;
     }
 
     private async Task EnsureConnectedAsync(CancellationToken ct)
@@ -504,6 +649,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                     maxArrayDepth: _maxArrayDepth,
                     onBytesRead: RecordLaneBytesReceived);
             }
+
+            Interlocked.Increment(ref _generation);
 
             // Successful connect/reset path clears transient unhealthy state.
             Interlocked.Exchange(ref _consecutiveFailures, 0);
@@ -537,6 +684,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 hasReq = true;
                 await EnsureConnectedAsync(_cts.Token).ConfigureAwait(false);
                 var conn = _conn!;
+                var generation = Volatile.Read(ref _generation);
 
                 // Coalescing path supports all Redis command shapes, including payload operations.
                 // When coalescing is disabled, use the direct non-coalesced send path.
@@ -545,17 +693,17 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 if (useCoalescedPath)
                 {
                     usedCoalescedPath = true;
-                    await _coalescedWriteDispatcher.SendAsync(req, conn.Socket, _cts.Token).ConfigureAwait(false);
+                    await _coalescedWriteDispatcher.SendAsync(req, conn.Socket, generation, _cts.Token).ConfigureAwait(false);
                 }
                 else
                 {
-                    await SendDirectAsync(req, conn, _cts.Token).ConfigureAwait(false);
+                    await SendDirectAsync(req, conn, generation, _cts.Token).ConfigureAwait(false);
                     if (req.HeaderBuffer is not null)
-                        ReturnHeaderBuffer(req.HeaderBuffer);
+                        ReturnHeaderBufferFromMux(req.HeaderBuffer);
                     if (req.PayloadArrayBuffer is not null)
                     {
                         // Preserve length; skip clearing to avoid extra work.
-                        ReturnPayloadArray(req.PayloadArrayBuffer);
+                        ReturnPayloadArrayFromMux(req.PayloadArrayBuffer);
                     }
                 }
             }
@@ -582,12 +730,12 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         }
     }
 
-    private void ReturnRequestBuffers(PendingRequest req)
+    private static void ReturnRequestBuffers(PendingRequest req)
     {
         if (req.HeaderBuffer is not null)
-            ReturnHeaderBuffer(req.HeaderBuffer);
+            ReturnHeaderBufferFromMux(req.HeaderBuffer);
         if (req.PayloadArrayBuffer is not null)
-            ReturnPayloadArray(req.PayloadArrayBuffer);
+            ReturnPayloadArrayFromMux(req.PayloadArrayBuffer);
     }
 
     private async Task ReaderLoopAsync()
@@ -599,28 +747,46 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             {
                 next = await _pending.DequeueAsync(_cts.Token).ConfigureAwait(false);
                 await EnsureConnectedAsync(_cts.Token).ConfigureAwait(false);
+                var readGeneration = Volatile.Read(ref _generation);
                 var (resp, ex) = await _responseReaderLoop.ReadAsync(next.PoolBulk).ConfigureAwait(false);
-                if (resp is not null)
-                    RecordLaneResponseObserved(next, resp);
+                if (resp.HasValue)
+                    RecordLaneResponseObserved(next, resp.Value);
 
                 if (next.IsCompleted)
                 {
-                    if (resp is not null)
-                        RedisRespReader.ReturnBuffers(resp);
+                    if (resp.HasValue)
+                        RedisRespReader.ReturnBuffers(resp.Value);
                 }
                 else if (ex is not null)
                 {
-                    if (ex is TimeoutException)
+                    if (ex is TimeoutException timeout)
+                    {
                         Interlocked.Increment(ref _responseTimeoutCount);
-                    if (resp is not null)
-                        RedisRespReader.ReturnBuffers(resp);
+                        if (ShouldResetTransportForTimeout(next))
+                            await FailTransportAsync(timeout).ConfigureAwait(false);
+                    }
+                    if (resp.HasValue)
+                        RedisRespReader.ReturnBuffers(resp.Value);
                     next.TrySetException(ex);
                 }
                 else
                 {
-                    if (resp is null)
+                    if (!resp.HasValue)
                         throw new InvalidOperationException("RESP reader returned null response without error.");
-                    next.TrySetResult(resp);
+
+                    var response = resp.Value;
+                    var currentGeneration = Volatile.Read(ref _generation);
+                    if (next.Generation != currentGeneration || readGeneration != currentGeneration)
+                    {
+                        RedisRespReader.ReturnBuffers(response);
+                        next.TrySetException(
+                            new IOException(
+                                $"Stale transport generation response ignored. Operation generation {next.Generation}, current generation {currentGeneration}."));
+                        next.MarkResponseProcessed();
+                        continue;
+                    }
+
+                    next.TrySetResult(response);
                 }
 
                 next.MarkResponseProcessed();
@@ -639,23 +805,23 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         }
     }
 
-    private async Task SendDirectAsync(PendingRequest req, IRedisConnection conn, CancellationToken ct)
+    private async Task SendDirectAsync(PendingRequest req, IRedisConnection conn, long generation, CancellationToken ct)
     {
         var sendHeader = await conn.SendAsync(req.Command, ct).ConfigureAwait(false);
         if (!sendHeader.IsSuccess)
-            sendHeader.IfFail(static ex => throw ex);
+            _ = sendHeader.IfFail(static ex => throw ex);
         RecordLaneBytesSent(req.Command.Length);
         if (!req.Payload.IsEmpty)
         {
             var sendPayload = await conn.SendAsync(req.Payload, ct).ConfigureAwait(false);
             if (!sendPayload.IsSuccess)
-                sendPayload.IfFail(static ex => throw ex);
+                _ = sendPayload.IfFail(static ex => throw ex);
             RecordLaneBytesSent(req.Payload.Length);
             if (req.AppendCrlf)
             {
                 var sendCrlf = await conn.SendAsync(CrlfMemory, ct).ConfigureAwait(false);
                 if (!sendCrlf.IsSuccess)
-                    sendCrlf.IfFail(static ex => throw ex);
+                    _ = sendCrlf.IfFail(static ex => throw ex);
                 RecordLaneBytesSent(CrlfMemory.Length);
             }
         }
@@ -666,18 +832,19 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             {
                 var sendSegment = await conn.SendAsync(payloads[i], ct).ConfigureAwait(false);
                 if (!sendSegment.IsSuccess)
-                    sendSegment.IfFail(static ex => throw ex);
+                    _ = sendSegment.IfFail(static ex => throw ex);
                 RecordLaneBytesSent(payloads[i].Length);
                 if (req.AppendCrlfPerPayload)
                 {
                     var sendLine = await conn.SendAsync(CrlfMemory, ct).ConfigureAwait(false);
                     if (!sendLine.IsSuccess)
-                    sendLine.IfFail(static ex => throw ex);
+                    _ = sendLine.IfFail(static ex => throw ex);
                     RecordLaneBytesSent(CrlfMemory.Length);
                 }
             }
         }
 
+        req.Op.AssignGeneration(generation);
         req.Op.AssignSequenceId(NextPendingResponseSequence());
         await _pending.EnqueueAsync(req.Op, ct).ConfigureAwait(false);
     }
@@ -686,6 +853,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         Interlocked.Increment(ref _failureCount);
         Interlocked.Increment(ref _consecutiveFailures);
+        Interlocked.Increment(ref _generation);
         Volatile.Write(ref _laneExpectedResponseSequence, 0);
         if (countTransportReset)
             Interlocked.Increment(ref _laneTransportResetCount);
@@ -724,9 +892,9 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         while (_writes.TryDequeue(out var req))
         {
             if (req.HeaderBuffer is not null)
-                ReturnHeaderBuffer(req.HeaderBuffer);
+                ReturnHeaderBufferFromMux(req.HeaderBuffer);
             if (req.PayloadArrayBuffer is not null)
-                ReturnPayloadArray(req.PayloadArrayBuffer);
+                ReturnPayloadArrayFromMux(req.PayloadArrayBuffer);
             if (req.Op is not null)
                 req.Op.AbortUnqueued(ex);
         }
@@ -880,17 +1048,38 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private PendingOperation RentOperation()
         => _operationPool.Rent();
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void MarkRequestBuffersOwnedByMux(PendingRequest request)
+    {
+        if (request.HeaderBuffer is not null)
+            RedisMultiplexedBufferCaches.MarkHeaderBufferInFlight(request.HeaderBuffer);
+        if (request.PayloadArrayBuffer is not null)
+            RedisMultiplexedBufferCaches.MarkPayloadArrayInFlight(request.PayloadArrayBuffer);
+    }
+
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal byte[] RentHeaderBuffer(int minLength)
-        => _bufferCaches.RentHeaderBuffer(minLength);
+        => RedisMultiplexedBufferCaches.RentHeaderBuffer(minLength);
 
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal void ReturnHeaderBuffer(byte[] buffer)
-        => _bufferCaches.ReturnHeaderBuffer(buffer);
+        => RedisMultiplexedBufferCaches.ReturnHeaderBufferFromCaller(buffer);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ReturnHeaderBufferFromMux(byte[]? buffer)
+        => RedisMultiplexedBufferCaches.ReturnHeaderBufferFromMux(buffer);
+
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal ReadOnlyMemory<byte>[] RentPayloadArray(int minLength)
-        => _bufferCaches.RentPayloadArray(minLength);
+        => RedisMultiplexedBufferCaches.RentPayloadArray(minLength);
 
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance method keeps the connection-facing API stable for command-executor call sites.")]
     internal void ReturnPayloadArray(ReadOnlyMemory<byte>[]? payloads)
-        => _bufferCaches.ReturnPayloadArray(payloads);
+        => RedisMultiplexedBufferCaches.ReturnPayloadArrayFromCaller(payloads);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ReturnPayloadArrayFromMux(ReadOnlyMemory<byte>[]? payloads)
+        => RedisMultiplexedBufferCaches.ReturnPayloadArrayFromMux(payloads);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal int GetLaneSelectionScore()
@@ -968,7 +1157,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             while (spinner.Count < 10)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_slots.Wait(0))
+                if (_slots.Wait(0, ct))
                 {
                     EnqueueAfterSlot(item);
                     return ValueTask.CompletedTask;
@@ -1059,15 +1248,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                 return false;
             }
 
-            if (TryDequeueCore(out item))
-            {
-                _slots.Release();
-                return true;
-            }
-
-            _items.Release();
-            item = default;
-            return false;
+            item = DequeueAfterWait();
+            return true;
         }
 
         /// <summary>
@@ -1079,7 +1261,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             while (spinner.Count < 10)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_items.Wait(0))
+                if (_items.Wait(0, ct))
                     return new ValueTask<T>(DequeueAfterWait());
                 spinner.SpinOnce();
             }
@@ -1101,23 +1283,17 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             var spinner = new SpinWait();
             while (true)
             {
-                if (TryDequeueCore(out var item))
+                if (TryDequeueCore(out var item, allowBailout: false))
                 {
                     _slots.Release();
                     return item!;
                 }
 
                 spinner.SpinOnce();
-
-                if (spinner.Count > 1000)
-                {
-                    _items.Release();
-                    throw new InvalidOperationException("Ring dequeue failed unexpectedly after 1000 spins.");
-                }
             }
         }
 
-        private bool TryDequeueCore(out T? item)
+        private bool TryDequeueCore(out T? item, bool allowBailout = true)
         {
             var pos = Volatile.Read(ref _tail);
             var spins = 0;
@@ -1147,9 +1323,10 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                     return false;
                 }
 
-                // Spin wait with limit to prevent infinite loops
+                // In non-guaranteed paths we allow a bounded bailout; after a successful _items.Wait
+                // the caller must continue until a slot is observable.
                 spins++;
-                if (spins > 100)
+                if (allowBailout && spins > 100)
                 {
                     // Too many spins, likely a race condition - bail out
                     item = default;
@@ -1267,7 +1444,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             while (spinner.Count < 10)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_slots.Wait(0))
+                if (_slots.Wait(0, ct))
                 {
                     EnqueueAfterSlot(item);
                     return ValueTask.CompletedTask;
@@ -1352,7 +1529,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             while (spinner.Count < 10)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_items.Wait(0))
+                if (_items.Wait(0, ct))
                     return new ValueTask<T>(DequeueAfterWait());
                 spinner.SpinOnce();
             }

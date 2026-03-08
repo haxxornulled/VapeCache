@@ -17,8 +17,8 @@ public static class AspireHealthCheckExtensions
     /// <remarks>
     /// <para>
     /// This extension registers two health checks:
-    /// - "redis": Validates Redis connectivity (PING command)
-    /// - "vapecache": Reports circuit breaker state and cache statistics
+    /// - "redis": Acquires a pooled connection and performs a Redis PING
+    /// - "vapecache": Executes a cache read and reports breaker/fallback state
     /// </para>
     /// <para>
     /// <strong>Health Check Results:</strong>
@@ -58,9 +58,13 @@ public static class AspireHealthCheckExtensions
                 name: "redis",
                 failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
                 tags: new[] { "vapecache", "redis", "infrastructure" })
+            .AddCheck<VapeCacheStartupReadinessHealthCheck>(
+                name: "vapecache-startup-readiness",
+                failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+                tags: new[] { "vapecache", "startup", "readiness" })
             .AddCheck<VapeCacheHealthCheck>(
                 name: "vapecache",
-                failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded,
+                failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
                 tags: new[] { "vapecache", "cache" });
 
         return builder;

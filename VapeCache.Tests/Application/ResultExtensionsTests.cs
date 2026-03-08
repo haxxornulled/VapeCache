@@ -1,6 +1,6 @@
 using LanguageExt.Common;
 using Microsoft.Extensions.Logging.Abstractions;
-using VapeCache.Application.Common.Extensions;
+using VapeCache.Core.Common.Extensions;
 
 namespace VapeCache.Tests.Application;
 

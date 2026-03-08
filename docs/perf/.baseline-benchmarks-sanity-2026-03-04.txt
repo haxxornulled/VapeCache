@@ -1,0 +1,26 @@
+  BenchmarkDotNet.Artifacts\20260304-143104\VapeCache.Benchmarks.Benchmarks.SanityBenchmarks-report.csv
+  BenchmarkDotNet.Artifacts\20260304-143104\VapeCache.Benchmarks.Benchmarks.SanityBenchmarks-report.html
+  BenchmarkDotNet.Artifacts\20260304-143104\VapeCache.Benchmarks.Benchmarks.SanityBenchmarks-report-github.md
+  BenchmarkDotNet.Artifacts\20260304-143104\VapeCache.Benchmarks.Benchmarks.SanityBenchmarks-report-full-compressed.json
+Comparison markdown exported: C:\Visual Studio Projects\VapeCache\BenchmarkDotNet.Artifacts\20260304-143104\comparison.md
+  BenchmarkDotNet.Artifacts\20260304-143104\comparison.md
+| Method                     | Job       | Server | BytesToAllocate | Mean          | Error        | StdDev        | Median        | P90           | P95           | Gen0     | Gen1     | Gen2     | Allocated |
+|--------------------------- |---------- |------- |---------------- |--------------:|-------------:|--------------:|--------------:|--------------:|--------------:|---------:|---------:|---------:|----------:|
+| 'Sanity: no allocation'    | net10-svr | True   | 1024            |     549.30 ns |     3.732 ns |      3.308 ns |     548.37 ns |     554.17 ns |     555.36 ns |   0.0000 |   0.0000 |   0.0000 |       0 B |
+| 'Sanity: allocates'        | net10-svr | True   | 1024            |      58.99 ns |     1.188 ns |      0.992 ns |      58.62 ns |      60.31 ns |      60.66 ns |   0.0157 |   0.0000 |   0.0000 |    1048 B |
+| 'Sanity: allocates string' | net10-svr | True   | 1024            |      67.79 ns |     1.038 ns |      0.971 ns |      67.93 ns |      69.12 ns |      69.17 ns |   0.0156 |   0.0000 |   0.0000 |    1048 B |
+| 'Sanity: no allocation'    | net10-wks | False  | 1024            |     546.45 ns |     0.657 ns |      0.583 ns |     546.31 ns |     547.07 ns |     547.36 ns |   0.0000 |   0.0000 |   0.0000 |       0 B |
+| 'Sanity: allocates'        | net10-wks | False  | 1024            |      25.10 ns |     0.437 ns |      0.365 ns |      25.01 ns |      25.49 ns |      25.68 ns |   0.0607 |   0.0000 |   0.0000 |    1048 B |
+| 'Sanity: allocates string' | net10-wks | False  | 1024            |      32.65 ns |     0.547 ns |      0.512 ns |      32.62 ns |      33.28 ns |      33.41 ns |   0.0607 |   0.0000 |   0.0000 |    1048 B |
+| 'Sanity: no allocation'    | net10-svr | True   | 32768           |     546.44 ns |     0.679 ns |      0.602 ns |     546.43 ns |     546.98 ns |     547.36 ns |   0.0000 |   0.0000 |   0.0000 |       0 B |
+| 'Sanity: allocates'        | net10-svr | True   | 32768           |   1,627.09 ns |    11.305 ns |     10.574 ns |   1,628.29 ns |   1,639.57 ns |   1,643.31 ns |   0.5817 |   0.0000 |   0.0000 |   32792 B |
+| 'Sanity: allocates string' | net10-svr | True   | 32768           |   2,060.28 ns |    21.825 ns |     19.348 ns |   2,057.95 ns |   2,085.40 ns |   2,092.08 ns |   0.5798 |   0.0000 |   0.0000 |   32792 B |
+| 'Sanity: no allocation'    | net10-wks | False  | 32768           |     546.23 ns |     0.425 ns |      0.355 ns |     546.36 ns |     546.62 ns |     546.65 ns |   0.0000 |   0.0000 |   0.0000 |       0 B |
+| 'Sanity: allocates'        | net10-wks | False  | 32768           |     693.85 ns |    11.610 ns |      9.695 ns |     694.12 ns |     703.10 ns |     705.07 ns |   1.8930 |   0.0000 |   0.0000 |   32792 B |
+| 'Sanity: allocates string' | net10-wks | False  | 32768           |   1,147.75 ns |    20.700 ns |     22.149 ns |   1,141.92 ns |   1,173.45 ns |   1,178.45 ns |   1.8921 |   0.0000 |   0.0000 |   32792 B |
+| 'Sanity: no allocation'    | net10-svr | True   | 1048576         |     547.57 ns |     3.108 ns |      2.427 ns |     546.66 ns |     548.88 ns |     551.54 ns |   0.0000 |   0.0000 |   0.0000 |       0 B |
+| 'Sanity: allocates'        | net10-svr | True   | 1048576         |  39,227.20 ns | 2,544.480 ns |  7,381.997 ns |  38,065.84 ns |  48,888.89 ns |  51,453.30 ns |   2.5024 |   2.5024 |   2.5024 | 1048580 B |
+| 'Sanity: allocates string' | net10-svr | True   | 1048576         | 304,785.73 ns | 9,060.749 ns | 26,573.611 ns | 303,480.86 ns | 344,149.02 ns | 354,888.63 ns |   9.7656 |   9.7656 |   9.7656 | 1048592 B |
+| 'Sanity: no allocation'    | net10-wks | False  | 1048576         |     554.54 ns |     8.943 ns |      8.365 ns |     553.77 ns |     564.90 ns |     567.35 ns |   0.0000 |   0.0000 |   0.0000 |       0 B |
+| 'Sanity: allocates'        | net10-wks | False  | 1048576         |  34,227.66 ns |   410.422 ns |    383.909 ns |  34,186.34 ns |  34,724.27 ns |  34,801.36 ns | 152.4658 | 152.4048 | 152.4048 | 1048642 B |
+| 'Sanity: allocates string' | net10-wks | False  | 1048576         |  89,410.11 ns | 1,263.124 ns |  1,181.527 ns |  89,653.80 ns |  90,513.12 ns |  90,625.53 ns | 232.9102 | 232.9102 | 232.9102 | 1048673 B |

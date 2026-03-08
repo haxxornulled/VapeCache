@@ -78,6 +78,74 @@ public sealed class RedisConnectionPoolTests
         Assert.IsType<TimeoutException>(ex);
     }
 
+    [Fact]
+    public async Task Rent_retries_when_returned_connection_is_dropped_and_slot_reopens()
+    {
+        var factory = new FakeFactory();
+        var options = new RedisConnectionOptions
+        {
+            Host = "h",
+            MaxConnections = 1,
+            MaxIdle = 1,
+            AcquireTimeout = TimeSpan.FromSeconds(1),
+            MaxConnectionLifetime = TimeSpan.FromMilliseconds(50)
+        };
+
+        await using var pool = new RedisConnectionPool(factory, new OptionsMonitorStub<RedisConnectionOptions>(options), NullLogger<RedisConnectionPool>.Instance);
+
+        var first = await pool.RentAsync(CancellationToken.None);
+        Assert.True(first.IsSuccess);
+
+        var secondTask = pool.RentAsync(CancellationToken.None).AsTask();
+
+        await Task.Delay(100);
+        Assert.False(secondTask.IsCompleted);
+
+        await first.Match(
+            async lease => await lease.DisposeAsync(),
+            ex => throw ex);
+
+        var second = await secondTask;
+        Assert.True(second.IsSuccess);
+        Assert.Equal(2, factory.CreatedCount);
+    }
+
+    [Fact]
+    public async Task Pool_stays_operational_when_max_idle_is_zero()
+    {
+        var factory = new FakeFactory();
+        var options = new RedisConnectionOptions { Host = "h", MaxConnections = 1, MaxIdle = 0, AcquireTimeout = TimeSpan.FromSeconds(1) };
+
+        await using var pool = new RedisConnectionPool(factory, new OptionsMonitorStub<RedisConnectionOptions>(options), NullLogger<RedisConnectionPool>.Instance);
+
+        var first = await pool.RentAsync(CancellationToken.None);
+        Assert.True(first.IsSuccess);
+
+        await first.Match(
+            async lease => await lease.DisposeAsync(),
+            ex => throw ex);
+
+        var second = await pool.RentAsync(CancellationToken.None);
+        Assert.True(second.IsSuccess);
+        Assert.Equal(1, factory.CreatedCount);
+    }
+
+    [Fact]
+    public async Task Rent_after_dispose_returns_object_disposed()
+    {
+        var factory = new FakeFactory();
+        var options = new RedisConnectionOptions { Host = "h", MaxConnections = 1, MaxIdle = 1, AcquireTimeout = TimeSpan.FromSeconds(1) };
+
+        var pool = new RedisConnectionPool(factory, new OptionsMonitorStub<RedisConnectionOptions>(options), NullLogger<RedisConnectionPool>.Instance);
+        await pool.DisposeAsync();
+
+        var rented = await pool.RentAsync(CancellationToken.None);
+        Assert.False(rented.IsSuccess);
+
+        var ex = rented.Match<Exception>(_ => new Exception("Expected failure"), e => e);
+        Assert.IsType<ObjectDisposedException>(ex);
+    }
+
     private sealed class FakeFactory : IRedisConnectionFactory
     {
         public int CreatedCount { get; private set; }

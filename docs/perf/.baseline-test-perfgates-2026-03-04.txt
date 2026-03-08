@@ -1,0 +1,12 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  VapeCache.Abstractions -> C:\Visual Studio Projects\VapeCache\VapeCache.Abstractions\bin\Release\net10.0\VapeCache.Abstractions.dll
+  VapeCache.Infrastructure -> C:\Visual Studio Projects\VapeCache\VapeCache.Infrastructure\bin\Release\net10.0\VapeCache.Infrastructure.dll
+  VapeCache.PerfGates.Tests -> C:\Visual Studio Projects\VapeCache\VapeCache.PerfGates.Tests\bin\Release\net10.0\VapeCache.PerfGates.Tests.dll
+Test run for C:\Visual Studio Projects\VapeCache\VapeCache.PerfGates.Tests\bin\Release\net10.0\VapeCache.PerfGates.Tests.dll (.NETCoreApp,Version=v10.0)
+VSTest version 18.0.1 (x64)
+
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:     7, Skipped:     0, Total:     7, Duration: 96 ms - VapeCache.PerfGates.Tests.dll (net10.0)

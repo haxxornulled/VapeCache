@@ -23,6 +23,18 @@ Or provide a connection string:
 $env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
 ```
 
+Bind the section before you register the core services:
+
+```csharp
+using VapeCache.Abstractions.Connections;
+
+builder.Services.AddOptions<RedisConnectionOptions>()
+    .Bind(builder.Configuration.GetSection("RedisConnection"));
+
+builder.Services.AddVapecacheRedisConnections();
+builder.Services.AddVapecacheCaching();
+```
+
 ## RedisConnection (RedisConnectionOptions)
 
 Controls connection pooling and socket behavior.
@@ -55,10 +67,13 @@ Controls connection pooling and socket behavior.
     "EnableTcpKeepAlive": true,
     "TcpKeepAliveTime": "00:00:30",
     "TcpKeepAliveInterval": "00:00:10",
-    "AllowAuthFallbackToPasswordOnly": true,
+    "AllowAuthFallbackToPasswordOnly": false,
     "LogWhoAmIOnConnect": false,
     "MaxBulkStringBytes": 16777216,
-    "MaxArrayDepth": 64
+    "MaxArrayDepth": 64,
+    "RespProtocolVersion": 3,
+    "EnableClusterRedirection": true,
+    "MaxClusterRedirects": 3
   }
 }
 ```
@@ -70,6 +85,10 @@ Controls connection pooling and socket behavior.
 - Defaults are full-tilt for high-throughput links (`TcpSendBufferBytes=4MB`, `TcpReceiveBufferBytes=4MB`).
 - `EnableTcpNoDelay=true` is best for low-latency cache workloads.
 - `TcpSendBufferBytes` / `TcpReceiveBufferBytes` let you tune socket buffering for high-throughput links.
+- `RespProtocolVersion` supports `2` or `3`; default negotiation is `RESP2` unless configured.
+- `EnableClusterRedirection=true` enables MOVED/ASK retries on cache-path commands.
+- `MaxClusterRedirects` bounds redirect hops per command (default `3`, clamped `0..16`).
+- `AllowAuthFallbackToPasswordOnly=false` is the safe default; only enable it when you intentionally want legacy password-only fallback after ACL auth fails.
 
 ## RedisMultiplexer (RedisMultiplexerOptions)
 
@@ -78,21 +97,28 @@ Controls multiplexed command execution.
 ```json
 {
   "RedisMultiplexer": {
+    "TransportProfile": "FullTilt",
     "Connections": 4,
     "MaxInFlightPerConnection": 4096,
     "ResponseTimeout": "00:00:02",
     "EnableCommandInstrumentation": true,
     "EnableCoalescedSocketWrites": true,
     "EnableSocketRespReader": false,
-    "CoalescedWriteMaxBytes": 1048576,
-    "CoalescedWriteMaxSegments": 256,
-    "CoalescedWriteSmallCopyThresholdBytes": 2048,
+    "CoalescedWriteMaxBytes": 524288,
+    "CoalescedWriteMaxSegments": 192,
+    "CoalescedWriteSmallCopyThresholdBytes": 1536,
     "EnableAdaptiveCoalescing": true,
-    "AdaptiveCoalescingLowDepth": 4,
-    "AdaptiveCoalescingHighDepth": 64,
+    "AdaptiveCoalescingLowDepth": 6,
+    "AdaptiveCoalescingHighDepth": 56,
     "AdaptiveCoalescingMinWriteBytes": 65536,
-    "AdaptiveCoalescingMinSegments": 64,
-    "AdaptiveCoalescingMinSmallCopyThresholdBytes": 512
+    "AdaptiveCoalescingMinSegments": 48,
+    "AdaptiveCoalescingMinSmallCopyThresholdBytes": 384,
+    "CoalescingEnterQueueDepth": 8,
+    "CoalescingExitQueueDepth": 3,
+    "CoalescedWriteMaxOperations": 128,
+    "CoalescingSpinBudget": 8,
+    "BulkLaneConnections": 1,
+    "BulkLaneResponseTimeout": "00:00:05"
   }
 }
 ```
@@ -101,10 +127,16 @@ Controls multiplexed command execution.
 - `EnableAutoscaling` and autoscaler thresholds are **Enterprise-only** operational controls.
 - For OSS-only deployments, keep `EnableAutoscaling=false` (default).
 - `ResponseTimeout` applies per command response; set to `00:00:00` to disable.
-- Defaults are full-tilt (`CoalescedWriteMaxBytes=1MB`, `CoalescedWriteMaxSegments=256`, `CoalescedWriteSmallCopyThresholdBytes=2048`).
+- Effective FullTilt profile sizing defaults are `CoalescedWriteMaxBytes=524288`, `CoalescedWriteMaxSegments=192`, `CoalescedWriteSmallCopyThresholdBytes=1536`.
 - Coalesced write knobs control packet framing at the driver layer. Increase batch bytes/segments for throughput; reduce for lower tail latency.
 - `EnableAdaptiveCoalescing=true` automatically scales between the adaptive minimum limits and configured max limits based on queue depth.
 - `EnableSocketRespReader` is optional and defaults to `false`; enable only after validating in your environment.
+- Set `TransportProfile=Custom` when you want explicit coalescing byte/segment values to win over profile defaults.
+- `CoalescingEnterQueueDepth` / `CoalescingExitQueueDepth` provide burst hysteresis so short spikes batch well without holding lone requests.
+- `CoalescedWriteMaxOperations` limits per-batch op count for predictable p95/p99 behavior.
+- `CoalescingSpinBudget` controls brief follower capture during bursts; keep this small for stable tails.
+- `BulkLaneConnections` isolates pooled bulk paths from fast-lane p99 and autoscaler signals (`0..2`, effective only when fast connections > 1).
+- Fast-path and lane-management diagrams: [MUX_FAST_PATH_ARCHITECTURE.md](MUX_FAST_PATH_ARCHITECTURE.md)
 
 ### Runtime Performance Guardrails
 
@@ -117,6 +149,15 @@ This keeps baseline performance stable even when config values are invalid or ex
 - Negative/invalid time spans are normalized to safe defaults or `TimeSpan.Zero` where intended.
 
 If normalization occurs, `RedisCommandExecutor` logs a warning so teams can correct config drift.
+
+### Runtime Snapshot + Hot Reload Behavior
+
+`RedisCommandExecutor` applies multiplexer options through an immutable runtime snapshot that is swapped atomically on `IOptionsMonitor` updates.
+
+- Hot paths read a single snapshot reference per decision point to avoid mixed-config reads.
+- `EnableCommandInstrumentation` updates take effect immediately without transport restarts.
+- New lanes created during autoscale events use the latest snapshot defaults.
+- Existing long-lived transport loops keep their current socket/runtime state until naturally recycled.
 
 ### Autoscaler Knobs (Enterprise)
 
@@ -170,6 +211,29 @@ Controls hybrid failover behavior.
 }
 ```
 
+## HybridFailover (HybridFailoverOptions)
+
+Controls how VapeCache keeps local in-memory fallback warm while Redis is healthy.
+
+```json
+{
+  "HybridFailover": {
+    "MirrorWritesToFallbackWhenRedisHealthy": true,
+    "WarmFallbackOnRedisReadHit": true,
+    "FallbackWarmReadTtl": "00:02:00",
+    "FallbackMirrorWriteTtlWhenMissing": "00:05:00",
+    "MaxMirrorPayloadBytes": 262144,
+    "RemoveStaleFallbackOnRedisMiss": true
+  }
+}
+```
+
+**Notes**
+- `MirrorWritesToFallbackWhenRedisHealthy=true` gives immediate failover continuity for recent writes.
+- `WarmFallbackOnRedisReadHit=true` warms hot keys locally from Redis hits.
+- `RemoveStaleFallbackOnRedisMiss=true` avoids stale local values during outages after Redis eviction.
+- In multi-node/web-garden deployments, local in-memory fallback is still node-local. Use sticky sessions/affinity during failover.
+
 ## CacheStampede (CacheStampedeOptions)
 
 Controls stampede protection.
@@ -202,7 +266,7 @@ Controls large-payload spill behavior for the in-memory fallback cache.
 ```json
 {
   "InMemorySpill": {
-    "EnableSpillToDisk": true,
+    "EnableSpillToDisk": false,
     "SpillThresholdBytes": 262144,
     "InlinePrefixBytes": 4096,
     "SpillDirectory": "%LOCALAPPDATA%/VapeCache/spill",
@@ -215,8 +279,118 @@ Controls large-payload spill behavior for the in-memory fallback cache.
 
 **Notes**
 - Values larger than `SpillThresholdBytes` are stored with an in-memory prefix and a disk tail.
+- `EnableSpillToDisk` requires a writable spill store registration (`AddVapeCachePersistence(...)`); otherwise fallback remains memory-only and emits diagnostics as `mode=noop`.
 - Register a custom `ISpillEncryptionProvider` to encrypt spill files.
 - Orphan cleanup is best-effort and only runs when enabled.
+
+## Redis Reconciliation (Optional)
+
+Reconciliation lives in the `VapeCache.Reconciliation` package. It tracks in-memory writes during outages and replays them when Redis recovers.
+
+```json
+{
+  "RedisReconciliation": {
+    "Enabled": true,
+    "MaxOperationAge": "00:05:00",
+    "MaxPendingOperations": 100000,
+    "MaxOperationsPerRun": 10000,
+    "BatchSize": 256,
+    "MaxRunDuration": "00:00:30",
+    "InitialBackoff": "00:00:00.025",
+    "MaxBackoff": "00:00:02",
+    "BackoffMultiplier": 2.0
+  },
+  "RedisReconciliationStore": {
+    "UseSqlite": true,
+    "StorePath": "%LOCALAPPDATA%/VapeCache/persistence/reconciliation.db",
+    "BusyTimeoutMs": 1000,
+    "EnablePragmaOptimizations": true,
+    "VacuumOnClear": false
+  }
+}
+```
+
+Enable in code:
+
+```csharp
+builder.Services.AddVapeCacheRedisReconciliation(options =>
+{
+    options.MaxOperationAge = TimeSpan.FromMinutes(5);
+});
+```
+
+## ASP.NET Core Output Caching (MVC/Blazor/Minimal API)
+
+Use `VapeCache.Extensions.AspNetCore` to keep ASP.NET Core output-cache middleware/policies while storing responses in VapeCache:
+
+```csharp
+builder.Services.AddVapeCacheOutputCaching(
+    configureOutputCache: options =>
+    {
+        options.AddBasePolicy(policy => policy.Expire(TimeSpan.FromSeconds(30)));
+    },
+    configureStore: store =>
+    {
+        store.KeyPrefix = "vapecache:output";
+        store.DefaultTtl = TimeSpan.FromSeconds(30);
+        store.EnableTagIndexing = true;
+});
+```
+
+Sticky-session affinity hints for clustered/web-garden hosts:
+
+```csharp
+builder.Services.AddVapeCacheFailoverAffinityHints(options =>
+{
+    options.NodeId = Environment.MachineName;
+    options.CookieName = "VapeCacheAffinity";
+});
+
+var app = builder.Build();
+app.UseVapeCacheFailoverAffinityHints();
+```
+
+Configuration binding option:
+
+```csharp
+builder.Services.AddVapeCacheOutputCaching(builder.Configuration);
+```
+
+```json
+{
+  "VapeCacheOutputCache": {
+    "KeyPrefix": "vapecache:output",
+    "DefaultTtl": "00:00:30",
+    "EnableTagIndexing": true
+  }
+}
+```
+
+## Enterprise Licensing Runtime
+
+Enterprise extension gates now fail closed on missing keys. Set a key explicitly:
+
+```bash
+$env:VAPECACHE_LICENSE_KEY = "VC2...."
+```
+
+Optional online revocation/kill-switch checks:
+
+```bash
+$env:VAPECACHE_LICENSE_REVOCATION_ENABLED = "true"
+$env:VAPECACHE_LICENSE_REVOCATION_ENDPOINT = "https://license-control-plane.internal"
+$env:VAPECACHE_LICENSE_REVOCATION_API_KEY = "<secret>"
+$env:VAPECACHE_LICENSE_REVOCATION_TIMEOUT_MS = "2000"
+$env:VAPECACHE_LICENSE_REVOCATION_CACHE_SECONDS = "60"
+```
+
+Online revocation now fails closed by default. Only set `VAPECACHE_LICENSE_REVOCATION_FAIL_OPEN=true` if you explicitly want legacy fail-open behavior during revocation endpoint failures.
+
+Verifier override hardening:
+
+- Default behavior ignores verifier env overrides.
+- To opt in (dev/test only), set:
+  - `$env:VAPECACHE_LICENSE_ALLOW_VERIFIER_ENV_OVERRIDE = "true"`
 
 ## Environment Variables
 
@@ -261,5 +435,6 @@ builder.Services.AddOptions<CacheStampedeOptions>()
 ## See Also
 - [QUICKSTART.md](QUICKSTART.md)
 - [ARCHITECTURE.md](ARCHITECTURE.md)
+- [MUX_FAST_PATH_ARCHITECTURE.md](MUX_FAST_PATH_ARCHITECTURE.md)
 - [OBSERVABILITY_ARCHITECTURE.md](OBSERVABILITY_ARCHITECTURE.md)
 - [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md)

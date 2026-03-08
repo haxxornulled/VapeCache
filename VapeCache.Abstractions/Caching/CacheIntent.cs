@@ -1,3 +1,5 @@
+using VapeCache.Abstractions.Diagnostics;
+
 namespace VapeCache.Abstractions.Caching;
 
 public enum CacheIntentKind
@@ -21,7 +23,7 @@ public sealed record CacheIntent(
 
 public sealed record CacheIntentEntry(
     string Key,
-    string Backend,
+    BackendType Backend,
     CacheIntent Intent,
     DateTimeOffset RecordedAtUtc,
     DateTimeOffset? ExpiresAtUtc,
@@ -29,7 +31,7 @@ public sealed record CacheIntentEntry(
 
 public interface ICacheIntentRegistry
 {
-    void RecordSet(string key, string backend, in CacheEntryOptions options, int payloadBytes);
+    void RecordSet(string key, BackendType backend, in CacheEntryOptions options, int payloadBytes);
     void RecordRemove(string key);
     bool TryGet(string key, out CacheIntentEntry? entry);
     IReadOnlyList<CacheIntentEntry> GetRecent(int maxCount);

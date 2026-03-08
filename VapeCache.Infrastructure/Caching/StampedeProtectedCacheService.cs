@@ -3,21 +3,24 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Core.Policies;
 
 namespace VapeCache.Infrastructure.Caching;
 
-internal sealed class StampedeProtectedCacheService : ICacheService
+internal sealed class StampedeProtectedCacheService : ICacheService, ICacheTagService
 {
     private sealed class FailureEntry
     {
         public long RetryAfterUtcTicks;
     }
 
-    private sealed class LockEntry
+    private sealed class LockEntry : IDisposable
     {
         public readonly SemaphoreSlim Semaphore = new(1, 1);
         public int RefCount;
         public int Disposed; // 0 = active, 1 = disposed (prevents race on disposal)
+
+        public void Dispose() => Semaphore.Dispose();
     }
 
     private readonly ICacheService _inner;
@@ -58,6 +61,30 @@ internal sealed class StampedeProtectedCacheService : ICacheService
 
     public ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
         => _inner.SetAsync(key, value, serialize, options, ct);
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<long> InvalidateTagAsync(string tag, CancellationToken ct = default)
+        => RequireTagService().InvalidateTagAsync(tag, ct);
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public ValueTask<long> GetTagVersionAsync(string tag, CancellationToken ct = default)
+        => RequireTagService().GetTagVersionAsync(tag, ct);
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<long> InvalidateZoneAsync(string zone, CancellationToken ct = default)
+        => RequireTagService().InvalidateZoneAsync(zone, ct);
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public ValueTask<long> GetZoneVersionAsync(string zone, CancellationToken ct = default)
+        => RequireTagService().GetZoneVersionAsync(zone, ct);
 
     public async ValueTask<T> GetOrSetAsync<T>(
         string key,
@@ -174,7 +201,7 @@ internal sealed class StampedeProtectedCacheService : ICacheService
                     if (_locks.TryRemove(new KeyValuePair<string, LockEntry>(key, entry)))
                     {
                         Interlocked.Decrement(ref _lockKeyCount);
-                        entry.Semaphore.Dispose();
+                        entry.Dispose();
                     }
                 }
             }
@@ -183,32 +210,13 @@ internal sealed class StampedeProtectedCacheService : ICacheService
 
     private void ValidateKey(string key, CacheStampedeOptions options)
     {
-        if (!options.RejectSuspiciousKeys)
+        var decision = StampedeRuntimePolicy.ValidateKey(key, options.RejectSuspiciousKeys, options.MaxKeyLength);
+        if (decision.IsValid)
             return;
 
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            CacheTelemetry.StampedeKeyRejected.Add(1, new TagList { { "reason", "empty" } });
-            _stats?.IncStampedeKeyRejected();
-            throw new ArgumentException("Cache key must not be null or empty.", nameof(key));
-        }
-
-        if (key.Length > options.MaxKeyLength)
-        {
-            CacheTelemetry.StampedeKeyRejected.Add(1, new TagList { { "reason", "max_length" } });
-            _stats?.IncStampedeKeyRejected();
-            throw new ArgumentException($"Cache key length ({key.Length}) exceeds configured max ({options.MaxKeyLength}).", nameof(key));
-        }
-
-        for (var i = 0; i < key.Length; i++)
-        {
-            if (char.IsControl(key[i]))
-            {
-                CacheTelemetry.StampedeKeyRejected.Add(1, new TagList { { "reason", "control_char" } });
-                _stats?.IncStampedeKeyRejected();
-                throw new ArgumentException("Cache key contains control characters.", nameof(key));
-            }
-        }
+        CacheTelemetry.StampedeKeyRejected.Add(1, new TagList { { "reason", MapKeyRejectionTag(decision.Reason) } });
+        _stats?.IncStampedeKeyRejected();
+        throw CreateKeyValidationException(key, options, decision.Reason);
     }
 
     private static CancellationTokenSource? CreateWaitTokenSource(CacheStampedeOptions options, CancellationToken ct)
@@ -223,13 +231,13 @@ internal sealed class StampedeProtectedCacheService : ICacheService
 
     private void ThrowIfInFailureBackoff(string key, CacheStampedeOptions options)
     {
-        if (!options.EnableFailureBackoff || options.FailureBackoff <= TimeSpan.Zero)
+        if (!StampedeRuntimePolicy.IsFailureBackoffConfigured(options.EnableFailureBackoff, options.FailureBackoff))
             return;
 
         if (!_failures.TryGetValue(key, out var state))
             return;
 
-        if (DateTime.UtcNow.Ticks < Volatile.Read(ref state.RetryAfterUtcTicks))
+        if (StampedeRuntimePolicy.IsWithinFailureBackoffWindow(DateTime.UtcNow.Ticks, Volatile.Read(ref state.RetryAfterUtcTicks)))
         {
             CacheTelemetry.StampedeFailureBackoffRejected.Add(1);
             _stats?.IncStampedeFailureBackoffRejected();
@@ -241,11 +249,42 @@ internal sealed class StampedeProtectedCacheService : ICacheService
 
     private void RegisterFailure(string key, CacheStampedeOptions options)
     {
-        if (!options.EnableFailureBackoff || options.FailureBackoff <= TimeSpan.Zero)
+        if (!StampedeRuntimePolicy.IsFailureBackoffConfigured(options.EnableFailureBackoff, options.FailureBackoff))
             return;
 
-        var retryAfterTicks = DateTime.UtcNow.Add(options.FailureBackoff).Ticks;
+        var retryAfterTicks = StampedeRuntimePolicy.ComputeRetryAfterUtcTicks(DateTime.UtcNow.Ticks, options.FailureBackoff);
         var entry = _failures.GetOrAdd(key, static _ => new FailureEntry());
         Volatile.Write(ref entry.RetryAfterUtcTicks, retryAfterTicks);
+    }
+
+    private static string MapKeyRejectionTag(StampedeKeyRejectionReason reason) =>
+        reason switch
+        {
+            StampedeKeyRejectionReason.Empty => "empty",
+            StampedeKeyRejectionReason.MaxLength => "max_length",
+            StampedeKeyRejectionReason.ControlCharacter => "control_char",
+            _ => "unknown"
+        };
+
+    private static ArgumentException CreateKeyValidationException(string key, CacheStampedeOptions options, StampedeKeyRejectionReason reason) =>
+        reason switch
+        {
+            StampedeKeyRejectionReason.Empty =>
+                new ArgumentException("Cache key must not be null or empty.", nameof(key)),
+            StampedeKeyRejectionReason.MaxLength =>
+                new ArgumentException($"Cache key length ({key.Length}) exceeds configured max ({options.MaxKeyLength}).", nameof(key)),
+            StampedeKeyRejectionReason.ControlCharacter =>
+                new ArgumentException("Cache key contains control characters.", nameof(key)),
+            _ =>
+                new ArgumentException("Cache key failed stampede validation.", nameof(key))
+        };
+
+    private ICacheTagService RequireTagService()
+    {
+        if (_inner is ICacheTagService tags)
+            return tags;
+
+        throw new NotSupportedException(
+            $"Inner cache service '{_inner.GetType().Name}' does not implement tag/zone invalidation.");
     }
 }

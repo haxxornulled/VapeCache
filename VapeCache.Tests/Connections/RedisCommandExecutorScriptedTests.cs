@@ -348,6 +348,101 @@ public sealed class RedisCommandExecutorScriptedTests
         Assert.Empty(await sut.ModuleListAsync(default));
     }
 
+    [Fact]
+    public async Task FtSearchAsync_parses_resp2_document_ids_with_payload_rows()
+    {
+        var stream = new ScriptedResponseStream();
+        await using var factory = new ReconnectingConnectionFactory(stream);
+        await using var sut = CreateExecutor(factory);
+
+        stream.Enqueue("*3\r\n:1\r\n$9\r\npos:sku:1\r\n*2\r\n$3\r\nsku\r\n$1\r\n1\r\n");
+
+        var ids = await sut.FtSearchAsync("idx:pos", "pencil*", 0, 10, default);
+
+        Assert.Single(ids);
+        Assert.Equal("pos:sku:1", ids[0]);
+    }
+
+    [Fact]
+    public async Task FtSearchAsync_parses_resp3_map_results_with_id_fields()
+    {
+        var stream = new ScriptedResponseStream();
+        await using var factory = new ReconnectingConnectionFactory(stream);
+        await using var sut = CreateExecutor(factory);
+
+        stream.Enqueue(
+            "%2\r\n" +
+            "+total_results\r\n" +
+            ":1\r\n" +
+            "+results\r\n" +
+            "*1\r\n" +
+            "%2\r\n" +
+            "+id\r\n" +
+            "$9\r\npos:sku:2\r\n" +
+            "+extra_attributes\r\n" +
+            "%1\r\n" +
+            "+name\r\n" +
+            "$6\r\nPencil\r\n");
+
+        var ids = await sut.FtSearchAsync("idx:pos", "*", 0, 10, default);
+
+        Assert.Single(ids);
+        Assert.Equal("pos:sku:2", ids[0]);
+    }
+
+    [Fact]
+    public async Task FtCreateAsync_returns_false_when_index_already_exists()
+    {
+        var stream = new ScriptedResponseStream();
+        await using var factory = new ReconnectingConnectionFactory(stream);
+        await using var sut = CreateExecutor(factory);
+
+        stream.Enqueue("-Index already exists\r\n");
+
+        var created = await sut.FtCreateAsync("idx:pos", "pos:sku:", new[] { "name", "code" }, default);
+
+        Assert.False(created);
+    }
+
+    [Fact]
+    public async Task ZScoreAsync_parses_special_double_tokens()
+    {
+        var stream = new ScriptedResponseStream();
+        await using var factory = new ReconnectingConnectionFactory(stream);
+        await using var sut = CreateExecutor(factory);
+
+        stream.Enqueue("$4\r\n+inf\r\n");
+        var positiveInfinity = await sut.ZScoreAsync("z1", "m1"u8.ToArray(), default);
+        Assert.Equal(double.PositiveInfinity, positiveInfinity);
+
+        stream.Enqueue("$4\r\n-inf\r\n");
+        var negativeInfinity = await sut.ZScoreAsync("z1", "m1"u8.ToArray(), default);
+        Assert.Equal(double.NegativeInfinity, negativeInfinity);
+
+        stream.Enqueue("$3\r\nNaN\r\n");
+        var nan = await sut.ZScoreAsync("z1", "m1"u8.ToArray(), default);
+        Assert.NotNull(nan);
+        Assert.True(double.IsNaN(nan.Value));
+    }
+
+    [Fact]
+    public async Task ScanAsync_parses_bulk_cursor_and_yields_keys()
+    {
+        var stream = new ScriptedResponseStream();
+        await using var factory = new ReconnectingConnectionFactory(stream);
+        await using var sut = CreateExecutor(factory);
+
+        stream.Enqueue("*2\r\n$1\r\n0\r\n*2\r\n$4\r\nkey1\r\n$4\r\nkey2\r\n");
+
+        var keys = new List<string>();
+        await foreach (var key in sut.ScanAsync(pattern: null, pageSize: 16, default))
+        {
+            keys.Add(key);
+        }
+
+        Assert.Equal(["key1", "key2"], keys);
+    }
+
     private static RedisCommandExecutor CreateExecutor(
         IRedisConnectionFactory factory,
         RedisMultiplexerOptions? options = null)

@@ -2,7 +2,8 @@ namespace VapeCache.Abstractions.Caching;
 
 /// <summary>
 /// Tracks in-memory cache writes during Redis outages and syncs them back when Redis recovers.
-/// This ensures zero data loss during circuit breaker failover scenarios.
+/// Uses no-drop tracking semantics while the process is running: operations are persisted (or deferred for retry)
+/// instead of being dropped under queue pressure.
 /// </summary>
 public interface IRedisReconciliationService
 {

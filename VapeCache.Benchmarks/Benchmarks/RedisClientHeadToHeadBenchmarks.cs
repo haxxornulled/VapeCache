@@ -32,8 +32,12 @@ public class RedisClientHeadToHeadBenchmarks
         RedisClientOperation.ListPushPop
     ];
 
-    private static readonly int[] FullPayloadSizes = [256, 2048];
-    private static readonly int[] QuickPayloadSizes = [256];
+    private static readonly int[] FullPayloadSizes = [256, 1024, 4096, 16384];
+    private static readonly int[] QuickPayloadSizes = [256, 4096];
+    private static readonly bool[] FullInstrumentationModes = [false, true];
+    private static readonly bool[] QuickInstrumentationModes = [false];
+    private static readonly VapeReadPath[] FullReadPaths = [VapeReadPath.Lease, VapeReadPath.Materialized];
+    private static readonly VapeReadPath[] QuickReadPaths = [VapeReadPath.Lease];
 
     [ParamsSource(nameof(Operations))]
     public RedisClientOperation Operation { get; set; }
@@ -41,17 +45,33 @@ public class RedisClientHeadToHeadBenchmarks
     [ParamsSource(nameof(PayloadSizes))]
     public int PayloadBytes { get; set; }
 
-    [Params(false, true)]
+    [ParamsSource(nameof(InstrumentationModes))]
     public bool EnableInstrumentation { get; set; }
 
-    [Params(VapeReadPath.Lease, VapeReadPath.Materialized)]
+    [ParamsSource(nameof(ReadPaths))]
     public VapeReadPath ReadPath { get; set; }
 
     public IEnumerable<RedisClientOperation> Operations =>
         BenchmarkRedisConfig.ResolveEnumParams("VAPECACHE_BENCH_CLIENT_OPERATIONS", FullOperations, QuickOperations);
 
     public IEnumerable<int> PayloadSizes =>
-        BenchmarkRedisConfig.ResolveIntParams("VAPECACHE_BENCH_CLIENT_PAYLOADS", FullPayloadSizes, QuickPayloadSizes);
+        BenchmarkRedisConfig.ResolveIntParamsWithFallback(
+            "VAPECACHE_BENCH_CLIENT_PAYLOADS",
+            "VAPECACHE_BENCH_PARITY_PAYLOADS",
+            FullPayloadSizes,
+            QuickPayloadSizes);
+
+    public IEnumerable<bool> InstrumentationModes =>
+        BenchmarkRedisConfig.ResolveBoolParams(
+            "VAPECACHE_BENCH_CLIENT_INSTRUMENTATION",
+            FullInstrumentationModes,
+            QuickInstrumentationModes);
+
+    public IEnumerable<VapeReadPath> ReadPaths =>
+        BenchmarkRedisConfig.ResolveEnumParams(
+            "VAPECACHE_BENCH_CLIENT_READ_PATHS",
+            FullReadPaths,
+            QuickReadPaths);
 
     private readonly Consumer _consumer = new();
     private byte[] _payload = Array.Empty<byte>();

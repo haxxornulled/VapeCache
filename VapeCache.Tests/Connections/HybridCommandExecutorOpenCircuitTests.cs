@@ -13,7 +13,7 @@ namespace VapeCache.Tests.Connections;
 public sealed class HybridCommandExecutorOpenCircuitTests
 {
     [Fact]
-    public async Task Open_circuit_routes_commands_to_fallback_for_all_surfaces()
+    public async Task Open_circuit_routes_fallbackable_commands_to_fallback()
     {
         var current = new CurrentCacheService();
         var stats = new CacheStatsRegistry();
@@ -159,7 +159,6 @@ public sealed class HybridCommandExecutorOpenCircuitTests
         Assert.NotEmpty(zItems);
 
         Assert.Equal("PONG", await sut.PingAsync(default));
-        Assert.Empty(await sut.ModuleListAsync(default));
 
         // Extended fallback-only operations
         await sut.SetAsync("exp1", "abcdef"u8.ToArray(), null, default);

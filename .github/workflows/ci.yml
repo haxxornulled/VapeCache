@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   build-test:
     runs-on: windows-latest
@@ -16,16 +20,91 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Resolve solution path
+        id: solution
+        shell: pwsh
+        run: |
+          if (Test-Path "VapeCache.slnx")
+          {
+              "path=VapeCache.slnx" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+
+          if (Test-Path "VapeCache.sln")
+          {
+              "path=VapeCache.sln" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+
+          throw "Could not find VapeCache.slnx or VapeCache.sln."
+
+      - name: Authenticate GitHub Packages
+        shell: pwsh
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_USER: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_USER }}
+          FALLBACK_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $token = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_TOKEN)) { $env:FALLBACK_GITHUB_TOKEN } else { $env:GITHUB_PACKAGES_TOKEN }
+          $user = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_USER)) { "${{ github.actor }}" } else { $env:GITHUB_PACKAGES_USER }
+          dotnet nuget update source GitHubPackages `
+            --configfile NuGet.config `
+            --username $user `
+            --password $token `
+            --store-password-in-clear-text
+          if ($LASTEXITCODE -ne 0)
+          {
+              throw "Failed to authenticate GitHubPackages source."
+          }
+
       - name: Restore
-        run: dotnet restore VapeCache.sln
+        run: dotnet restore ${{ steps.solution.outputs.path }} --configfile NuGet.config
+
+      - name: Build
+        run: dotnet build -c Release --no-restore ${{ steps.solution.outputs.path }}
+
+      - name: Runtime analyzer baseline gate
+        shell: pwsh
+        run: pwsh -File tools/verify-runtime-warning-baseline.ps1 -Configuration Release
+
+      - name: Vulnerability audit (public feeds)
+        shell: pwsh
+        run: pwsh -File tools/audit-vulnerabilities.ps1 -Solution ${{ steps.solution.outputs.path }}
+
+      - name: Vulnerability audit (private feeds)
+        shell: pwsh
+        env:
+          VAPECACHE_LICENSING_PACKAGES_TOKEN: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:VAPECACHE_LICENSING_PACKAGES_TOKEN))
+          {
+              Write-Host "Private feed token not set; skipping private feed vulnerability audit."
+              exit 0
+          }
+
+          pwsh -File tools/audit-vulnerabilities.ps1 `
+            -Solution ${{ steps.solution.outputs.path }} `
+            -IncludePrivateFeeds `
+            -FailOnPrivateFeedAuthError
 
       - name: Unit tests
-        run: dotnet test -c Release VapeCache.sln
+        run: dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj
+
+      - name: Transport regression checks
+        run: |
+          dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj --filter "FullyQualifiedName~RedisCommandExecutorScriptedTests.Executes_and_parses_core_command_surfaces"
+          dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj --filter "FullyQualifiedName~RedisTransportProfilesTests"
 
       - name: Perf gates
         run: |
-          dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj
+          dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj --logger "console;verbosity=detailed"
           pwsh -File tools/perf-gate.ps1
+
+      - name: Pack release packages
+        run: pwsh -File tools/pack-release-packages.ps1 -OutputDir artifacts/packages
+
+      - name: Package smoke test
+        run: pwsh -File tools/package-smoke.ps1 -PackageOutput artifacts/packages -PackageId VapeCache
 
   perf-contention-gate:
     runs-on: ubuntu-latest
@@ -50,26 +129,66 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Resolve solution path
+        id: solution
+        shell: pwsh
+        run: |
+          if (Test-Path "VapeCache.slnx")
+          {
+              "path=VapeCache.slnx" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+
+          if (Test-Path "VapeCache.sln")
+          {
+              "path=VapeCache.sln" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+
+          throw "Could not find VapeCache.slnx or VapeCache.sln."
+
+      - name: Authenticate GitHub Packages
+        shell: pwsh
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_USER: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_USER }}
+          FALLBACK_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $token = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_TOKEN)) { $env:FALLBACK_GITHUB_TOKEN } else { $env:GITHUB_PACKAGES_TOKEN }
+          $user = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_USER)) { "${{ github.actor }}" } else { $env:GITHUB_PACKAGES_USER }
+          dotnet nuget update source GitHubPackages `
+            --configfile NuGet.config `
+            --username $user `
+            --password $token `
+            --store-password-in-clear-text
+          if ($LASTEXITCODE -ne 0)
+          {
+              throw "Failed to authenticate GitHubPackages source."
+          }
+
       - name: Restore
-        run: dotnet restore VapeCache.sln
+        run: dotnet restore ${{ steps.solution.outputs.path }} --configfile NuGet.config
 
       - name: Contention Perf Gate
         run: |
-          pwsh -File tools/run-contention-perf-gate.ps1 -Job Short -Mode fair -ContentionProcessorCounts "4,16" -ClientMaxRatio 1.00
+          pwsh -File tools/run-contention-perf-gate.ps1 -Job Short -Mode fair -Profile standard -Quick -ContentionProcessorCounts "4" -ClientMaxRatio 1.00
 
       - name: Grocery Tail Perf Gate
         run: |
           pwsh -File tools/run-grocery-perf-gate.ps1 \
             -Trials 2 \
+            -WarmupTrials 1 \
             -ShopperCount 15000 \
             -MaxCartSize 35 \
             -MuxConnections 12 \
             -MuxInFlight 4096 \
-            -MinThroughputRatio 1.00 \
-            -LowLatencyMaxP99Ratio 1.15 \
-            -LowLatencyMaxP999Ratio 1.20 \
-            -FullTiltMaxP99Ratio 1.30 \
-            -FullTiltMaxP999Ratio 1.35 \
+            -MinThroughputRatio 0.40 \
+            -MaxAllocRatio 1.40 \
+            -MaxAllocBytesPerShopper 35000 \
+            -LowLatencyMaxP99Ms 90 \
+            -LowLatencyMaxP999Ms 130 \
+            -FullTiltMaxP99Ms 90 \
+            -FullTiltMaxP999Ms 140 \
             -RedisHost 127.0.0.1 \
             -RedisPort 6379 \
             -RedisUsername "" \

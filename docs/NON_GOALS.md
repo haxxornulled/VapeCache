@@ -37,17 +37,20 @@ VapeCache implements ~20 core caching commands. StackExchange.Redis has 200+.
 
 **Recommendation:** Use VapeCache for caching, StackExchange.Redis for advanced features.
 
-### Cluster Support
-❌ **Single-instance or Sentinel only**
+### Full Cluster Orchestration
+⚠️ **Partial support only**
 
-No support for:
-- MOVED/ASK redirects
-- Cluster topology tracking
-- Cross-shard operations
+Supported now:
+- MOVED/ASK redirect handling on core cache-path commands (GET/SET/DEL + lease variants)
+- Redirect-aware retries with bounded hop count
 
-**Why:** Cluster mode adds significant complexity (topology changes, slot migrations, redirect handling). Most users don't need it - single-instance with replication/Sentinel covers 90% of use cases.
+Still not in scope:
+- Full topology tracking and slot-map orchestration for every command surface
+- Cross-shard multi-key orchestration
 
-**Workaround:** Use Redis Sentinel for HA, or use StackExchange.Redis for cluster mode.
+**Why:** Full cluster orchestration adds substantial complexity and operational surface area. We’re prioritizing reliability for cache-first operations.
+
+**Workaround:** For advanced full-cluster command workflows, pair with StackExchange.Redis.
 
 ### Lua Scripting
 ❌ **No EVAL/EVALSHA commands**
@@ -82,18 +85,17 @@ No support for:
 
 **Workaround:** Use StackExchange.Redis or Redis.OM for Streams.
 
-### RESP3 Protocol
-❌ **RESP2 only**
+### RESP3 Advanced Features
+⚠️ **Core RESP3 support is in; advanced RESP3 features remain scoped**
 
-No support for:
-- HELLO 3 command
-- Push messages
-- Client-side caching
-- Map/Set/Attribute types
+Supported now:
+- HELLO 3 negotiation
+- RESP3 parser support for map/set/attribute/push/null/boolean/verbatim/blob-error types
+- Push frame handling in reader loops (ignored safely when unrelated to request/response path)
 
-**Why:** RESP2 is stable, widely supported, and sufficient for caching. RESP3 adoption is still limited (Redis 6.0+).
-
-**Planned:** Future consideration (if RESP3 becomes mainstream).
+Still not in scope:
+- Client-side caching protocol orchestration
+- Dedicated RESP3 push subscription workflows beyond request/response handling
 
 ### Transactions (MULTI/EXEC)
 ❌ **No atomic transaction support**
@@ -178,7 +180,7 @@ VapeCache is an **enterprise Redis transport + hybrid cache**, not a general-pur
 **Non-Target Users:**
 - ❌ Users needing full Redis command surface (use StackExchange.Redis)
 - ❌ Users needing Pub/Sub as primary pattern (use message broker)
-- ❌ Users needing cluster mode (use StackExchange.Redis or migrate to Sentinel)
+- ❌ Users needing complete cluster orchestration for all Redis workloads (use StackExchange.Redis)
 
 ## Hybrid Approach (Recommended)
 
@@ -219,7 +221,7 @@ await redis.GetSubscriber().SubscribeAsync("channel", handler);
 | Pub/Sub | ❌ Not supported | ✅ Native | Use SER |
 | Lua scripting | ❌ Not supported | ✅ Native | Use SER |
 | Streams | ❌ Not supported | ✅ Native | Use SER |
-| Cluster mode | ❌ Not supported | ✅ Native | Use SER |
+| Cluster mode (cache-path redirects) | ✅ Partial | ✅ Native | Use VapeCache for cache path, SER for full orchestration |
 | 200+ commands | ❌ 20 commands | ✅ Full surface | Use SER |
 
 ## Frequently Asked Questions
@@ -230,8 +232,8 @@ await redis.GetSubscriber().SubscribeAsync("channel", handler);
 ### Q: Can I use VapeCache and StackExchange.Redis together?
 **A:** Yes! This is the recommended approach. Use VapeCache for caching, SER for advanced features.
 
-### Q: Will VapeCache ever support cluster mode?
-**A:** Maybe, if there's demand. Current focus is single-instance + Sentinel (covers 90% of use cases).
+### Q: Does VapeCache support Redis cluster?
+**A:** Partially. Core cache-path commands handle MOVED/ASK redirects. Full cluster orchestration across every command is still out of scope.
 
 ### Q: When will Pub/Sub be supported?
 **A:** Not planned. Pub/Sub requires different architecture, so it's out of scope for VapeCache.
@@ -243,7 +245,7 @@ await redis.GetSubscriber().SubscribeAsync("channel", handler);
 3. Implement it yourself and contribute a PR
 
 ### Q: Is VapeCache production-ready?
-**A:** Yes, for caching use cases. Not yet for Pub/Sub, Lua, Streams, or cluster mode.
+**A:** Yes, for caching use cases. Pub/Sub/Lua/Streams remain out of scope; cluster support is partial and cache-path focused.
 
 ## References
 

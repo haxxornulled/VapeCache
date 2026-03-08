@@ -12,9 +12,17 @@ internal sealed class RedisSanityCheckHostedService(
     IOptions<StartupPreflightOptions> options,
     IRedisConnectionFactory factory,
     IRedisFailoverController failover,
-    ILogger<RedisSanityCheckHostedService> logger) : BackgroundService
+    ILogger<RedisSanityCheckHostedService> logger) : BackgroundService, IHostedLifecycleService
 {
     private static readonly byte[] Ping = "*1\r\n$4\r\nPING\r\n"u8.ToArray();
+
+    public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

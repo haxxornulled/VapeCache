@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Abstractions.Diagnostics;
 using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Infrastructure.Caching;
@@ -83,7 +84,7 @@ internal sealed class RedisCacheService : ICacheService
         var ok = await _redis.SetAsync(key, value, options.Ttl, ct).ConfigureAwait(false);
         CacheTelemetry.OpMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds, new TagList { { "backend", Name }, { "op", "set" } });
         if (!ok) throw new InvalidOperationException("Redis SET failed.");
-        _intentRegistry.RecordSet(key, Name, options, value.Length);
+        _intentRegistry.RecordSet(key, BackendType.Redis, options, value.Length);
     }
 
     /// <summary>
@@ -174,7 +175,7 @@ internal sealed class RedisCacheService : ICacheService
         /// <summary>
         /// Executes value.
         /// </summary>
-        public void RecordSet(string key, string backend, in CacheEntryOptions options, int payloadBytes) { }
+        public void RecordSet(string key, BackendType backend, in CacheEntryOptions options, int payloadBytes) { }
         /// <summary>
         /// Attempts to value.
         /// </summary>

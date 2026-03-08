@@ -165,10 +165,10 @@ Originally disabled for payload operations due to bugs. **Now works for ALL Redi
 
 **Key Method**: `TryBuildBatch(CoalescedWriteBatch batch)`
 
-**Limits:**
-- `CoalescedWriteMaxBytes` (default `1MB`): Maximum total bytes per batch
-- `CoalescedWriteMaxSegments` (default `256`): Maximum segments per batch (for scatter/gather I/O)
-- `CoalescedWriteSmallCopyThresholdBytes` (default `2048`): Segments at/under threshold copied to scratch, larger segments sent directly
+**Limits (effective FullTilt defaults):**
+- `CoalescedWriteMaxBytes` (default `524288`): Maximum total bytes per batch
+- `CoalescedWriteMaxSegments` (default `192`): Maximum segments per batch (for scatter/gather I/O)
+- `CoalescedWriteSmallCopyThresholdBytes` (default `1536`): Segments at/under threshold copied to scratch, larger segments sent directly
 
 **Algorithm:**
 1. Dequeue up to 8 requests from queue (opportunistic batching)
