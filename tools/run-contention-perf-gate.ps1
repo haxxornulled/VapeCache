@@ -4,7 +4,8 @@ param(
     [ValidateSet("standard", "aggressive", "extreme")]
     [string]$Profile = "aggressive",
     [string]$ContentionProcessorCounts = "4,16,32",
-    [double]$ClientMaxRatio = 1.00
+    [double]$ClientMaxRatio = 1.00,
+    [switch]$Quick
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,6 +15,15 @@ $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $artifactsRoot = Join-Path $repoRoot "BenchmarkDotNet.Artifacts/head-to-head/contention-gate/$timestamp"
 
 Write-Host "Running contention benchmark matrix for perf-gate..."
+if ($Quick.IsPresent) {
+    Write-Host "Quick mode enabled for contention perf-gate."
+}
+
+$quickArgs = @()
+if ($Quick.IsPresent) {
+    $quickArgs += "-Quick"
+}
+
 pwsh -File (Join-Path $PSScriptRoot "run-head-to-head-benchmarks.ps1") `
     -Suite client `
     -Job $Job `
@@ -21,7 +31,8 @@ pwsh -File (Join-Path $PSScriptRoot "run-head-to-head-benchmarks.ps1") `
     -Profile $Profile `
     -ArtifactsRoot $artifactsRoot `
     -ContentionMatrix `
-    -ContentionProcessorCounts $ContentionProcessorCounts | Out-Host
+    -ContentionProcessorCounts $ContentionProcessorCounts `
+    @quickArgs | Out-Host
 
 $cpuDirs = Get-ChildItem -Path $artifactsRoot -Directory -Filter "cpu-*" -ErrorAction SilentlyContinue
 if (($cpuDirs | Measure-Object).Count -eq 0) {
