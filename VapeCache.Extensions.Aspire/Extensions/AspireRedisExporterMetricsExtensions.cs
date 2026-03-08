@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -11,6 +11,9 @@ namespace VapeCache.Extensions.Aspire;
 /// </summary>
 public static class AspireRedisExporterMetricsExtensions
 {
+    /// <summary>
+    /// Executes with redis exporter metrics.
+    /// </summary>
     public static AspireVapeCacheBuilder WithRedisExporterMetrics(
         this AspireVapeCacheBuilder builder,
         Action<RedisExporterMetricsOptions>? configure = null,

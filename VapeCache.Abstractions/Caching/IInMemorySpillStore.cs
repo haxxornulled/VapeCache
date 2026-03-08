@@ -1,4 +1,4 @@
-namespace VapeCache.Abstractions.Caching;
+﻿namespace VapeCache.Abstractions.Caching;
 
 /// <summary>
 /// Interface for in-memory cache spill-to-disk storage.
@@ -7,7 +7,16 @@ namespace VapeCache.Abstractions.Caching;
 /// </summary>
 public interface IInMemorySpillStore
 {
+    /// <summary>
+    /// Executes write async.
+    /// </summary>
     ValueTask WriteAsync(Guid spillRef, ReadOnlyMemory<byte> data, CancellationToken ct);
+    /// <summary>
+    /// Executes try read async.
+    /// </summary>
     ValueTask<byte[]?> TryReadAsync(Guid spillRef, CancellationToken ct);
+    /// <summary>
+    /// Executes delete async.
+    /// </summary>
     ValueTask DeleteAsync(Guid spillRef, CancellationToken ct);
 }

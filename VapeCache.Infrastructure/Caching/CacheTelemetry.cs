@@ -1,37 +1,109 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Infrastructure.Caching;
 
+/// <summary>
+/// Represents the cache telemetry.
+/// </summary>
 public static class CacheTelemetry
 {
+    /// <summary>
+    /// Executes new.
+    /// </summary>
     public static readonly Meter Meter = new("VapeCache.Cache");
 
+    /// <summary>
+    /// Defines the get calls.
+    /// </summary>
     public static readonly Counter<long> GetCalls = Meter.CreateCounter<long>("cache.get.calls", description: "Total GET operations");
+    /// <summary>
+    /// Defines the hits.
+    /// </summary>
     public static readonly Counter<long> Hits = Meter.CreateCounter<long>("cache.get.hits", description: "Cache hits");
+    /// <summary>
+    /// Defines the misses.
+    /// </summary>
     public static readonly Counter<long> Misses = Meter.CreateCounter<long>("cache.get.misses", description: "Cache misses");
+    /// <summary>
+    /// Defines the set calls.
+    /// </summary>
     public static readonly Counter<long> SetCalls = Meter.CreateCounter<long>("cache.set.calls", description: "Total SET operations");
+    /// <summary>
+    /// Defines the remove calls.
+    /// </summary>
     public static readonly Counter<long> RemoveCalls = Meter.CreateCounter<long>("cache.remove.calls", description: "Total REMOVE operations");
+    /// <summary>
+    /// Defines the fallback to memory.
+    /// </summary>
     public static readonly Counter<long> FallbackToMemory = Meter.CreateCounter<long>("cache.fallback.to_memory", description: "Circuit breaker fallback events");
+    /// <summary>
+    /// Defines the redis breaker opened.
+    /// </summary>
     public static readonly Counter<long> RedisBreakerOpened = Meter.CreateCounter<long>("cache.redis.breaker.opened", description: "Circuit breaker opened events");
+    /// <summary>
+    /// Defines the stampede key rejected.
+    /// </summary>
     public static readonly Counter<long> StampedeKeyRejected = Meter.CreateCounter<long>("cache.stampede.key_rejected", description: "Stampede-protected requests rejected due to suspicious/invalid key");
+    /// <summary>
+    /// Defines the stampede lock wait timeout.
+    /// </summary>
     public static readonly Counter<long> StampedeLockWaitTimeout = Meter.CreateCounter<long>("cache.stampede.lock_wait_timeout", description: "Stampede lock wait timed out");
+    /// <summary>
+    /// Defines the stampede failure backoff rejected.
+    /// </summary>
     public static readonly Counter<long> StampedeFailureBackoffRejected = Meter.CreateCounter<long>("cache.stampede.failure_backoff_rejected", description: "Requests rejected due to per-key failure backoff window");
 
+    /// <summary>
+    /// Defines the op ms.
+    /// </summary>
     public static readonly Histogram<double> OpMs = Meter.CreateHistogram<double>("cache.op.ms", unit: "ms", description: "Cache operation latency");
 
+    /// <summary>
+    /// Defines the spill write count.
+    /// </summary>
     public static readonly Counter<long> SpillWriteCount = Meter.CreateCounter<long>("cache.spill.write.count", description: "Spill write operations");
+    /// <summary>
+    /// Defines the spill write bytes.
+    /// </summary>
     public static readonly Counter<long> SpillWriteBytes = Meter.CreateCounter<long>("cache.spill.write.bytes", unit: "bytes", description: "Spill write bytes");
+    /// <summary>
+    /// Defines the spill read count.
+    /// </summary>
     public static readonly Counter<long> SpillReadCount = Meter.CreateCounter<long>("cache.spill.read.count", description: "Spill read operations");
+    /// <summary>
+    /// Defines the spill read bytes.
+    /// </summary>
     public static readonly Counter<long> SpillReadBytes = Meter.CreateCounter<long>("cache.spill.read.bytes", unit: "bytes", description: "Spill read bytes");
+    /// <summary>
+    /// Defines the spill orphan scanned.
+    /// </summary>
     public static readonly Counter<long> SpillOrphanScanned = Meter.CreateCounter<long>("cache.spill.orphan.scanned", description: "Spill files scanned for orphan cleanup");
+    /// <summary>
+    /// Defines the spill orphan cleanup count.
+    /// </summary>
     public static readonly Counter<long> SpillOrphanCleanupCount = Meter.CreateCounter<long>("cache.spill.orphan.cleanup.count", description: "Spill files deleted during orphan cleanup");
+    /// <summary>
+    /// Defines the spill orphan cleanup bytes.
+    /// </summary>
     public static readonly Counter<long> SpillOrphanCleanupBytes = Meter.CreateCounter<long>("cache.spill.orphan.cleanup.bytes", unit: "bytes", description: "Spill bytes deleted during orphan cleanup");
+    /// <summary>
+    /// Defines the spill store unavailable.
+    /// </summary>
     public static readonly Counter<long> SpillStoreUnavailable = Meter.CreateCounter<long>("cache.spill.store_unavailable", description: "Spill-to-disk requested but no writable spill store is registered");
+    /// <summary>
+    /// Defines the set payload bytes.
+    /// </summary>
     public static readonly Histogram<long> SetPayloadBytes = Meter.CreateHistogram<long>("cache.set.payload.bytes", unit: "bytes", description: "Payload size for cache SET operations");
+    /// <summary>
+    /// Defines the large key writes.
+    /// </summary>
     public static readonly Counter<long> LargeKeyWrites = Meter.CreateCounter<long>("cache.set.large_key", description: "Large payload cache writes");
+    /// <summary>
+    /// Defines the evictions.
+    /// </summary>
     public static readonly Counter<long> Evictions = Meter.CreateCounter<long>("cache.evictions", description: "In-memory cache evictions");
 
     private static ICacheBackendState? _backendState;

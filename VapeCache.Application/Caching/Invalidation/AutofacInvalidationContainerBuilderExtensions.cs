@@ -1,4 +1,4 @@
-using Autofac;
+﻿using Autofac;
 using VapeCache.Application.Abstractions;
 using VapeCache.Application.Caching.Invalidation.Commands;
 using VapeCache.Application.Caching.Invalidation.Events;
@@ -13,6 +13,9 @@ namespace VapeCache.Application.Caching.Invalidation;
 /// </summary>
 public static class AutofacInvalidationContainerBuilderExtensions
 {
+    /// <summary>
+    /// Executes add vape cache application invalidation.
+    /// </summary>
     public static ContainerBuilder AddVapeCacheApplicationInvalidation(
         this ContainerBuilder builder,
         Action<CacheInvalidationOptions>? configure = null)
@@ -24,6 +27,9 @@ public static class AutofacInvalidationContainerBuilderExtensions
         return builder;
     }
 
+    /// <summary>
+    /// Executes add vape cache application invalidation defaults.
+    /// </summary>
     public static ContainerBuilder AddVapeCacheApplicationInvalidationDefaults(this ContainerBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);

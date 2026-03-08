@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Collections.Concurrent;
 using System.Threading;
 
@@ -39,12 +39,27 @@ public sealed class RedisValueLease : IDisposable
         return lease;
     }
 
+    /// <summary>
+    /// Defines the null.
+    /// </summary>
     public static RedisValueLease Null => NullInstance;
 
+    /// <summary>
+    /// Executes read.
+    /// </summary>
     public bool IsNull => Volatile.Read(ref _disposed) != 0 || _buffer is null;
+    /// <summary>
+    /// Executes read.
+    /// </summary>
     public int Length => Volatile.Read(ref _disposed) != 0 || _buffer is null ? 0 : _length;
 
+    /// <summary>
+    /// Executes read.
+    /// </summary>
     public ReadOnlyMemory<byte> Memory => Volatile.Read(ref _disposed) != 0 || _buffer is null ? ReadOnlyMemory<byte>.Empty : _buffer.AsMemory(0, _length);
+    /// <summary>
+    /// Executes read.
+    /// </summary>
     public ReadOnlySpan<byte> Span => Volatile.Read(ref _disposed) != 0 || _buffer is null ? ReadOnlySpan<byte>.Empty : _buffer.AsSpan(0, _length);
 
     /// <summary>

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -15,6 +15,9 @@ using VapeCache.Infrastructure.Modules;
 
 namespace VapeCache.Infrastructure.Caching;
 
+/// <summary>
+/// Represents the cache registration.
+/// </summary>
 public static class CacheRegistration
 {
     /// <summary>

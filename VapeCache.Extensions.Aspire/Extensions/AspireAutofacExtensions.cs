@@ -1,4 +1,4 @@
-using Autofac;
+﻿using Autofac;
 using Microsoft.AspNetCore.Builder;
 using VapeCache.Extensions.Aspire.Autofac;
 
@@ -41,8 +41,17 @@ public static class AspireAutofacExtensions
     }
 }
 
+/// <summary>
+/// Represents the vape cache aspire autofac options.
+/// </summary>
 public sealed class VapeCacheAspireAutofacOptions
 {
+    /// <summary>
+    /// Gets or sets the connection name.
+    /// </summary>
     public string ConnectionName { get; set; } = "redis";
+    /// <summary>
+    /// Gets or sets the transport mode.
+    /// </summary>
     public VapeCacheAspireTransportMode TransportMode { get; set; } = VapeCacheAspireTransportMode.MaxThroughput;
 }

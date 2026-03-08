@@ -1,4 +1,4 @@
-using VapeCache.Core.Domain.Primitives;
+﻿using VapeCache.Core.Domain.Primitives;
 
 namespace VapeCache.Application.Caching.Invalidation.Events;
 
@@ -7,6 +7,9 @@ namespace VapeCache.Application.Caching.Invalidation.Events;
 /// </summary>
 public sealed record CacheTagsInvalidatedEvent(IReadOnlyList<string> Tags) : DomainEvent
 {
+    /// <summary>
+    /// Executes cache tags invalidated event.
+    /// </summary>
     public CacheTagsInvalidatedEvent(params string[] tags)
         : this((IReadOnlyList<string>)tags)
     {

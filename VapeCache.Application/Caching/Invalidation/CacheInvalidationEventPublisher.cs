@@ -1,4 +1,4 @@
-using VapeCache.Features.Invalidation;
+﻿using VapeCache.Features.Invalidation;
 
 namespace VapeCache.Application.Caching.Invalidation;
 
@@ -10,6 +10,9 @@ public sealed class CacheInvalidationEventPublisher(ICacheInvalidationDispatcher
 {
     private readonly ICacheInvalidationDispatcher _dispatcher = dispatcher;
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public ValueTask<CacheInvalidationExecutionResult> PublishAsync<TEvent>(
         TEvent eventData,
         CancellationToken cancellationToken = default)

@@ -1,19 +1,46 @@
-namespace VapeCache.Abstractions.Connections;
+﻿namespace VapeCache.Abstractions.Connections;
 
+/// <summary>
+/// Represents the redis connection options.
+/// </summary>
 public sealed record RedisConnectionOptions
 {
+    /// <summary>
+    /// Gets or sets the host.
+    /// </summary>
     public string Host { get; init; } = "";
+    /// <summary>
+    /// Gets or sets the port.
+    /// </summary>
     public int Port { get; init; } = 6379;
 
+    /// <summary>
+    /// Gets or sets the username.
+    /// </summary>
     public string? Username { get; init; }
+    /// <summary>
+    /// Gets or sets the password.
+    /// </summary>
     public string? Password { get; init; }
+    /// <summary>
+    /// Gets or sets the database.
+    /// </summary>
     public int Database { get; init; } = 0;
 
     // Optional: provide a full redis:// or rediss:// connection string.
     // This is ideal for KeyVault/secret stores. When set, parsed values override Host/Port/User/Password/Database/TLS settings.
+    /// <summary>
+    /// Gets or sets the connection string.
+    /// </summary>
     public string? ConnectionString { get; init; }
 
+    /// <summary>
+    /// Gets or sets the use tls.
+    /// </summary>
     public bool UseTls { get; init; }
+    /// <summary>
+    /// Gets or sets the tls host.
+    /// </summary>
     public string? TlsHost { get; init; }
 
     /// <summary>
@@ -23,17 +50,47 @@ public sealed record RedisConnectionOptions
     /// </summary>
     public bool AllowInvalidCert { get; init; }
 
+    /// <summary>
+    /// Gets or sets the max connections.
+    /// </summary>
     public int MaxConnections { get; init; } = 64;
+    /// <summary>
+    /// Gets or sets the max idle.
+    /// </summary>
     public int MaxIdle { get; init; } = 64;
+    /// <summary>
+    /// Gets or sets the warm.
+    /// </summary>
     public int Warm { get; init; } = 0;
 
+    /// <summary>
+    /// Executes from seconds.
+    /// </summary>
     public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(2);
+    /// <summary>
+    /// Executes from seconds.
+    /// </summary>
     public TimeSpan AcquireTimeout { get; init; } = TimeSpan.FromSeconds(2);
 
+    /// <summary>
+    /// Executes from seconds.
+    /// </summary>
     public TimeSpan ValidateAfterIdle { get; init; } = TimeSpan.FromSeconds(30);
+    /// <summary>
+    /// Executes from milliseconds.
+    /// </summary>
     public TimeSpan ValidateTimeout { get; init; } = TimeSpan.FromMilliseconds(500);
+    /// <summary>
+    /// Executes from minutes.
+    /// </summary>
     public TimeSpan IdleTimeout { get; init; } = TimeSpan.FromMinutes(5);
+    /// <summary>
+    /// Executes from hours.
+    /// </summary>
     public TimeSpan MaxConnectionLifetime { get; init; } = TimeSpan.FromHours(1);
+    /// <summary>
+    /// Executes from seconds.
+    /// </summary>
     public TimeSpan ReaperPeriod { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
@@ -58,11 +115,26 @@ public sealed record RedisConnectionOptions
     /// </summary>
     public int TcpReceiveBufferBytes { get; init; } = 4 * 1024 * 1024;
 
+    /// <summary>
+    /// Gets or sets the enable tcp keep alive.
+    /// </summary>
     public bool EnableTcpKeepAlive { get; init; } = true;
+    /// <summary>
+    /// Executes from seconds.
+    /// </summary>
     public TimeSpan TcpKeepAliveTime { get; init; } = TimeSpan.FromSeconds(30);
+    /// <summary>
+    /// Executes from seconds.
+    /// </summary>
     public TimeSpan TcpKeepAliveInterval { get; init; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// Gets or sets the allow auth fallback to password only.
+    /// </summary>
     public bool AllowAuthFallbackToPasswordOnly { get; init; } = false;
+    /// <summary>
+    /// Gets or sets the log who am ion connect.
+    /// </summary>
     public bool LogWhoAmIOnConnect { get; init; } = false;
 
     /// <summary>

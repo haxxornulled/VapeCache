@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Autofac;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -15,8 +15,14 @@ using VapeCache.Infrastructure.Modules;
 
 namespace VapeCache.Infrastructure.DependencyInjection;
 
+/// <summary>
+/// Represents the vape cache caching module.
+/// </summary>
 public sealed class VapeCacheCachingModule : Module
 {
+    /// <summary>
+    /// Executes load.
+    /// </summary>
     protected override void Load(ContainerBuilder builder)
     {
         CacheTelemetry.EnsureInitialized();

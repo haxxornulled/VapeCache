@@ -1,4 +1,4 @@
-namespace VapeCache.Features.Invalidation;
+﻿namespace VapeCache.Features.Invalidation;
 
 /// <summary>
 /// Immutable invalidation targets resolved by one or more policies.
@@ -7,16 +7,34 @@ public sealed class CacheInvalidationPlan
 {
     private static readonly string[] EmptyTargets = [];
 
+    /// <summary>
+    /// Executes new.
+    /// </summary>
     public static CacheInvalidationPlan Empty { get; } = new();
 
+    /// <summary>
+    /// Gets the tags.
+    /// </summary>
     public IReadOnlyList<string> Tags { get; }
 
+    /// <summary>
+    /// Gets the zones.
+    /// </summary>
     public IReadOnlyList<string> Zones { get; }
 
+    /// <summary>
+    /// Gets the keys.
+    /// </summary>
     public IReadOnlyList<string> Keys { get; }
 
+    /// <summary>
+    /// Defines the total targets.
+    /// </summary>
     public int TotalTargets => Tags.Count + Zones.Count + Keys.Count;
 
+    /// <summary>
+    /// Executes cache invalidation plan.
+    /// </summary>
     public CacheInvalidationPlan(
         IEnumerable<string>? tags = null,
         IEnumerable<string>? zones = null,

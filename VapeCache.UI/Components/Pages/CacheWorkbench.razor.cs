@@ -1,8 +1,11 @@
-using VapeCache.UI.Features.CacheWorkbench;
+﻿using VapeCache.UI.Features.CacheWorkbench;
 using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.UI.Components.Pages;
 
+/// <summary>
+/// Represents the cache workbench.
+/// </summary>
 public partial class CacheWorkbench
 {
     private readonly CacheWorkbenchOrchestrator _orchestrator;
@@ -26,11 +29,17 @@ public partial class CacheWorkbench
         RemoveCalls: 0,
         FallbackToMemory: 0);
 
+    /// <summary>
+    /// Executes cache workbench.
+    /// </summary>
     public CacheWorkbench(CacheWorkbenchOrchestrator orchestrator)
     {
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
     }
 
+    /// <summary>
+    /// Executes on initialized async.
+    /// </summary>
     protected override Task OnInitializedAsync()
         => RefreshAsync();
 

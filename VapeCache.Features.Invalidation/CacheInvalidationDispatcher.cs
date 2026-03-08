@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -18,6 +18,9 @@ public sealed partial class CacheInvalidationDispatcher(
     private readonly IOptionsMonitor<CacheInvalidationOptions> _optionsMonitor = optionsMonitor;
     private readonly ILogger<CacheInvalidationDispatcher> _logger = logger;
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public async ValueTask<CacheInvalidationExecutionResult> DispatchAsync<TEvent>(
         TEvent eventData,
         CancellationToken cancellationToken = default)

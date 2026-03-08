@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
@@ -24,6 +24,9 @@ public sealed class FileSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics
     private long _totalSpillFiles;
     private int _inventoryInitialized;
 
+    /// <summary>
+    /// Executes file spill store.
+    /// </summary>
     public FileSpillStore(IOptionsMonitor<InMemorySpillOptions> options, ISpillEncryptionProvider encryption)
     {
         _options = options.CurrentValue;

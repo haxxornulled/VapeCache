@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Serilog;
 using Serilog.Events;
 using Serilog.Sinks.OpenTelemetry;
@@ -13,6 +13,9 @@ public static class VapeCacheSerilogExtensions
 {
     private const string DefaultConsoleOutputTemplate = "[{Timestamp:HH:mm:ss} {Level:u3}] ({TraceId}:{SpanId}) {Message:lj}{NewLine}{Exception}";
 
+    /// <summary>
+    /// Executes configure vape cache logging.
+    /// </summary>
     public static LoggerConfiguration ConfigureVapeCacheLogging(
         this LoggerConfiguration loggerConfiguration,
         IConfiguration configuration,

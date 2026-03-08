@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Builder;
+﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Configuration;
@@ -16,6 +16,9 @@ namespace Microsoft.Extensions.Hosting;
 // Adds common Aspire services: service discovery, resilience, health checks, and OpenTelemetry.
 // This project should be referenced by each service project in your solution.
 // To learn more about using this project, see https://aka.ms/dotnet/aspire/service-defaults
+/// <summary>
+/// Represents the extensions.
+/// </summary>
 public static class Extensions
 {
     private const string HealthEndpointPath = "/health";
@@ -32,6 +35,9 @@ public static class Extensions
         new PathString("/_blazor")
     ];
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         builder.ConfigureOpenTelemetry();
@@ -52,6 +58,9 @@ public static class Extensions
         return builder;
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         builder.Logging.AddOpenTelemetry(logging =>
@@ -175,6 +184,9 @@ public static class Extensions
         return true;
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static TBuilder AddDefaultHealthChecks<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         builder.Services.AddHealthChecks()
@@ -184,6 +196,9 @@ public static class Extensions
         return builder;
     }
 
+    /// <summary>
+    /// Executes map default endpoints.
+    /// </summary>
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
         // Adding health checks endpoints to applications in non-development environments has security implications.

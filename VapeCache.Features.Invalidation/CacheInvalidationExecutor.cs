@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 
@@ -16,6 +16,9 @@ public sealed partial class CacheInvalidationExecutor(
     private readonly IOptionsMonitor<CacheInvalidationOptions> _optionsMonitor = optionsMonitor;
     private readonly ILogger<CacheInvalidationExecutor> _logger = logger;
 
+    /// <summary>
+    /// Executes nvalidate async.
+    /// </summary>
     public async ValueTask<CacheInvalidationExecutionResult> InvalidateAsync(
         CacheInvalidationPlan plan,
         CancellationToken cancellationToken = default)

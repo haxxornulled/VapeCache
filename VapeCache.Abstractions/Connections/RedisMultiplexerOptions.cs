@@ -1,8 +1,17 @@
-namespace VapeCache.Abstractions.Connections;
+﻿namespace VapeCache.Abstractions.Connections;
 
+/// <summary>
+/// Represents the redis multiplexer options.
+/// </summary>
 public sealed record RedisMultiplexerOptions
 {
+    /// <summary>
+    /// Executes max.
+    /// </summary>
     public int Connections { get; init; } = Math.Max(2, Environment.ProcessorCount / 2);
+    /// <summary>
+    /// Gets or sets the max in flight per connection.
+    /// </summary>
     public int MaxInFlightPerConnection { get; init; } = 4096;
 
     /// <summary>

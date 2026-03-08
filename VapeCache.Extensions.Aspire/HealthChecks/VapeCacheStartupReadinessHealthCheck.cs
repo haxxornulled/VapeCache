@@ -1,9 +1,15 @@
-using Microsoft.Extensions.Diagnostics.HealthChecks;
+﻿using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace VapeCache.Extensions.Aspire.HealthChecks;
 
+/// <summary>
+/// Represents the vape cache startup readiness health check.
+/// </summary>
 public sealed class VapeCacheStartupReadinessHealthCheck(IVapeCacheStartupReadiness readiness) : IHealthCheck
 {
+    /// <summary>
+    /// Executes check health async.
+    /// </summary>
     public Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)

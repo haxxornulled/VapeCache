@@ -1,4 +1,4 @@
-namespace VapeCache.Features.Invalidation;
+﻿namespace VapeCache.Features.Invalidation;
 
 /// <summary>
 /// Summarizes invalidation execution outcomes.
@@ -10,5 +10,8 @@ public readonly record struct CacheInvalidationExecutionResult(
     int SkippedTargets,
     int PolicyFailures = 0)
 {
+    /// <summary>
+    /// Defines the has failures.
+    /// </summary>
     public bool HasFailures => FailedTargets > 0 || PolicyFailures > 0;
 }

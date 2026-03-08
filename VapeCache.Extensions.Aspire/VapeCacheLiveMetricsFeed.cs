@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
@@ -9,11 +9,35 @@ using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Extensions.Aspire;
 
+/// <summary>
+/// Defines the vape cache live metrics feed contract.
+/// </summary>
 public interface IVapeCacheLiveMetricsFeed
 {
+    /// <summary>
+    /// Executes subscribe.
+    /// </summary>
     ChannelReader<VapeCacheLiveSample> Subscribe(CancellationToken ct);
 }
 
+/// <summary>
+/// Represents the vape cache live sample.
+/// </summary>
+/// <param name="TimestampUtc">Sample timestamp in UTC.</param>
+/// <param name="CurrentBackend">Backend active when the sample was captured.</param>
+/// <param name="Hits">Total cache hits.</param>
+/// <param name="Misses">Total cache misses.</param>
+/// <param name="SetCalls">Total set operations.</param>
+/// <param name="RemoveCalls">Total remove operations.</param>
+/// <param name="FallbackToMemory">Total requests served by in-memory fallback.</param>
+/// <param name="RedisBreakerOpened">Total breaker-open events.</param>
+/// <param name="StampedeKeyRejected">Total requests rejected by stampede key gating.</param>
+/// <param name="StampedeLockWaitTimeout">Total requests timing out while waiting on stampede locks.</param>
+/// <param name="StampedeFailureBackoffRejected">Total requests rejected by stampede failure backoff.</param>
+/// <param name="HitRate">Computed cache hit rate for the sample window.</param>
+/// <param name="Spill">Optional spill-store diagnostics snapshot.</param>
+/// <param name="Autoscaler">Optional redis autoscaler snapshot.</param>
+/// <param name="Lanes">Optional lane-level mux diagnostics snapshots.</param>
 public sealed record VapeCacheLiveSample(
     DateTimeOffset TimestampUtc,
     [property: JsonConverter(typeof(JsonStringEnumConverter<BackendType>))] BackendType CurrentBackend,

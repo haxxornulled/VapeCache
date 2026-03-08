@@ -1,4 +1,4 @@
-using VapeCache.Core.Domain.Primitives;
+﻿using VapeCache.Core.Domain.Primitives;
 
 namespace VapeCache.Application.Caching.Invalidation.Events;
 
@@ -13,6 +13,9 @@ public sealed record EntityCacheChangedEvent(
     IReadOnlyList<string>? Keys = null,
     IReadOnlyList<string>? Tags = null) : DomainEvent
 {
+    /// <summary>
+    /// Executes entity cache changed event.
+    /// </summary>
     public EntityCacheChangedEvent(
         string entityName,
         string entityId,

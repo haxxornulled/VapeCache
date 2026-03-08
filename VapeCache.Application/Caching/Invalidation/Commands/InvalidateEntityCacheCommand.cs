@@ -1,4 +1,4 @@
-using VapeCache.Application.Abstractions;
+﻿using VapeCache.Application.Abstractions;
 using VapeCache.Features.Invalidation;
 
 namespace VapeCache.Application.Caching.Invalidation.Commands;
@@ -14,6 +14,9 @@ public sealed record InvalidateEntityCacheCommand(
     IReadOnlyList<string>? Keys = null,
     IReadOnlyList<string>? Tags = null) : ICommand<CacheInvalidationExecutionResult>
 {
+    /// <summary>
+    /// Executes nvalidate entity cache command.
+    /// </summary>
     public InvalidateEntityCacheCommand(
         string entityName,
         string entityId,

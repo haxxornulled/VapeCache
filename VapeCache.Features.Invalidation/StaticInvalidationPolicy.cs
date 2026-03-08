@@ -1,4 +1,4 @@
-namespace VapeCache.Features.Invalidation;
+﻿namespace VapeCache.Features.Invalidation;
 
 /// <summary>
 /// Returns the same invalidation plan for every event.
@@ -7,11 +7,17 @@ public sealed class StaticInvalidationPolicy<TEvent> : ICacheInvalidationPolicy<
 {
     private readonly CacheInvalidationPlan _plan;
 
+    /// <summary>
+    /// Executes static invalidation policy.
+    /// </summary>
     public StaticInvalidationPolicy(CacheInvalidationPlan plan)
     {
         _plan = plan ?? throw new ArgumentNullException(nameof(plan));
     }
 
+    /// <summary>
+    /// Executes build plan async.
+    /// </summary>
     public ValueTask<CacheInvalidationPlan> BuildPlanAsync(TEvent eventData, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

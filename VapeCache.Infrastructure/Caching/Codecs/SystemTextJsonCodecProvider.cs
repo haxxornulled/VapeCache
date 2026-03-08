@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using VapeCache.Abstractions.Caching;
@@ -18,11 +18,17 @@ public sealed class SystemTextJsonCodecProvider : ICacheCodecProvider
     private readonly ConcurrentDictionary<Type, object> _customCodecs = new();
     private readonly ConcurrentDictionary<Type, object> _codecCache = new();
 
+    /// <summary>
+    /// Executes system text json codec provider.
+    /// </summary>
     public SystemTextJsonCodecProvider(JsonSerializerOptions? options = null)
     {
         _options = options ?? new JsonSerializerOptions(JsonSerializerDefaults.Web);
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public ICacheCodec<T> Get<T>()
     {
         // Check for custom codec first
@@ -38,6 +44,9 @@ public sealed class SystemTextJsonCodecProvider : ICacheCodecProvider
         return codec;
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public void Register<T>(ICacheCodec<T> codec)
     {
         if (codec == null)

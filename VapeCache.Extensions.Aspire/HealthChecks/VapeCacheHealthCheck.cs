@@ -1,9 +1,12 @@
-using Microsoft.Extensions.Diagnostics.HealthChecks;
+﻿using Microsoft.Extensions.Diagnostics.HealthChecks;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Extensions.Aspire.HealthChecks;
 
+/// <summary>
+/// Represents the vape cache health check.
+/// </summary>
 public sealed class VapeCacheHealthCheck : IHealthCheck
 {
     private readonly ICacheService _cache;
@@ -12,6 +15,9 @@ public sealed class VapeCacheHealthCheck : IHealthCheck
     private readonly IRedisCircuitBreakerState _breaker;
     private readonly IRedisFailoverController _failover;
 
+    /// <summary>
+    /// Executes vape cache health check.
+    /// </summary>
     public VapeCacheHealthCheck(
         ICacheService cache,
         ICacheBackendState backendState,

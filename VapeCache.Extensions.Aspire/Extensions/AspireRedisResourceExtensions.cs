@@ -1,10 +1,13 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using System.Reflection;
 using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Extensions.Aspire;
 
+/// <summary>
+/// Represents the aspire redis resource extensions.
+/// </summary>
 public static class AspireRedisResourceExtensions
 {
     private static readonly PropertyInfo ConnectionStringProperty =

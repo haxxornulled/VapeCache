@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -10,6 +10,9 @@ using VapeCache.Licensing;
 
 namespace VapeCache.Reconciliation;
 
+/// <summary>
+/// Represents the redis reconciliation extensions.
+/// </summary>
 public static class RedisReconciliationExtensions
 {
     /// <summary>

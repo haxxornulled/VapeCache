@@ -1,10 +1,13 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Licensing;
 
 namespace VapeCache.Persistence;
 
+/// <summary>
+/// Represents the persistence service extensions.
+/// </summary>
 public static class PersistenceServiceExtensions
 {
     /// <summary>

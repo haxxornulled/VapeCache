@@ -1,8 +1,11 @@
-using VapeCache.Abstractions.Connections;
+﻿using VapeCache.Abstractions.Connections;
 using VapeCache.UI.Features.Dashboard;
 
 namespace VapeCache.UI.Components.Pages;
 
+/// <summary>
+/// Represents the vape cache dashboard.
+/// </summary>
 public partial class VapeCacheDashboard : IAsyncDisposable
 {
     private static readonly IComparer<RedisMuxLaneSnapshot> LaneIndexComparer =
@@ -15,11 +18,17 @@ public partial class VapeCacheDashboard : IAsyncDisposable
     private Task? _refreshLoop;
     private bool _disposed;
 
+    /// <summary>
+    /// Executes vape cache dashboard.
+    /// </summary>
     public VapeCacheDashboard(VapeCacheDashboardOrchestrator dashboard)
     {
         _dashboard = dashboard ?? throw new ArgumentNullException(nameof(dashboard));
     }
 
+    /// <summary>
+    /// Executes on initialized async.
+    /// </summary>
     protected override async Task OnInitializedAsync()
     {
         await RefreshAsync().ConfigureAwait(false);
@@ -80,6 +89,9 @@ public partial class VapeCacheDashboard : IAsyncDisposable
         Array.Sort(_sortedLanes, LaneIndexComparer);
     }
 
+    /// <summary>
+    /// Executes dispose async.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
