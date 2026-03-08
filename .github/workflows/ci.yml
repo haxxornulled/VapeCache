@@ -171,7 +171,7 @@ jobs:
 
       - name: Contention Perf Gate
         run: |
-          pwsh -File tools/run-contention-perf-gate.ps1 -Job Short -Mode fair -Profile aggressive -ContentionProcessorCounts "4,16" -ClientMaxRatio 1.00
+          pwsh -File tools/run-contention-perf-gate.ps1 -Job Short -Mode fair -Profile standard -ContentionProcessorCounts "4,16" -ClientMaxRatio 1.00
 
       - name: Grocery Tail Perf Gate
         run: |
