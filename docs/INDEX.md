@@ -5,6 +5,7 @@ This index tracks the current feature set and supported APIs.
 ## Start Here (Juniors)
 - [QUICKSTART.md](QUICKSTART.md) - Copy/paste setup from zero to first endpoint
 - [CONFIGURATION.md](CONFIGURATION.md) - Every knob, sane defaults, and limits
+- [SETTINGS_REFERENCE.md](SETTINGS_REFERENCE.md) - Generated source-of-truth for all options/defaults
 - [API_REFERENCE.md](API_REFERENCE.md) - Exact interfaces and endpoint contracts
 - [CACHE_INVALIDATION.md](CACHE_INVALIDATION.md) - Autofac-first, no-custom-code invalidation guide
 
@@ -64,6 +65,7 @@ This index tracks the current feature set and supported APIs.
 
 ## Contributing
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution guidelines
+- [DOCUMENTATION_STANDARDS.md](DOCUMENTATION_STANDARDS.md) - API/comment/docs standards and enforcement commands
 - [BENCHMARKING_STATUS.md](BENCHMARKING_STATUS.md) - Benchmark coverage status
 
 ## Quick Reference

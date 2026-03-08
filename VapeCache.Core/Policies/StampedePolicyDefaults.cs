@@ -5,6 +5,9 @@ namespace VapeCache.Core.Policies;
 /// </summary>
 public static class StampedePolicyDefaults
 {
+    /// <summary>
+    /// Conservative profile with tighter key limits and longer backoff.
+    /// </summary>
     public static StampedeProfileSettings Strict => new(
         Enabled: true,
         MaxKeys: 25_000,
@@ -14,6 +17,9 @@ public static class StampedePolicyDefaults
         EnableFailureBackoff: true,
         FailureBackoff: TimeSpan.FromSeconds(1));
 
+    /// <summary>
+    /// General-purpose profile balancing throughput and safety.
+    /// </summary>
     public static StampedeProfileSettings Balanced => new(
         Enabled: true,
         MaxKeys: 50_000,
@@ -23,6 +29,9 @@ public static class StampedePolicyDefaults
         EnableFailureBackoff: true,
         FailureBackoff: TimeSpan.FromMilliseconds(500));
 
+    /// <summary>
+    /// Throughput-biased profile with higher key limits and shorter backoff.
+    /// </summary>
     public static StampedeProfileSettings Relaxed => new(
         Enabled: true,
         MaxKeys: 100_000,

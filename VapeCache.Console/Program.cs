@@ -302,8 +302,6 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
         services.AddHostedService<RedisConnectionPoolReaperHostedService>();
         services.AddHostedService<SharedDashboardSnapshotPublisherHostedService>();
         services.AddHostedService<PluginDemoHostedService>();
-        // services.AddHostedService<RedisStressHostedService>();  // Disabled in favor of grocery store test
-        // services.AddHostedService<LiveDemoHostedService>();     // Disabled in favor of grocery store test
     })
     .ConfigureContainer<ContainerBuilder>(static (context, builder) =>
     {

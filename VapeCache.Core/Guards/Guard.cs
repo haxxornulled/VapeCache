@@ -2,10 +2,19 @@ using System.Runtime.CompilerServices;
 
 namespace VapeCache.Core.Guards;
 
+/// <summary>
+/// Lightweight argument-guard helpers for common validation checks.
+/// </summary>
 public static class Guard
 {
+    /// <summary>
+    /// Guard methods that throw on invalid input.
+    /// </summary>
     public static class Against
     {
+        /// <summary>
+        /// Ensures a string is not null or empty.
+        /// </summary>
         public static string NotNullOrEmpty(string? value, [CallerArgumentExpression(nameof(value))] string argumentName = "")
         {
             if (string.IsNullOrEmpty(value))
@@ -14,6 +23,9 @@ public static class Guard
             return value;
         }
 
+        /// <summary>
+        /// Ensures a string is not null, empty, or whitespace.
+        /// </summary>
         public static string NotNullOrWhiteSpace(string? value, [CallerArgumentExpression(nameof(value))] string argumentName = "")
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -22,6 +34,9 @@ public static class Guard
             return value;
         }
 
+        /// <summary>
+        /// Ensures a nullable value type has a value and returns the value.
+        /// </summary>
         public static T NotNull<T>(T? value, [CallerArgumentExpression(nameof(value))] string argumentName = "")
             where T : struct
         {
@@ -31,6 +46,9 @@ public static class Guard
             return value.Value;
         }
 
+        /// <summary>
+        /// Ensures an integer falls within the inclusive range.
+        /// </summary>
         public static int NotOutOfRange(int value, int min, int max, [CallerArgumentExpression(nameof(value))] string argumentName = "")
         {
             if (value < min || value > max)
@@ -39,6 +57,9 @@ public static class Guard
             return value;
         }
 
+        /// <summary>
+        /// Ensures an enum value is defined on its enum type.
+        /// </summary>
         public static TEnum ValidEnumValue<TEnum>(TEnum value, [CallerArgumentExpression(nameof(value))] string argumentName = "")
             where TEnum : struct, Enum
         {

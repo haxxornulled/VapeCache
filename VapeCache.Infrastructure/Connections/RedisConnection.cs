@@ -1,4 +1,3 @@
-// ========================= File: Vapecache.Infrastructure/Connections/RedisConnection.cs =========================
 using System.Net.Sockets;
 using LanguageExt;
 using LanguageExt.Common;

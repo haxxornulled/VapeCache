@@ -5,9 +5,15 @@ namespace VapeCache.Core.Policies;
 /// </summary>
 public static class CacheTagPolicy
 {
+    /// <summary>
+    /// Prefix used for zone-scoped tags.
+    /// </summary>
     public const string ZonePrefix = "zone:";
     private const int LinearDedupThreshold = 8;
 
+    /// <summary>
+    /// Converts a zone name into its canonical zone tag representation.
+    /// </summary>
     public static string ToZoneTag(string zone)
     {
         if (!TryGetTrimmedRange(zone, out var start, out var length))
@@ -23,6 +29,9 @@ public static class CacheTagPolicy
             });
     }
 
+    /// <summary>
+    /// Trims and normalizes a single tag value.
+    /// </summary>
     public static string NormalizeTag(string tag)
     {
         if (!TryGetTrimmedRange(tag, out var start, out var length))
@@ -31,6 +40,9 @@ public static class CacheTagPolicy
         return NormalizeFromRange(tag, start, length);
     }
 
+    /// <summary>
+    /// Trims, de-duplicates, and merges two tag arrays using ordinal comparison.
+    /// </summary>
     public static string[] NormalizeTags(string[]? existingTags, string[]? additionalTags)
     {
         var maxCandidateCount = (existingTags?.Length ?? 0) + (additionalTags?.Length ?? 0);

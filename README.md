@@ -226,6 +226,12 @@ app.MapPut("/media/{id}", async (string id, HttpRequest request, ICacheChunkStre
 - `CacheStampede` values outside valid ranges.
 - Exposing operational endpoints publicly without auth.
 
+## Documentation Coverage
+
+- Full options/defaults reference (generated from source): [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md)
+- Configuration deep dive: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+- Quick setup: [QUICK_START.md](QUICK_START.md)
+
 ## Benchmarks
 
 - Latest posted benchmark summary: [PHASE1_BENCHMARK_REPORT.md](PHASE1_BENCHMARK_REPORT.md)

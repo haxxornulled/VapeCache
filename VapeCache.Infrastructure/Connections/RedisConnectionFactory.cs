@@ -1,4 +1,3 @@
-// ========================= File: Vapecache.Infrastructure/Connections/RedisConnectionFactory.cs =========================
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;

@@ -3,12 +3,18 @@ using Microsoft.Extensions.Logging;
 
 namespace VapeCache.Core.Common.Extensions;
 
+/// <summary>
+/// Helper extensions for <see cref="Result{T}"/> success/error handling with optional logging hooks.
+/// </summary>
 public static class ResultExtensions
 {
     private const string HandleSuccessFailureMessage = "HandleSuccess was called on a failed Result.";
     private const string HandleSuccessWithLoggingFailureMessage = "HandleSuccessWithLogging was called on a failed Result.";
     private const string ErrorHandlingFailureMessage = "An error occurred while handling or logging another exception.";
 
+    /// <summary>
+    /// Executes an error handler when the result is failed and returns the captured exception.
+    /// </summary>
     public static Exception? HandleError<T>(
         this Result<T> result,
         Action<Exception> errorHandler)
@@ -24,6 +30,9 @@ public static class ResultExtensions
             });
     }
 
+    /// <summary>
+    /// Maps a failed result exception to a custom error value.
+    /// </summary>
     public static TE? HandleError<T, TE>(
         this Result<T> result,
         Func<Exception, TE> errorHandler)
@@ -35,6 +44,10 @@ public static class ResultExtensions
             errorHandler);
     }
 
+    /// <summary>
+    /// Executes a success handler and returns the success value.
+    /// Throws when the result is failed.
+    /// </summary>
     public static T HandleSuccess<T>(
         this Result<T> result,
         Action<T> successHandler)
@@ -50,6 +63,10 @@ public static class ResultExtensions
             ThrowHandleSuccessFailure<T>);
     }
 
+    /// <summary>
+    /// Transforms a successful result value and returns the transformed value.
+    /// Throws when the result is failed.
+    /// </summary>
     public static T HandleSuccess<T>(
         this Result<T> result,
         Func<T, T> successHandler)
@@ -61,6 +78,9 @@ public static class ResultExtensions
             ThrowHandleSuccessFailure<T>);
     }
 
+    /// <summary>
+    /// Executes error logging and error handling when the result is failed.
+    /// </summary>
     public static Exception? HandleErrorWithLogging<T>(
         this Result<T> result,
         Action<Exception> errorHandler,
@@ -89,6 +109,10 @@ public static class ResultExtensions
             });
     }
 
+    /// <summary>
+    /// Executes success logging and success handling for a successful result.
+    /// Throws when the result is failed.
+    /// </summary>
     public static T HandleSuccessWithLogging<T>(
         this Result<T> result,
         Action<T> successHandler,
