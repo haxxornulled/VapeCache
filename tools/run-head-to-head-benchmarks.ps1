@@ -124,10 +124,35 @@ Write-Host "Text payload: $($TextPayload.IsPresent)"
 Write-Host "Launch/Warmup/Iteration: $env:VAPECACHE_BENCH_LAUNCH_COUNT / $env:VAPECACHE_BENCH_WARMUP_COUNT / $env:VAPECACHE_BENCH_ITERATION_COUNT"
 
 function Invoke-Benchmarks([string]$targetArtifacts) {
-    dotnet run -c Release --project $project -- `
-        -j $Job `
-        --filter $filters `
-        --artifacts $targetArtifacts
+    $quotedProject = '"' + $project + '"'
+    $quotedArtifacts = '"' + $targetArtifacts + '"'
+    $argumentList = @(
+        "run"
+        "-c"
+        "Release"
+        "--project"
+        $quotedProject
+        "--"
+        "-j"
+        $Job
+        "--filter"
+    )
+    $argumentList += $filters
+    $argumentList += @(
+        "--artifacts"
+        $quotedArtifacts
+    )
+
+    $process = Start-Process -FilePath "dotnet" -ArgumentList $argumentList -NoNewWindow -PassThru
+    $startedAt = Get-Date
+    while (-not $process.WaitForExit(60000)) {
+        $elapsedMinutes = [int][Math]::Floor(((Get-Date) - $startedAt).TotalMinutes)
+        Write-Host "Benchmark run still executing ($elapsedMinutes minute(s) elapsed)..."
+    }
+
+    if ($process.ExitCode -ne 0) {
+        throw "dotnet run failed with exit code $($process.ExitCode)."
+    }
 }
 
 if ($ContentionMatrix.IsPresent) {
