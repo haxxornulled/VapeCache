@@ -1,4 +1,4 @@
-namespace VapeCache.Features.Invalidation;
+﻿namespace VapeCache.Features.Invalidation;
 
 /// <summary>
 /// Entity-centric invalidation policy for common CRUD/event-driven scenarios.
@@ -14,6 +14,9 @@ public sealed class EntityInvalidationPolicy<TEvent> : ICacheInvalidationPolicy<
     private readonly string[] _keyPrefixes;
     private readonly Func<TEvent, bool>? _predicate;
 
+    /// <summary>
+    /// Executes entity invalidation policy.
+    /// </summary>
     public EntityInvalidationPolicy(
         string entityName,
         Func<TEvent, IEnumerable<string>?> idsSelector,
@@ -31,6 +34,9 @@ public sealed class EntityInvalidationPolicy<TEvent> : ICacheInvalidationPolicy<
         _keyPrefixes = NormalizePrefixes(keyPrefixes);
     }
 
+    /// <summary>
+    /// Executes build plan async.
+    /// </summary>
     public ValueTask<CacheInvalidationPlan> BuildPlanAsync(TEvent eventData, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

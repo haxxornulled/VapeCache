@@ -1,4 +1,4 @@
-using Autofac;
+﻿using Autofac;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -10,6 +10,9 @@ namespace VapeCache.Features.Invalidation;
 /// </summary>
 public static class AutofacInvalidationContainerBuilderExtensions
 {
+    /// <summary>
+    /// Executes add vape cache invalidation.
+    /// </summary>
     public static ContainerBuilder AddVapeCacheInvalidation(
         this ContainerBuilder builder,
         Action<CacheInvalidationOptions>? configure = null)
@@ -49,6 +52,9 @@ public static class AutofacInvalidationContainerBuilderExtensions
         return builder;
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static ContainerBuilder AddCacheInvalidationPolicy<TEvent, TPolicy>(this ContainerBuilder builder)
         where TPolicy : class, ICacheInvalidationPolicy<TEvent>
     {
@@ -61,6 +67,9 @@ public static class AutofacInvalidationContainerBuilderExtensions
         return builder;
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static ContainerBuilder AddCacheInvalidationPolicy<TEvent>(
         this ContainerBuilder builder,
         Func<IComponentContext, ICacheInvalidationPolicy<TEvent>> factory)
@@ -75,6 +84,9 @@ public static class AutofacInvalidationContainerBuilderExtensions
         return builder;
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static ContainerBuilder AddTagInvalidationPolicy<TEvent>(
         this ContainerBuilder builder,
         Func<TEvent, IEnumerable<string>?> tagsSelector,
@@ -87,6 +99,9 @@ public static class AutofacInvalidationContainerBuilderExtensions
             new TagInvalidationPolicy<TEvent>(tagsSelector, predicate));
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static ContainerBuilder AddZoneInvalidationPolicy<TEvent>(
         this ContainerBuilder builder,
         Func<TEvent, IEnumerable<string>?> zonesSelector,
@@ -99,6 +114,9 @@ public static class AutofacInvalidationContainerBuilderExtensions
             new ZoneInvalidationPolicy<TEvent>(zonesSelector, predicate));
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static ContainerBuilder AddKeyInvalidationPolicy<TEvent>(
         this ContainerBuilder builder,
         Func<TEvent, IEnumerable<string>?> keysSelector,
@@ -111,6 +129,9 @@ public static class AutofacInvalidationContainerBuilderExtensions
             new KeyInvalidationPolicy<TEvent>(keysSelector, predicate));
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static ContainerBuilder AddEntityInvalidationPolicy<TEvent>(
         this ContainerBuilder builder,
         string entityName,
@@ -132,6 +153,9 @@ public static class AutofacInvalidationContainerBuilderExtensions
                 predicate));
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static ContainerBuilder AddSmallWebsiteEntityInvalidationPolicy<TEvent>(
         this ContainerBuilder builder,
         string entityName,
@@ -151,6 +175,9 @@ public static class AutofacInvalidationContainerBuilderExtensions
             predicate: predicate);
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static ContainerBuilder AddHighTrafficEntityInvalidationPolicy<TEvent>(
         this ContainerBuilder builder,
         string entityName,
@@ -171,6 +198,9 @@ public static class AutofacInvalidationContainerBuilderExtensions
             predicate: predicate);
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static ContainerBuilder AddDesktopKeyInvalidationPolicy<TEvent>(
         this ContainerBuilder builder,
         Func<TEvent, IEnumerable<string>?> keysSelector,

@@ -1,11 +1,23 @@
-namespace VapeCache.Abstractions.Connections;
+﻿namespace VapeCache.Abstractions.Connections;
 
+/// <summary>
+/// Defines the redis multiplexer diagnostics contract.
+/// </summary>
 public interface IRedisMultiplexerDiagnostics
 {
+    /// <summary>
+    /// Executes get autoscaler snapshot.
+    /// </summary>
     RedisAutoscalerSnapshot GetAutoscalerSnapshot();
+    /// <summary>
+    /// Executes get mux lane snapshots.
+    /// </summary>
     IReadOnlyList<RedisMuxLaneSnapshot> GetMuxLaneSnapshots();
 }
 
+/// <summary>
+/// Represents the redis autoscaler snapshot.
+/// </summary>
 public sealed record RedisAutoscalerSnapshot(
     bool Enabled,
     int CurrentConnections,
@@ -32,6 +44,9 @@ public sealed record RedisAutoscalerSnapshot(
     string? LastScaleDirection,
     string? LastScaleReason);
 
+/// <summary>
+/// Represents the redis mux lane snapshot.
+/// </summary>
 public sealed record RedisMuxLaneSnapshot(
     int LaneIndex,
     int ConnectionId,

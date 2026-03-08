@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -9,6 +9,9 @@ namespace VapeCache.Features.Invalidation;
 /// </summary>
 public static class InvalidationServiceCollectionExtensions
 {
+    /// <summary>
+    /// Executes add vape cache invalidation.
+    /// </summary>
     public static IServiceCollection AddVapeCacheInvalidation(
         this IServiceCollection services,
         IConfiguration? configuration = null,
@@ -32,6 +35,9 @@ public static class InvalidationServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static IServiceCollection AddCacheInvalidationPolicy<TEvent, TPolicy>(this IServiceCollection services)
         where TPolicy : class, ICacheInvalidationPolicy<TEvent>
     {
@@ -43,6 +49,9 @@ public static class InvalidationServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static IServiceCollection AddCacheInvalidationPolicy<TEvent>(
         this IServiceCollection services,
         Func<IServiceProvider, ICacheInvalidationPolicy<TEvent>> factory)
@@ -55,6 +64,9 @@ public static class InvalidationServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static IServiceCollection AddTagInvalidationPolicy<TEvent>(
         this IServiceCollection services,
         Func<TEvent, IEnumerable<string>?> tagsSelector,
@@ -67,6 +79,9 @@ public static class InvalidationServiceCollectionExtensions
             new TagInvalidationPolicy<TEvent>(tagsSelector, predicate));
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static IServiceCollection AddZoneInvalidationPolicy<TEvent>(
         this IServiceCollection services,
         Func<TEvent, IEnumerable<string>?> zonesSelector,
@@ -79,6 +94,9 @@ public static class InvalidationServiceCollectionExtensions
             new ZoneInvalidationPolicy<TEvent>(zonesSelector, predicate));
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static IServiceCollection AddKeyInvalidationPolicy<TEvent>(
         this IServiceCollection services,
         Func<TEvent, IEnumerable<string>?> keysSelector,
@@ -91,6 +109,9 @@ public static class InvalidationServiceCollectionExtensions
             new KeyInvalidationPolicy<TEvent>(keysSelector, predicate));
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public static IServiceCollection AddEntityInvalidationPolicy<TEvent>(
         this IServiceCollection services,
         string entityName,

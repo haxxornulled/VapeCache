@@ -1,4 +1,4 @@
-using VapeCache.Core.Domain.Primitives;
+﻿using VapeCache.Core.Domain.Primitives;
 
 namespace VapeCache.Application.Caching.Invalidation.Events;
 
@@ -7,6 +7,9 @@ namespace VapeCache.Application.Caching.Invalidation.Events;
 /// </summary>
 public sealed record CacheZonesInvalidatedEvent(IReadOnlyList<string> Zones) : DomainEvent
 {
+    /// <summary>
+    /// Executes cache zones invalidated event.
+    /// </summary>
     public CacheZonesInvalidatedEvent(params string[] zones)
         : this((IReadOnlyList<string>)zones)
     {

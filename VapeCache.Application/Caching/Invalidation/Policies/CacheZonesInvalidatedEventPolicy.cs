@@ -1,4 +1,4 @@
-using VapeCache.Application.Caching.Invalidation.Events;
+﻿using VapeCache.Application.Caching.Invalidation.Events;
 using VapeCache.Features.Invalidation;
 
 namespace VapeCache.Application.Caching.Invalidation.Policies;
@@ -8,6 +8,9 @@ namespace VapeCache.Application.Caching.Invalidation.Policies;
 /// </summary>
 public sealed class CacheZonesInvalidatedEventPolicy : ICacheInvalidationPolicy<CacheZonesInvalidatedEvent>
 {
+    /// <summary>
+    /// Executes build plan async.
+    /// </summary>
     public ValueTask<CacheInvalidationPlan> BuildPlanAsync(
         CacheZonesInvalidatedEvent eventData,
         CancellationToken cancellationToken = default)

@@ -1,4 +1,4 @@
-namespace VapeCache.Features.Invalidation;
+﻿namespace VapeCache.Features.Invalidation;
 
 /// <summary>
 /// Accumulates invalidation targets and builds a normalized plan.
@@ -9,6 +9,9 @@ public sealed class CacheInvalidationPlanBuilder
     private readonly HashSet<string> _zones = new(StringComparer.Ordinal);
     private readonly HashSet<string> _keys = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Executes add plan.
+    /// </summary>
     public CacheInvalidationPlanBuilder AddPlan(CacheInvalidationPlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -18,24 +21,36 @@ public sealed class CacheInvalidationPlanBuilder
         return this;
     }
 
+    /// <summary>
+    /// Executes add tags.
+    /// </summary>
     public CacheInvalidationPlanBuilder AddTags(IEnumerable<string>? tags)
     {
         AddTargets(_tags, tags);
         return this;
     }
 
+    /// <summary>
+    /// Executes add zones.
+    /// </summary>
     public CacheInvalidationPlanBuilder AddZones(IEnumerable<string>? zones)
     {
         AddTargets(_zones, zones);
         return this;
     }
 
+    /// <summary>
+    /// Executes add keys.
+    /// </summary>
     public CacheInvalidationPlanBuilder AddKeys(IEnumerable<string>? keys)
     {
         AddTargets(_keys, keys);
         return this;
     }
 
+    /// <summary>
+    /// Executes build.
+    /// </summary>
     public CacheInvalidationPlan Build()
     {
         if (_tags.Count == 0 && _zones.Count == 0 && _keys.Count == 0)

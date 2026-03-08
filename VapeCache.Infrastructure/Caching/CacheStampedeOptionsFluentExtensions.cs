@@ -1,9 +1,12 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Infrastructure.Caching;
 
+/// <summary>
+/// Represents the cache stampede options fluent extensions.
+/// </summary>
 public static class CacheStampedeOptionsFluentExtensions
 {
     /// <summary>
@@ -33,6 +36,9 @@ public static class CacheStampedeOptionsFluentExtensions
     }
 }
 
+/// <summary>
+/// Represents the cache stampede options builder.
+/// </summary>
 public sealed class CacheStampedeOptionsBuilder
 {
     private readonly CacheStampedeOptions _options;

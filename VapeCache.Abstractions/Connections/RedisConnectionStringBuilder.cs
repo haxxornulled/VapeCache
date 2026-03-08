@@ -1,5 +1,8 @@
-namespace VapeCache.Abstractions.Connections;
+﻿namespace VapeCache.Abstractions.Connections;
 
+/// <summary>
+/// Represents the redis connection string builder.
+/// </summary>
 public sealed class RedisConnectionStringBuilder : IRedisConnectionStringBuilder
 {
     /// <summary>

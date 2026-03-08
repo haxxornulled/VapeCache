@@ -1,4 +1,4 @@
-// ========================= File: Vapecache.Infrastructure/Connections/RedisConnectionRegistration.cs =========================
+﻿// ========================= File: Vapecache.Infrastructure/Connections/RedisConnectionRegistration.cs =========================
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -7,6 +7,9 @@ using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
 
+/// <summary>
+/// Represents the redis connection registration.
+/// </summary>
 public static class RedisConnectionRegistration
 {
     /// <summary>

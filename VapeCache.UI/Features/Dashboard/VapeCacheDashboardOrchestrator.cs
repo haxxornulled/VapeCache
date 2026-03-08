@@ -1,9 +1,12 @@
-using VapeCache.Abstractions.Caching;
+﻿using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.UI.Features.Dashboard;
 
+/// <summary>
+/// Represents the vape cache dashboard orchestrator.
+/// </summary>
 public sealed class VapeCacheDashboardOrchestrator
 {
     private readonly ICacheStats _cacheStats;
@@ -29,6 +32,9 @@ public sealed class VapeCacheDashboardOrchestrator
     private IReadOnlyList<RedisMuxLaneSnapshot>? _localCacheLanes;
     private VapeCacheDashboardSnapshot? _localCacheSnapshot;
 
+    /// <summary>
+    /// Executes vape cache dashboard orchestrator.
+    /// </summary>
     public VapeCacheDashboardOrchestrator(
         ICacheStats cacheStats,
         IRedisCircuitBreakerState breakerState,
@@ -45,6 +51,9 @@ public sealed class VapeCacheDashboardOrchestrator
         _spillDiagnostics = spillDiagnostics;
     }
 
+    /// <summary>
+    /// Executes get snapshot async.
+    /// </summary>
     public async ValueTask<VapeCacheDashboardSnapshot> GetSnapshotAsync(CancellationToken ct = default)
     {
         var shared = await TryGetSharedSnapshotAsync(ct).ConfigureAwait(false);
@@ -294,6 +303,9 @@ public sealed class VapeCacheDashboardOrchestrator
     }
 }
 
+/// <summary>
+/// Represents the vape cache dashboard snapshot.
+/// </summary>
 public sealed record VapeCacheDashboardSnapshot(
     DateTimeOffset TimestampUtc,
     BackendType Backend,
@@ -317,6 +329,9 @@ public sealed record VapeCacheDashboardSnapshot(
     IReadOnlyList<RedisMuxLaneSnapshot> Lanes,
     SpillStoreDiagnosticsSnapshot? Spill)
 {
+    /// <summary>
+    /// Executes new.
+    /// </summary>
     public static VapeCacheDashboardSnapshot Empty { get; } = new(
         TimestampUtc: DateTimeOffset.MinValue,
         Backend: BackendType.Redis,

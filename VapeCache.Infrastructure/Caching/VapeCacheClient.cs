@@ -1,4 +1,4 @@
-using VapeCache.Abstractions.Caching;
+﻿using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Infrastructure.Caching;
 
@@ -12,6 +12,9 @@ public sealed class VapeCacheClient : IVapeCache
     private readonly ICacheCodecProvider _codecs;
     private readonly ICacheTagService? _tags;
 
+    /// <summary>
+    /// Executes vape cache client.
+    /// </summary>
     public VapeCacheClient(ICacheService inner, ICacheCodecProvider codecs)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
@@ -30,6 +33,9 @@ public sealed class VapeCacheClient : IVapeCache
         return new CacheRegion(name, this);
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public async ValueTask<T?> GetAsync<T>(CacheKey<T> key, CancellationToken ct = default)
     {
         var codec = _codecs.Get<T>();
@@ -37,12 +43,18 @@ public sealed class VapeCacheClient : IVapeCache
         return result;
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public ValueTask SetAsync<T>(CacheKey<T> key, T value, CacheEntryOptions options = default, CancellationToken ct = default)
     {
         var codec = _codecs.Get<T>();
         return _inner.SetAsync(key.Value, value, codec.Serialize, options, ct);
     }
 
+    /// <summary>
+    /// Provides member behavior.
+    /// </summary>
     public async ValueTask<T> GetOrCreateAsync<T>(
         CacheKey<T> key,
         Func<CancellationToken, ValueTask<T>> factory,

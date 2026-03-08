@@ -1,4 +1,4 @@
-using Autofac;
+﻿using Autofac;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Connections;
@@ -15,6 +15,9 @@ public sealed class VapeCacheAspireAutofacModule : Module
     private readonly RedisTransportProfile _transportProfile;
     private readonly string _connectionName;
 
+    /// <summary>
+    /// Executes vape cache aspire autofac module.
+    /// </summary>
     public VapeCacheAspireAutofacModule(
         IConfiguration configuration,
         RedisTransportProfile transportProfile = RedisTransportProfile.FullTilt,
@@ -25,6 +28,9 @@ public sealed class VapeCacheAspireAutofacModule : Module
         _connectionName = string.IsNullOrWhiteSpace(connectionName) ? "redis" : connectionName.Trim();
     }
 
+    /// <summary>
+    /// Executes load.
+    /// </summary>
     protected override void Load(ContainerBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);

@@ -1,4 +1,4 @@
-namespace VapeCache.Features.Invalidation;
+﻿namespace VapeCache.Features.Invalidation;
 
 /// <summary>
 /// Merges multiple policies into a single normalized invalidation plan.
@@ -7,12 +7,18 @@ public sealed class CompositeInvalidationPolicy<TEvent> : ICacheInvalidationPoli
 {
     private readonly IReadOnlyList<ICacheInvalidationPolicy<TEvent>> _policies;
 
+    /// <summary>
+    /// Executes composite invalidation policy.
+    /// </summary>
     public CompositeInvalidationPolicy(IEnumerable<ICacheInvalidationPolicy<TEvent>> policies)
     {
         ArgumentNullException.ThrowIfNull(policies);
         _policies = policies as IReadOnlyList<ICacheInvalidationPolicy<TEvent>> ?? policies.ToArray();
     }
 
+    /// <summary>
+    /// Executes build plan async.
+    /// </summary>
     public async ValueTask<CacheInvalidationPlan> BuildPlanAsync(TEvent eventData, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

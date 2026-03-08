@@ -1,8 +1,17 @@
-namespace VapeCache.Abstractions.Caching;
+﻿namespace VapeCache.Abstractions.Caching;
 
+/// <summary>
+/// Represents the cache stampede options.
+/// </summary>
 public sealed record CacheStampedeOptions
 {
+    /// <summary>
+    /// Gets or sets the enabled.
+    /// </summary>
     public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Gets or sets the max keys.
+    /// </summary>
     public int MaxKeys { get; set; } = 50_000;
 
     /// <summary>

@@ -1,4 +1,4 @@
-using VapeCache.Core.Domain.Primitives;
+﻿using VapeCache.Core.Domain.Primitives;
 
 namespace VapeCache.Application;
 
@@ -7,5 +7,8 @@ namespace VapeCache.Application;
 /// </summary>
 public sealed class ApplicationAssemblyMarker
 {
+    /// <summary>
+    /// Executes typeof.
+    /// </summary>
     public static Type CoreAnchorType => typeof(ValueObject);
 }

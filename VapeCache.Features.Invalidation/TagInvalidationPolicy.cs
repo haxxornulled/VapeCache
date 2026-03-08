@@ -1,4 +1,4 @@
-namespace VapeCache.Features.Invalidation;
+﻿namespace VapeCache.Features.Invalidation;
 
 /// <summary>
 /// Out-of-the-box policy that projects an event into tag invalidation targets.
@@ -8,6 +8,9 @@ public sealed class TagInvalidationPolicy<TEvent> : ICacheInvalidationPolicy<TEv
     private readonly Func<TEvent, IEnumerable<string>?> _tagsSelector;
     private readonly Func<TEvent, bool>? _predicate;
 
+    /// <summary>
+    /// Executes tag invalidation policy.
+    /// </summary>
     public TagInvalidationPolicy(
         Func<TEvent, IEnumerable<string>?> tagsSelector,
         Func<TEvent, bool>? predicate = null)
@@ -16,6 +19,9 @@ public sealed class TagInvalidationPolicy<TEvent> : ICacheInvalidationPolicy<TEv
         _predicate = predicate;
     }
 
+    /// <summary>
+    /// Executes build plan async.
+    /// </summary>
     public ValueTask<CacheInvalidationPlan> BuildPlanAsync(TEvent eventData, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

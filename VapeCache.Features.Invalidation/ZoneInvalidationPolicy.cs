@@ -1,4 +1,4 @@
-namespace VapeCache.Features.Invalidation;
+﻿namespace VapeCache.Features.Invalidation;
 
 /// <summary>
 /// Out-of-the-box policy that projects an event into zone invalidation targets.
@@ -8,6 +8,9 @@ public sealed class ZoneInvalidationPolicy<TEvent> : ICacheInvalidationPolicy<TE
     private readonly Func<TEvent, IEnumerable<string>?> _zonesSelector;
     private readonly Func<TEvent, bool>? _predicate;
 
+    /// <summary>
+    /// Executes zone invalidation policy.
+    /// </summary>
     public ZoneInvalidationPolicy(
         Func<TEvent, IEnumerable<string>?> zonesSelector,
         Func<TEvent, bool>? predicate = null)
@@ -16,6 +19,9 @@ public sealed class ZoneInvalidationPolicy<TEvent> : ICacheInvalidationPolicy<TE
         _predicate = predicate;
     }
 
+    /// <summary>
+    /// Executes build plan async.
+    /// </summary>
     public ValueTask<CacheInvalidationPlan> BuildPlanAsync(TEvent eventData, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

@@ -1,4 +1,4 @@
-namespace VapeCache.Features.Invalidation;
+﻿namespace VapeCache.Features.Invalidation;
 
 /// <summary>
 /// Delegate-based invalidation policy for quick event projection.
@@ -10,6 +10,9 @@ public sealed class DelegateInvalidationPolicy<TEvent> : ICacheInvalidationPolic
     private readonly Func<TEvent, IEnumerable<string>?>? _zoneSelector;
     private readonly Func<TEvent, IEnumerable<string>?>? _keySelector;
 
+    /// <summary>
+    /// Executes delegate invalidation policy.
+    /// </summary>
     public DelegateInvalidationPolicy(
         Func<TEvent, IEnumerable<string>?>? tagSelector = null,
         Func<TEvent, IEnumerable<string>?>? zoneSelector = null,
@@ -22,6 +25,9 @@ public sealed class DelegateInvalidationPolicy<TEvent> : ICacheInvalidationPolic
         _predicate = predicate;
     }
 
+    /// <summary>
+    /// Executes build plan async.
+    /// </summary>
     public ValueTask<CacheInvalidationPlan> BuildPlanAsync(TEvent eventData, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

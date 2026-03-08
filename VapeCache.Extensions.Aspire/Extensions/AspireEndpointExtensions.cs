@@ -34,6 +34,12 @@ public static class AspireEndpointExtensions
     /// <param name="includeDashboardEndpoint">
     /// When true, maps a built-in realtime dashboard UI at {prefix}/dashboard.
     /// </param>
+    /// <param name="includeLiveStreamEndpoint">
+    /// When true, maps a live metrics stream endpoint under the configured prefix.
+    /// </param>
+    /// <param name="includeIntentEndpoints">
+    /// When true, maps intent inspection endpoints.
+    /// </param>
     /// <returns>A route group builder for additional customization.</returns>
     public static RouteGroupBuilder MapVapeCacheEndpoints(
         this IEndpointRouteBuilder endpoints,

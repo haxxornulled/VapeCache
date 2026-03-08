@@ -1,8 +1,11 @@
-using VapeCache.Abstractions.Caching;
+﻿using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.UI.Features.CacheWorkbench;
 
+/// <summary>
+/// Represents the cache workbench orchestrator.
+/// </summary>
 public sealed class CacheWorkbenchOrchestrator(
     IVapeCache cache,
     ICacheBackendState backendState,
@@ -10,6 +13,9 @@ public sealed class CacheWorkbenchOrchestrator(
     IRedisCircuitBreakerState breakerState,
     IRedisFailoverController failoverController)
 {
+    /// <summary>
+    /// Executes get status async.
+    /// </summary>
     public ValueTask<CacheWorkbenchStatus> GetStatusAsync(CancellationToken ct = default)
     {
         var snapshot = cacheStats.Snapshot;
@@ -30,6 +36,9 @@ public sealed class CacheWorkbenchOrchestrator(
             snapshot.FallbackToMemory));
     }
 
+    /// <summary>
+    /// Executes set string async.
+    /// </summary>
     public async ValueTask<CacheWriteResult> SetStringAsync(
         string key,
         string value,
@@ -46,6 +55,9 @@ public sealed class CacheWorkbenchOrchestrator(
         return new CacheWriteResult(normalizedKey, stored ?? string.Empty, options.Ttl);
     }
 
+    /// <summary>
+    /// Executes read string async.
+    /// </summary>
     public async ValueTask<CacheReadResult> ReadStringAsync(string key, CancellationToken ct = default)
     {
         var normalizedKey = NormalizeKey(key);
@@ -53,9 +65,15 @@ public sealed class CacheWorkbenchOrchestrator(
         return new CacheReadResult(normalizedKey, value, value is not null);
     }
 
+    /// <summary>
+    /// Executes remove async.
+    /// </summary>
     public ValueTask<bool> RemoveAsync(string key, CancellationToken ct = default) =>
         cache.RemoveAsync(new CacheKey(NormalizeKey(key)), ct);
 
+    /// <summary>
+    /// Executes force breaker open async.
+    /// </summary>
     public ValueTask ForceBreakerOpenAsync(string reason, CancellationToken ct = default)
     {
         var normalizedReason = string.IsNullOrWhiteSpace(reason)
@@ -65,6 +83,9 @@ public sealed class CacheWorkbenchOrchestrator(
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Executes clear breaker force open async.
+    /// </summary>
     public ValueTask ClearBreakerForceOpenAsync(CancellationToken ct = default)
     {
         failoverController.ClearForcedOpen();
@@ -80,6 +101,9 @@ public sealed class CacheWorkbenchOrchestrator(
     }
 }
 
+/// <summary>
+/// Represents the cache workbench status.
+/// </summary>
 public sealed record CacheWorkbenchStatus(
     BackendType Backend,
     bool BreakerOpen,
@@ -94,6 +118,12 @@ public sealed record CacheWorkbenchStatus(
     long RemoveCalls,
     long FallbackToMemory);
 
+/// <summary>
+/// Represents the cache write result.
+/// </summary>
 public sealed record CacheWriteResult(string Key, string Value, TimeSpan? Ttl);
 
+/// <summary>
+/// Represents the cache read result.
+/// </summary>
 public sealed record CacheReadResult(string Key, string? Value, bool Found);

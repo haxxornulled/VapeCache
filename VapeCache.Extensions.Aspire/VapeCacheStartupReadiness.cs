@@ -1,21 +1,54 @@
-namespace VapeCache.Extensions.Aspire;
+﻿namespace VapeCache.Extensions.Aspire;
 
 /// <summary>
 /// Readiness state for Aspire startup warmup.
 /// </summary>
 public interface IVapeCacheStartupReadiness
 {
+    /// <summary>
+    /// Gets the s ready.
+    /// </summary>
     bool IsReady { get; }
+    /// <summary>
+    /// Gets the s running.
+    /// </summary>
     bool IsRunning { get; }
+    /// <summary>
+    /// Gets the target connections.
+    /// </summary>
     int TargetConnections { get; }
+    /// <summary>
+    /// Gets the successful connections.
+    /// </summary>
     int SuccessfulConnections { get; }
+    /// <summary>
+    /// Gets the failed connections.
+    /// </summary>
     int FailedConnections { get; }
+    /// <summary>
+    /// Gets the status.
+    /// </summary>
     string? Status { get; }
+    /// <summary>
+    /// Gets the last error.
+    /// </summary>
     Exception? LastError { get; }
+    /// <summary>
+    /// Gets the completed at utc.
+    /// </summary>
     DateTimeOffset? CompletedAtUtc { get; }
 
+    /// <summary>
+    /// Executes mark warmup disabled.
+    /// </summary>
     void MarkWarmupDisabled();
+    /// <summary>
+    /// Executes mark running.
+    /// </summary>
     void MarkRunning(int targetConnections);
+    /// <summary>
+    /// Executes mark completed.
+    /// </summary>
     void MarkCompleted(bool ready, int successfulConnections, int failedConnections, string? status, Exception? lastError);
 }
 

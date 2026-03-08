@@ -1,4 +1,4 @@
-using VapeCache.Application.Abstractions;
+﻿using VapeCache.Application.Abstractions;
 using VapeCache.Application.Caching.Invalidation.Commands;
 using VapeCache.Application.Caching.Invalidation.Events;
 using VapeCache.Features.Invalidation;
@@ -14,6 +14,9 @@ public sealed class InvalidateCacheKeysCommandHandler(
 {
     private readonly ICacheInvalidationEventPublisher _publisher = publisher;
 
+    /// <summary>
+    /// Executes handle async.
+    /// </summary>
     public ValueTask<CacheInvalidationExecutionResult> HandleAsync(
         InvalidateCacheKeysCommand command,
         CancellationToken cancellationToken = default)

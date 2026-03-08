@@ -1,7 +1,10 @@
-using System.Globalization;
+﻿using System.Globalization;
 
 namespace VapeCache.Abstractions.Connections;
 
+/// <summary>
+/// Represents the redis connection string parser.
+/// </summary>
 public static class RedisConnectionStringParser
 {
     /// <summary>

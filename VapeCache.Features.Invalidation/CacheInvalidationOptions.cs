@@ -1,4 +1,4 @@
-namespace VapeCache.Features.Invalidation;
+﻿namespace VapeCache.Features.Invalidation;
 
 /// <summary>
 /// Runtime options for policy-driven cache invalidation execution.
@@ -57,6 +57,9 @@ public sealed class CacheInvalidationOptions
     /// </summary>
     public int? MaxConcurrency { get; set; }
 
+    /// <summary>
+    /// Executes resolve runtime settings.
+    /// </summary>
     public CacheInvalidationRuntimeSettings ResolveRuntimeSettings()
     {
         var defaults = Profile switch
@@ -103,6 +106,9 @@ public sealed class CacheInvalidationOptions
     }
 }
 
+/// <summary>
+/// Represents the struct.
+/// </summary>
 public readonly record struct CacheInvalidationRuntimeSettings(
     bool ThrowOnFailure,
     bool ExecuteTargetsInParallel,

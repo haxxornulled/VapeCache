@@ -1,4 +1,4 @@
-namespace VapeCache.Features.Invalidation;
+﻿namespace VapeCache.Features.Invalidation;
 
 /// <summary>
 /// Out-of-the-box policy that projects an event into key removal targets.
@@ -8,6 +8,9 @@ public sealed class KeyInvalidationPolicy<TEvent> : ICacheInvalidationPolicy<TEv
     private readonly Func<TEvent, IEnumerable<string>?> _keysSelector;
     private readonly Func<TEvent, bool>? _predicate;
 
+    /// <summary>
+    /// Executes key invalidation policy.
+    /// </summary>
     public KeyInvalidationPolicy(
         Func<TEvent, IEnumerable<string>?> keysSelector,
         Func<TEvent, bool>? predicate = null)
@@ -16,6 +19,9 @@ public sealed class KeyInvalidationPolicy<TEvent> : ICacheInvalidationPolicy<TEv
         _predicate = predicate;
     }
 
+    /// <summary>
+    /// Executes build plan async.
+    /// </summary>
     public ValueTask<CacheInvalidationPlan> BuildPlanAsync(TEvent eventData, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

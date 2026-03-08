@@ -1,14 +1,20 @@
-using Microsoft.Extensions.Diagnostics.HealthChecks;
+﻿using Microsoft.Extensions.Diagnostics.HealthChecks;
 using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Extensions.Aspire.HealthChecks;
 
+/// <summary>
+/// Represents the redis health check.
+/// </summary>
 public sealed class RedisHealthCheck : IHealthCheck
 {
     private static readonly ReadOnlyMemory<byte> PingCommand = "*1\r\n$4\r\nPING\r\n"u8.ToArray();
     private static readonly byte[] PongResponse = "+PONG\r\n"u8.ToArray();
     private readonly IRedisConnectionPool _pool;
 
+    /// <summary>
+    /// Executes redis health check.
+    /// </summary>
     public RedisHealthCheck(IRedisConnectionPool pool)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));

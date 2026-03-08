@@ -1,16 +1,40 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Microsoft.AspNetCore.Components;
 
 namespace VapeCache.UI.Components.Dashboard;
 
+/// <summary>
+/// Represents the metric gauge.
+/// </summary>
 public partial class MetricGauge
 {
+    /// <summary>
+    /// Gets or sets the gauge label.
+    /// </summary>
     [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    /// <summary>
+    /// Gets or sets the current value.
+    /// </summary>
     [Parameter] public double Value { get; set; }
+    /// <summary>
+    /// Gets or sets the minimum value.
+    /// </summary>
     [Parameter] public double Min { get; set; }
+    /// <summary>
+    /// Gets or sets the maximum value.
+    /// </summary>
     [Parameter] public double Max { get; set; } = 100d;
+    /// <summary>
+    /// Gets or sets the display unit suffix.
+    /// </summary>
     [Parameter] public string Unit { get; set; } = string.Empty;
+    /// <summary>
+    /// Gets or sets the optional caption.
+    /// </summary>
     [Parameter] public string? Caption { get; set; }
+    /// <summary>
+    /// Gets or sets the decimal precision for value display.
+    /// </summary>
     [Parameter] public int Decimals { get; set; } = 1;
 
     private string FillPercentCss { get; set; } = "0.0%";
@@ -18,6 +42,9 @@ public partial class MetricGauge
     private string RangeDisplay { get; set; } = "0..100";
     private string DisplayValue { get; set; } = "0.0";
 
+    /// <summary>
+    /// Executes on parameters set.
+    /// </summary>
     protected override void OnParametersSet()
     {
         var fillPercent = Max <= Min

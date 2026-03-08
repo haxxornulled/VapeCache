@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.Options;
 using VapeCache.Application.Caching.Invalidation.Events;
 using VapeCache.Features.Invalidation;
 
@@ -15,6 +15,9 @@ public sealed class ProfileAwareEntityCacheChangedInvalidationPolicy(
 
     private readonly IOptionsMonitor<CacheInvalidationOptions> _optionsMonitor = optionsMonitor;
 
+    /// <summary>
+    /// Executes build plan async.
+    /// </summary>
     public ValueTask<CacheInvalidationPlan> BuildPlanAsync(
         EntityCacheChangedEvent eventData,
         CancellationToken cancellationToken = default)

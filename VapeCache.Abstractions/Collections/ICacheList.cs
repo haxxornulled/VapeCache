@@ -37,6 +37,7 @@ public interface ICacheList<T>
     /// <summary>Get a range of items without removing them</summary>
     /// <param name="start">Zero-based start index (0 = first item, -1 = last item)</param>
     /// <param name="stop">Zero-based stop index (inclusive)</param>
+    /// <param name="ct">Cancellation token.</param>
     ValueTask<T[]> RangeAsync(long start, long stop, CancellationToken ct = default);
 
     /// <summary>Get the length of the list</summary>

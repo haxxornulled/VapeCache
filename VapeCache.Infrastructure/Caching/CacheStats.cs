@@ -1,7 +1,10 @@
-using VapeCache.Abstractions.Caching;
+﻿using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Infrastructure.Caching;
 
+/// <summary>
+/// Represents the cache stats.
+/// </summary>
 public sealed class CacheStats : ICacheStats
 {
     private long _get;
@@ -15,6 +18,9 @@ public sealed class CacheStats : ICacheStats
     private long _stampedeLockWaitTimeout;
     private long _stampedeFailureBackoffRejected;
 
+    /// <summary>
+    /// Executes new.
+    /// </summary>
     public CacheStatsSnapshot Snapshot => new(
         GetCalls: Volatile.Read(ref _get),
         Hits: Volatile.Read(ref _hit),
