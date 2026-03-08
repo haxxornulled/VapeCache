@@ -101,7 +101,7 @@ Controls multiplexed command execution.
     "Connections": 4,
     "MaxInFlightPerConnection": 4096,
     "ResponseTimeout": "00:00:02",
-    "EnableCommandInstrumentation": true,
+    "EnableCommandInstrumentation": false,
     "EnableCoalescedSocketWrites": true,
     "EnableSocketRespReader": false,
     "CoalescedWriteMaxBytes": 524288,
@@ -126,6 +126,7 @@ Controls multiplexed command execution.
 **Notes**
 - `EnableAutoscaling` and autoscaler thresholds are **Enterprise-only** operational controls.
 - For OSS-only deployments, keep `EnableAutoscaling=false` (default).
+- `EnableCommandInstrumentation=false` is the default and is recommended for strict zero-allocation hot paths.
 - `ResponseTimeout` applies per command response; set to `00:00:00` to disable.
 - Effective FullTilt profile sizing defaults are `CoalescedWriteMaxBytes=524288`, `CoalescedWriteMaxSegments=192`, `CoalescedWriteSmallCopyThresholdBytes=1536`.
 - Coalesced write knobs control packet framing at the driver layer. Increase batch bytes/segments for throughput; reduce for lower tail latency.
@@ -191,6 +192,7 @@ If normalization occurs, `RedisCommandExecutor` logs a warning so teams can corr
 
 Detailed behavior, diagrams, and tuning guidance:
 - [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md)
+- Complete options inventory: [SETTINGS_REFERENCE.md](SETTINGS_REFERENCE.md)
 
 ## RedisCircuitBreaker (RedisCircuitBreakerOptions)
 

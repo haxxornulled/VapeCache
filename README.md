@@ -114,6 +114,12 @@ public sealed class PingService(ICacheService cache)
 }
 ```
 
+## Documentation Coverage
+
+- Full options/defaults reference (generated from source): [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md)
+- Configuration deep dive: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+- Quick setup: [QUICK_START.md](QUICK_START.md)
+
 ## Documentation
 
 Start here:
