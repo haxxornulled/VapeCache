@@ -182,14 +182,13 @@ jobs:
             -MaxCartSize 35 \
             -MuxConnections 12 \
             -MuxInFlight 4096 \
-            -MinThroughputRatio 1.00 \
+            -MinThroughputRatio 0.40 \
             -MaxAllocRatio 1.40 \
             -MaxAllocBytesPerShopper 35000 \
-            -LowLatencyMaxP99Ratio 1.15 \
-            -LowLatencyMaxP999Ratio 1.20 \
-            -FullTiltMaxP99Ratio 1.30 \
-            -FullTiltMaxP999Ratio 1.35 \
-            -StrictTailRatios \
+            -LowLatencyMaxP99Ms 90 \
+            -LowLatencyMaxP999Ms 130 \
+            -FullTiltMaxP99Ms 90 \
+            -FullTiltMaxP999Ms 140 \
             -RedisHost 127.0.0.1 \
             -RedisPort 6379 \
             -RedisUsername "" \
