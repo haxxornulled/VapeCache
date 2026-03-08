@@ -1,4 +1,5 @@
 using System.Net;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VapeCache.Extensions.Aspire;
@@ -48,7 +49,9 @@ public sealed class RedisExporterMetricsHostedServiceTests
                 RequestTimeout = TimeSpan.FromMilliseconds(100)
             });
 
-            await Task.Delay(180);
+            await WaitForConditionAsync(
+                () => state.Current.Enabled && state.Current.Up == 1 && handler.RequestCount > 0,
+                timeout: TimeSpan.FromSeconds(2));
 
             Assert.True(state.Current.Enabled);
             Assert.Equal(1, state.Current.Up);
@@ -97,6 +100,18 @@ public sealed class RedisExporterMetricsHostedServiceTests
         finally
         {
             await sut.StopAsync(CancellationToken.None);
+        }
+    }
+
+    private static async Task WaitForConditionAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        var start = Stopwatch.GetTimestamp();
+        while (!condition())
+        {
+            if (Stopwatch.GetElapsedTime(start) >= timeout)
+                throw new TimeoutException("Condition was not satisfied within the expected timeout.");
+
+            await Task.Delay(25).ConfigureAwait(false);
         }
     }
 

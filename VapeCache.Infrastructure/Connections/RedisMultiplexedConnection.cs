@@ -27,6 +27,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private readonly TimeSpan _responseTimeout;
     private readonly int _connectionId;
     private readonly KeyValuePair<string, object?>[] _writeQueueWaitTags;
+    private readonly bool _runtimeTelemetryRegistered;
+    private readonly Func<bool>? _shouldRecordRuntimeTelemetry;
 
     private readonly MpscRingQueue<PendingRequest> _writes;
     private readonly SpscRingQueue<PendingOperation> _pending;
@@ -106,7 +108,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         int fastTimeoutResetThreshold = 3,
         TimeSpan fastTimeoutResetWindow = default,
         Action<long>? recordLatencyStopwatchTicks = null,
-        Func<bool>? shouldRecordLatency = null)
+        Func<bool>? shouldRecordLatency = null,
+        Func<bool>? shouldRecordRuntimeTelemetry = null)
     {
         _factory = factory;
         _maxInFlight = Math.Max(1, maxInFlight);
@@ -115,6 +118,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         _useDedicatedLaneWorkers = useDedicatedLaneWorkers;
         _bulkMgetKeyThreshold = Math.Max(1, bulkMgetKeyThreshold);
         _bulkPayloadBytesThreshold = Math.Max(1, bulkPayloadBytesThreshold);
+        _shouldRecordRuntimeTelemetry = shouldRecordRuntimeTelemetry;
         _ = fastTimeoutResetThreshold;
         _ = fastTimeoutResetWindow;
         _maxBulkStringBytes = maxBulkStringBytes;
@@ -161,9 +165,18 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             coalescingSpinBudget);
 
         _connectionId = Interlocked.Increment(ref _nextConnectionId);
-        _writeQueueWaitTags = RedisMetrics.CreateWriteQueueWaitTags(_connectionId);
-        RedisTelemetry.RegisterQueueDepthProvider(_connectionId, GetQueueDepthSnapshot);
-        RedisTelemetry.RegisterMuxLaneUsageProvider(_connectionId, GetMuxLaneUsageSnapshot);
+        if (IsRuntimeTelemetryEnabled())
+        {
+            _writeQueueWaitTags = RedisMetrics.CreateWriteQueueWaitTags(_connectionId);
+            RedisTelemetry.RegisterQueueDepthProvider(_connectionId, GetQueueDepthSnapshot);
+            RedisTelemetry.RegisterMuxLaneUsageProvider(_connectionId, GetMuxLaneUsageTelemetrySnapshot);
+            _runtimeTelemetryRegistered = true;
+        }
+        else
+        {
+            _writeQueueWaitTags = Array.Empty<KeyValuePair<string, object?>>();
+            _runtimeTelemetryRegistered = false;
+        }
 
         _writer = _useDedicatedLaneWorkers
             ? StartLongRunningWorker(WriterLoopAsync)
@@ -520,8 +533,13 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             op.AbortUnqueued(ex);
             throw;
         }
-        var elapsedMs = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
-        RedisMetrics.QueueWaitMs.Record(elapsedMs, _writeQueueWaitTags);
+
+        if (IsRuntimeTelemetryEnabled())
+        {
+            var elapsedMs = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
+            RedisMetrics.QueueWaitMs.Record(elapsedMs, _writeQueueWaitTags);
+        }
+
         return await op.ValueTask.ConfigureAwait(false);
     }
 
@@ -916,8 +934,11 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-        RedisTelemetry.UnregisterQueueDepthProvider(_connectionId);
-        RedisTelemetry.UnregisterMuxLaneUsageProvider(_connectionId);
+        if (_runtimeTelemetryRegistered)
+        {
+            RedisTelemetry.UnregisterQueueDepthProvider(_connectionId);
+            RedisTelemetry.UnregisterMuxLaneUsageProvider(_connectionId);
+        }
 
         try { _cts.Cancel(); } catch { }
 
@@ -972,13 +993,24 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool IsRuntimeTelemetryEnabled()
+        => _shouldRecordRuntimeTelemetry?.Invoke() ?? true;
+
     private RedisTelemetry.QueueDepthSnapshot GetQueueDepthSnapshot()
-        => new(_writes.Count, _pending.Count, _writes.Capacity, _pending.Capacity);
+        => IsRuntimeTelemetryEnabled()
+            ? new RedisTelemetry.QueueDepthSnapshot(_writes.Count, _pending.Count, _writes.Capacity, _pending.Capacity)
+            : new RedisTelemetry.QueueDepthSnapshot(0, 0, 0, 0);
 
     internal int ConnectionId => _connectionId;
 
     internal RedisTelemetry.MuxLaneUsageSnapshot CaptureMuxLaneUsageSnapshot()
         => GetMuxLaneUsageSnapshot();
+
+    private RedisTelemetry.MuxLaneUsageSnapshot GetMuxLaneUsageTelemetrySnapshot()
+        => IsRuntimeTelemetryEnabled()
+            ? GetMuxLaneUsageSnapshot()
+            : new RedisTelemetry.MuxLaneUsageSnapshot(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
     private RedisTelemetry.MuxLaneUsageSnapshot GetMuxLaneUsageSnapshot()
     {
