@@ -191,6 +191,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
             EmergencyScaleUpTimeoutRatePerSecThreshold = 0.5
         });
 
+        SetAllLanesFailureCount(harness.Executor, 0);
         ForceTimeoutSpike(harness.Executor, 10);
         InvokeEvaluateAutoscale(harness.Executor);
         var first = harness.Executor.GetAutoscalerSnapshot().CurrentConnections;
@@ -198,6 +199,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
 
         // Keep cooldown active.
         SetField(harness.Executor, "_lastScaleUpTicks", Stopwatch.GetTimestamp());
+        SetAllLanesFailureCount(harness.Executor, 0);
         ForceTimeoutSpike(harness.Executor, 10);
         InvokeEvaluateAutoscale(harness.Executor);
 
@@ -548,6 +550,23 @@ public sealed class RedisCommandExecutorAutoscalerTests
         var unhealthyField = lane!.GetType().GetField("_consecutiveFailures", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(unhealthyField);
         unhealthyField!.SetValue(lane, 1);
+    }
+
+    private static void SetAllLanesFailureCount(RedisCommandExecutor executor, int consecutiveFailures)
+    {
+        var connsField = typeof(RedisCommandExecutor).GetField("_conns", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(connsField);
+        var conns = (Array?)connsField!.GetValue(executor);
+        Assert.NotNull(conns);
+
+        for (var i = 0; i < conns!.Length; i++)
+        {
+            var lane = conns.GetValue(i);
+            Assert.NotNull(lane);
+            var consecutiveFailuresField = lane!.GetType().GetField("_consecutiveFailures", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(consecutiveFailuresField);
+            consecutiveFailuresField!.SetValue(lane, consecutiveFailures);
+        }
     }
 
     private static Harness CreateHarness(RedisMultiplexerOptions options)

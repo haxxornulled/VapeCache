@@ -1,7 +1,7 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
-    [string]$Solution = "VapeCache.sln",
+    [string]$Solution = "",
     [string]$BaselinePath = "tools/analyzer-baselines/runtime-warning-baseline.json",
     [switch]$UpdateBaseline
 )

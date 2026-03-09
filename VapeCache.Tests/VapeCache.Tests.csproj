@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <DefineConstants>VAPECACHE_TESTING</DefineConstants>
-    <VapeCacheLicensingVersion Condition="'$(VapeCacheLicensingVersion)' == ''">1.1.0</VapeCacheLicensingVersion>
+    <VapeCacheLicensingVersion Condition="'$(VapeCacheLicensingVersion)' == ''">1.2.0</VapeCacheLicensingVersion>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
