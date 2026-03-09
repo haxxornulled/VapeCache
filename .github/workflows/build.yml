@@ -147,6 +147,7 @@ jobs:
             -PackageOutput artifacts/packages `
             -PackageVersion "${{ steps.release_tag.outputs.package_version }}" `
             -Source https://api.nuget.org/v3/index.json `
+            -SkipPackageIds VapeCache `
             -ApiKey "${{ steps.nuget_login.outputs.NUGET_API_KEY }}"
 
       - name: Generate checksums
