@@ -30,7 +30,7 @@ flowchart TB
     D --> J[Optional Approval Signal<br/>label: auto-approve<br/>or bot actor]:::action
     I --> K{Tag v* Created?}:::gate
     K -->|No| L[Main is continuously validated]:::success
-    K -->|Yes| M[Release Workflow<br/>.github/workflows/release.yml]:::action
+    K -->|Yes| M[Release Workflow<br/>.github/workflows/build.yml]:::action
     M --> N[Build + Test + Vulnerability Scan + Pack]:::action
     N --> O[Publish GitHub Release<br/>with .nupkg + checksums]:::success
 ```

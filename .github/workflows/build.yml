@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag to build (must start with v, for example v1.1.0 or v1.1.0-rc1)"
+        description: "Release tag to build (must start with v, for example v1.2.0 or v1.2.0-rc1)"
         required: true
         type: string
 
@@ -23,6 +23,7 @@ concurrency:
 jobs:
   build-test-pack-release:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
