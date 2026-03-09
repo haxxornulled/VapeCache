@@ -18,8 +18,8 @@ flowchart TB
     B -->|pull_request / push| C[CI Workflow<br/>.github/workflows/ci.yml]:::action
     B -->|pull_request_target| D[PR Auto Approve<br/>.github/workflows/pr-auto-approve.yml]:::action
 
-    C --> E[build-test job<br/>windows-latest]:::action
-    C --> F[perf-contention-gate job<br/>ubuntu + Redis service]:::action
+    C --> E[build-test job<br/>ubuntu-latest]:::action
+    C --> F[perf-contention-gate job<br/>manual + ubuntu + Redis service]:::action
 
     E --> G{All Required Checks Pass?}:::gate
     F --> G
@@ -43,14 +43,14 @@ flowchart TB
     classDef step fill:transparent,stroke:#868e96,stroke-width:2px
     classDef gate fill:transparent,stroke:#f08c00,stroke-width:2px,stroke-dasharray: 6 4
 
-    A[CI Trigger<br/>push / pull_request] --> B{Run Jobs in Parallel}:::gate
+    A[CI Trigger<br/>push main / pull_request / manual dispatch] --> B{Run Jobs in Parallel}:::gate
 
-    subgraph W1[Job: build-test (windows-latest)]
+    subgraph W1[Job: build-test (ubuntu-latest)]
       direction TB
-      C1[Checkout]:::step --> C2[Setup .NET 10]:::step --> C3[Restore]:::step --> C4[Build Release]:::step --> C5[Run Unit Tests]:::step --> C6[Transport Regression Tests]:::step --> C7[Perf Gate Script]:::step
+      C1[Checkout]:::step --> C2[Setup .NET 10]:::step --> C3[Restore]:::step --> C4[Build Release]:::step --> C5[Run Unit Tests]:::step --> C6[Transport Regression Tests]:::step --> C7[Perf-gate tests]:::step --> C8[Perf gate script (manual only)]:::step
     end
 
-    subgraph W2[Job: perf-contention-gate (ubuntu-latest)]
+    subgraph W2[Job: perf-contention-gate (manual, ubuntu-latest)]
       direction TB
       D1[Start Redis service container]:::step --> D2[Checkout]:::step --> D3[Setup .NET 10]:::step --> D4[Restore]:::step --> D5[Run contention perf gate]:::step --> D6[Run grocery tail perf gate]:::step
     end
@@ -113,7 +113,7 @@ flowchart TB
 ## 6. NuGet Consumer Validation
 
 - Workflow: `.github/workflows/nuget-consumer-validation.yml`
-- Trigger: scheduled daily run plus manual dispatch.
+- Trigger: scheduled weekly run (Monday) plus manual dispatch.
 - Purpose: validate real consumer restore/build from `nuget.org` only (isolated `NuGet.config`) to catch packaging/dependency graph regressions quickly.
 - Checks:
   - ASP.NET consumer install path (`VapeCache.Extensions.AspNetCore`)

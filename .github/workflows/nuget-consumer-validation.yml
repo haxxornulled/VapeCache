@@ -3,10 +3,14 @@ name: NuGet Consumer Validation
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 9 * * *"
+    - cron: "17 9 * * 1"
 
 permissions:
   contents: read
+
+concurrency:
+  group: nuget-consumer-validation-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate-nuget-consumers:
