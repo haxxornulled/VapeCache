@@ -160,6 +160,7 @@ jobs:
         with:
           name: release-packages-${{ steps.release_tag.outputs.tag }}
           path: artifacts/packages/*
+          retention-days: 5
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2

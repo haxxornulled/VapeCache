@@ -2,15 +2,35 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  workflow_dispatch:
+    inputs:
+      run_perf_gates:
+        description: "Run heavy contention and grocery perf gates"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
   packages: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,19 +115,27 @@ jobs:
           dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj --filter "FullyQualifiedName~RedisCommandExecutorScriptedTests.Executes_and_parses_core_command_surfaces"
           dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj --filter "FullyQualifiedName~RedisTransportProfilesTests"
 
-      - name: Perf gates
+      - name: Perf gates tests
         run: |
           dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj --logger "console;verbosity=detailed"
+
+      - name: Perf gate script (manual)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_perf_gates }}
+        run: |
           pwsh -File tools/perf-gate.ps1
 
       - name: Pack release packages
+        if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
         run: pwsh -File tools/pack-release-packages.ps1 -OutputDir artifacts/packages
 
       - name: Package smoke test
+        if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
         run: pwsh -File tools/package-smoke.ps1 -PackageOutput artifacts/packages -PackageId VapeCache.Runtime
 
   perf-contention-gate:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_perf_gates }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     services:
       redis:
         image: redis:7-alpine
