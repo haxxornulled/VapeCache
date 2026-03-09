@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache</PackageId>
     <Title>VapeCache</Title>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache</Product>
@@ -24,7 +24,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache-Enterprise</PackageProjectUrl>
-    <PackageReleaseNotes>1.1.0 release: transport hardening, lane telemetry, and production packaging cleanup.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.0 release: transport hardening, lane telemetry, and production packaging cleanup.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
@@ -63,3 +63,4 @@
   </ItemGroup>
 
 </Project>
+

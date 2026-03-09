@@ -112,7 +112,8 @@ flowchart TB
 
 ## 6. Release Notes
 
-- Release workflow manual dispatch now requires a `release_tag` input (for example `v1.1.0` or `v1.1.0-rc1`).
+- Release workflow manual dispatch now requires a `release_tag` input (for example `v1.2.0` or `v1.2.0-rc1`).
 - Package artifacts are versioned from the resolved tag, so prerelease tags generate matching prerelease `.nupkg` versions.
 - `tools/pack-release-packages.ps1` validates that all packable projects share the same base version before packing.
 - `tools/publish-release-packages.ps1` pushes packages in dependency-safe order when you are ready to publish to a NuGet feed.
+

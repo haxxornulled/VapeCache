@@ -12,7 +12,7 @@
     <!-- NuGet Package Metadata -->
     <PackageId>VapeCache.Extensions.Aspire</PackageId>
     <Title>VapeCache Extensions for Aspire</Title>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Description>.NET Aspire integration for VapeCache. Adds service discovery, health checks, and OpenTelemetry wiring for Aspire-hosted applications.</Description>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
@@ -28,7 +28,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache-Enterprise</PackageProjectUrl>
-    <PackageReleaseNotes>1.1.0 release: updated Aspire packaging metadata and telemetry integration alignment.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.0 release: updated Aspire packaging metadata and telemetry integration alignment.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
@@ -69,3 +69,4 @@
   </ItemGroup>
 
 </Project>
+

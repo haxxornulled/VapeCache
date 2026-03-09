@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Persistence</PackageId>
     <Title>VapeCache Persistence</Title>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <VapeCacheLicensingVersion Condition="'$(VapeCacheLicensingVersion)' == ''">$(Version)</VapeCacheLicensingVersion>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
@@ -24,7 +24,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache-Enterprise</PackageProjectUrl>
-    <PackageReleaseNotes>1.1.0 release: aligned enterprise persistence packaging for production deployment.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.0 release: aligned enterprise persistence packaging for production deployment.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg\enterprise</PackageOutputPath>
   </PropertyGroup>
@@ -47,3 +47,4 @@
   </ItemGroup>
 
 </Project>
+
