@@ -131,7 +131,19 @@ jobs:
         run: pwsh -File tools/pack-release-packages.ps1 -OutputDir artifacts/packages -PackageVersion "${{ steps.release_tag.outputs.package_version }}"
 
       - name: Package smoke test
-        run: pwsh -File tools/package-smoke.ps1 -PackageOutput artifacts/packages -PackageId VapeCache
+        shell: pwsh
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_USER: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_USER }}
+          FALLBACK_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $token = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_TOKEN)) { $env:FALLBACK_GITHUB_TOKEN } else { $env:GITHUB_PACKAGES_TOKEN }
+          $user = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_USER)) { "${{ github.actor }}" } else { $env:GITHUB_PACKAGES_USER }
+
+          pwsh -File tools/smoke-release-packages.ps1 `
+            -PackageOutput artifacts/packages `
+            -GitHubPackagesUser $user `
+            -GitHubPackagesToken $token
 
       - name: NuGet login (OIDC)
         if: github.event_name == 'push'
