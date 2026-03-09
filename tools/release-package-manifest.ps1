@@ -6,6 +6,7 @@ function Get-ReleaseRepoRoot
 function Get-ReleasePackageProjects
 {
     @(
+        "VapeCache.Core/VapeCache.Core.csproj",
         "VapeCache.Abstractions/VapeCache.Abstractions.csproj",
         "VapeCache.Features.Invalidation/VapeCache.Features.Invalidation.csproj",
         "VapeCache.Infrastructure/VapeCache.Infrastructure.csproj",

@@ -99,6 +99,7 @@ app.Run();
 | Package | Purpose |
 |---|---|
 | `VapeCache.Runtime` | Core runtime, Redis transport, fallback behavior, telemetry |
+| `VapeCache.Core` | Shared primitives package (transitive dependency, usually not installed directly) |
 | `VapeCache.Abstractions` | Public contracts and option/value types |
 | `VapeCache.Features.Invalidation` | Optional key/tag/zone invalidation policies |
 | `VapeCache.Extensions.AspNetCore` | ASP.NET Core output-cache integration |

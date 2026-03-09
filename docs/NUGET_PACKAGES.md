@@ -11,6 +11,13 @@ Core runtime package (transport, cache API, fallback, telemetry).
 dotnet add package VapeCache.Runtime
 ```
 
+### VapeCache.Core
+Shared primitives used by multiple VapeCache packages. Normally resolved transitively.
+
+```bash
+dotnet add package VapeCache.Core
+```
+
 ### VapeCache.Abstractions
 Contracts, options, and shared value types.
 
