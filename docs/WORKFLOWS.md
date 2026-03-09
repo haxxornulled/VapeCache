@@ -18,7 +18,7 @@ flowchart TB
     B -->|pull_request / push| C[CI Workflow<br/>.github/workflows/ci.yml]:::action
     B -->|pull_request_target| D[PR Auto Approve<br/>.github/workflows/pr-auto-approve.yml]:::action
 
-    C --> E[build-test job<br/>ubuntu-latest]:::action
+    C --> E[build-test job<br/>windows-latest]:::action
     C --> F[perf-contention-gate job<br/>manual + ubuntu + Redis service]:::action
 
     E --> G{All Required Checks Pass?}:::gate
@@ -45,7 +45,7 @@ flowchart TB
 
     A[CI Trigger<br/>push main / pull_request / manual dispatch] --> B{Run Jobs in Parallel}:::gate
 
-    subgraph W1[Job: build-test (ubuntu-latest)]
+    subgraph W1[Job: build-test (windows-latest)]
       direction TB
       C1[Checkout]:::step --> C2[Setup .NET 10]:::step --> C3[Restore]:::step --> C4[Build Release]:::step --> C5[Run Unit Tests]:::step --> C6[Transport Regression Tests]:::step --> C7[Perf-gate tests]:::step --> C8[Perf gate script (manual only)]:::step
     end
