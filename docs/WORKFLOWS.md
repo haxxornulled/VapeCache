@@ -30,7 +30,7 @@ flowchart TB
     D --> J[Optional Approval Signal<br/>label: auto-approve<br/>or bot actor]:::action
     I --> K{Tag v* Created?}:::gate
     K -->|No| L[Main is continuously validated]:::success
-    K -->|Yes| M[Release Workflow<br/>.github/workflows/release.yml]:::action
+    K -->|Yes| M[Release Workflow<br/>.github/workflows/build.yml]:::action
     M --> N[Build + Test + Vulnerability Scan + Pack]:::action
     N --> O[Publish GitHub Release<br/>with .nupkg + checksums]:::success
 ```
@@ -110,9 +110,18 @@ flowchart TB
 - Recipients: handles from `.github/commit-notify-subscribers.txt` plus contributors whose git author email uses GitHub's noreply format.
 - Result: contributors receive standard GitHub notifications from issue comment mentions without requiring external mail or chat infrastructure.
 
-## 6. Release Notes
+## 6. NuGet Consumer Validation
 
-- Release workflow manual dispatch now requires a `release_tag` input (for example `v1.2.0` or `v1.2.0-rc1`).
+- Workflow: `.github/workflows/nuget-consumer-validation.yml`
+- Trigger: scheduled daily run plus manual dispatch.
+- Purpose: validate real consumer restore/build from `nuget.org` only (isolated `NuGet.config`) to catch packaging/dependency graph regressions quickly.
+- Checks:
+  - ASP.NET consumer install path (`VapeCache.Extensions.AspNetCore`)
+  - Runtime/invalidation install path (`VapeCache.Runtime`, `VapeCache.Features.Invalidation`)
+
+## 7. Release Notes
+
+- Release workflow manual dispatch now requires a `release_tag` input (for example `v1.2.1` or `v1.2.1-rc1`).
 - Package artifacts are versioned from the resolved tag, so prerelease tags generate matching prerelease `.nupkg` versions.
 - `tools/pack-release-packages.ps1` validates that all packable projects share the same base version before packing.
 - `tools/publish-release-packages.ps1` pushes packages in dependency-safe order when you are ready to publish to a NuGet feed.

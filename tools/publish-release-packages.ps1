@@ -3,6 +3,7 @@ param(
     [string]$PackageOutput = "artifacts/packages",
     [string]$Source = "https://api.nuget.org/v3/index.json",
     [string]$PackageVersion = "",
+    [string[]]$SkipPackageIds = @(),
     [Parameter(Mandatory = $true)]
     [string]$ApiKey
 )
@@ -24,6 +25,12 @@ Write-Host "Publishing release packages in dependency-safe order for version $re
 
 foreach ($package in $packages)
 {
+    if ($SkipPackageIds -contains $package.PackageId)
+    {
+        Write-Host "Skipping package publish for $($package.PackageId) (configured skip list)."
+        continue
+    }
+
     $packageFile = Join-Path $PackageOutput "$($package.PackageId).$resolvedPackageVersion.nupkg"
     if (-not (Test-Path -LiteralPath $packageFile))
     {

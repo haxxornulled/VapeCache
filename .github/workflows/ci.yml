@@ -104,19 +104,7 @@ jobs:
         run: pwsh -File tools/pack-release-packages.ps1 -OutputDir artifacts/packages
 
       - name: Package smoke test
-        shell: pwsh
-        env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN }}
-          GITHUB_PACKAGES_USER: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_USER }}
-          FALLBACK_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $token = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_TOKEN)) { $env:FALLBACK_GITHUB_TOKEN } else { $env:GITHUB_PACKAGES_TOKEN }
-          $user = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_USER)) { "${{ github.actor }}" } else { $env:GITHUB_PACKAGES_USER }
-
-          pwsh -File tools/smoke-release-packages.ps1 `
-            -PackageOutput artifacts/packages `
-            -GitHubPackagesUser $user `
-            -GitHubPackagesToken $token
+        run: pwsh -File tools/package-smoke.ps1 -PackageOutput artifacts/packages -PackageId VapeCache.Runtime
 
   perf-contention-gate:
     runs-on: ubuntu-latest

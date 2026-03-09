@@ -20,7 +20,6 @@ using VapeCache.Infrastructure.DependencyInjection;
 using VapeCache.Console.Stress;
 using VapeCache.Console.Secrets;
 using VapeCache.Console.Pos;
-using VapeCache.Reconciliation;
 
 var hostBuilder = Host.CreateDefaultBuilder(args)
     .UseServiceProviderFactory(new AutofacServiceProviderFactory())
@@ -281,12 +280,6 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.FallbackMirrorWriteTtlWhenMissing > TimeSpan.Zero, "HybridFailover:FallbackMirrorWriteTtlWhenMissing must be > 0.")
             .Validate(static o => o.MaxMirrorPayloadBytes >= 0, "HybridFailover:MaxMirrorPayloadBytes must be >= 0.")
             .ValidateOnStart();
-
-        if (context.HostingEnvironment.IsDevelopment())
-        {
-            services.AddVapeCacheRedisReconciliation(context.Configuration);
-        }
-
 
         // Grocery Store Demo Services
         services.AddSingleton<VapeCache.Console.GroceryStore.GroceryStoreService>();

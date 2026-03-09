@@ -8,23 +8,23 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.AspNetCore</PackageId>
     <Title>VapeCache Extensions for ASP.NET Core</Title>
-    <Version>1.2.0</Version>
+    <Version>1.2.1</Version>
     <Description>ASP.NET Core output cache integration for VapeCache. Registers VapeCache as the backing store for ASP.NET Core output caching.</Description>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache.Extensions.AspNetCore</Product>
     <PackageTags>cache;redis;aspnetcore;output-cache;middleware;dotnet</PackageTags>
-    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
-    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache-Enterprise/main/assets/vapecache-icon.png</PackageIconUrl>
-    <RepositoryUrl>https://github.com/haxxornulled/VapeCache-Enterprise</RepositoryUrl>
+    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache-Enterprise</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.0 release: updated ASP.NET Core integration packaging metadata for production release.</PackageReleaseNotes>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
+    <PackageReleaseNotes>1.2.1 release: dependency alignment update for OSS package restore and release automation.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
@@ -40,7 +40,7 @@
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
-    <None Include="..\LICENSE.md" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

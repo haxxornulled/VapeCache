@@ -8,7 +8,7 @@ namespace VapeCache.Extensions.AspNetCore;
 /// <summary>
 /// Emits node-affinity hints for sticky-session routing during local in-memory failover.
 /// </summary>
-public sealed class VapeCacheFailoverAffinityMiddleware(
+public sealed partial class VapeCacheFailoverAffinityMiddleware(
     RequestDelegate next,
     IOptionsMonitor<VapeCacheFailoverAffinityOptions> optionsMonitor,
     IRedisCircuitBreakerState breakerState,
@@ -60,13 +60,15 @@ public sealed class VapeCacheFailoverAffinityMiddleware(
             !string.Equals(incomingNode, nodeId, StringComparison.Ordinal))
         {
             context.Response.Headers["X-VapeCache-Affinity-Mismatch"] = "1";
-            logger.LogDebug(
-                "Affinity mismatch detected. IncomingNode={IncomingNode} CurrentNode={CurrentNode} Path={Path}",
-                incomingNode,
-                nodeId,
-                context.Request.Path);
+            LogAffinityMismatch(logger, incomingNode, nodeId, context.Request.Path);
         }
 
         await next(context).ConfigureAwait(false);
     }
+
+    [LoggerMessage(
+        EventId = 1101,
+        Level = LogLevel.Debug,
+        Message = "Affinity mismatch detected. IncomingNode={IncomingNode} CurrentNode={CurrentNode} Path={Path}")]
+    private static partial void LogAffinityMismatch(ILogger logger, string incomingNode, string currentNode, PathString path);
 }

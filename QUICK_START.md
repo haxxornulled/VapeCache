@@ -11,7 +11,7 @@ This is the fastest path from zero to a working endpoint with VapeCache.
 ## Install
 
 ```bash
-dotnet add package VapeCache
+dotnet add package VapeCache.Runtime
 ```
 
 Optional integrations:

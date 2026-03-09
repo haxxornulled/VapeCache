@@ -12,10 +12,10 @@ public sealed class RedisConnectionStringBuilder : IRedisConnectionStringBuilder
     {
         ArgumentNullException.ThrowIfNull(options);
         if (string.IsNullOrWhiteSpace(options.Host))
-            throw new ArgumentException("Host is required.", nameof(options.Host));
+            throw new ArgumentException("options.Host is required.", nameof(options));
         ArgumentOutOfRangeException.ThrowIfNegative(options.Database);
         if (options.Port is < 1 or > 65535)
-            throw new ArgumentOutOfRangeException(nameof(options.Port), "Port must be between 1 and 65535.");
+            throw new ArgumentOutOfRangeException(nameof(options), "options.Port must be between 1 and 65535.");
 
         var sb = new System.Text.StringBuilder(128);
         sb.Append(options.UseTls ? "rediss://" : "redis://");

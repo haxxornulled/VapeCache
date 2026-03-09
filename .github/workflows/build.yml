@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to build (must start with v, for example v1.2.0 or v1.2.0-rc1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  packages: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-test-pack-release:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: release_tag
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ inputs.release_tag }}" } else { "${{ github.ref_name }}" }
+          if ([string]::IsNullOrWhiteSpace($tag))
+          {
+              throw "Release tag is required."
+          }
+
+          if ($tag -notlike "v*")
+          {
+              throw "Release tag must start with 'v'."
+          }
+
+          $packageVersion = $tag.Substring(1)
+          if ([string]::IsNullOrWhiteSpace($packageVersion))
+          {
+              throw "Release tag must contain a version after 'v'."
+          }
+
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "package_version=$packageVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Resolve solution path
+        id: solution
+        shell: pwsh
+        run: |
+          if (Test-Path "VapeCache.slnx")
+          {
+              "path=VapeCache.slnx" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+
+          if (Test-Path "VapeCache.sln")
+          {
+              "path=VapeCache.sln" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+
+          throw "Could not find VapeCache.slnx or VapeCache.sln."
+
+      - name: Authenticate GitHub Packages
+        shell: pwsh
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_USER: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_USER }}
+          FALLBACK_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $token = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_TOKEN)) { $env:FALLBACK_GITHUB_TOKEN } else { $env:GITHUB_PACKAGES_TOKEN }
+          $user = if ([string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_USER)) { "${{ github.actor }}" } else { $env:GITHUB_PACKAGES_USER }
+          dotnet nuget update source GitHubPackages `
+            --configfile NuGet.config `
+            --username $user `
+            --password $token `
+            --store-password-in-clear-text
+          if ($LASTEXITCODE -ne 0)
+          {
+              throw "Failed to authenticate GitHubPackages source."
+          }
+
+      - name: Restore
+        run: dotnet restore ${{ steps.solution.outputs.path }} --configfile NuGet.config
+
+      - name: Build
+        run: dotnet build -c Release --no-restore ${{ steps.solution.outputs.path }}
+
+      - name: Unit tests
+        run: dotnet test -c Release --no-build VapeCache.Tests/VapeCache.Tests.csproj
+
+      - name: Perf gates tests
+        run: dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj
+
+      - name: Vulnerability scan (public feeds)
+        shell: pwsh
+        run: |
+          . ./tools/release-package-manifest.ps1
+          $projects = Get-ReleasePackageProjects
+          & ./tools/audit-vulnerabilities.ps1 -Projects $projects
+
+      - name: Vulnerability scan (private feeds)
+        shell: pwsh
+        env:
+          VAPECACHE_LICENSING_PACKAGES_TOKEN: ${{ secrets.VAPECACHE_LICENSING_PACKAGES_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:VAPECACHE_LICENSING_PACKAGES_TOKEN))
+          {
+              Write-Host "Private feed token not set; skipping private feed vulnerability scan."
+              exit 0
+          }
+
+          . ./tools/release-package-manifest.ps1
+          $projects = Get-ReleasePackageProjects
+          & ./tools/audit-vulnerabilities.ps1 -Projects $projects -IncludePrivateFeeds -FailOnPrivateFeedAuthError
+
+      - name: Pack
+        run: pwsh -File tools/pack-release-packages.ps1 -OutputDir artifacts/packages -PackageVersion "${{ steps.release_tag.outputs.package_version }}"
+
+      - name: Package smoke test
+        run: pwsh -File tools/package-smoke.ps1 -PackageOutput artifacts/packages -PackageId VapeCache.Runtime
+
+      - name: NuGet login (OIDC)
+        id: nuget_login
+        uses: NuGet/login@v1
+        with:
+          user: haxxornulled
+
+      - name: Publish NuGet packages
+        shell: pwsh
+        run: |
+          pwsh -File tools/publish-release-packages.ps1 `
+            -PackageOutput artifacts/packages `
+            -PackageVersion "${{ steps.release_tag.outputs.package_version }}" `
+            -Source https://api.nuget.org/v3/index.json `
+            -ApiKey "${{ steps.nuget_login.outputs.NUGET_API_KEY }}"
+
+      - name: Generate checksums
+        run: |
+          cd artifacts/packages
+          sha256sum *.nupkg > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages-${{ steps.release_tag.outputs.tag }}
+          path: artifacts/packages/*
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ contains(steps.release_tag.outputs.package_version, '-') }}
+          files: |
+            artifacts/packages/*.nupkg
+            artifacts/packages/SHA256SUMS.txt

@@ -1,18 +1,12 @@
 param(
     [string]$PackageOutput = "artifacts/packages",
-    [string]$PackageId = "VapeCache",
-    [string[]]$AdditionalPackageSources = @(),
-    [string]$GitHubPackagesSource = "https://nuget.pkg.github.com/haxxornulled/index.json",
-    [string]$GitHubPackagesUser = "",
-    [string]$GitHubPackagesToken = ""
+    [string]$PackageId = "VapeCache.Runtime",
+    [string[]]$AdditionalPackageSources = @()
 )
 
 $ErrorActionPreference = "Stop"
 
 $resolvedPackageOutput = (Resolve-Path -LiteralPath $PackageOutput).Path
-$resolvedGitHubPackagesSource = if ([string]::IsNullOrWhiteSpace($GitHubPackagesSource)) { "" } else { $GitHubPackagesSource.Trim() }
-$resolvedGitHubPackagesToken = if (-not [string]::IsNullOrWhiteSpace($GitHubPackagesToken)) { $GitHubPackagesToken.Trim() } elseif (-not [string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_TOKEN)) { $env:GITHUB_PACKAGES_TOKEN.Trim() } elseif (-not [string]::IsNullOrWhiteSpace($env:VAPECACHE_LICENSING_PACKAGES_TOKEN)) { $env:VAPECACHE_LICENSING_PACKAGES_TOKEN.Trim() } elseif (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) { $env:GITHUB_TOKEN.Trim() } else { "" }
-$resolvedGitHubPackagesUser = if (-not [string]::IsNullOrWhiteSpace($GitHubPackagesUser)) { $GitHubPackagesUser.Trim() } elseif (-not [string]::IsNullOrWhiteSpace($env:GITHUB_PACKAGES_USER)) { $env:GITHUB_PACKAGES_USER.Trim() } elseif (-not [string]::IsNullOrWhiteSpace($env:GITHUB_ACTOR)) { $env:GITHUB_ACTOR.Trim() } else { "" }
 
 $packagePattern = "^" + [regex]::Escape($PackageId) + "\.(?<version>.+)$"
 
@@ -59,61 +53,10 @@ foreach ($source in $AdditionalPackageSources)
 }
 
 $packageSources.Add("https://api.nuget.org/v3/index.json")
-
-if (-not [string]::IsNullOrWhiteSpace($resolvedGitHubPackagesToken))
-{
-    if ([string]::IsNullOrWhiteSpace($resolvedGitHubPackagesSource))
-    {
-        throw "GitHub Packages token was provided but GitHubPackagesSource is empty."
-    }
-
-    if ([string]::IsNullOrWhiteSpace($resolvedGitHubPackagesUser))
-    {
-        throw "GitHub Packages token was provided but GitHubPackagesUser could not be resolved."
-    }
-
-    if (-not ($packageSources -contains $resolvedGitHubPackagesSource))
-    {
-        $packageSources.Add($resolvedGitHubPackagesSource)
-    }
-}
-
 $packageSourceEntries = for ($index = 0; $index -lt $packageSources.Count; $index++)
 {
     $source = $packageSources[$index]
     "    <add key=""source$index"" value=""$source"" />"
-}
-
-$githubPackagesCredentialsBlock = ""
-if (-not [string]::IsNullOrWhiteSpace($resolvedGitHubPackagesToken))
-{
-    $githubSourceIndex = -1
-    for ($index = 0; $index -lt $packageSources.Count; $index++)
-    {
-        if ($packageSources[$index] -eq $resolvedGitHubPackagesSource)
-        {
-            $githubSourceIndex = $index
-            break
-        }
-    }
-
-    if ($githubSourceIndex -lt 0)
-    {
-        throw "Failed to map GitHub Packages source '$resolvedGitHubPackagesSource' in generated NuGet.Config."
-    }
-
-    $githubSourceKey = "source$githubSourceIndex"
-    $escapedUser = [System.Security.SecurityElement]::Escape($resolvedGitHubPackagesUser)
-    $escapedToken = [System.Security.SecurityElement]::Escape($resolvedGitHubPackagesToken)
-
-    $githubPackagesCredentialsBlock = @"
-  <packageSourceCredentials>
-    <$githubSourceKey>
-      <add key="Username" value="$escapedUser" />
-      <add key="ClearTextPassword" value="$escapedToken" />
-    </$githubSourceKey>
-  </packageSourceCredentials>
-"@
 }
 
 if (Test-Path -LiteralPath $smokeRoot)
@@ -137,7 +80,6 @@ $projectPath = Join-Path $smokeRoot "SmokeConsumer.csproj"
     <clear />
 $($packageSourceEntries -join [Environment]::NewLine)
   </packageSources>
-$githubPackagesCredentialsBlock
 </configuration>
 "@ | Set-Content -LiteralPath $nugetConfigPath -Encoding UTF8
 

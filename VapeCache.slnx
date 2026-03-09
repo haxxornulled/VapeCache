@@ -11,8 +11,6 @@
   <Project Path="VapeCache.Features.Invalidation/VapeCache.Features.Invalidation.csproj" />
   <Project Path="VapeCache.Infrastructure/VapeCache.Infrastructure.csproj" />
   <Project Path="VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj" />
-  <Project Path="VapeCache.Persistence/VapeCache.Persistence.csproj" />
-  <Project Path="VapeCache.Reconciliation/VapeCache.Reconciliation.csproj" />
   <Project Path="VapeCache.ServiceDefaults/VapeCache.ServiceDefaults.csproj" />
   <Project Path="VapeCache.Tests/VapeCache.Tests.csproj" />
   <Project Path="VapeCache.UI/VapeCache.UI.csproj" />

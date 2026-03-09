@@ -6,25 +6,25 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>true</IsPackable>
-    <PackageId>VapeCache</PackageId>
+    <PackageId>VapeCache.Runtime</PackageId>
     <Title>VapeCache</Title>
-    <Version>1.2.0</Version>
+    <Version>1.2.1</Version>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache</Product>
     <Description>Redis transport and caching runtime for VapeCache. Includes multiplexed connections, circuit breaking, pooling, and OpenTelemetry hooks for production cache workloads.</Description>
     <PackageTags>redis;cache;distributed-cache;circuit-breaker;opentelemetry;dotnet</PackageTags>
-    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
-    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache-Enterprise/main/assets/vapecache-icon.png</PackageIconUrl>
-    <RepositoryUrl>https://github.com/haxxornulled/VapeCache-Enterprise</RepositoryUrl>
+    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache-Enterprise</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.0 release: transport hardening, lane telemetry, and production packaging cleanup.</PackageReleaseNotes>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
+    <PackageReleaseNotes>1.2.1 release: dependency alignment update for OSS package restore and release automation.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
@@ -32,7 +32,7 @@
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
-    <None Include="..\LICENSE.md" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
@@ -40,7 +40,6 @@
     <InternalsVisibleTo Include="VapeCache.Benchmarks" />
     <InternalsVisibleTo Include="VapeCache.Benchmarks.Runner" />
     <InternalsVisibleTo Include="VapeCache.PerfGates.Tests" />
-    <InternalsVisibleTo Include="VapeCache.Reconciliation" />
   </ItemGroup>
 
   <ItemGroup>
