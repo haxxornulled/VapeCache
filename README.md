@@ -4,76 +4,39 @@
 
 # VapeCache
 
-VapeCache is a Redis-first cache runtime for .NET 10. It is built for applications that need fast cache paths, bounded behavior during Redis trouble, and production telemetry that explains what the cache layer is doing.
+VapeCache is a Redis-first caching runtime for ASP.NET Core and .NET services.
+It is designed for predictable behavior under load, Redis trouble, and high-throughput API traffic.
 
-## What This Repo Is
+- Redis transport tuned for cache workloads
+- Circuit-breaker and in-memory fallback for outage tolerance
+- Stampede controls for hot keys
+- OpenTelemetry metrics + traces
+- ASP.NET Core and Aspire integrations
 
-This repository is the OSS runtime.
+OSS scope in this repository: production-ready runtime packages for core caching, invalidation, ASP.NET Core integration, and Aspire integration.
 
-It contains the core Redis transport, cache APIs, telemetry, and framework integrations.
+## QuickStart
 
-If you need durable spill persistence, reconciliation, or enterprise control-plane features, use the enterprise repository:
+1. Install packages
 
-- `https://github.com/haxxornulled/VapeCache-Enterprise`
+```bash
+dotnet add package VapeCache
+dotnet add package VapeCache.Extensions.Aspire
+```
 
-## Why It Was Designed
+If you need ASP.NET Core output-cache middleware integration:
 
-VapeCache was designed for cache-heavy systems where the main problems are:
+```bash
+dotnet add package VapeCache.Extensions.AspNetCore
+```
 
-- hot-path latency
-- hot-key stampedes
-- cascading failures when Redis becomes slow or unavailable
-- poor visibility into queue pressure and transport behavior
-
-The goal is not to be everything Redis can do. The goal is to make cache behavior predictable and observable in real .NET applications.
-
-## What You Actually Get
-
-- cache-oriented Redis transport with multiplexing and ordered responses
-- coalesced socket writes on the write path
-- runtime guardrails for transport settings
-- RESP2/RESP3 negotiation and cluster MOVED/ASK handling on cache paths
-- circuit breaker and hybrid in-memory failover
-- stampede protection profiles
-- typed cache APIs plus low-level byte-oriented APIs
-- OpenTelemetry metrics and traces
-- Aspire integration and ASP.NET Core integration
-
-## What You Do Not Get In OSS
-
-The OSS repo does not include:
-
-- durable spill persistence
-- write reconciliation after Redis recovery
-- enterprise licensing and control-plane enforcement
-
-Those live in the enterprise repo.
-
-## Package Map
-
-| Package | Purpose |
-|---|---|
-| `VapeCache` | Core runtime, Redis transport, cache APIs, telemetry |
-| `VapeCache.Abstractions` | Contracts, options, value types |
-| `VapeCache.Extensions.Aspire` | Aspire wiring, endpoints, telemetry integration |
-
-## Quick Start
-
-### 1. Run Redis
+2. Run Redis
 
 ```bash
 docker run --name vapecache-redis -p 6379:6379 -d redis:7
 ```
 
-### 2. Install the Package
-
-```bash
-dotnet add package VapeCache
-```
-
-### 3. Configure Redis
-
-`appsettings.json`
+3. Configure `appsettings.json`
 
 ```json
 {
@@ -81,74 +44,92 @@ dotnet add package VapeCache
     "Host": "localhost",
     "Port": 6379,
     "Database": 0
+  },
+  "CacheStampede": {
+    "Profile": "Balanced"
   }
 }
 ```
 
-### 4. Register Services
-
-`Program.cs`
+4. Register VapeCache in `Program.cs`
 
 ```csharp
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddOptions<RedisConnectionOptions>()
+    .Bind(builder.Configuration.GetSection("RedisConnection"));
+
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
+
+builder.Services.AddOptions<CacheStampedeOptions>()
+    .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
+    .Bind(builder.Configuration.GetSection("CacheStampede"));
 ```
 
-### 5. Use the Cache API
+5. Add one endpoint
 
 ```csharp
-public sealed class PingService(ICacheService cache)
+var app = builder.Build();
+
+app.MapGet("/products/{id:int}", async (int id, IVapeCache cache, CancellationToken ct) =>
 {
-    public Task<string?> GetAsync(CancellationToken ct) =>
-        cache.GetOrSetAsync(
-            "demo:ping",
-            _ => Task.FromResult("pong"),
-            (writer, value) => JsonSerializer.Serialize(writer, value),
-            bytes => JsonSerializer.Deserialize<string>(bytes),
-            new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(1)),
-            ct);
-}
+    var key = CacheKey<string>.From($"products:{id}");
+    var value = await cache.GetOrCreateAsync(
+        key,
+        _ => new ValueTask<string>($"product-{id}"),
+        new CacheEntryOptions(TimeSpan.FromMinutes(5)),
+        ct);
+
+    return Results.Ok(value);
+});
+
+app.Run();
 ```
 
-## Documentation Coverage
+6. Go deeper: [docs/QUICKSTART.md](docs/QUICKSTART.md)
 
-- Full options/defaults reference (generated from source): [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md)
-- Configuration deep dive: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
-- Quick setup: [QUICK_START.md](QUICK_START.md)
+## Production Packages (OSS)
+
+| Package | Purpose |
+|---|---|
+| `VapeCache` | Core runtime, Redis transport, fallback behavior, telemetry |
+| `VapeCache.Abstractions` | Public contracts and option/value types |
+| `VapeCache.Features.Invalidation` | Optional key/tag/zone invalidation policies |
+| `VapeCache.Extensions.AspNetCore` | ASP.NET Core output-cache integration |
+| `VapeCache.Extensions.Aspire` | Aspire wiring, health checks, endpoint helpers |
+
+## Out Of OSS Scope
+
+The following are not shipped from this OSS repository:
+
+- enterprise licensing and control-plane features
+- durable spill persistence package
+- reconciliation package for post-outage write replay
 
 ## Documentation
-
-Start here:
 
 - [docs/INDEX.md](docs/INDEX.md)
 - [docs/QUICKSTART.md](docs/QUICKSTART.md)
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
-- [docs/LOGGING_TELEMETRY_CONFIGURATION.md](docs/LOGGING_TELEMETRY_CONFIGURATION.md)
-- [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
+- [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md)
+- [docs/CACHE_INVALIDATION.md](docs/CACHE_INVALIDATION.md)
+- [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md)
 - [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md)
-- [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 
 ## Build And Test
 
-### Build
-
 ```bash
-dotnet build VapeCache.sln -c Release
-```
-
-### Test
-
-```bash
+dotnet build VapeCache.slnx -c Release
 dotnet test VapeCache.Tests/VapeCache.Tests.csproj -c Release
 ```
 
 ## License
 
-Community use is licensed under [LICENSE](LICENSE) (PolyForm Noncommercial 1.0.0 with required notices).
-
-Commercial use requires an enterprise license from the enterprise repository.
-
+- Community/non-commercial usage: [LICENSE](LICENSE)
+- Commercial usage: enterprise license required

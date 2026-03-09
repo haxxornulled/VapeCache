@@ -208,19 +208,7 @@ With hybrid cache enabled, this stream path automatically reads from in-memory f
 - [API_REFERENCE.md](API_REFERENCE.md)
 - [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md)
 - [WRAPPER_PLUGIN_GUIDE.md](WRAPPER_PLUGIN_GUIDE.md)
-- [LICENSE_CONTROL_PLANE.md](LICENSE_CONTROL_PLANE.md)
 - [ASPNETCORE_PIPELINE_CACHING.md](ASPNETCORE_PIPELINE_CACHING.md)
-
-## Enterprise License Runtime (Optional but Recommended)
-
-For enterprise features (Persistence/Reconciliation), set explicit license + revocation config:
-
-```bash
-setx VAPECACHE_LICENSE_KEY "VC2...."
-setx VAPECACHE_LICENSE_REVOCATION_ENABLED "true"
-setx VAPECACHE_LICENSE_REVOCATION_ENDPOINT "https://license-control-plane.internal"
-setx VAPECACHE_LICENSE_REVOCATION_API_KEY "<secret>"
-```
 
 ## ASP.NET Core Output Caching Hook (MVC/Blazor/Minimal API)
 

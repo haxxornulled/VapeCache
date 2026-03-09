@@ -1,101 +1,40 @@
-# VapeCache Documentation
+# VapeCache Documentation Index
 
-This index tracks the current feature set and supported APIs.
+This index reflects the OSS runtime surface in this repository.
 
-## Start Here (Juniors)
-- [QUICKSTART.md](QUICKSTART.md) - Copy/paste setup from zero to first endpoint
-- [CONFIGURATION.md](CONFIGURATION.md) - Every knob, sane defaults, and limits
-- [SETTINGS_REFERENCE.md](SETTINGS_REFERENCE.md) - Generated source-of-truth for all options/defaults
-- [API_REFERENCE.md](API_REFERENCE.md) - Exact interfaces and endpoint contracts
-- [CACHE_INVALIDATION.md](CACHE_INVALIDATION.md) - Autofac-first, no-custom-code invalidation guide
+## 1. Getting Started
 
-## Getting Started
-- [README.md](../README.md) - Project overview and quick start
-- [WORKFLOWS.md](WORKFLOWS.md) - CI/CD workflow maps with Mermaid diagrams
-- [QUICKSTART.md](QUICKSTART.md) - Junior-friendly setup walkthrough
-- [CONFIGURATION.md](CONFIGURATION.md) - Options and appsettings.json
-- [NUGET_PACKAGES.md](NUGET_PACKAGES.md) - Package overview
-- [.NET Aspire integration](../VapeCache.Extensions.Aspire/README.md) - Aspire usage
-- [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md) - Detailed Aspire guide
-- [WRAPPER_PLUGIN_GUIDE.md](WRAPPER_PLUGIN_GUIDE.md) - Wrapper endpoints + plugin pattern
-- [BLAZOR_DASHBOARD_EXAMPLE.md](BLAZOR_DASHBOARD_EXAMPLE.md) - Realtime dashboard wiring from `/vapecache/stream`
-- [ASPNETCORE_PIPELINE_CACHING.md](ASPNETCORE_PIPELINE_CACHING.md) - Output-cache pipeline hooks for MVC/Minimal API/Blazor
+- [README.md](../README.md)
+- [QUICKSTART.md](QUICKSTART.md)
+- [CONFIGURATION.md](CONFIGURATION.md)
+- [SETTINGS_REFERENCE.md](SETTINGS_REFERENCE.md)
+- [NUGET_PACKAGES.md](NUGET_PACKAGES.md)
 
-## API Reference
-- [API_REFERENCE.md](API_REFERENCE.md) - Core APIs, intent model, stampede profiles, Aspire endpoints
-- [HYBRID_CACHING_API_SURFACE.md](HYBRID_CACHING_API_SURFACE.md) - Integration contract for hybrid caching APIs and behavior
-- [CACHE_TAGS_AND_ZONES.md](CACHE_TAGS_AND_ZONES.md) - Versioned tag invalidation and zone patterns (EF second-level cache)
-- [CACHE_INVALIDATION.md](CACHE_INVALIDATION.md) - Policy-driven invalidation profiles and canned command usage
-- [TYPED_COLLECTIONS.md](TYPED_COLLECTIONS.md) - Lists, sets, hashes, sorted sets
-- [REDIS_PROTOCOL_SUPPORT.md](REDIS_PROTOCOL_SUPPORT.md) - Supported Redis commands
-- [REDIS_MODULES.md](REDIS_MODULES.md) - Module detection + RedisJSON/RediSearch/Bloom/TimeSeries
-- [FAQ.md](FAQ.md) - Common questions and behavior clarifications
+## 2. Core Concepts
 
-## Architecture & Performance
-- [CLEAN_ARCHITECTURE.md](CLEAN_ARCHITECTURE.md) - Layer boundaries, dependency rules, and enforcement tests
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System design and data flow
-- [MUX_FAST_PATH_ARCHITECTURE.md](MUX_FAST_PATH_ARCHITECTURE.md) - Fast-path mux flowcharts, lane management, and tuning playbook
-- [COALESCED_WRITES.md](COALESCED_WRITES.md) - Coalesced write strategy
-- [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md) - Multiplexed lanes + autoscaler architecture and tuning
-- [INMEMORY_PERSISTENCE.md](INMEMORY_PERSISTENCE.md) - In-memory fallback spill design
-- [PERFORMANCE.md](PERFORMANCE.md) - Benchmark methodology and results
-- [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) - Current benchmark snapshot (environment + latest comparison)
-- [BENCHMARKING.md](BENCHMARKING.md) - How to run benchmarks
-- [BENCHMARK_CLAIMS_POLICY.md](BENCHMARK_CLAIMS_POLICY.md) - Strict vs tuned reporting rules and claim language policy
-- [HOT_PATH_BENCHMARK_CHECKLIST.md](HOT_PATH_BENCHMARK_CHECKLIST.md) - Hot-path benchmark audience split, tuning checklist, and gate criteria
-- [ENGINEERING_PLAYBOOK.md](ENGINEERING_PLAYBOOK.md) - Analyzer, profiling, and capture workflow
+- [CACHE_INVALIDATION.md](CACHE_INVALIDATION.md)
+- [CACHE_TAGS_AND_ZONES.md](CACHE_TAGS_AND_ZONES.md)
+- [ASPNETCORE_PIPELINE_CACHING.md](ASPNETCORE_PIPELINE_CACHING.md)
+- [WRAPPER_PLUGIN_GUIDE.md](WRAPPER_PLUGIN_GUIDE.md)
+- [API_REFERENCE.md](API_REFERENCE.md)
 
-## Observability & Operations
-- [LOGGING_TELEMETRY_CONFIGURATION.md](LOGGING_TELEMETRY_CONFIGURATION.md) - Exact Serilog/Seq/OTLP configuration, precedence, and fail-safe defaults
-- [OBSERVABILITY_ARCHITECTURE.md](OBSERVABILITY_ARCHITECTURE.md) - Metrics, traces, logging
-- [CURRENT_BACKEND_METRIC.md](CURRENT_BACKEND_METRIC.md) - Active backend metric
-- [FAILURE_SCENARIOS.md](FAILURE_SCENARIOS.md) - Redis outage behavior
-- [TLS_SECURITY.md](TLS_SECURITY.md) - TLS guidance
-- [LICENSE_OPERATIONS_RUNBOOK.md](LICENSE_OPERATIONS_RUNBOOK.md) - Key rotation, revocation, and incident flow
-- [LICENSE_CONTROL_PLANE.md](LICENSE_CONTROL_PLANE.md) - Online revocation/kill-switch service
-- [LICENSE_GENERATOR_EXTERNALIZATION.md](LICENSE_GENERATOR_EXTERNALIZATION.md) - Moving issuance/signing out of this repo
-- [UPGRADE_NOTES.md](UPGRADE_NOTES.md) - Release-critical behavior changes and migration notes
+## 3. Platform Integrations
 
-## Roadmap & Risk
-- [FUTURE_PROOFING.md](FUTURE_PROOFING.md) - Hardening notes and risk assessment
-- [API_EXPANSION_PLAN.md](API_EXPANSION_PLAN.md) - Planned API expansions
-- [PHASE_2_3_COMPLETE.md](PHASE_2_3_COMPLETE.md) - Phase status and roadmap
-- [GAP_ANALYSIS.md](GAP_ANALYSIS.md) - Known gaps and coverage
-- [NON_GOALS.md](NON_GOALS.md) - Explicit non-goals
+- [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md)
+- [BLAZOR_DASHBOARD_EXAMPLE.md](BLAZOR_DASHBOARD_EXAMPLE.md)
+- [.NET Aspire package README](../VapeCache.Extensions.Aspire/README.md)
 
-## Contributing
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution guidelines
-- [DOCUMENTATION_STANDARDS.md](DOCUMENTATION_STANDARDS.md) - API/comment/docs standards and enforcement commands
-- [BENCHMARKING_STATUS.md](BENCHMARKING_STATUS.md) - Benchmark coverage status
+## 4. Operations
 
-## Quick Reference
+- [WORKFLOWS.md](WORKFLOWS.md)
+- [LOGGING_TELEMETRY_CONFIGURATION.md](LOGGING_TELEMETRY_CONFIGURATION.md)
+- [PERFORMANCE.md](PERFORMANCE.md)
+- [BENCHMARK_CLAIMS_POLICY.md](BENCHMARK_CLAIMS_POLICY.md)
+- [UPGRADE_NOTES.md](UPGRADE_NOTES.md)
 
-### Install
-```bash
-dotnet add package VapeCache
-dotnet add package VapeCache.Extensions.Aspire
-```
+## Supporting References
 
-### Basic Registration (Microsoft DI)
-```csharp
-using VapeCache.Abstractions.Connections;
-
-builder.Services.AddOptions<RedisConnectionOptions>()
-    .Bind(builder.Configuration.GetSection("RedisConnection"));
-
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
-
-builder.Services.AddOptions<CacheStampedeOptions>()
-    .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
-    .Bind(builder.Configuration.GetSection("CacheStampede"));
-```
-
-### Basic Registration (Autofac)
-```csharp
-builder.RegisterModule(new VapeCache.Infrastructure.DependencyInjection.VapeCacheConnectionsModule());
-builder.RegisterModule(new VapeCache.Infrastructure.DependencyInjection.VapeCacheCachingModule());
-```
-
-### Console Demo
-The console demo runs background workloads and logs cache activity; see `VapeCache.Console/PLUGINS.md` for extension points and `docs/WRAPPER_PLUGIN_GUIDE.md` for optional endpoint mapping in wrapper hosts.
+- [CLEAN_ARCHITECTURE.md](CLEAN_ARCHITECTURE.md)
+- [ARCHITECTURE.md](architecture.md)
+- [FAQ.md](FAQ.md)
+- [DOCUMENTATION_STANDARDS.md](DOCUMENTATION_STANDARDS.md)
