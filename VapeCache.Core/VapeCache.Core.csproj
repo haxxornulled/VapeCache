@@ -7,7 +7,7 @@
     <IsPackable>false</IsPackable>
     <PackageId>VapeCache.Core</PackageId>
     <Title>VapeCache Core</Title>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache</Product>
@@ -23,7 +23,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.1.0 release: extracted shared core primitives for package dependency alignment.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.0 release: extracted shared core primitives for package dependency alignment.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
   </PropertyGroup>
 
@@ -39,3 +39,4 @@
   </ItemGroup>
 
 </Project>
+
