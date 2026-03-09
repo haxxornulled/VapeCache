@@ -5,7 +5,7 @@ This guide shows how to enable and use policy-driven cache invalidation in VapeC
 ## Packages
 
 ```bash
-dotnet add package VapeCache
+dotnet add package VapeCache.Runtime
 dotnet add package VapeCache.Features.Invalidation
 ```
 

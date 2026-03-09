@@ -132,7 +132,7 @@ jobs:
         run: pwsh -File tools/pack-release-packages.ps1 -OutputDir artifacts/packages -PackageVersion "${{ steps.release_tag.outputs.package_version }}"
 
       - name: Package smoke test
-        run: pwsh -File tools/package-smoke.ps1 -PackageOutput artifacts/packages -PackageId VapeCache
+        run: pwsh -File tools/package-smoke.ps1 -PackageOutput artifacts/packages -PackageId VapeCache.Runtime
 
       - name: NuGet login (OIDC)
         id: nuget_login
@@ -147,7 +147,6 @@ jobs:
             -PackageOutput artifacts/packages `
             -PackageVersion "${{ steps.release_tag.outputs.package_version }}" `
             -Source https://api.nuget.org/v3/index.json `
-            -SkipPackageIds VapeCache `
             -ApiKey "${{ steps.nuget_login.outputs.NUGET_API_KEY }}"
 
       - name: Generate checksums

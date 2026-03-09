@@ -1,6 +1,6 @@
 param(
     [string]$PackageOutput = "artifacts/packages",
-    [string]$PackageId = "VapeCache",
+    [string]$PackageId = "VapeCache.Runtime",
     [string[]]$AdditionalPackageSources = @()
 )
 

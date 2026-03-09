@@ -20,7 +20,7 @@ OSS scope in this repository: production-ready runtime packages for core caching
 1. Install packages
 
 ```bash
-dotnet add package VapeCache
+dotnet add package VapeCache.Runtime
 dotnet add package VapeCache.Extensions.Aspire
 ```
 
@@ -98,7 +98,7 @@ app.Run();
 
 | Package | Purpose |
 |---|---|
-| `VapeCache` | Core runtime, Redis transport, fallback behavior, telemetry |
+| `VapeCache.Runtime` | Core runtime, Redis transport, fallback behavior, telemetry |
 | `VapeCache.Abstractions` | Public contracts and option/value types |
 | `VapeCache.Features.Invalidation` | Optional key/tag/zone invalidation policies |
 | `VapeCache.Extensions.AspNetCore` | ASP.NET Core output-cache integration |

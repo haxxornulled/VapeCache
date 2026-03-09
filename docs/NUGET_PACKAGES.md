@@ -4,11 +4,11 @@ This OSS repository ships production-ready runtime packages for Redis-first cach
 
 ## Install Matrix
 
-### VapeCache
+### VapeCache.Runtime
 Core runtime package (transport, cache API, fallback, telemetry).
 
 ```bash
-dotnet add package VapeCache
+dotnet add package VapeCache.Runtime
 ```
 
 ### VapeCache.Abstractions

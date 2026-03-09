@@ -12,7 +12,7 @@ Copy/paste it in order and you are up.
 ## 1. Install Packages
 
 ```bash
-dotnet add package VapeCache
+dotnet add package VapeCache.Runtime
 ```
 
 Optional, if you are using Aspire:
