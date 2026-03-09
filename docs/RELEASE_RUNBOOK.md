@@ -24,7 +24,7 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 1. Confirm local/remote sync.
 2. Trigger release workflow:
    - workflow: `build.yml`
-   - input: `release_tag` (example: `v1.2.0`)
+   - input: `release_tag` (example: `v1.2.1`)
 3. Monitor run to completion.
 4. Verify NuGet push logs include all OSS package IDs:
    - `VapeCache.Core`
@@ -70,4 +70,3 @@ If release assets are stale/misaligned:
 
 - runbook must be kept current
 - at least one backup maintainer should be able to execute these steps without private tribal knowledge
-
