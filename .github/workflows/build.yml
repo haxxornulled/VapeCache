@@ -111,7 +111,7 @@ jobs:
         run: |
           . ./tools/release-package-manifest.ps1
           $projects = Get-ReleasePackageProjects
-          pwsh -File tools/audit-vulnerabilities.ps1 -Projects $projects
+          & ./tools/audit-vulnerabilities.ps1 -Projects $projects
 
       - name: Vulnerability scan (private feeds)
         shell: pwsh
@@ -126,7 +126,7 @@ jobs:
 
           . ./tools/release-package-manifest.ps1
           $projects = Get-ReleasePackageProjects
-          pwsh -File tools/audit-vulnerabilities.ps1 -Projects $projects -IncludePrivateFeeds -FailOnPrivateFeedAuthError
+          & ./tools/audit-vulnerabilities.ps1 -Projects $projects -IncludePrivateFeeds -FailOnPrivateFeedAuthError
 
       - name: Pack
         run: pwsh -File tools/pack-release-packages.ps1 -OutputDir artifacts/packages -PackageVersion "${{ steps.release_tag.outputs.package_version }}"
