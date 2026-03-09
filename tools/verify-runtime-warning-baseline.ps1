@@ -13,7 +13,7 @@ Set-Location $repoRoot
 
 function Resolve-SolutionPath {
     param(
-        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
         [string]$RequestedPath
     )
 
