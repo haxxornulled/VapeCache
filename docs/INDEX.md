@@ -26,7 +26,6 @@ This index reflects the OSS runtime surface in this repository.
 
 ## 4. Operations
 
-- [WORKFLOWS.md](WORKFLOWS.md)
 - [LOGGING_TELEMETRY_CONFIGURATION.md](LOGGING_TELEMETRY_CONFIGURATION.md)
 - [PERFORMANCE.md](PERFORMANCE.md)
 - [BENCHMARK_CLAIMS_POLICY.md](BENCHMARK_CLAIMS_POLICY.md)
