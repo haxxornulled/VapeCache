@@ -10,7 +10,7 @@ namespace VapeCache.Extensions.AspNetCore;
 /// <summary>
 /// ASP.NET Core output-cache store backed by <see cref="ICacheService"/>.
 /// </summary>
-public sealed class VapeCacheOutputCacheStore(
+public sealed partial class VapeCacheOutputCacheStore(
     ICacheService cache,
     IOptionsMonitor<VapeCacheOutputCacheStoreOptions> optionsMonitor,
     ILogger<VapeCacheOutputCacheStore> logger) : IOutputCacheStore
@@ -33,7 +33,7 @@ public sealed class VapeCacheOutputCacheStore(
 
         if (!TryDeserializeEnvelope(stored, out var envelope))
         {
-            logger.LogWarning("Discarding malformed output-cache envelope for key {Key}.", normalizedKey);
+            LogDiscardingMalformedEnvelope(logger, normalizedKey);
             await cache.RemoveAsync(normalizedKey, cancellationToken).ConfigureAwait(false);
             return null;
         }
@@ -45,7 +45,7 @@ public sealed class VapeCacheOutputCacheStore(
             return envelope.Payload;
 
         await cache.RemoveAsync(normalizedKey, cancellationToken).ConfigureAwait(false);
-        logger.LogDebug("Discarded stale output-cache entry for key {Key} after tag invalidation.", normalizedKey);
+        LogDiscardedStaleEntry(logger, normalizedKey);
         return null;
     }
 
@@ -113,7 +113,7 @@ public sealed class VapeCacheOutputCacheStore(
                     Tags: [normalizedTag])),
             cancellationToken).ConfigureAwait(false);
 
-        logger.LogInformation("Output-cache eviction by tag completed. Tag={Tag} Version={Version}", normalizedTag, nextVersion);
+        LogEvictedOutputCacheTag(logger, normalizedTag, nextVersion);
     }
 
     private async ValueTask<Dictionary<string, long>> CaptureTagVersionsAsync(string[] normalizedTags, CancellationToken cancellationToken)
@@ -238,4 +238,13 @@ public sealed class VapeCacheOutputCacheStore(
         public byte[] Payload { get; init; } = Array.Empty<byte>();
         public Dictionary<string, long> TagVersions { get; init; } = new(StringComparer.Ordinal);
     }
+
+    [LoggerMessage(EventId = 1001, Level = LogLevel.Warning, Message = "Discarding malformed output-cache envelope for key {Key}.")]
+    private static partial void LogDiscardingMalformedEnvelope(ILogger logger, string key);
+
+    [LoggerMessage(EventId = 1002, Level = LogLevel.Debug, Message = "Discarded stale output-cache entry for key {Key} after tag invalidation.")]
+    private static partial void LogDiscardedStaleEntry(ILogger logger, string key);
+
+    [LoggerMessage(EventId = 1003, Level = LogLevel.Information, Message = "Output-cache eviction by tag completed. Tag={Tag} Version={Version}")]
+    private static partial void LogEvictedOutputCacheTag(ILogger logger, string tag, long version);
 }

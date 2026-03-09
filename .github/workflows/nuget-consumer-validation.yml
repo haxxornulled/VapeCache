@@ -55,3 +55,49 @@ jobs:
           dotnet add "$WORKDIR/ConsumerRuntime/ConsumerRuntime.csproj" package VapeCache.Features.Invalidation --source https://api.nuget.org/v3/index.json
           dotnet restore "$WORKDIR/ConsumerRuntime/ConsumerRuntime.csproj" --configfile "$NUGET_CONFIG"
           dotnet build "$WORKDIR/ConsumerRuntime/ConsumerRuntime.csproj" -c Release --no-restore
+
+      - name: Validate README runtime snippet compile (nuget.org only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKDIR="$RUNNER_TEMP/vapecache-consumer/readme-runtime"
+          NUGET_CONFIG="$RUNNER_TEMP/vapecache-consumer/NuGet.config"
+          mkdir -p "$WORKDIR"
+          dotnet new web -n ReadmeRuntime -o "$WORKDIR/ReadmeRuntime" --framework net10.0
+          dotnet add "$WORKDIR/ReadmeRuntime/ReadmeRuntime.csproj" package VapeCache.Runtime --source https://api.nuget.org/v3/index.json
+          cat > "$WORKDIR/ReadmeRuntime/Program.cs" <<'EOF'
+          using VapeCache.Abstractions.Caching;
+          using VapeCache.Abstractions.Connections;
+          using VapeCache.Infrastructure.Caching;
+          using VapeCache.Infrastructure.Connections;
+
+          var builder = WebApplication.CreateBuilder(args);
+
+          builder.Services.AddOptions<RedisConnectionOptions>()
+              .Bind(builder.Configuration.GetSection("RedisConnection"));
+
+          builder.Services.AddVapecacheRedisConnections();
+          builder.Services.AddVapecacheCaching();
+
+          builder.Services.AddOptions<CacheStampedeOptions>()
+              .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
+              .Bind(builder.Configuration.GetSection("CacheStampede"));
+
+          var app = builder.Build();
+
+          app.MapGet("/products/{id:int}", async (int id, IVapeCache cache, CancellationToken ct) =>
+          {
+              var key = CacheKey<string>.From($"products:{id}");
+              var value = await cache.GetOrCreateAsync(
+                  key,
+                  _ => new ValueTask<string>($"product-{id}"),
+                  new CacheEntryOptions(TimeSpan.FromMinutes(5)),
+                  ct);
+
+              return Results.Ok(value);
+          });
+
+          app.Run();
+          EOF
+          dotnet restore "$WORKDIR/ReadmeRuntime/ReadmeRuntime.csproj" --configfile "$NUGET_CONFIG"
+          dotnet build "$WORKDIR/ReadmeRuntime/ReadmeRuntime.csproj" -c Release --no-restore

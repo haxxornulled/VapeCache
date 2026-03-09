@@ -6,7 +6,7 @@ namespace VapeCache.Core.Common.Extensions;
 /// <summary>
 /// Helper extensions for <see cref="Result{T}"/> success/error handling with optional logging hooks.
 /// </summary>
-public static class ResultExtensions
+public static partial class ResultExtensions
 {
     private const string HandleSuccessFailureMessage = "HandleSuccess was called on a failed Result.";
     private const string HandleSuccessWithLoggingFailureMessage = "HandleSuccessWithLogging was called on a failed Result.";
@@ -102,7 +102,7 @@ public static class ResultExtensions
                 }
                 catch (Exception loggingException)
                 {
-                    logger.LogError(loggingException, ErrorHandlingFailureMessage);
+                    LogErrorHandlingFailure(logger, loggingException);
                 }
 
                 return error;
@@ -138,4 +138,7 @@ public static class ResultExtensions
 
     private static T ThrowHandleSuccessWithLoggingFailure<T>(Exception error) =>
         throw new InvalidOperationException(HandleSuccessWithLoggingFailureMessage, error);
+
+    [LoggerMessage(EventId = 4001, Level = LogLevel.Error, Message = ErrorHandlingFailureMessage)]
+    private static partial void LogErrorHandlingFailure(ILogger logger, Exception exception);
 }

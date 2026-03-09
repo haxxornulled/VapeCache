@@ -66,21 +66,19 @@ function Get-RuntimeWarningSnapshot {
         Sort-Object File, Line, Rule -Unique
 
     $entries = $uniqueLocations |
-        Group-Object -Property File, Rule |
         ForEach-Object {
-            $first = $_.Group[0]
-            $absoluteFile = [System.IO.Path]::GetFullPath($first.File)
+            $absoluteFile = [System.IO.Path]::GetFullPath($_.File)
             $relativeFile = [System.IO.Path]::GetRelativePath($repoRoot, $absoluteFile).Replace('\', '/')
             [pscustomobject]@{
                 file = $relativeFile
-                rule = $first.Rule
-                count = $_.Count
+                line = [int]$_.Line
+                rule = $_.Rule
             }
         } |
-        Sort-Object file, rule
+        Sort-Object file, line, rule
 
     return [pscustomobject]@{
-        formatVersion = 1
+        formatVersion = 2
         generatedUtc = [DateTimeOffset]::UtcNow.ToString("O")
         configuration = $BuildConfiguration
         totals = [pscustomobject]@{
@@ -112,30 +110,59 @@ if (-not (Test-Path $baselineFullPath)) {
 }
 
 $baseline = Get-Content $baselineFullPath -Raw | ConvertFrom-Json
-$baselineMap = @{}
-foreach ($entry in $baseline.entries) {
-    $key = "$($entry.file)|$($entry.rule)"
-    $baselineMap[$key] = [int]$entry.count
-}
-
-$currentMap = @{}
-foreach ($entry in $snapshot.entries) {
-    $key = "$($entry.file)|$($entry.rule)"
-    $currentMap[$key] = [int]$entry.count
-}
+$baselineFormatVersion = if ($null -eq $baseline.formatVersion) { 1 } else { [int]$baseline.formatVersion }
+$baselineIsLineLevel = $baselineFormatVersion -ge 2
 
 $violations = New-Object System.Collections.Generic.List[object]
-foreach ($kv in $currentMap.GetEnumerator()) {
-    $baselineCount = if ($baselineMap.ContainsKey($kv.Key)) { $baselineMap[$kv.Key] } else { 0 }
-    if ($kv.Value -gt $baselineCount) {
-        $parts = $kv.Key.Split('|')
-        $violations.Add([pscustomobject]@{
-            file = $parts[0]
-            rule = $parts[1]
-            baseline = $baselineCount
-            current = $kv.Value
-            delta = $kv.Value - $baselineCount
-        }) | Out-Null
+if ($baselineIsLineLevel) {
+    $baselineSet = @{}
+    foreach ($entry in $baseline.entries) {
+        $key = "$($entry.file)|$([int]$entry.line)|$($entry.rule)"
+        $baselineSet[$key] = $true
+    }
+
+    foreach ($entry in $snapshot.entries) {
+        $key = "$($entry.file)|$([int]$entry.line)|$($entry.rule)"
+        if (-not $baselineSet.ContainsKey($key)) {
+            $violations.Add([pscustomobject]@{
+                file = $entry.file
+                line = [int]$entry.line
+                rule = $entry.rule
+            }) | Out-Null
+        }
+    }
+}
+else {
+    # Backward compatibility for v1 baseline format (file+rule count).
+    $baselineMap = @{}
+    foreach ($entry in $baseline.entries) {
+        $key = "$($entry.file)|$($entry.rule)"
+        $baselineMap[$key] = [int]$entry.count
+    }
+
+    $currentMap = @{}
+    foreach ($entry in $snapshot.entries) {
+        $key = "$($entry.file)|$($entry.rule)"
+        if ($currentMap.ContainsKey($key)) {
+            $currentMap[$key] = [int]$currentMap[$key] + 1
+        }
+        else {
+            $currentMap[$key] = 1
+        }
+    }
+
+    foreach ($kv in $currentMap.GetEnumerator()) {
+        $baselineCount = if ($baselineMap.ContainsKey($kv.Key)) { $baselineMap[$kv.Key] } else { 0 }
+        if ($kv.Value -gt $baselineCount) {
+            $parts = $kv.Key.Split('|')
+            $violations.Add([pscustomobject]@{
+                file = $parts[0]
+                rule = $parts[1]
+                baseline = $baselineCount
+                current = $kv.Value
+                delta = $kv.Value - $baselineCount
+            }) | Out-Null
+        }
     }
 }
 
@@ -146,12 +173,22 @@ Write-Host "  Current  unique warning locations: $($snapshot.totals.uniqueWarnin
 if ($violations.Count -gt 0) {
     Write-Host ""
     Write-Host "Runtime analyzer warning baseline regression detected:" -ForegroundColor Red
-    $violations |
-        Sort-Object -Property @{Expression = "delta"; Descending = $true }, file, rule |
-        Select-Object -First 25 |
-        ForEach-Object {
-            Write-Host ("  +{0} {1} {2} (baseline={3}, current={4})" -f $_.delta, $_.rule, $_.file, $_.baseline, $_.current) -ForegroundColor Red
-        }
+    if ($baselineIsLineLevel) {
+        $violations |
+            Sort-Object file, line, rule |
+            Select-Object -First 25 |
+            ForEach-Object {
+                Write-Host ("  +1 {0} {1}:{2}" -f $_.rule, $_.file, $_.line) -ForegroundColor Red
+            }
+    }
+    else {
+        $violations |
+            Sort-Object -Property @{Expression = "delta"; Descending = $true }, file, rule |
+            Select-Object -First 25 |
+            ForEach-Object {
+                Write-Host ("  +{0} {1} {2} (baseline={3}, current={4})" -f $_.delta, $_.rule, $_.file, $_.baseline, $_.current) -ForegroundColor Red
+            }
+    }
 
     throw "Runtime analyzer warning counts increased. Burn down warnings or update baseline intentionally."
 }
