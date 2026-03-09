@@ -135,14 +135,12 @@ jobs:
         run: pwsh -File tools/package-smoke.ps1 -PackageOutput artifacts/packages -PackageId VapeCache
 
       - name: NuGet login (OIDC)
-        if: github.event_name == 'push'
         id: nuget_login
         uses: NuGet/login@v1
         with:
           user: haxxornulled
 
       - name: Publish NuGet packages
-        if: github.event_name == 'push'
         shell: pwsh
         run: |
           pwsh -File tools/publish-release-packages.ps1 `
