@@ -110,7 +110,16 @@ flowchart TB
 - Recipients: handles from `.github/commit-notify-subscribers.txt` plus contributors whose git author email uses GitHub's noreply format.
 - Result: contributors receive standard GitHub notifications from issue comment mentions without requiring external mail or chat infrastructure.
 
-## 6. Release Notes
+## 6. NuGet Consumer Validation
+
+- Workflow: `.github/workflows/nuget-consumer-validation.yml`
+- Trigger: scheduled daily run plus manual dispatch.
+- Purpose: validate real consumer restore/build from `nuget.org` only (isolated `NuGet.config`) to catch packaging/dependency graph regressions quickly.
+- Checks:
+  - ASP.NET consumer install path (`VapeCache.Extensions.AspNetCore`)
+  - Runtime/invalidation install path (`VapeCache.Runtime`, `VapeCache.Features.Invalidation`)
+
+## 7. Release Notes
 
 - Release workflow manual dispatch now requires a `release_tag` input (for example `v1.2.0` or `v1.2.0-rc1`).
 - Package artifacts are versioned from the resolved tag, so prerelease tags generate matching prerelease `.nupkg` versions.

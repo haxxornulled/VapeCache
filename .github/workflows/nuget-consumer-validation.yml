@@ -1,0 +1,57 @@
+name: NuGet Consumer Validation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-nuget-consumers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Create isolated NuGet config
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/vapecache-consumer"
+          cat > "$RUNNER_TEMP/vapecache-consumer/NuGet.config" <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+          </configuration>
+          EOF
+
+      - name: Validate ASP.NET Core consumer install (nuget.org only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKDIR="$RUNNER_TEMP/vapecache-consumer/aspnet"
+          NUGET_CONFIG="$RUNNER_TEMP/vapecache-consumer/NuGet.config"
+          mkdir -p "$WORKDIR"
+          dotnet new webapi -n ConsumerAspNet -o "$WORKDIR/ConsumerAspNet" --framework net10.0 --no-https
+          dotnet add "$WORKDIR/ConsumerAspNet/ConsumerAspNet.csproj" package VapeCache.Extensions.AspNetCore --source https://api.nuget.org/v3/index.json
+          dotnet restore "$WORKDIR/ConsumerAspNet/ConsumerAspNet.csproj" --configfile "$NUGET_CONFIG"
+          dotnet build "$WORKDIR/ConsumerAspNet/ConsumerAspNet.csproj" -c Release --no-restore
+
+      - name: Validate runtime/invalidation consumer install (nuget.org only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKDIR="$RUNNER_TEMP/vapecache-consumer/runtime"
+          NUGET_CONFIG="$RUNNER_TEMP/vapecache-consumer/NuGet.config"
+          mkdir -p "$WORKDIR"
+          dotnet new console -n ConsumerRuntime -o "$WORKDIR/ConsumerRuntime" --framework net10.0
+          dotnet add "$WORKDIR/ConsumerRuntime/ConsumerRuntime.csproj" package VapeCache.Runtime --source https://api.nuget.org/v3/index.json
+          dotnet add "$WORKDIR/ConsumerRuntime/ConsumerRuntime.csproj" package VapeCache.Features.Invalidation --source https://api.nuget.org/v3/index.json
+          dotnet restore "$WORKDIR/ConsumerRuntime/ConsumerRuntime.csproj" --configfile "$NUGET_CONFIG"
+          dotnet build "$WORKDIR/ConsumerRuntime/ConsumerRuntime.csproj" -c Release --no-restore

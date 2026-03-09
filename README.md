@@ -15,6 +15,17 @@ It is designed for predictable behavior under load, Redis trouble, and high-thro
 
 OSS scope in this repository: production-ready runtime packages for core caching, invalidation, ASP.NET Core integration, and Aspire integration.
 
+## Maturity and Evidence
+
+Current project status: `Early Adoption`.
+
+- Production-capable features are present, but ecosystem adoption is still building.
+- Benchmark claims follow strict disclosure rules in [docs/BENCHMARK_CLAIMS_POLICY.md](docs/BENCHMARK_CLAIMS_POLICY.md).
+- Release and compatibility governance is documented in:
+  - [docs/STABILITY_POLICY.md](docs/STABILITY_POLICY.md)
+  - [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md)
+  - [docs/PACKAGE_COMPATIBILITY_PLAN.md](docs/PACKAGE_COMPATIBILITY_PLAN.md)
+
 ## QuickStart
 
 1. Install packages
@@ -122,6 +133,9 @@ The following are not shipped from this OSS repository:
 - [docs/CACHE_INVALIDATION.md](docs/CACHE_INVALIDATION.md)
 - [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md)
 - [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md)
+- [docs/STABILITY_POLICY.md](docs/STABILITY_POLICY.md)
+- [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md)
+- [docs/RELEASE_RUNBOOK.md](docs/RELEASE_RUNBOOK.md)
 
 ## Build And Test
 
