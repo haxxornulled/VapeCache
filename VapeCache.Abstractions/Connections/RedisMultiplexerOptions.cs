@@ -28,7 +28,7 @@ public sealed record RedisMultiplexerOptions
     ///
     /// Default: false (favor hot-path allocation stability; opt in when needed)
     /// </summary>
-    public bool EnableCommandInstrumentation { get; init; } = false;
+    public bool EnableCommandInstrumentation { get; init; }
 
     /// <summary>
     /// Enables scatter/gather coalesced writes via SocketAsyncEventArgs when available.
