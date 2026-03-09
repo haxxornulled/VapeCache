@@ -5,7 +5,33 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <PackageId>VapeCache.Core</PackageId>
+    <Title>VapeCache Core</Title>
+    <Version>1.1.0</Version>
+    <Authors>HaxxorNulled</Authors>
+    <Company>HaxxorNulled</Company>
+    <Product>VapeCache</Product>
+    <Description>Core primitives shared by VapeCache packages.</Description>
+    <PackageTags>redis;cache;core;dotnet</PackageTags>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageIcon>vapecache-icon.png</PackageIcon>
+    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <RepositoryBranch>main</RepositoryBranch>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
+    <PackageReleaseNotes>1.1.0 release: extracted shared core primitives for package dependency alignment.</PackageReleaseNotes>
+    <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="LanguageExt.Core" Version="4.4.9" />
