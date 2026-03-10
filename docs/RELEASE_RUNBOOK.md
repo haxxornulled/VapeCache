@@ -30,10 +30,10 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 2. Run release verification:
    - `pwsh ./tools/release-check.ps1 -Configuration Release`
 3. Pack release artifacts:
-   - `pwsh ./tools/pack-release-packages.ps1 -PackageVersion 1.2.3`
+   - `pwsh ./tools/pack-release-packages.ps1 -PackageVersion 1.2.4`
 4. Publish to NuGet.org:
    - set `NUGET_API_KEY` in the shell or pass `-ApiKey`
-   - `pwsh ./tools/publish-release-packages.ps1 -PackageVersion 1.2.3`
+   - `pwsh ./tools/publish-release-packages.ps1 -PackageVersion 1.2.4`
 5. Verify NuGet push logs include all OSS package IDs:
    - `VapeCache.Core`
    - `VapeCache.Abstractions`
