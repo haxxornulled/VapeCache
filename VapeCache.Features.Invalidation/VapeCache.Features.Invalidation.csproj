@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Features.Invalidation</PackageId>
     <Title>VapeCache Invalidation Features</Title>
-    <Version>1.2.1</Version>
+    <Version>1.2.2</Version>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache.Features.Invalidation</Product>

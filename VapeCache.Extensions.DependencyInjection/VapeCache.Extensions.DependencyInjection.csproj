@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.DependencyInjection</PackageId>
     <Title>VapeCache Extensions for Dependency Injection</Title>
-    <Version>1.2.1</Version>
+    <Version>1.2.2</Version>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache.Extensions.DependencyInjection</Product>
