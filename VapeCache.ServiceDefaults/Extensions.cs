@@ -9,6 +9,7 @@ using Microsoft.Extensions.ServiceDiscovery;
 using OpenTelemetry;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
 namespace Microsoft.Extensions.Hosting;
@@ -70,6 +71,8 @@ public static class Extensions
         });
 
         builder.Services.AddOpenTelemetry()
+            .ConfigureResource(resource =>
+                resource.AddService(serviceName: ResolveServiceName(builder.Configuration, builder.Environment.ApplicationName)))
             .WithMetrics(metrics =>
             {
                 metrics.AddAspNetCoreInstrumentation()
@@ -171,6 +174,38 @@ public static class Extensions
             return OtlpExportProtocol.HttpProtobuf;
 
         return OtlpExportProtocol.Grpc;
+    }
+
+    private static string ResolveServiceName(IConfiguration configuration, string applicationName)
+    {
+        var serviceName = configuration["OTEL_SERVICE_NAME"];
+        if (!string.IsNullOrWhiteSpace(serviceName))
+            return serviceName;
+
+        serviceName = TryReadServiceNameFromResourceAttributes(configuration["OTEL_RESOURCE_ATTRIBUTES"]);
+        if (!string.IsNullOrWhiteSpace(serviceName))
+            return serviceName;
+
+        return applicationName;
+    }
+
+    private static string? TryReadServiceNameFromResourceAttributes(string? resourceAttributes)
+    {
+        if (string.IsNullOrWhiteSpace(resourceAttributes))
+            return null;
+
+        var attributes = resourceAttributes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var i = 0; i < attributes.Length; i++)
+        {
+            const string prefix = "service.name=";
+            if (!attributes[i].StartsWith(prefix, StringComparison.Ordinal))
+                continue;
+
+            var serviceName = attributes[i][prefix.Length..].Trim();
+            return string.IsNullOrWhiteSpace(serviceName) ? null : serviceName;
+        }
+
+        return null;
     }
 
     private static bool ShouldIncludeAspNetTelemetry(PathString path)

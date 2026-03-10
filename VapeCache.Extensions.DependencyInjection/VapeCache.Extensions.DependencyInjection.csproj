@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.DependencyInjection</PackageId>
     <Title>VapeCache Extensions for Dependency Injection</Title>
-    <Version>1.2.1</Version>
+    <Version>1.2.3</Version>
     <Authors>HaxxorNulled</Authors>
     <Company>HaxxorNulled</Company>
     <Product>VapeCache.Extensions.DependencyInjection</Product>
@@ -24,7 +24,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.1 release: adds DI facade package for one-call runtime wiring in clean architecture projects.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.3 release: aligns manual NuGet publishing, refreshes release docs, and preserves the DI facade package in the release manifest.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>

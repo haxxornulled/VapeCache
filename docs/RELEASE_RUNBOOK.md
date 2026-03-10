@@ -11,30 +11,39 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 
 ## Required Access
 
-- GitHub repo write access
-- GitHub Actions workflow dispatch access
-- NuGet trusted publishing policy configured for:
-  - owner: `haxxornulled`
-  - repo: `haxxornulled/VapeCache`
-  - workflow: `.github/workflows/build.yml`
-  - environment: `production`
+- git push access for the public OSS repo
+- NuGet.org publish credentials
+- local environment with `pwsh` and `.NET 10 SDK`
+
+## Remote Expectations
+
+- package metadata must continue to point to `https://github.com/haxxornulled/VapeCache`
+- local clone should keep the public OSS remote available as `oss`
+- if `origin` targets a private mirror, release tags and release notes still need to land in `oss`
 
 ## Release Steps
 
 1. Confirm local/remote sync.
-2. Trigger release workflow:
-   - workflow: `build.yml`
-   - input: `release_tag` (example: `v1.2.1`)
-3. Monitor run to completion.
-4. Verify NuGet push logs include all OSS package IDs:
+   - `git fetch origin --tags`
+   - `git fetch oss --tags`
+   - `git status`
+2. Run release verification:
+   - `pwsh ./tools/release-check.ps1 -Configuration Release`
+3. Pack release artifacts:
+   - `pwsh ./tools/pack-release-packages.ps1 -PackageVersion 1.2.3`
+4. Publish to NuGet.org:
+   - set `NUGET_API_KEY` in the shell or pass `-ApiKey`
+   - `pwsh ./tools/publish-release-packages.ps1 -PackageVersion 1.2.3`
+5. Verify NuGet push logs include all OSS package IDs:
    - `VapeCache.Core`
    - `VapeCache.Abstractions`
    - `VapeCache.Features.Invalidation`
    - `VapeCache.Runtime`
+   - `VapeCache.Extensions.DependencyInjection`
    - `VapeCache.Extensions.AspNetCore`
    - `VapeCache.Extensions.Aspire`
-5. Verify GitHub release assets and checksums.
-6. Verify consumer install from nuget.org.
+6. Push the release commit/tag to the public OSS repo.
+7. Verify consumer install from nuget.org.
 
 ## Post-Release Verification
 
@@ -53,18 +62,20 @@ dotnet build -c Release
 If release fails before publish:
 
 - fix on branch
-- rerun workflow for same tag
+- rerun `tools/release-check.ps1`
+- repack with the same version after fixing the issue
 
 If release fails during publish:
 
 - identify exact package that failed
 - patch release tooling to preserve dependency-safe publish order
-- rerun workflow
+- rerun `tools/publish-release-packages.ps1` with `-SkipPackageIds` if already-published packages should be skipped
 
-If release assets are stale/misaligned:
+If release tag/repo state is stale or misaligned:
 
-- delete only incorrect assets from GitHub release
-- rerun workflow and re-verify checksums
+- correct the public `oss` remote first
+- push only the intended release commit/tag
+- re-verify package metadata points at `haxxornulled/VapeCache`
 
 ## Bus-Factor Controls
 

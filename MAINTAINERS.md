@@ -8,7 +8,7 @@ This file documents ownership and release responsibilities for OSS.
 - Responsibilities:
   - architecture and roadmap
   - release approval
-  - NuGet trusted publishing policy ownership
+  - NuGet.org publish credential ownership
 
 ## Backup Maintainer Requirement
 
@@ -18,7 +18,7 @@ Target state:
 
 - at least one additional maintainer with:
   - repo write access
-  - workflow dispatch permissions
+  - NuGet publish access
   - runbook familiarity (`docs/RELEASE_RUNBOOK.md`)
 
 ## Operational Rule

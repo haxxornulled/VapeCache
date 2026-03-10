@@ -4,8 +4,7 @@ param(
     [string]$Source = "https://api.nuget.org/v3/index.json",
     [string]$PackageVersion = "",
     [string[]]$SkipPackageIds = @(),
-    [Parameter(Mandatory = $true)]
-    [string]$ApiKey
+    [string]$ApiKey = $env:NUGET_API_KEY
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +19,11 @@ if (-not [System.IO.Path]::IsPathRooted($PackageOutput))
 
 $resolvedPackageVersion = Resolve-ReleasePackageVersion -PackageVersion $PackageVersion
 $packages = Get-ReleasePackageVersionInfo
+
+if ([string]::IsNullOrWhiteSpace($ApiKey))
+{
+    throw "NuGet API key required. Pass -ApiKey or set NUGET_API_KEY."
+}
 
 Write-Host "Publishing release packages in dependency-safe order for version $resolvedPackageVersion"
 
