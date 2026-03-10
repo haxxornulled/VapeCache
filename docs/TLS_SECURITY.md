@@ -83,6 +83,38 @@ rediss://user:password@redis.example.com:6380/0
 
 **Note:** `rediss://` (double-s) enables TLS automatically.
 
+### Redis ACL Authentication (Username + Password)
+
+For Redis 6+ ACL deployments, configure both `Username` and `Password`:
+
+```json
+{
+  "RedisConnection": {
+    "Host": "redis.example.com",
+    "Port": 6380,
+    "Username": "vapecache-app",
+    "Password": "<secret>",
+    "UseTls": true,
+    "TlsHost": "redis.example.com",
+    "AllowAuthFallbackToPasswordOnly": false
+  }
+}
+```
+
+Authentication behavior in VapeCache:
+
+- `Username` + `Password` sends `AUTH <username> <password>`.
+- `Password` only sends `AUTH <password>` for the default Redis user.
+- `AllowAuthFallbackToPasswordOnly=false` keeps auth strict and avoids silent downgrade from ACL auth.
+
+If credentials contain reserved URI characters (`@`, `:`, `/`, `?`, `#`, `%`), URL-encode them in connection strings:
+
+```bash
+rediss://vapecache-app:pa%24%24w0rd%21@redis.example.com:6380/0?sni=redis.example.com
+```
+
+If certificate identity differs from the DNS host, set `TlsHost` (or `sni=` in connection string) to match cert CN/SAN.
+
 ### Environment Variables
 
 ```bash
@@ -93,6 +125,9 @@ export VAPECACHE_REDIS_CONNECTIONSTRING="rediss://user:password@redis.example.co
 export RedisConnection__UseTls="true"
 export RedisConnection__Host="redis.example.com"
 export RedisConnection__Port="6380"
+export RedisConnection__Username="vapecache-app"
+export RedisConnection__Password="<secret>"
+export RedisConnection__TlsHost="redis.example.com"
 ```
 
 ---

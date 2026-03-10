@@ -90,6 +90,42 @@ Controls connection pooling and socket behavior.
 - `MaxClusterRedirects` bounds redirect hops per command (default `3`, clamped `0..16`).
 - `AllowAuthFallbackToPasswordOnly=false` is the safe default; only enable it when you intentionally want legacy password-only fallback after ACL auth fails.
 
+### TLS + ACL Authentication (Recommended Production Profile)
+
+Use Redis ACL auth (`Username` + `Password`) together with TLS.
+
+```json
+{
+  "RedisConnection": {
+    "Host": "redis-prod.internal",
+    "Port": 6380,
+    "Username": "vapecache-app",
+    "Password": "<from-secret-store>",
+    "Database": 0,
+    "UseTls": true,
+    "TlsHost": "redis-prod.internal",
+    "AllowInvalidCert": false,
+    "AllowAuthFallbackToPasswordOnly": false
+  }
+}
+```
+
+Equivalent connection string:
+
+```text
+rediss://vapecache-app:pa%24%24w0rd%21@redis-prod.internal:6380/0?sni=redis-prod.internal
+```
+
+- `rediss://` enables TLS.
+- Use URL encoding for reserved characters in username/password (`@`, `:`, `/`, `?`, `#`, `%`).
+- `sni=...` is optional; use it when certificate CN/SAN differs from `Host`.
+
+Runtime auth behavior:
+
+- `Username` + `Password` -> `AUTH <username> <password>`
+- `Password` only -> `AUTH <password>` (default Redis user)
+- `AllowAuthFallbackToPasswordOnly=true` allows fallback to password-only auth if ACL auth fails (disabled by default)
+
 ## RedisMultiplexer (RedisMultiplexerOptions)
 
 Controls multiplexed command execution.
@@ -400,7 +436,10 @@ Every option can be overridden via environment variables using `__` as the separ
 
 ```bash
 $env:RedisConnection__Host = "prod-redis.example.com"
+$env:RedisConnection__Username = "vapecache-app"
 $env:RedisConnection__Password = "secret"
+$env:RedisConnection__UseTls = "true"
+$env:RedisConnection__TlsHost = "prod-redis.example.com"
 $env:RedisCircuitBreaker__ConsecutiveFailuresToOpen = "3"
 ```
 

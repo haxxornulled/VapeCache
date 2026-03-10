@@ -371,7 +371,13 @@ Configuration options for Redis reconciliation (syncing in-memory writes back to
 |---|---|---|---|
 | Host | string | "" | (No XML summary.) |
 | Port | int | 6379 | (No XML summary.) |
+| Username | string? | null | Gets or sets the username. |
+| Password | string? | null | Gets or sets the password. |
 | Database | int | 0 | (No XML summary.) |
+| ConnectionString | string? | null | Gets or sets the connection string. |
+| UseTls | bool | false | Gets or sets the use tls. |
+| TlsHost | string? | null | Gets or sets the tls host. |
+| AllowInvalidCert | bool | false | WARNING: Development/testing only. Bypasses TLS certificate validation and must not be enabled in production. |
 | MaxConnections | int | 64 | (No XML summary.) |
 | MaxIdle | int | 64 | (No XML summary.) |
 | Warm | int | 0 | (No XML summary.) |

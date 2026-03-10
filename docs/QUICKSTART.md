@@ -60,6 +60,41 @@ Cluster + RESP3 (optional):
 }
 ```
 
+Production TLS + ACL auth (recommended):
+
+```json
+{
+  "RedisConnection": {
+    "Host": "redis-prod.internal",
+    "Port": 6380,
+    "Username": "vapecache-app",
+    "Password": "<from-secret-store>",
+    "Database": 0,
+    "UseTls": true,
+    "TlsHost": "redis-prod.internal",
+    "AllowInvalidCert": false,
+    "AllowAuthFallbackToPasswordOnly": false
+  }
+}
+```
+
+Equivalent connection string:
+
+```bash
+setx VAPECACHE_REDIS_CONNECTIONSTRING "rediss://vapecache-app:pa%24%24w0rd%21@redis-prod.internal:6380/0?sni=redis-prod.internal"
+```
+
+If you use direct env-var binding instead of a full connection string:
+
+```bash
+setx RedisConnection__Username "vapecache-app"
+setx RedisConnection__Password "your-redis-password"
+setx RedisConnection__UseTls "true"
+setx RedisConnection__TlsHost "redis-prod.internal"
+```
+
+Use URL encoding in credentials when they contain reserved characters (`@`, `:`, `/`, `?`, `#`, `%`).
+
 ## 4. Register VapeCache in `Program.cs`
 
 Use this when wiring services directly:
@@ -204,6 +239,7 @@ With hybrid cache enabled, this stream path automatically reads from in-memory f
 ## Next Docs
 
 - [CONFIGURATION.md](CONFIGURATION.md)
+- [TLS_SECURITY.md](TLS_SECURITY.md)
 - [LOGGING_TELEMETRY_CONFIGURATION.md](LOGGING_TELEMETRY_CONFIGURATION.md)
 - [API_REFERENCE.md](API_REFERENCE.md)
 - [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md)

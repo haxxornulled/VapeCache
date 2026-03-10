@@ -62,6 +62,8 @@ docker run --name vapecache-redis -p 6379:6379 -d redis:7
 }
 ```
 
+For production Redis security (TLS, ACL username/password auth, certificate validation), use [docs/TLS_SECURITY.md](docs/TLS_SECURITY.md) and the auth recipes in [docs/CONFIGURATION.md](docs/CONFIGURATION.md#tls--acl-authentication-recommended-production-profile).
+
 4. Register VapeCache in `Program.cs`
 
 ```csharp
@@ -129,6 +131,7 @@ The following are not shipped from this OSS repository:
 - [docs/INDEX.md](docs/INDEX.md)
 - [docs/QUICKSTART.md](docs/QUICKSTART.md)
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+- [docs/TLS_SECURITY.md](docs/TLS_SECURITY.md)
 - [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md)
 - [docs/CACHE_INVALIDATION.md](docs/CACHE_INVALIDATION.md)
 - [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md)
