@@ -21,6 +21,12 @@ Optional, if you are using Aspire:
 dotnet add package VapeCache.Extensions.Aspire
 ```
 
+Optional, if you want DI-facade wiring (clean architecture style):
+
+```bash
+dotnet add package VapeCache.Extensions.DependencyInjection
+```
+
 ## 2. Run Redis
 
 ```bash
@@ -86,6 +92,16 @@ builder.Services.AddOptions<CacheStampedeOptions>()
             .WithFailureBackoff(TimeSpan.FromMilliseconds(500));
     })
     .Bind(builder.Configuration.GetSection("CacheStampede"));
+```
+
+Alternative with DI facade package:
+
+```csharp
+using VapeCache.Extensions.DependencyInjection;
+using VapeCache.Abstractions.Caching;
+
+builder.Services.AddVapeCache(builder.Configuration)
+    .WithCacheStampedeProfile(CacheStampedeProfile.Balanced);
 ```
 
 Use this when you are on Aspire and want one fluent chain:

@@ -10,6 +10,7 @@ function Get-ReleasePackageProjects
         "VapeCache.Abstractions/VapeCache.Abstractions.csproj",
         "VapeCache.Features.Invalidation/VapeCache.Features.Invalidation.csproj",
         "VapeCache.Infrastructure/VapeCache.Infrastructure.csproj",
+        "VapeCache.Extensions.DependencyInjection/VapeCache.Extensions.DependencyInjection.csproj",
         "VapeCache.Extensions.AspNetCore/VapeCache.Extensions.AspNetCore.csproj",
         "VapeCache.Extensions.Aspire/VapeCache.Extensions.Aspire.csproj"
     )

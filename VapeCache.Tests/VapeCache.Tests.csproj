@@ -29,6 +29,7 @@
     <ProjectReference Include="..\VapeCache.Application\VapeCache.Application.csproj" />
     <ProjectReference Include="..\VapeCache.Core\VapeCache.Core.csproj" />
     <ProjectReference Include="..\VapeCache.Benchmarks\VapeCache.Benchmarks.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.DependencyInjection\VapeCache.Extensions.DependencyInjection.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
     <ProjectReference Include="..\VapeCache.Console\VapeCache.Console.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj" />

@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>true</IsPackable>
+    <PackageId>VapeCache.Extensions.DependencyInjection</PackageId>
+    <Title>VapeCache Extensions for Dependency Injection</Title>
+    <Version>1.2.1</Version>
+    <Authors>HaxxorNulled</Authors>
+    <Company>HaxxorNulled</Company>
+    <Product>VapeCache.Extensions.DependencyInjection</Product>
+    <Description>DI composition facade for VapeCache runtime registration in clean architecture applications. Provides one-call IServiceCollection wiring with optional configuration binding and stampede profile setup.</Description>
+    <PackageTags>redis;cache;distributed-cache;dependency-injection;clean-architecture;dotnet</PackageTags>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageIcon>vapecache-icon.png</PackageIcon>
+    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <RepositoryBranch>main</RepositoryBranch>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
+    <PackageReleaseNotes>1.2.1 release: adds DI facade package for one-call runtime wiring in clean architecture projects.</PackageReleaseNotes>
+    <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
+    <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

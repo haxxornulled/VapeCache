@@ -32,6 +32,13 @@ Optional invalidation policies (keys, tags, zones).
 dotnet add package VapeCache.Features.Invalidation
 ```
 
+### VapeCache.Extensions.DependencyInjection
+DI facade package for clean architecture wiring. Registers runtime services and provides fluent configuration binding helpers.
+
+```bash
+dotnet add package VapeCache.Extensions.DependencyInjection
+```
+
 ### VapeCache.Extensions.AspNetCore
 ASP.NET Core output-cache integration with VapeCache storage.
 
