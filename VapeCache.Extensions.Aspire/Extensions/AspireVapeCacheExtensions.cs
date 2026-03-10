@@ -54,4 +54,32 @@ public static class AspireVapeCacheExtensions
     /// </example>
     public static AspireVapeCacheBuilder AddVapeCache(this IHostApplicationBuilder builder)
         => builder.AddVapeCacheClientBuilder(registerCoreServices: true);
+
+    /// <summary>
+    /// Adds VapeCache services and applies the full Aspire kitchen-sink profile in one call.
+    /// </summary>
+    /// <param name="builder">The host application builder.</param>
+    /// <param name="configure">Optional kitchen-sink configuration overrides.</param>
+    /// <returns>A builder for additional chaining.</returns>
+    public static AspireVapeCacheBuilder AddVapeCacheKitchenSink(
+        this IHostApplicationBuilder builder,
+        Action<VapeCacheKitchenSinkOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        return builder.AddVapeCache().WithKitchenSink(configure);
+    }
+
+    /// <summary>
+    /// Adds VapeCache core services and applies production observability defaults.
+    /// </summary>
+    /// <param name="builder">The host application builder.</param>
+    /// <param name="configure">Optional observability configuration overrides.</param>
+    /// <returns>A builder for additional chaining.</returns>
+    public static AspireVapeCacheBuilder AddVapeCacheWithProductionObservability(
+        this IHostApplicationBuilder builder,
+        Action<VapeCacheProductionObservabilityOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        return builder.AddVapeCache().WithProductionObservability(configure);
+    }
 }
