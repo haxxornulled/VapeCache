@@ -22,11 +22,15 @@ concurrency:
 
 jobs:
   build-test-pack-release:
+    if: ${{ github.repository == 'haxxornulled/VapeCache' }}
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Resolve release tag
         id: release_tag
@@ -49,8 +53,46 @@ jobs:
               throw "Release tag must contain a version after 'v'."
           }
 
+          if ($packageVersion -notmatch '^\d+\.\d+\.\d+([\-+][0-9A-Za-z\.-]+)?$')
+          {
+              throw "Release tag version '$packageVersion' is not a valid SemVer value."
+          }
+
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "package_version=$packageVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Validate manual release branch
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_name }}" -ne "main")
+          {
+              throw "Manual release dispatch must run from main. Current ref: ${{ github.ref_name }}"
+          }
+
+      - name: Checkout requested release tag
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.release_tag.outputs.tag }}"
+          git fetch --tags --force
+          git rev-parse --verify "refs/tags/$tag" *> $null
+          if ($LASTEXITCODE -ne 0)
+          {
+              throw "Release tag '$tag' does not exist."
+          }
+
+          git checkout "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0)
+          {
+              throw "Failed to checkout release tag '$tag'."
+          }
+
+          $checkedOut = git describe --tags --exact-match
+          if ($LASTEXITCODE -ne 0 -or $checkedOut -ne $tag)
+          {
+              throw "Expected to be on tag '$tag' but current ref is '$checkedOut'."
+          }
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
