@@ -6,6 +6,7 @@
   <Project Path="VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj" />
   <Project Path="VapeCache.Console/VapeCache.Console.csproj" />
   <Project Path="VapeCache.Core/VapeCache.Core.csproj" />
+  <Project Path="VapeCache.Extensions.DependencyInjection/VapeCache.Extensions.DependencyInjection.csproj" />
   <Project Path="VapeCache.Extensions.Aspire/VapeCache.Extensions.Aspire.csproj" />
   <Project Path="VapeCache.Extensions.AspNetCore/VapeCache.Extensions.AspNetCore.csproj" />
   <Project Path="VapeCache.Features.Invalidation/VapeCache.Features.Invalidation.csproj" />

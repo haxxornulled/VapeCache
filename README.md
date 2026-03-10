@@ -41,6 +41,12 @@ If you need ASP.NET Core output-cache middleware integration:
 dotnet add package VapeCache.Extensions.AspNetCore
 ```
 
+If you want a DI composition facade for clean architecture wiring:
+
+```bash
+dotnet add package VapeCache.Extensions.DependencyInjection
+```
+
 2. Run Redis
 
 ```bash
@@ -115,6 +121,7 @@ app.Run();
 | `VapeCache.Core` | Shared primitives package (transitive dependency, usually not installed directly) |
 | `VapeCache.Abstractions` | Public contracts and option/value types |
 | `VapeCache.Features.Invalidation` | Optional key/tag/zone invalidation policies |
+| `VapeCache.Extensions.DependencyInjection` | One-call IServiceCollection wiring facade for runtime + config binding |
 | `VapeCache.Extensions.AspNetCore` | ASP.NET Core output-cache integration |
 | `VapeCache.Extensions.Aspire` | Aspire wiring, health checks, endpoint helpers |
 
