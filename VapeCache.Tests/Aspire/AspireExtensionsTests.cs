@@ -273,4 +273,118 @@ public sealed class AspireExtensionsTests
         Assert.Equal("test:output", options.KeyPrefix);
         Assert.Equal(TimeSpan.FromSeconds(45), options.DefaultTtl);
     }
+
+    [Fact]
+    public async Task WithKitchenSink_ComposesFullAspireSurface()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        hostBuilder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:redis"] = "redis://localhost:6379"
+        });
+
+        hostBuilder.AddVapeCache()
+            .WithKitchenSink(options =>
+            {
+                options.TransportMode = VapeCacheAspireTransportMode.UltraLowLatency;
+                options.ConfigureEndpoints = endpoint =>
+                {
+                    endpoint.Enabled = true;
+                    endpoint.EnableDashboard = true;
+                };
+            });
+
+        await using var provider = hostBuilder.Services.BuildServiceProvider();
+
+        var connection = provider.GetRequiredService<IOptions<RedisConnectionOptions>>().Value;
+        var multiplexer = provider.GetRequiredService<IOptions<RedisMultiplexerOptions>>().Value;
+        var endpointOptions = provider.GetRequiredService<IOptions<VapeCacheEndpointOptions>>().Value;
+        var healthOptions = provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value;
+        var outputCacheStore = provider.GetRequiredService<IOutputCacheStore>();
+
+        Assert.Equal("redis://localhost:6379", connection.ConnectionString);
+        Assert.Equal(RedisTransportProfile.LowLatency, connection.TransportProfile);
+        Assert.Equal(RedisTransportProfile.LowLatency, multiplexer.TransportProfile);
+        Assert.True(endpointOptions.Enabled);
+        Assert.True(endpointOptions.EnableDashboard);
+        Assert.Contains(healthOptions.Registrations, r => r.Name == "redis");
+        Assert.Contains(
+            hostBuilder.Services,
+            static descriptor =>
+                descriptor.ServiceType == typeof(IHostedService) &&
+                descriptor.ImplementationType?.Name == "VapeCacheStartupWarmupHostedService");
+        Assert.IsType<VapeCacheOutputCacheStore>(outputCacheStore);
+    }
+
+    [Fact]
+    public async Task AddVapeCacheKitchenSink_AddsCoreServicesAndComposedProfile()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        hostBuilder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:cache"] = "redis://localhost:6380"
+        });
+
+        hostBuilder.AddVapeCacheKitchenSink(options =>
+        {
+            options.RedisConnectionName = "cache";
+            options.EnableAutoMappedEndpoints = false;
+            options.EnableFailoverAffinityHints = false;
+        });
+
+        await using var provider = hostBuilder.Services.BuildServiceProvider();
+        var connection = provider.GetRequiredService<IOptions<RedisConnectionOptions>>().Value;
+
+        Assert.Contains(hostBuilder.Services, sd => sd.ServiceType == typeof(IRedisCommandExecutor));
+        Assert.Contains(hostBuilder.Services, sd => sd.ServiceType == typeof(ICacheService));
+        Assert.Equal("redis://localhost:6380", connection.ConnectionString);
+    }
+
+    [Fact]
+    public async Task WithProductionObservability_ComposesTelemetryAndHealthChecks_WithoutEndpointSurface()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        hostBuilder.AddVapeCache()
+            .WithProductionObservability();
+
+        await using var provider = hostBuilder.Services.BuildServiceProvider();
+        var healthOptions = provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value;
+
+        Assert.Contains(healthOptions.Registrations, r => r.Name == "redis");
+        Assert.Contains(healthOptions.Registrations, r => r.Name == "vapecache");
+        Assert.DoesNotContain(
+            hostBuilder.Services,
+            static descriptor =>
+                descriptor.ServiceType == typeof(IHostedService) &&
+                descriptor.ImplementationType?.Name == "VapeCacheStartupWarmupHostedService");
+        Assert.DoesNotContain(
+            hostBuilder.Services,
+            static descriptor =>
+                descriptor.ServiceType == typeof(IHostedService) &&
+                descriptor.ImplementationType?.Name == "RedisExporterMetricsHostedService");
+    }
+
+    [Fact]
+    public void AddVapeCacheWithProductionObservability_AddsCoreServicesAndOptionalHostedPipelines()
+    {
+        var hostBuilder = new HostApplicationBuilder();
+        hostBuilder.AddVapeCacheWithProductionObservability(options =>
+        {
+            options.EnableStartupWarmup = true;
+            options.EnableRedisExporterMetrics = true;
+        });
+
+        Assert.Contains(hostBuilder.Services, sd => sd.ServiceType == typeof(IRedisCommandExecutor));
+        Assert.Contains(hostBuilder.Services, sd => sd.ServiceType == typeof(ICacheService));
+        Assert.Contains(
+            hostBuilder.Services,
+            static descriptor =>
+                descriptor.ServiceType == typeof(IHostedService) &&
+                descriptor.ImplementationType?.Name == "VapeCacheStartupWarmupHostedService");
+        Assert.Contains(
+            hostBuilder.Services,
+            static descriptor =>
+                descriptor.ServiceType == typeof(IHostedService) &&
+                descriptor.ImplementationType?.Name == "RedisExporterMetricsHostedService");
+    }
 }

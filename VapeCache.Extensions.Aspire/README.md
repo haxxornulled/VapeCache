@@ -15,6 +15,8 @@ You get service discovery, health checks, telemetry, and wrapper endpoints in on
 ✅ **Fluent Stampede Profiles** - `.WithCacheStampedeProfile(...)` with optional overrides
 ✅ **ASP.NET Core Pipeline Hook** - `.WithAspNetCoreOutputCaching(...)` for MVC/Blazor/minimal output cache store
 ✅ **Failover Affinity Hints** - `.WithFailoverAffinityHints(...)` for cluster/web-garden sticky-session routing
+✅ **Kitchen Sink Profile** - `.WithKitchenSink(...)` or `AddVapeCacheKitchenSink(...)` for one-call full integration
+✅ **Production Observability Profile** - `.WithProductionObservability(...)` or `AddVapeCacheWithProductionObservability(...)`
 ✅ **Low Ceremony** - Single fluent chain to enable all major features
 
 ## Installation
@@ -45,18 +47,20 @@ builder.Build().Run();
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-// One fluent chain for full Aspire integration
-builder.AddVapeCache()
-    .WithRedisFromAspire("redis")     // Bind to AppHost Redis resource
-    .WithHealthChecks()                // Add health checks (host maps endpoints)
-    .WithAspireTelemetry()             // Send metrics to Aspire Dashboard
-    .WithAspNetCoreOutputCaching()     // Replace output-cache store with VapeCache
-    .WithFailoverAffinityHints()       // Emit sticky-session hints during failover
+// Production baseline: observability on, app-hosted debug/admin endpoint surface remains opt-in.
+var vapeCache = builder.AddVapeCache()
+    .WithRedisFromAspire("redis")
+    .UseTransport(VapeCacheAspireTransportMode.Balanced)
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced)
-    .WithAutoMappedEndpoints(options =>
-    {
-        options.Enabled = true;        // Explicitly opt in to wrapper endpoint mapping
-    });
+    .WithProductionObservability();
+
+// Optional app-hosted diagnostics surface (protect with auth/network policy):
+vapeCache.WithAutoMappedEndpoints(options =>
+{
+    options.Enabled = true;
+    options.EnableDashboard = true;
+    options.EnableLiveStream = true;
+});
 
 var app = builder.Build();
 
@@ -134,6 +138,48 @@ Registers core VapeCache services.
 builder.AddVapeCache()
 ```
 
+### `AddVapeCacheKitchenSink(configure?)`
+
+Adds core VapeCache services and applies a composed Aspire profile in one call:
+
+```csharp
+builder.AddVapeCacheKitchenSink(options =>
+{
+    options.RedisConnectionName = "redis";
+    options.ConfigureEndpoints = endpoint => endpoint.Enabled = true;
+});
+```
+
+This composes:
+- `WithRedisFromAspire(...)`
+- `UseTransport(...)`
+- `WithCacheStampedeProfile(...)`
+- `WithHealthChecks()`
+- `WithAspireTelemetry()`
+- `WithStartupWarmup()`
+- `WithAspNetCoreOutputCaching()`
+- `WithFailoverAffinityHints()`
+- `WithAutoMappedEndpoints(...)`
+
+### `AddVapeCacheWithProductionObservability(configure?)`
+
+Adds core VapeCache services and wires production observability defaults:
+
+```csharp
+builder.AddVapeCacheWithProductionObservability(options =>
+{
+    options.EnableStartupWarmup = true; // optional
+});
+```
+
+Default composition:
+- `WithHealthChecks()`
+- `WithAspireTelemetry()`
+
+Optional composition:
+- `WithStartupWarmup(...)`
+- `WithRedisExporterMetrics(...)`
+
 ### `WithRedisFromAspire(connectionName)`
 
 Uses the AppHost resource name so connection details come from Aspire service discovery.
@@ -170,6 +216,37 @@ Resolution order for OTLP endpoint:
 
 ```csharp
 .WithAspireTelemetry()
+```
+
+### `WithKitchenSink(configure?)`
+
+Composes all major Aspire integration extensions for an existing builder chain:
+
+```csharp
+builder.AddVapeCache()
+    .WithKitchenSink(options =>
+    {
+        options.RedisConnectionName = "redis";
+        options.EnableRedisExporterMetrics = true;
+        options.ConfigureEndpoints = endpoint =>
+        {
+            endpoint.Enabled = true;
+            endpoint.EnableLiveStream = true;
+        };
+    });
+```
+
+### `WithProductionObservability(configure?)`
+
+Production observability baseline without enabling app-hosted dashboard/admin route surfaces:
+
+```csharp
+builder.AddVapeCache()
+    .WithProductionObservability(options =>
+    {
+        options.EnableStartupWarmup = true;         // optional
+        options.EnableRedisExporterMetrics = false; // optional
+    });
 ```
 
 ### `WithCacheStampedeProfile(profile, configure?)`

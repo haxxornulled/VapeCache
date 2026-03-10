@@ -45,6 +45,8 @@ See:
 
 ### Developer Experience
 ✅ **Low-friction setup**: `builder.AddVapeCache().WithRedisFromAspire("redis")`
+✅ **One-call composition**: `builder.AddVapeCacheKitchenSink(...)`
+✅ **Production observability baseline**: `builder.AddVapeCache().WithProductionObservability()`
 ✅ **Minimal config**: Aspire resources auto-configure connection strings
 ✅ **Local dev parity**: Same code runs in dev (Docker) and prod (Azure)
 ✅ **Observable by default**: Metrics/traces flow to Aspire Dashboard
@@ -78,16 +80,16 @@ See:
 ├─────────────────────────────────────────────────────────────┤
 │ var builder = WebApplication.CreateBuilder(args);          │
 │                                                              │
-│ builder.AddVapeCache()  // From VapeCache.Extensions.Aspire│
-│     .WithRedisFromAspire("redis")  // Binds to resource     │
-│     .WithHealthChecks()             // Adds health checks   │
-│     .WithAspireTelemetry()          // OTel → Dashboard     │
-│     .WithAspNetCoreOutputCaching()  // MVC/Blazor pipeline  │
-│     .WithFailoverAffinityHints()    // Cluster failover hint │
-│     .WithCacheStampedeProfile(      // Stampede defaults    │
-│         CacheStampedeProfile.Balanced)                      │
-│     .WithAutoMappedEndpoints(       // opt in to status/stats/stream
-│         options => options.Enabled = true)                 │
+│ var vapeCache = builder.AddVapeCache()                     │
+│     .WithRedisFromAspire("redis")                          │
+│     .WithProductionObservability();                        │
+│                                                            │
+│ // Optional app-hosted diagnostic surface (protected):     │
+│ vapeCache.WithAutoMappedEndpoints(options =>               │
+│ {                                                          │
+│     options.Enabled = true;                                │
+│     options.EnableDashboard = true;                        │
+│ });                                                        │
 │                                                              │
 │ var app = builder.Build();                                  │
 │ app.MapHealthChecks("/health");                             │
