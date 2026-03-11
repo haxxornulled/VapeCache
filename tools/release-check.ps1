@@ -42,10 +42,18 @@ $start = Get-Date
 $solutionPath = Resolve-SolutionPath
 $nugetConfigPath = Join-Path $repoRoot "NuGet.config"
 $hasNuGetConfig = Test-Path $nugetConfigPath
+$releaseManifestPath = Join-Path $PSScriptRoot "release-package-manifest.ps1"
 
 Write-Host "Repo: $repoRoot"
 Write-Host "Solution: $solutionPath"
 Write-Host "Configuration: $Configuration"
+
+if (Test-Path $releaseManifestPath) {
+    . $releaseManifestPath
+    Invoke-Step -Name "Release package branding metadata" -Action {
+        Assert-ReleasePackageBranding
+    }
+}
 
 Invoke-Step -Name "Restore" -Action {
     if ($hasNuGetConfig) {

@@ -16,6 +16,8 @@ if (-not [System.IO.Path]::IsPathRooted($OutputDir))
 $projects = Get-ReleasePackageProjects
 $resolvedPackageVersion = Resolve-ReleasePackageVersion -PackageVersion $PackageVersion
 
+Assert-ReleasePackageBranding
+
 if (Test-Path -LiteralPath $OutputDir)
 {
     Remove-Item -LiteralPath $OutputDir -Recurse -Force

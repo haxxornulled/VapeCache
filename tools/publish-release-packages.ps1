@@ -21,6 +21,7 @@ if (-not [System.IO.Path]::IsPathRooted($PackageOutput))
 $resolvedPackageVersion = Resolve-ReleasePackageVersion -PackageVersion $PackageVersion
 $packages = Get-ReleasePackageVersionInfo
 
+Assert-ReleasePackageBranding
 Write-Host "Publishing release packages in dependency-safe order for version $resolvedPackageVersion"
 
 foreach ($package in $packages)
