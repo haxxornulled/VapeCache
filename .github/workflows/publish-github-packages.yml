@@ -1,0 +1,94 @@
+name: Publish GitHub Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: "Release package version (for example 1.2.5)"
+        required: true
+        default: "1.2.5"
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-github-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ github.repository == 'haxxornulled/VapeCache' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Resolve solution path
+        id: solution
+        shell: pwsh
+        run: |
+          if (Test-Path "VapeCache.slnx")
+          {
+              "path=VapeCache.slnx" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+
+          if (Test-Path "VapeCache.sln")
+          {
+              "path=VapeCache.sln" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+
+          throw "Could not find VapeCache.slnx or VapeCache.sln."
+
+      - name: Authenticate GitHub Packages source
+        shell: pwsh
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ github.token }}
+          GITHUB_PACKAGES_USER: ${{ github.repository_owner }}
+        run: |
+          dotnet nuget update source GitHubPackages `
+            --configfile NuGet.config `
+            --username $env:GITHUB_PACKAGES_USER `
+            --password $env:GITHUB_PACKAGES_TOKEN `
+            --store-password-in-clear-text
+          if ($LASTEXITCODE -ne 0)
+          {
+              throw "Failed to authenticate GitHubPackages source."
+          }
+
+      - name: Restore
+        run: dotnet restore ${{ steps.solution.outputs.path }} --configfile NuGet.config
+
+      - name: Pack release packages
+        run: |
+          pwsh -File tools/pack-release-packages.ps1 `
+            -OutputDir artifacts/github-packages `
+            -PackageVersion "${{ inputs.package_version }}"
+
+      - name: Publish to GitHub Packages
+        shell: pwsh
+        run: |
+          $source = "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+          pwsh -File tools/publish-release-packages.ps1 `
+            -PackageOutput artifacts/github-packages `
+            -PackageVersion "${{ inputs.package_version }}" `
+            -Source $source `
+            -ApiKey "${{ github.token }}"
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-packages-${{ inputs.package_version }}
+          path: artifacts/github-packages/*.nupkg
+          retention-days: 5
