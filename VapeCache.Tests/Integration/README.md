@@ -119,6 +119,11 @@ Controlled live reconnect/outage drill:
 This drill is opt-in and runs only when:
 - `VAPECACHE_RECONNECT_DRILL_ENABLED=true`
 
+### RedisPubSubIntegrationTests
+Tests end-to-end pub/sub delivery against live Redis.
+
+- `PubSub_publish_and_subscribe_round_trip`: Verifies `SubscribeAsync` receives payloads published via `PublishAsync`.
+
 ## Running Tests in CI/CD
 
 ### GitHub Actions Example
