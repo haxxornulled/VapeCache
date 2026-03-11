@@ -36,7 +36,7 @@ VapeCache.Extensions.Aspire/
 
 **Package Metadata:**
 - PackageId: `VapeCache.Extensions.Aspire`
-- License: Community non-commercial (`LICENSE`) + Enterprise commercial terms
+- License: Business Source License 1.1 with Additional Use Grant (`LICENSE`) + Enterprise commercial terms
 - Description: .NET Aspire integration for VapeCache
 
 ### 2. [AspireVapeCacheBuilder.cs](../VapeCache.Extensions.Aspire/AspireVapeCacheBuilder.cs)
@@ -322,7 +322,7 @@ Kubernetes liveness probe (includes checks with `live` tag)
 - ✅ [CONTRIBUTING.md](../CONTRIBUTING.md) - Created contribution guidelines
 
 ### Solution Changes
-- ✅ Added `VapeCache.Extensions.Aspire.csproj` to `VapeCache.sln`
+- ✅ Added `VapeCache.Extensions.Aspire.csproj` to `VapeCache.slnx`
 
 ## Conclusion
 
