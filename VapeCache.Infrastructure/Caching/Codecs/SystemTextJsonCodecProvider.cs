@@ -49,8 +49,7 @@ public sealed class SystemTextJsonCodecProvider : ICacheCodecProvider
     /// </summary>
     public void Register<T>(ICacheCodec<T> codec)
     {
-        if (codec == null)
-            throw new ArgumentNullException(nameof(codec));
+        ArgumentNullException.ThrowIfNull(codec);
 
         _customCodecs[typeof(T)] = codec;
     }

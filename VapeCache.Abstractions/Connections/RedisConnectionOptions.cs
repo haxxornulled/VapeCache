@@ -25,7 +25,7 @@ public sealed record RedisConnectionOptions
     /// <summary>
     /// Gets or sets the database.
     /// </summary>
-    public int Database { get; init; } = 0;
+    public int Database { get; init; }
 
     // Optional: provide a full redis:// or rediss:// connection string.
     // This is ideal for KeyVault/secret stores. When set, parsed values override Host/Port/User/Password/Database/TLS settings.
@@ -61,7 +61,7 @@ public sealed record RedisConnectionOptions
     /// <summary>
     /// Gets or sets the warm.
     /// </summary>
-    public int Warm { get; init; } = 0;
+    public int Warm { get; init; }
 
     /// <summary>
     /// Executes from seconds.
@@ -131,11 +131,11 @@ public sealed record RedisConnectionOptions
     /// <summary>
     /// Gets or sets the allow auth fallback to password only.
     /// </summary>
-    public bool AllowAuthFallbackToPasswordOnly { get; init; } = false;
+    public bool AllowAuthFallbackToPasswordOnly { get; init; }
     /// <summary>
     /// Gets or sets the log who am ion connect.
     /// </summary>
-    public bool LogWhoAmIOnConnect { get; init; } = false;
+    public bool LogWhoAmIOnConnect { get; init; }
 
     /// <summary>
     /// Maximum allowed size for Redis bulk strings (RESP protocol).
@@ -159,7 +159,7 @@ public sealed record RedisConnectionOptions
     /// <summary>
     /// Enables cluster redirect handling for MOVED/ASK responses on cache-path commands.
     /// </summary>
-    public bool EnableClusterRedirection { get; init; } = false;
+    public bool EnableClusterRedirection { get; init; }
 
     /// <summary>
     /// Maximum number of redirect hops allowed for a single command.

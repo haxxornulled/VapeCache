@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Sockets;
 using System.Threading.Tasks.Sources;
@@ -15,6 +16,8 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
     private int _pos;
     private int _len;
     private int _disposed;
+    private int _readCallDepth;
+    private long _totalBytesRead;
     private readonly bool _useUnsafeFastPath;
     private readonly SocketIoAwaitableEventArgs _recvArgs = new();
     private readonly int _maxBulkStringBytes;
@@ -49,8 +52,15 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
 
     private async ValueTask<RedisRespReader.RespValue> ReadInternalAsync(bool poolBulk, CancellationToken ct)
     {
+        var depth = Interlocked.Increment(ref _readCallDepth);
+        var isTopLevelRead = depth == 1;
+        var parseStartBytes = isTopLevelRead ? GetConsumedByteCount() : 0L;
+        var parseStartTicks = isTopLevelRead ? Stopwatch.GetTimestamp() : 0L;
+
+        try
+        {
         var prefix = await ReadByteAsync(ct).ConfigureAwait(false);
-        return prefix switch
+            var value = prefix switch
         {
             (byte)'+' => RedisRespReader.RespValue.SimpleString(await ReadSimpleStringAsync(ct).ConfigureAwait(false)),
             (byte)'-' => RedisRespReader.RespValue.Error(await ReadLineAsync(ct).ConfigureAwait(false)),
@@ -69,6 +79,20 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
             (byte)'|' => await ReadAttributeWrappedAsync(poolBulk, ct).ConfigureAwait(false),
             _ => throw new InvalidOperationException($"Unsupported RESP type: {(char)prefix}")
         };
+
+            if (isTopLevelRead)
+            {
+                var parsedBytes = GetConsumedByteCount() - parseStartBytes;
+                var elapsedTicks = Stopwatch.GetTimestamp() - parseStartTicks;
+                RedisTelemetry.RecordParserFrame(parsedBytes, elapsedTicks);
+            }
+
+            return value;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _readCallDepth);
+        }
     }
 
     private async ValueTask<byte> ReadByteAsync(CancellationToken ct)
@@ -113,7 +137,7 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
 
     private async ValueTask FillAsync(CancellationToken ct)
     {
-        if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisRespSocketReaderState));
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
 
         _pos = 0;
         _len = 0;
@@ -136,8 +160,13 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
         if (read == 0) throw new EndOfStreamException();
         RedisTelemetry.BytesReceived.Add(read);
         _onBytesRead?.Invoke(read);
+        _totalBytesRead += read;
         _len = read;
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long GetConsumedByteCount()
+        => _totalBytesRead - (_len - _pos);
 
     private async ValueTask<string> ReadLineAsync(CancellationToken ct)
     {

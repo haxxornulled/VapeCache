@@ -12,14 +12,14 @@ public class RespParserLiteBenchmarks
     public enum FrameKind
     {
         Ok,
-        Integer,
+        IntegerValue,
         Error,
         BulkSmall,
         Bulk4K,
         ArrayGet
     }
 
-    [Params(FrameKind.Ok, FrameKind.Integer, FrameKind.Error, FrameKind.BulkSmall, FrameKind.Bulk4K, FrameKind.ArrayGet)]
+    [Params(FrameKind.Ok, FrameKind.IntegerValue, FrameKind.Error, FrameKind.BulkSmall, FrameKind.Bulk4K, FrameKind.ArrayGet)]
     public FrameKind Frame { get; set; }
 
     private ReadOnlyMemory<byte> _buffer;
@@ -31,7 +31,7 @@ public class RespParserLiteBenchmarks
         _buffer = Frame switch
         {
             FrameKind.Ok => "+OK\r\n"u8.ToArray(),
-            FrameKind.Integer => ":123456789\r\n"u8.ToArray(),
+            FrameKind.IntegerValue => ":123456789\r\n"u8.ToArray(),
             FrameKind.Error => "-ERR msg\r\n"u8.ToArray(),
             FrameKind.BulkSmall => "$3\r\nfoo\r\n"u8.ToArray(),
             FrameKind.Bulk4K => BuildBulkStringBytes(4096),

@@ -273,7 +273,7 @@ public class GroceryStoreComparisonStressTest
 
                     await ProcessShopperAsync(shopperIndex).ConfigureAwait(false);
                 }
-            });
+            }, cancellationToken);
         }
 
         await Task.WhenAll(workers).ConfigureAwait(false);

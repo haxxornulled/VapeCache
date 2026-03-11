@@ -16,7 +16,7 @@ public sealed class CacheEntryOptionsTagExtensionsTests
         var merged = options.WithTags("shared", "new");
 
         Assert.NotNull(merged.Intent);
-        Assert.Equal(["existing", "shared", "new"], merged.Intent!.Tags);
+        Assert.Equal(["existing", "shared", "new"], merged.Intent!.Tags!);
     }
 
     [Fact]
@@ -26,7 +26,7 @@ public sealed class CacheEntryOptionsTagExtensionsTests
             .WithZone("ef:products");
 
         Assert.NotNull(options.Intent);
-        Assert.Equal(["zone:ef:products"], options.Intent!.Tags);
+        Assert.Equal(["zone:ef:products"], options.Intent!.Tags!);
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public sealed class CacheEntryOptionsTagExtensionsTests
             .WithZone("  ef:products  ");
 
         Assert.NotNull(options.Intent);
-        Assert.Equal(["zone:ef:products"], options.Intent!.Tags);
+        Assert.Equal(["zone:ef:products"], options.Intent!.Tags!);
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public sealed class CacheEntryOptionsTagExtensionsTests
 
         Assert.Equal(
             ["tenant:1", "zone:ef:products", "zone:ef:inventory"],
-            merged.Intent!.Tags);
+            merged.Intent!.Tags!);
     }
 
     [Fact]
@@ -70,6 +70,6 @@ public sealed class CacheEntryOptionsTagExtensionsTests
         var merged = options.WithTags(" tenant:1 ", " ", "");
 
         Assert.Same(intent, merged.Intent);
-        Assert.Equal(["tenant:1"], merged.Intent!.Tags);
+        Assert.Equal(["tenant:1"], merged.Intent!.Tags!);
     }
 }

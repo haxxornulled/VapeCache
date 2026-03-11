@@ -14,7 +14,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 {
     private readonly ConcurrentDictionary<string, CacheEntry> _store = new();
     private readonly Timer _expirationTimer;
-    private int _cleanupOffset = 0;
+    private int _cleanupOffset;
 
     public InMemoryCommandExecutor()
     {
@@ -500,10 +500,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
     /// </summary>
     public ValueTask<long> RPushManyAsync(string key, ReadOnlyMemory<byte>[] values, int count, CancellationToken ct)
     {
-        if (count <= 0 || values.Length == 0)
-            throw new ArgumentOutOfRangeException(nameof(count));
-        if (count > values.Length)
-            throw new ArgumentOutOfRangeException(nameof(count));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(values.Length, nameof(values));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(count, values.Length);
 
         var entry = _store.GetOrAdd(key, _ => new CacheEntry { Type = EntryType.List, ListValue = new() });
         lock (entry.Sync)
@@ -836,7 +835,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
                     return ValueTask.FromResult(0L);
 
                 var removed = entry.SetValue!.TryRemove(member.ToArray(), out _);
-                if (removed && entry.SetValue.Count == 0)
+                if (removed && entry.SetValue.IsEmpty)
                     _store.TryRemove(key, out _);
                 return ValueTask.FromResult(removed ? 1L : 0L);
             }
@@ -1387,8 +1386,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         int pageSize = 128,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (pageSize <= 0)
-            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
 
         foreach (var entry in _store.ToArray())
         {
@@ -1414,8 +1412,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         int pageSize = 128,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (pageSize <= 0)
-            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
 
         if (!_store.TryGetValue(key, out var entry))
             yield break;
@@ -1443,8 +1440,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         int pageSize = 128,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (pageSize <= 0)
-            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
 
         if (!_store.TryGetValue(key, out var entry))
             yield break;
@@ -1474,8 +1470,7 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         int pageSize = 128,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (pageSize <= 0)
-            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
 
         if (!_store.TryGetValue(key, out var entry))
             yield break;

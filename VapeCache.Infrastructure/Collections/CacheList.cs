@@ -122,8 +122,7 @@ internal sealed class CacheList<T> : ICacheList<T>
         int pageSize = 128,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (pageSize <= 0)
-            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
 
         long start = 0;
         while (true)

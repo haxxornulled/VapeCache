@@ -8,7 +8,7 @@ public sealed class VapeCacheEndpointOptions
     /// <summary>
     /// Gets or sets the enabled.
     /// </summary>
-    public bool Enabled { get; set; } = false;
+    public bool Enabled { get; set; }
     /// <summary>
     /// Gets or sets the prefix.
     /// </summary>
@@ -16,19 +16,19 @@ public sealed class VapeCacheEndpointOptions
     /// <summary>
     /// Gets or sets the nclude breaker control endpoints.
     /// </summary>
-    public bool IncludeBreakerControlEndpoints { get; set; } = false;
+    public bool IncludeBreakerControlEndpoints { get; set; }
     /// <summary>
     /// Gets or sets the nclude intent endpoints.
     /// </summary>
-    public bool IncludeIntentEndpoints { get; set; } = false;
+    public bool IncludeIntentEndpoints { get; set; }
     /// <summary>
     /// Gets or sets the enable live stream.
     /// </summary>
-    public bool EnableLiveStream { get; set; } = false;
+    public bool EnableLiveStream { get; set; }
     /// <summary>
     /// Gets or sets the enable dashboard.
     /// </summary>
-    public bool EnableDashboard { get; set; } = false;
+    public bool EnableDashboard { get; set; }
     /// <summary>
     /// Executes from seconds.
     /// </summary>

@@ -8,7 +8,7 @@ public sealed class InMemorySpillOptions
     /// <summary>
     /// Gets or sets the enable spill to disk.
     /// </summary>
-    public bool EnableSpillToDisk { get; set; } = false;
+    public bool EnableSpillToDisk { get; set; }
     /// <summary>
     /// Gets or sets the spill threshold bytes.
     /// </summary>
@@ -24,7 +24,7 @@ public sealed class InMemorySpillOptions
     /// <summary>
     /// Gets or sets the enable orphan cleanup.
     /// </summary>
-    public bool EnableOrphanCleanup { get; set; } = false;
+    public bool EnableOrphanCleanup { get; set; }
     /// <summary>
     /// Executes from hours.
     /// </summary>
