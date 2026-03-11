@@ -153,5 +153,6 @@ dotnet test VapeCache.Tests/VapeCache.Tests.csproj -c Release
 
 ## License
 
-- Community/non-commercial usage: [LICENSE](LICENSE)
-- Commercial usage: enterprise license required
+- Community + developer-friendly usage: Business Source License 1.1 with Additional Use Grant ([LICENSE](LICENSE))
+- Commercial managed-service / competing cache-platform usage: enterprise license required
+- Automatic change date to Apache-2.0 is defined in [LICENSE](LICENSE)
