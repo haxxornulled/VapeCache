@@ -24,12 +24,15 @@
       Rules listed here stay as warnings until debt is burned down; all other analyzer warnings fail runtime builds.
     -->
     <WarningsNotAsErrors>$(WarningsNotAsErrors);CA1848;CA1873;CA2012;CA1805;CA1068;CA1512;CA1716;CA1001;CA1861;CA1513;CA2016;CA1806;CA2208;CA1865;CA5359;CA1836;CA2263;CA1510;CA1305;CA1859;CA1000</WarningsNotAsErrors>
+    <!-- Runtime API-compat constraints: tracked separately from day-to-day warning burn-down. -->
+    <NoWarn>$(NoWarn);CA1068;CA1716;CA1000;CA1859</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(VapeCacheAnalyzerAudience)' == 'nonruntime'">
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
     <!-- Test/demo naming patterns intentionally use underscores for readability. -->
-    <NoWarn>$(NoWarn);CA1707;xUnit2013</NoWarn>
+    <!-- Keep non-runtime signal focused on actionable issues in shipped packages. -->
+    <NoWarn>$(NoWarn);CA1707;xUnit2013;CA1848;CA1873;CA1822;CA1861;CA2012;CA1305;CA1711;CA2201;CA1869;CA1001;CA1859;CA1865;CA1806;CA1805;CA1512;CA5359</NoWarn>
   </PropertyGroup>
 </Project>

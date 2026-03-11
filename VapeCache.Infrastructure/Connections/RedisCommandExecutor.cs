@@ -27,6 +27,12 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private RedisMultiplexedConnection[] _bulkConns = Array.Empty<RedisMultiplexedConnection>();
     private RedisMultiplexedConnection[] _bulkReadConns = Array.Empty<RedisMultiplexedConnection>();
     private RedisMultiplexedConnection[] _bulkWriteConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _pubSubConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _pubSubReadConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _pubSubWriteConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _blockingConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _blockingReadConns = Array.Empty<RedisMultiplexedConnection>();
+    private RedisMultiplexedConnection[] _blockingWriteConns = Array.Empty<RedisMultiplexedConnection>();
     private readonly System.Threading.Lock _connGate = new();
     private int _rr;
     private int _readRr;
@@ -94,6 +100,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private double _emergencyScaleUpTimeoutRatePerSecThreshold;
     private TimeSpan _scaleDownDrainTimeout;
     private int _configuredBulkLaneConnections;
+    private int _configuredPubSubLaneConnections;
+    private int _configuredBlockingLaneConnections;
     private bool _autoAdjustBulkLanes;
     private double _bulkLaneTargetRatio;
     private int _bulkLaneConnections;
@@ -157,10 +165,14 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         _bulkLaneResponseTimeout = runtime.BulkLaneResponseTimeout;
         var count = Math.Max(1, runtime.Multiplexer.Connections);
         _configuredBulkLaneConnections = Math.Max(0, runtime.Multiplexer.BulkLaneConnections);
+        _configuredPubSubLaneConnections = Math.Max(0, runtime.Multiplexer.PubSubLaneConnections);
+        _configuredBlockingLaneConnections = Math.Max(0, runtime.Multiplexer.BlockingLaneConnections);
         _autoAdjustBulkLanes = runtime.Multiplexer.AutoAdjustBulkLanes;
         _bulkLaneTargetRatio = NormalizeBulkLaneTargetRatio(runtime.Multiplexer.BulkLaneTargetRatio);
         var laneBudget = ResolveLaneBudget(
             _configuredBulkLaneConnections,
+            _configuredPubSubLaneConnections,
+            _configuredBlockingLaneConnections,
             _autoAdjustBulkLanes,
             _bulkLaneTargetRatio,
             count);
@@ -171,6 +183,12 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         _bulkConns = new RedisMultiplexedConnection[laneBudget.BulkConnections];
         for (var i = 0; i < _bulkConns.Length; i++)
             _bulkConns[i] = CreateBulkConnection();
+        _pubSubConns = new RedisMultiplexedConnection[laneBudget.PubSubConnections];
+        for (var i = 0; i < _pubSubConns.Length; i++)
+            _pubSubConns[i] = CreatePubSubConnection();
+        _blockingConns = new RedisMultiplexedConnection[laneBudget.BlockingConnections];
+        for (var i = 0; i < _blockingConns.Length; i++)
+            _blockingConns[i] = CreateBlockingConnection();
         RebuildLanesUnsafe();
         LogNormalizationIfChanged("RedisMultiplexer", configuredMuxOptions, o);
         LogNormalizationIfChanged("RedisConnection", configuredConnectionOptions, connOpts);
@@ -179,7 +197,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     }
 
     private static RedisTransportProfile NormalizeTransportProfile(RedisTransportProfile profile)
-        => Enum.IsDefined(typeof(RedisTransportProfile), profile)
+        => Enum.IsDefined(profile)
             ? profile
             : RedisTransportProfile.FullTilt;
 
@@ -221,20 +239,39 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return Math.Min(requested, maxBulkLanes);
     }
 
-    private static (int FastConnections, int BulkConnections) ResolveLaneBudget(
+    private static (int PubSubConnections, int BlockingConnections, int ScalableConnections) ResolveReservedLaneConnections(
+        int configuredPubSubLaneConnections,
+        int configuredBlockingLaneConnections,
+        int totalConnectionBudget)
+    {
+        var normalizedTotalConnections = Math.Max(1, totalConnectionBudget);
+        var reservedBudget = Math.Max(0, normalizedTotalConnections - 1);
+        var pubSubConnections = Math.Clamp(Math.Max(0, configuredPubSubLaneConnections), 0, reservedBudget);
+        var remainingReservedBudget = Math.Max(0, reservedBudget - pubSubConnections);
+        var blockingConnections = Math.Clamp(Math.Max(0, configuredBlockingLaneConnections), 0, remainingReservedBudget);
+        var scalableConnections = Math.Max(1, normalizedTotalConnections - pubSubConnections - blockingConnections);
+        return (pubSubConnections, blockingConnections, scalableConnections);
+    }
+
+    private static (int FastConnections, int BulkConnections, int PubSubConnections, int BlockingConnections) ResolveLaneBudget(
         int configuredBulkLaneConnections,
+        int configuredPubSubLaneConnections,
+        int configuredBlockingLaneConnections,
         bool autoAdjustBulkLanes,
         double bulkLaneTargetRatio,
         int totalConnectionBudget)
     {
-        var normalizedTotalConnections = Math.Max(1, totalConnectionBudget);
+        var reserved = ResolveReservedLaneConnections(
+            configuredPubSubLaneConnections,
+            configuredBlockingLaneConnections,
+            totalConnectionBudget);
         var bulkConnections = ResolveBulkLaneConnections(
             configuredBulkLaneConnections,
             autoAdjustBulkLanes,
             bulkLaneTargetRatio,
-            normalizedTotalConnections);
-        var fastConnections = Math.Max(1, normalizedTotalConnections - bulkConnections);
-        return (fastConnections, bulkConnections);
+            reserved.ScalableConnections);
+        var fastConnections = Math.Max(1, reserved.ScalableConnections - bulkConnections);
+        return (fastConnections, bulkConnections, reserved.PubSubConnections, reserved.BlockingConnections);
     }
 
     private static TimeSpan ResolveBulkLaneResponseTimeout(RedisMultiplexerOptions options)
@@ -253,7 +290,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int GetTotalConnectionCountUnsafe()
-        => _conns.Length + _bulkConns.Length;
+        => _conns.Length + _bulkConns.Length + _pubSubConns.Length + _blockingConns.Length;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private RuntimeConfig ReadRuntimeConfig()
@@ -1361,21 +1398,32 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             }
             else
             {
-                // For SET with TTL (SET key value PX ttl), we must build the entire command
-                // because the command structure is: [header][value][suffix] where suffix = PX ttl
-                // Scatter/gather I/O doesn't support a suffix after payload+CRLF
-                var len = RedisRespProtocol.GetSetCommandLength(key, value.Length, ttlMs);
-                rented = ArrayPool<byte>.Shared.Rent(len);
-                var written = RedisRespProtocol.WriteSetCommand(rented.AsSpan(0, len), key, value.Span, ttlMs);
+                // Use PSETEX so TTL writes can stay on the zero-copy header+payload path.
+                var len = RedisRespProtocol.GetPSetExCommandLength(key, value.Length, ttlMs.Value);
+                var headerLen = len - value.Length - 2; // exclude value bytes + CRLF
+                rented = conn.RentHeaderBuffer(headerLen);
+                var written = RedisRespProtocol.WritePSetExCommandHeader(rented.AsSpan(0, headerLen), key, ttlMs.Value, value.Length);
                 var command = rented.AsMemory(0, written);
+                byte[]? redirectCommand = null;
+                if (_clusterRedirectsEnabled)
+                {
+                    var fullLen = RedisRespProtocol.GetPSetExCommandLength(key, value.Length, ttlMs.Value);
+                    redirectCommand = GC.AllocateUninitializedArray<byte>(fullLen);
+                    RedisRespProtocol.WritePSetExCommand(redirectCommand.AsSpan(0, fullLen), key, value.Span, ttlMs.Value);
+                }
+
                 var resp = await ExecuteWithClusterRedirectsAsync(
                     token => conn.ExecuteAsync(
                         command,
+                        payload: value,
+                        appendCrlf: true,
                         poolBulk: false,
-                        token),
-                    command,
+                        token,
+                        headerBuffer: rented),
+                    redirectCommand ?? command,
                     poolBulk: false,
                     ct).ConfigureAwait(false);
+                rented = null; // returned by writer
 
                 try
                 {
@@ -1563,7 +1611,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     /// <summary>
     /// Executes value.
     /// </summary>
-    public async ValueTask<bool> DeleteAsync(string key, CancellationToken ct)
+    public ValueTask<bool> DeleteAsync(string key, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryDeleteAsync(key, ct, out var fastTask))
+            return fastTask;
+
+        return DeleteAsyncSlow(key, ct);
+    }
+
+    private async ValueTask<bool> DeleteAsyncSlow(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("DEL");
         var sw = Stopwatch.StartNew();
@@ -1604,6 +1660,45 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         {
             sw.Stop();
             RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryDeleteAsync(string key, CancellationToken ct, out ValueTask<bool> task)
+    {
+        RecordCommandCall();
+        var len = RedisRespProtocol.GetDelCommandLength(key);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteDelCommand(rented.AsSpan(0, len), key);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null; // returned by writer
+            task = MapDeleteResponseAsync(conn, respTask);
+            return true;
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2249,22 +2344,25 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 return true;
             }
 
-            var fullLen = RedisRespProtocol.GetSetCommandLength(key, value.Length, ttlMs);
-            rented = ArrayPool<byte>.Shared.Rent(fullLen);
-            var fullWritten = RedisRespProtocol.WriteSetCommand(rented.AsSpan(0, fullLen), key, value.Span, ttlMs);
+            var fullLen = RedisRespProtocol.GetPSetExCommandLength(key, value.Length, ttlMs.Value);
+            var ttlHeaderLen = fullLen - value.Length - 2;
+            rented = conn.RentHeaderBuffer(ttlHeaderLen);
+            var fullWritten = RedisRespProtocol.WritePSetExCommandHeader(rented.AsSpan(0, ttlHeaderLen), key, ttlMs.Value, value.Length);
             if (!conn.TryExecuteAsync(
                 rented.AsMemory(0, fullWritten),
+                payload: value,
+                appendCrlf: true,
                 poolBulk: false,
                 ct,
-                out var respTaskTtl))
+                out var respTaskTtl,
+                headerBuffer: rented))
             {
                 task = default;
                 return false;
             }
 
-            var buffer = rented;
             rented = null;
-            task = MapSetResponseAsync(conn, respTaskTtl, buffer);
+            task = MapSetResponseAsync(conn, respTaskTtl);
             return true;
         }
         catch
@@ -2276,9 +2374,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         {
             if (rented is not null)
             {
-                if (ttlMs is not null)
-                    ArrayPool<byte>.Shared.Return(rented);
-                else if (conn is not null)
+                if (conn is not null)
                     conn.ReturnHeaderBuffer(rented);
             }
         }
@@ -2564,6 +2660,12 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
         foreach (var c in _bulkConns)
             await c.DisposeAsync().ConfigureAwait(false);
+
+        foreach (var c in _pubSubConns)
+            await c.DisposeAsync().ConfigureAwait(false);
+
+        foreach (var c in _blockingConns)
+            await c.DisposeAsync().ConfigureAwait(false);
     }
 
     private RedisMultiplexedConnection CreateConnection(RuntimeConfig runtime, TimeSpan responseTimeout)
@@ -2608,6 +2710,18 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return CreateConnection(runtime, runtime.BulkLaneResponseTimeout);
     }
 
+    private RedisMultiplexedConnection CreatePubSubConnection()
+    {
+        var runtime = ReadRuntimeConfig();
+        return CreateConnection(runtime, runtime.Multiplexer.ResponseTimeout);
+    }
+
+    private RedisMultiplexedConnection CreateBlockingConnection()
+    {
+        var runtime = ReadRuntimeConfig();
+        return CreateConnection(runtime, runtime.Multiplexer.ResponseTimeout);
+    }
+
     private void RebuildLanesUnsafe()
     {
         // Fast group remains shared read/write and is the only autoscaled group.
@@ -2617,6 +2731,10 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         // Bulk group is fixed-size and isolated from autoscaler pressure signals.
         _bulkReadConns = _bulkConns;
         _bulkWriteConns = _bulkConns;
+        _pubSubReadConns = _pubSubConns;
+        _pubSubWriteConns = _pubSubConns;
+        _blockingReadConns = _blockingConns;
+        _blockingWriteConns = _blockingConns;
     }
 
     private async Task AutoscaleLoopAsync()
@@ -2676,7 +2794,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         var conns = _conns;
         if (conns.Length == 0)
             return;
-        var currentConnections = conns.Length + _bulkConns.Length;
+        var currentConnections = GetTotalConnectionCountUnsafe();
 
         var now = Stopwatch.GetTimestamp();
         var minuteWindowTicks = ScaleEventWindowStopwatchTicks;
@@ -2996,12 +3114,16 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         RedisMultiplexedConnection[]? fastConnsToDispose = null;
         RedisMultiplexedConnection[]? bulkConnsToDispose = null;
+        RedisMultiplexedConnection[]? pubSubConnsToDispose = null;
+        RedisMultiplexedConnection[]? blockingConnsToDispose = null;
         lock (_connGate)
         {
             _autoscaleEnabled = o.EnableAutoscaling;
             _minConnections = Math.Max(1, Math.Min(o.MinConnections, o.MaxConnections));
             _maxConnections = Math.Max(_minConnections, o.MaxConnections);
             _configuredBulkLaneConnections = Math.Max(0, o.BulkLaneConnections);
+            _configuredPubSubLaneConnections = Math.Max(0, o.PubSubLaneConnections);
+            _configuredBlockingLaneConnections = Math.Max(0, o.BlockingLaneConnections);
             _autoAdjustBulkLanes = o.AutoAdjustBulkLanes;
             _bulkLaneTargetRatio = NormalizeBulkLaneTargetRatio(o.BulkLaneTargetRatio);
             var desiredBulkLaneResponseTimeout = ResolveBulkLaneResponseTimeout(o);
@@ -3013,6 +3135,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 : configuredTotalConnections;
             var laneBudget = ResolveLaneBudget(
                 _configuredBulkLaneConnections,
+                _configuredPubSubLaneConnections,
+                _configuredBlockingLaneConnections,
                 _autoAdjustBulkLanes,
                 _bulkLaneTargetRatio,
                 desiredTotalConnections);
@@ -3039,6 +3163,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
             fastConnsToDispose = ReconcileFastConnectionsUnsafe(laneBudget.FastConnections);
             bulkConnsToDispose = ReconcileBulkConnectionsUnsafe(laneBudget.BulkConnections, bulkTimeoutChanged);
+            pubSubConnsToDispose = ReconcilePubSubConnectionsUnsafe(laneBudget.PubSubConnections);
+            blockingConnsToDispose = ReconcileBlockingConnectionsUnsafe(laneBudget.BlockingConnections);
 
             RebuildLanesUnsafe();
 
@@ -3060,6 +3186,12 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
         if (bulkConnsToDispose is { Length: > 0 })
             _ = DisposeConnectionsAsync(bulkConnsToDispose);
+
+        if (pubSubConnsToDispose is { Length: > 0 })
+            _ = DisposeConnectionsAsync(pubSubConnsToDispose);
+
+        if (blockingConnsToDispose is { Length: > 0 })
+            _ = DisposeConnectionsAsync(blockingConnsToDispose);
     }
 
     private RedisMultiplexedConnection[]? ReconcileFastConnectionsUnsafe(int desiredFastConnections)
@@ -3131,6 +3263,49 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
         _bulkLaneConnections = desiredBulkLaneConnections;
         return bulkConnsToDispose;
+    }
+
+    private RedisMultiplexedConnection[]? ReconcilePubSubConnectionsUnsafe(int desiredPubSubLaneConnections)
+        => ReconcileRoleConnectionsUnsafe(ref _pubSubConns, desiredPubSubLaneConnections, CreatePubSubConnection);
+
+    private RedisMultiplexedConnection[]? ReconcileBlockingConnectionsUnsafe(int desiredBlockingLaneConnections)
+        => ReconcileRoleConnectionsUnsafe(ref _blockingConns, desiredBlockingLaneConnections, CreateBlockingConnection);
+
+    private static RedisMultiplexedConnection[]? ReconcileRoleConnectionsUnsafe(
+        ref RedisMultiplexedConnection[] currentConnections,
+        int desiredConnections,
+        Func<RedisMultiplexedConnection> connectionFactory)
+    {
+        desiredConnections = Math.Max(0, desiredConnections);
+
+        if (currentConnections.Length == desiredConnections)
+            return null;
+
+        if (currentConnections.Length < desiredConnections)
+        {
+            var next = new RedisMultiplexedConnection[desiredConnections];
+            Array.Copy(currentConnections, next, currentConnections.Length);
+            for (var i = currentConnections.Length; i < next.Length; i++)
+                next[i] = connectionFactory();
+            currentConnections = next;
+            return null;
+        }
+
+        var removedCount = currentConnections.Length - desiredConnections;
+        var removed = new RedisMultiplexedConnection[removedCount];
+        Array.Copy(currentConnections, desiredConnections, removed, 0, removedCount);
+
+        if (desiredConnections == 0)
+        {
+            currentConnections = Array.Empty<RedisMultiplexedConnection>();
+            return removed;
+        }
+
+        var resized = new RedisMultiplexedConnection[desiredConnections];
+        Array.Copy(currentConnections, resized, desiredConnections);
+        currentConnections = resized;
+
+        return removed;
     }
 
     private static async Task DisposeConnectionsAsync(RedisMultiplexedConnection[] connections)
@@ -3283,6 +3458,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         RedisMultiplexedConnection[]? fastConnsToDispose = null;
         RedisMultiplexedConnection[]? bulkConnsToDispose = null;
+        RedisMultiplexedConnection[]? pubSubConnsToDispose = null;
+        RedisMultiplexedConnection[]? blockingConnsToDispose = null;
         lock (_connGate)
         {
             var currentConnections = GetTotalConnectionCountUnsafe();
@@ -3292,11 +3469,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             var targetConnections = currentConnections + 1;
             var laneBudget = ResolveLaneBudget(
                 _configuredBulkLaneConnections,
+                _configuredPubSubLaneConnections,
+                _configuredBlockingLaneConnections,
                 _autoAdjustBulkLanes,
                 _bulkLaneTargetRatio,
                 targetConnections);
             fastConnsToDispose = ReconcileFastConnectionsUnsafe(laneBudget.FastConnections);
             bulkConnsToDispose = ReconcileBulkConnectionsUnsafe(laneBudget.BulkConnections, timeoutChanged: false);
+            pubSubConnsToDispose = ReconcilePubSubConnectionsUnsafe(laneBudget.PubSubConnections);
+            blockingConnsToDispose = ReconcileBlockingConnectionsUnsafe(laneBudget.BlockingConnections);
 
             RebuildLanesUnsafe();
             Volatile.Write(ref _lastScaleEventTicks, Stopwatch.GetTimestamp());
@@ -3309,12 +3490,20 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
         if (bulkConnsToDispose is { Length: > 0 })
             _ = DisposeConnectionsAsync(bulkConnsToDispose);
+
+        if (pubSubConnsToDispose is { Length: > 0 })
+            _ = DisposeConnectionsAsync(pubSubConnsToDispose);
+
+        if (blockingConnsToDispose is { Length: > 0 })
+            _ = DisposeConnectionsAsync(blockingConnsToDispose);
     }
 
     private async Task ScaleDownAsync(string reason)
     {
         RedisMultiplexedConnection[]? fastConnsToDispose = null;
         RedisMultiplexedConnection[]? bulkConnsToDispose = null;
+        RedisMultiplexedConnection[]? pubSubConnsToDispose = null;
+        RedisMultiplexedConnection[]? blockingConnsToDispose = null;
         lock (_connGate)
         {
             var currentConnections = GetTotalConnectionCountUnsafe();
@@ -3324,11 +3513,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             var targetConnections = currentConnections - 1;
             var laneBudget = ResolveLaneBudget(
                 _configuredBulkLaneConnections,
+                _configuredPubSubLaneConnections,
+                _configuredBlockingLaneConnections,
                 _autoAdjustBulkLanes,
                 _bulkLaneTargetRatio,
                 targetConnections);
             fastConnsToDispose = ReconcileFastConnectionsUnsafe(laneBudget.FastConnections);
             bulkConnsToDispose = ReconcileBulkConnectionsUnsafe(laneBudget.BulkConnections, timeoutChanged: false);
+            pubSubConnsToDispose = ReconcilePubSubConnectionsUnsafe(laneBudget.PubSubConnections);
+            blockingConnsToDispose = ReconcileBlockingConnectionsUnsafe(laneBudget.BlockingConnections);
 
             RebuildLanesUnsafe();
             Volatile.Write(ref _lastScaleEventTicks, Stopwatch.GetTimestamp());
@@ -3349,6 +3542,18 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         {
             for (var i = 0; i < bulkConnsToDispose.Length; i++)
                 await bulkConnsToDispose[i].DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (pubSubConnsToDispose is not null)
+        {
+            for (var i = 0; i < pubSubConnsToDispose.Length; i++)
+                await pubSubConnsToDispose[i].DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (blockingConnsToDispose is not null)
+        {
+            for (var i = 0; i < blockingConnsToDispose.Length; i++)
+                await blockingConnsToDispose[i].DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -3679,14 +3884,18 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         var fastGroup = new LaneGroupSnapshot("fast", _conns, _readConns, _writeConns);
         var bulkGroup = new LaneGroupSnapshot("bulk", _bulkConns, _bulkReadConns, _bulkWriteConns);
-        var total = fastGroup.Connections.Length + bulkGroup.Connections.Length;
+        var pubSubGroup = new LaneGroupSnapshot("pubsub", _pubSubConns, _pubSubReadConns, _pubSubWriteConns);
+        var blockingGroup = new LaneGroupSnapshot("blocking", _blockingConns, _blockingReadConns, _blockingWriteConns);
+        var total = fastGroup.Connections.Length + bulkGroup.Connections.Length + pubSubGroup.Connections.Length + blockingGroup.Connections.Length;
         if (total == 0)
             return Array.Empty<RedisMuxLaneSnapshot>();
 
         var lanes = new RedisMuxLaneSnapshot[total];
         var index = 0;
         index = FillLaneGroupSnapshots(fastGroup, includeGroupPrefix: false, lanes, index);
-        _ = FillLaneGroupSnapshots(bulkGroup, includeGroupPrefix: true, lanes, index);
+        index = FillLaneGroupSnapshots(bulkGroup, includeGroupPrefix: true, lanes, index);
+        index = FillLaneGroupSnapshots(pubSubGroup, includeGroupPrefix: true, lanes, index);
+        _ = FillLaneGroupSnapshots(blockingGroup, includeGroupPrefix: true, lanes, index);
         return lanes;
     }
 
@@ -4449,6 +4658,60 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
     }
 
+    private ValueTask<long> MapIntegerResponseAsync(
+        RedisMultiplexedConnection conn,
+        ValueTask<RedisRespReader.RespValue> respTask,
+        string op)
+    {
+        if (respTask.IsCompletedSuccessfully)
+        {
+            var resp = respTask.Result;
+            if (resp.Kind == RedisRespReader.RespKind.Integer)
+                return new ValueTask<long>(resp.IntegerValue);
+            return ThrowUnexpectedResponseAndResetAsync<long>(conn, op, resp);
+        }
+
+        return AwaitMapIntegerResponseAsync(this, conn, respTask, op);
+
+        static async ValueTask<long> AwaitMapIntegerResponseAsync(
+            RedisCommandExecutor executor,
+            RedisMultiplexedConnection conn,
+            ValueTask<RedisRespReader.RespValue> task,
+            string op)
+        {
+            var resp = await task.ConfigureAwait(false);
+            if (resp.Kind == RedisRespReader.RespKind.Integer)
+                return resp.IntegerValue;
+            return await ThrowUnexpectedResponseAndResetAsync<long>(conn, op, resp).ConfigureAwait(false);
+        }
+    }
+
+    private ValueTask<bool> MapDeleteResponseAsync(
+        RedisMultiplexedConnection conn,
+        ValueTask<RedisRespReader.RespValue> respTask)
+    {
+        if (respTask.IsCompletedSuccessfully)
+        {
+            var resp = respTask.Result;
+            if (resp.Kind == RedisRespReader.RespKind.Integer)
+                return new ValueTask<bool>(resp.IntegerValue > 0);
+            return ThrowUnexpectedResponseAndResetAsync<bool>(conn, "DEL", resp);
+        }
+
+        return AwaitMapDeleteResponseAsync(this, conn, respTask);
+
+        static async ValueTask<bool> AwaitMapDeleteResponseAsync(
+            RedisCommandExecutor executor,
+            RedisMultiplexedConnection conn,
+            ValueTask<RedisRespReader.RespValue> task)
+        {
+            var resp = await task.ConfigureAwait(false);
+            if (resp.Kind == RedisRespReader.RespKind.Integer)
+                return resp.IntegerValue > 0;
+            return await ThrowUnexpectedResponseAndResetAsync<bool>(conn, "DEL", resp).ConfigureAwait(false);
+        }
+    }
+
     private static ValueTask<byte[]?> MapLPopResponseAsync(ValueTask<RedisRespReader.RespValue> respTask)
     {
         if (respTask.IsCompletedSuccessfully)
@@ -4919,7 +5182,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     /// <summary>
     /// Executes value.
     /// </summary>
-    public async ValueTask<long> LLenAsync(string key, CancellationToken ct)
+    public ValueTask<long> LLenAsync(string key, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryLLenAsync(key, ct, out var fastTask))
+            return fastTask;
+
+        return LLenAsyncSlow(key, ct);
+    }
+
+    private async ValueTask<long> LLenAsyncSlow(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LLEN");
         activity?.SetTag("db.redis.key", key);
@@ -4958,12 +5229,59 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
     }
 
+    private bool TryLLenAsync(string key, CancellationToken ct, out ValueTask<long> task)
+    {
+        RecordCommandCall();
+        var len = RedisRespProtocol.GetLLenCommandLength(key);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteLLenCommand(rented.AsSpan(0, len), key);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null; // returned by writer
+            task = MapIntegerResponseAsync(conn, respTask, "LLEN");
+            return true;
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
     // ========== Set Commands ==========
 
     /// <summary>
     /// Executes value.
     /// </summary>
-    public async ValueTask<long> SAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
+    public ValueTask<long> SAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TrySAddAsync(key, member, ct, out var fastTask))
+            return fastTask;
+
+        return SAddAsyncSlow(key, member, ct);
+    }
+
+    private async ValueTask<long> SAddAsyncSlow(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         using var activity = StartCommandActivity("SADD");
         activity?.SetTag("db.redis.key", key);
@@ -4998,6 +5316,45 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         {
             sw.Stop();
             RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TrySAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct, out ValueTask<long> task)
+    {
+        RecordCommandCall();
+        var len = RedisRespProtocol.GetSAddCommandLength(key, member.Length);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteSAddCommand(rented.AsSpan(0, len), key, member.Span);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null; // returned by writer
+            task = MapIntegerResponseAsync(conn, respTask, "SADD");
+            return true;
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5205,7 +5562,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     /// <summary>
     /// Executes value.
     /// </summary>
-    public async ValueTask<long> SCardAsync(string key, CancellationToken ct)
+    public ValueTask<long> SCardAsync(string key, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TrySCardAsync(key, ct, out var fastTask))
+            return fastTask;
+
+        return SCardAsyncSlow(key, ct);
+    }
+
+    private async ValueTask<long> SCardAsyncSlow(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("SCARD");
         activity?.SetTag("db.redis.key", key);
@@ -5240,6 +5605,45 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         {
             sw.Stop();
             RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TrySCardAsync(string key, CancellationToken ct, out ValueTask<long> task)
+    {
+        RecordCommandCall();
+        var len = RedisRespProtocol.GetSCardCommandLength(key);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteSCardCommand(rented.AsSpan(0, len), key);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null; // returned by writer
+            task = MapIntegerResponseAsync(conn, respTask, "SCARD");
+            return true;
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6457,8 +6861,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         int pageSize = 128,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (pageSize <= 0)
-            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
 
         long cursor = 0;
         do
@@ -6479,8 +6882,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         int pageSize = 128,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (pageSize <= 0)
-            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
 
         long cursor = 0;
         do
@@ -6498,8 +6900,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         int pageSize = 128,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (pageSize <= 0)
-            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
 
         long cursor = 0;
         do
@@ -6517,8 +6918,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         int pageSize = 128,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (pageSize <= 0)
-            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
 
         long cursor = 0;
         do

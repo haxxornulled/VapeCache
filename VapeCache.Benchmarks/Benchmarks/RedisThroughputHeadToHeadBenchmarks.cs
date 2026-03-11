@@ -250,7 +250,7 @@ public class RedisThroughputHeadToHeadBenchmarks
             RedisThroughputOperation.JsonGetHot => SerJsonGetAsync(keyIndex),
             RedisThroughputOperation.ListIndexHot => SerListIndexAsync(listKey),
             RedisThroughputOperation.ListRPopRecycleHot => SerListRPopRecycleAsync(listKey),
-            _ => throw new ArgumentOutOfRangeException()
+            _ => throw new InvalidOperationException($"Unsupported benchmark operation: {Operation}.")
         };
     }
 
@@ -275,7 +275,7 @@ public class RedisThroughputHeadToHeadBenchmarks
             RedisThroughputOperation.JsonGetHot => GetJsonFromVapeCacheAsync(jsonKey),
             RedisThroughputOperation.ListIndexHot => GetListIndexFromVapeCacheAsync(listKey),
             RedisThroughputOperation.ListRPopRecycleHot => GetListRPopRecycleFromVapeCacheAsync(listKey),
-            _ => throw new ArgumentOutOfRangeException()
+            _ => throw new InvalidOperationException($"Unsupported benchmark operation: {Operation}.")
         };
     }
 

@@ -8,6 +8,10 @@ namespace VapeCache.Extensions.Aspire;
 /// </summary>
 public static class AspireHealthCheckExtensions
 {
+    private static readonly string[] RedisHealthCheckTags = ["vapecache", "redis", "infrastructure"];
+    private static readonly string[] StartupReadinessHealthCheckTags = ["vapecache", "startup", "readiness"];
+    private static readonly string[] VapeCacheHealthCheckTags = ["vapecache", "cache"];
+
     /// <summary>
     /// Adds VapeCache and Redis health checks to the application.
     /// Endpoint mapping is handled by the host (Kubernetes, Azure Container Apps, etc.).
@@ -57,15 +61,15 @@ public static class AspireHealthCheckExtensions
             .AddCheck<RedisHealthCheck>(
                 name: "redis",
                 failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
-                tags: new[] { "vapecache", "redis", "infrastructure" })
+                tags: RedisHealthCheckTags)
             .AddCheck<VapeCacheStartupReadinessHealthCheck>(
                 name: "vapecache-startup-readiness",
                 failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
-                tags: new[] { "vapecache", "startup", "readiness" })
+                tags: StartupReadinessHealthCheckTags)
             .AddCheck<VapeCacheHealthCheck>(
                 name: "vapecache",
                 failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
-                tags: new[] { "vapecache", "cache" });
+                tags: VapeCacheHealthCheckTags);
 
         return builder;
     }

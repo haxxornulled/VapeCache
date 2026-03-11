@@ -24,7 +24,7 @@ internal sealed partial class CircuitBreakerRedisConnectionFactory : IRedisConne
     private RedisCircuitBreakerOptions _options => _optionsMonitor.CurrentValue;
     private readonly System.Threading.Lock _stateGate = new();
     private CircuitState _currentState = CircuitState.Closed;
-    private int _consecutiveRetries = 0;
+    private int _consecutiveRetries;
     private TimeSpan _currentBreakDuration;
 
     public CircuitBreakerRedisConnectionFactory(

@@ -208,7 +208,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         bool poolBulk,
         CancellationToken ct)
     {
-        if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisMultiplexedConnection));
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
 
         if (_inFlight.Wait(0, ct))
             return EnqueueAfterSlot(command, poolBulk, ct);
@@ -225,7 +225,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         CancellationToken ct,
         out ValueTask<RedisRespReader.RespValue> task)
     {
-        if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisMultiplexedConnection));
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
 
         if (!_inFlight.Wait(0))
         {
@@ -276,7 +276,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         int payloadCount = 0,
         ReadOnlyMemory<byte>[]? payloadArrayBuffer = null)
     {
-        if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisMultiplexedConnection));
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
 
         if (_inFlight.Wait(0, ct))
             return EnqueueAfterSlot(
@@ -347,7 +347,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         int payloadCount = 0,
         ReadOnlyMemory<byte>[]? payloadArrayBuffer = null)
     {
-        if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(RedisMultiplexedConnection));
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
 
         if (!_inFlight.Wait(0))
         {
@@ -1141,7 +1141,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
 
         public MpscRingQueue(int capacity)
         {
-            if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
             if ((capacity & (capacity - 1)) != 0)
                 throw new ArgumentException("Capacity must be a power of two.", nameof(capacity));
 
@@ -1426,7 +1426,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
 
         public SpscRingQueue(int capacity)
         {
-            if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
             if ((capacity & (capacity - 1)) != 0)
                 throw new ArgumentException("Capacity must be a power of two.", nameof(capacity));
 

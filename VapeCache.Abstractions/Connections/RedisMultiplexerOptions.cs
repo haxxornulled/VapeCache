@@ -40,13 +40,13 @@ public sealed record RedisMultiplexerOptions
     /// Enables the experimental socket-native RESP reader instead of the stream-based reader.
     /// Keep disabled unless explicitly validating this path in your environment.
     /// </summary>
-    public bool EnableSocketRespReader { get; init; } = false;
+    public bool EnableSocketRespReader { get; init; }
 
     /// <summary>
     /// Runs each mux lane reader/writer loop using LongRunning worker scheduling to reduce
     /// thread-pool contention under extreme sustained load. Keep disabled by default.
     /// </summary>
-    public bool UseDedicatedLaneWorkers { get; init; } = false;
+    public bool UseDedicatedLaneWorkers { get; init; }
 
     /// <summary>
     /// Maximum bytes to include in one coalesced socket write batch.
@@ -134,7 +134,7 @@ public sealed record RedisMultiplexerOptions
     /// When true, bulk lane count is derived from <see cref="BulkLaneTargetRatio"/> and recomputed from the total lane budget.
     /// When false, <see cref="BulkLaneConnections"/> is treated as the fixed target count.
     /// </summary>
-    public bool AutoAdjustBulkLanes { get; init; } = false;
+    public bool AutoAdjustBulkLanes { get; init; }
 
     /// <summary>
     /// Target ratio of total lanes reserved as bulk lanes when <see cref="AutoAdjustBulkLanes"/> is enabled.
@@ -149,10 +149,24 @@ public sealed record RedisMultiplexerOptions
     public TimeSpan BulkLaneResponseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// Dedicated lane count reserved for pub/sub isolation.
+    /// These lanes are isolated from fast/bulk request-response routing and can be wired to pub/sub APIs.
+    /// At least one fast lane must remain available after all lane-role reservations are applied.
+    /// </summary>
+    public int PubSubLaneConnections { get; init; }
+
+    /// <summary>
+    /// Dedicated lane count reserved for blocking-command isolation.
+    /// These lanes are isolated from fast/bulk request-response routing and can be wired to blocking-command APIs.
+    /// At least one fast lane must remain available after all lane-role reservations are applied.
+    /// </summary>
+    public int BlockingLaneConnections { get; init; }
+
+    /// <summary>
     /// Enables bounded autoscaling of long-lived multiplexed connections.
     /// Enterprise-only feature.
     /// </summary>
-    public bool EnableAutoscaling { get; init; } = false;
+    public bool EnableAutoscaling { get; init; }
 
     /// <summary>
     /// Minimum number of multiplexed connections to keep warm.
@@ -223,7 +237,7 @@ public sealed record RedisMultiplexerOptions
     /// Enables advisor mode. Decisions are logged but no scale actions are applied.
     /// Enterprise-only feature.
     /// </summary>
-    public bool AutoscaleAdvisorMode { get; init; } = false;
+    public bool AutoscaleAdvisorMode { get; init; }
 
     /// <summary>
     /// Emergency timeout-rate threshold (timeouts/sec) for immediate bounded scale-up.

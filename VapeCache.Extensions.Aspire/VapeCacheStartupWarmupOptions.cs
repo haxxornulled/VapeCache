@@ -8,7 +8,7 @@ public sealed record VapeCacheStartupWarmupOptions
     /// <summary>
     /// Enables startup warmup. Disabled by default and activated when <c>WithStartupWarmup</c> is used.
     /// </summary>
-    public bool Enabled { get; set; } = false;
+    public bool Enabled { get; set; }
 
     /// <summary>
     /// Number of pooled Redis leases to acquire and return during warmup.
@@ -33,5 +33,5 @@ public sealed record VapeCacheStartupWarmupOptions
     /// <summary>
     /// When true, throws during startup if readiness is not achieved.
     /// </summary>
-    public bool FailFastOnWarmupFailure { get; set; } = false;
+    public bool FailFastOnWarmupFailure { get; set; }
 }

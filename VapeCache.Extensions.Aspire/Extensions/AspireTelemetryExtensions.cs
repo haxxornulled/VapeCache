@@ -13,6 +13,7 @@ namespace VapeCache.Extensions.Aspire;
 public static class AspireTelemetryExtensions
 {
     private const string SeqDefaultOtlpBaseEndpoint = "http://localhost:5341/ingest/otlp";
+    private static readonly double[] DefaultLatencyHistogramBoundaries = [0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0];
 
     /// <summary>
     /// Configures OpenTelemetry to send VapeCache metrics and traces to Aspire Dashboard.
@@ -86,7 +87,7 @@ public static class AspireTelemetryExtensions
                     instrumentName: "cache.op.ms",
                     new ExplicitBucketHistogramConfiguration
                     {
-                        Boundaries = new double[] { 0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0 }
+                        Boundaries = DefaultLatencyHistogramBoundaries
                     });
 
                 // Configure histogram buckets for Redis command latency
@@ -94,7 +95,7 @@ public static class AspireTelemetryExtensions
                     instrumentName: "redis.cmd.ms",
                     new ExplicitBucketHistogramConfiguration
                     {
-                        Boundaries = new double[] { 0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0 }
+                        Boundaries = DefaultLatencyHistogramBoundaries
                     });
 
                 // Configure histogram buckets for pool wait time
@@ -102,7 +103,7 @@ public static class AspireTelemetryExtensions
                     instrumentName: "redis.pool.wait.ms",
                     new ExplicitBucketHistogramConfiguration
                     {
-                        Boundaries = new double[] { 0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0 }
+                        Boundaries = DefaultLatencyHistogramBoundaries
                     });
 
                 if (exporter is not null)

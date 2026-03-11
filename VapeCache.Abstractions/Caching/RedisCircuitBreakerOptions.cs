@@ -33,7 +33,7 @@ public sealed record RedisCircuitBreakerOptions
     /// Set to 0 for infinite retries (circuit will keep trying forever).
     /// Default: 0 (infinite retries - never give up on Redis recovery).
     /// </summary>
-    public int MaxConsecutiveRetries { get; init; } = 0;
+    public int MaxConsecutiveRetries { get; init; }
 
     /// <summary>
     /// Whether to use exponential backoff for retry delays.
