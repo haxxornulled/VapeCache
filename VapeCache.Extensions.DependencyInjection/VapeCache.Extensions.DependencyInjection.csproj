@@ -8,9 +8,9 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.DependencyInjection</PackageId>
     <Title>VapeCache Extensions for Dependency Injection</Title>
-    <Version>1.2.4</Version>
-    <Authors>HaxxorNulled</Authors>
-    <Company>HaxxorNulled</Company>
+    <Version>1.2.5</Version>
+    <Authors>DFWFORSALE INC</Authors>
+    <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.DependencyInjection</Product>
     <Description>DI composition facade for VapeCache runtime registration in clean architecture applications. Provides one-call IServiceCollection wiring with optional configuration binding and stampede profile setup.</Description>
     <PackageTags>redis;cache;distributed-cache;dependency-injection;clean-architecture;dotnet</PackageTags>
@@ -24,8 +24,8 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.4 release: fixes package README content on NuGet, keeps release tooling aligned, and preserves the DI facade package in the release manifest.</PackageReleaseNotes>
-    <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
+    <PackageReleaseNotes>1.2.5 release: package version bump and branding alignment for DFWFORSALE INC.</PackageReleaseNotes>
+    <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
 
@@ -45,3 +45,4 @@
   </ItemGroup>
 
 </Project>
+
