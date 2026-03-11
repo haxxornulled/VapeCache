@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Features.Invalidation</PackageId>
     <Title>VapeCache Invalidation Features</Title>
-    <Version>1.2.5</Version>
+    <Version>1.2.6</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Features.Invalidation</Product>
@@ -24,7 +24,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.5 release: package version bump and branding alignment for DFWFORSALE INC.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.6 release: updated licensing terms to BUSL-1.1 with Additional Use Grant and retained DFWFORSALE INC branding.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
