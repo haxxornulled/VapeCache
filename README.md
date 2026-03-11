@@ -153,6 +153,20 @@ dotnet test VapeCache.Tests/VapeCache.Tests.csproj -c Release
 
 ## License
 
-- Community + developer-friendly usage: Business Source License 1.1 with Additional Use Grant ([LICENSE](LICENSE))
-- Commercial managed-service / competing cache-platform usage: enterprise license required
-- Automatic change date to Apache-2.0 is defined in [LICENSE](LICENSE)
+VapeCache is licensed under the Business Source License (BUSL-1.1).
+
+You are free to:
+
+- use VapeCache in production
+- run it in SaaS or commercial applications
+- modify the source
+- redistribute the source
+
+You may NOT:
+
+- offer VapeCache as a hosted caching service
+- embed VapeCache as the core of a commercial caching product
+
+On March 11, 2029, the code will automatically convert to Apache 2.0.
+
+See [LICENSE](LICENSE) for the full terms.
