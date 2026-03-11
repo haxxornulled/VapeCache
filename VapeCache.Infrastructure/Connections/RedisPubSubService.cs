@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Connections;
@@ -14,10 +15,10 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
     private readonly ILogger<RedisPubSubService> _logger;
     private readonly object _subscriptionsGate = new();
     private readonly Dictionary<string, List<SubscriptionState>> _subscriptions = new(StringComparer.Ordinal);
-    private readonly AsyncInFlightGate _publisherGate = new(1, 1);
-    private readonly AsyncInFlightGate _subscriberConnectionGate = new(1, 1);
-    private readonly AsyncInFlightGate _subscriberSendGate = new(1, 1);
-    private readonly AsyncSignal _subscriberWakeup = new();
+    private readonly SemaphoreSlim _publisherGate = new(1, 1);
+    private readonly SemaphoreSlim _subscriberConnectionGate = new(1, 1);
+    private readonly SemaphoreSlim _subscriberSendGate = new(1, 1);
+    private readonly SemaphoreSlim _subscriberWakeup = new(0, int.MaxValue);
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly Task _subscriberLoopTask;
 
@@ -136,9 +137,9 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
             list.Add(state);
         }
 
-        _subscriberWakeup.Set();
+        _subscriberWakeup.Release();
 
-        if (sendSubscribe && !_subscriberNeedsResubscribe)
+        if (sendSubscribe)
         {
             try
             {
@@ -164,7 +165,7 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
             {
                 if (!HasSubscriptions())
                 {
-                    await WaitForSubscriptionsAsync(token).ConfigureAwait(false);
+                    await _subscriberWakeup.WaitAsync(token).ConfigureAwait(false);
                     reconnectAttempt = 0;
                     continue;
                 }
@@ -265,7 +266,7 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
 
     private async ValueTask SendSubscribeAsync(string channel, CancellationToken ct)
     {
-        await EnsureSubscriberConnectionAsync(ct).ConfigureAwait(false);
+        await EnsureSubscriberConnectedAndResubscribedAsync(ct).ConfigureAwait(false);
         var command = BuildSubscribeCommand(channel);
 
         await _subscriberSendGate.WaitAsync(ct).ConfigureAwait(false);
@@ -282,17 +283,13 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
 
     private async ValueTask SendUnsubscribeAsync(string channel, CancellationToken ct)
     {
-        if (_subscriberNeedsResubscribe)
-            return;
-
+        await EnsureSubscriberConnectedAndResubscribedAsync(ct).ConfigureAwait(false);
         var command = BuildUnsubscribeCommand(channel);
 
         await _subscriberSendGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var connection = Volatile.Read(ref _subscriberConnection);
-            if (connection is null)
-                return;
+            var connection = _subscriberConnection ?? throw new InvalidOperationException("Subscriber connection is unavailable.");
             await SendCommandAsync(connection, command, ct).ConfigureAwait(false);
         }
         finally
@@ -309,28 +306,6 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
         var created = await _factory.CreateOrThrowAsync(ct).ConfigureAwait(false);
         _publisherConnection = created;
         _publisherReader = new RedisRespReaderState(created.Stream);
-    }
-
-    private async ValueTask EnsureSubscriberConnectionAsync(CancellationToken ct)
-    {
-        if (_subscriberConnection is not null && _subscriberReader is not null)
-            return;
-
-        await _subscriberConnectionGate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            if (_subscriberConnection is not null && _subscriberReader is not null)
-                return;
-
-            var created = await _factory.CreateOrThrowAsync(ct).ConfigureAwait(false);
-            _subscriberConnection = created;
-            _subscriberReader = new RedisRespReaderState(created.Stream);
-            _subscriberNeedsResubscribe = true;
-        }
-        finally
-        {
-            _subscriberConnectionGate.Release();
-        }
     }
 
     private async ValueTask EnsureSubscriberConnectedAndResubscribedAsync(CancellationToken ct)
@@ -520,20 +495,6 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
         }
     }
 
-    private async ValueTask WaitForSubscriptionsAsync(CancellationToken token)
-    {
-        while (true)
-        {
-            token.ThrowIfCancellationRequested();
-
-            var observedVersion = _subscriberWakeup.Version;
-            if (HasSubscriptions())
-                return;
-
-            await _subscriberWakeup.WaitAsync(observedVersion, token).ConfigureAwait(false);
-        }
-    }
-
     private static TimeSpan ComputeReconnectDelay(RedisPubSubOptions options, int attempt)
     {
         var min = options.ReconnectDelayMin;
@@ -611,7 +572,7 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
             return;
 
         _disposeCts.Cancel();
-        _subscriberWakeup.Set();
+        _subscriberWakeup.Release();
 
         SubscriptionState[] states;
         lock (_subscriptionsGate)
@@ -681,7 +642,7 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
     {
         private readonly Func<RedisPubSubMessage, CancellationToken, ValueTask> _handler;
         private readonly ILogger _logger;
-        private readonly DeliveryQueue _queue;
+        private readonly Channel<RedisPubSubMessage> _channel;
         private readonly CancellationTokenSource _cts;
         private readonly Task _processorTask;
         private readonly bool _dropOldest;
@@ -700,7 +661,13 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
             _logger = logger;
             _dropOldest = dropOldestOnBackpressure;
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ownerToken);
-            _queue = new DeliveryQueue(queueCapacity);
+            _channel = System.Threading.Channels.Channel.CreateBounded<RedisPubSubMessage>(new BoundedChannelOptions(queueCapacity)
+            {
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleReader = true,
+                SingleWriter = false,
+                AllowSynchronousContinuations = false
+            });
             _processorTask = Task.Run(ProcessLoopAsync, CancellationToken.None);
         }
 
@@ -708,12 +675,12 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
 
         public bool TryEnqueue(RedisPubSubMessage message)
         {
-            if (_queue.TryEnqueue(message, dropOldest: false, out _))
+            if (_channel.Writer.TryWrite(message))
                 return true;
 
             if (_dropOldest)
             {
-                if (_queue.TryEnqueue(message, dropOldest: true, out var droppedOldest) && droppedOldest)
+                while (_channel.Reader.TryRead(out _))
                 {
                     RedisTelemetry.CommandFailures.Add(
                         1,
@@ -723,7 +690,8 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
                             { "class", "pubsub" },
                             { "reason", "backpressure" }
                         });
-                    return true;
+                    if (_channel.Writer.TryWrite(message))
+                        return true;
                 }
             }
 
@@ -734,9 +702,9 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
         {
             try
             {
-                while (await _queue.WaitToReadAsync(_cts.Token).ConfigureAwait(false))
+                while (await _channel.Reader.WaitToReadAsync(_cts.Token).ConfigureAwait(false))
                 {
-                    while (_queue.TryDequeue(out var message))
+                    while (_channel.Reader.TryRead(out var message))
                     {
                         try
                         {
@@ -764,8 +732,8 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
             if (Interlocked.Exchange(ref _disposed, 1) == 1)
                 return;
 
+            _channel.Writer.TryComplete();
             _cts.Cancel();
-            _queue.Dispose();
             try
             {
                 await _processorTask.ConfigureAwait(false);
@@ -778,172 +746,6 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
             {
                 _cts.Dispose();
             }
-        }
-    }
-
-    private sealed class DeliveryQueue : IDisposable
-    {
-        private readonly object _gate = new();
-        private readonly RedisPubSubMessage[] _items;
-        private readonly AsyncSignal _itemsAvailable = new();
-        private int _head;
-        private int _tail;
-        private int _count;
-        private int _disposed;
-
-        public DeliveryQueue(int capacity)
-        {
-            _items = new RedisPubSubMessage[capacity];
-        }
-
-        public bool TryEnqueue(RedisPubSubMessage message, bool dropOldest, out bool droppedOldest)
-        {
-            droppedOldest = false;
-
-            lock (_gate)
-            {
-                if (Volatile.Read(ref _disposed) == 1)
-                    return false;
-
-                if (_count == _items.Length)
-                {
-                    if (!dropOldest)
-                        return false;
-
-                    droppedOldest = true;
-                    RemoveOldestCore();
-                }
-
-                var shouldSignal = _count == 0;
-                _items[_tail] = message;
-                _tail = Advance(_tail);
-                _count++;
-                if (shouldSignal)
-                    _itemsAvailable.Set();
-
-                return true;
-            }
-        }
-
-        public bool TryDequeue(out RedisPubSubMessage message)
-        {
-            lock (_gate)
-            {
-                if (_count == 0)
-                {
-                    message = default;
-                    return false;
-                }
-
-                message = _items[_head];
-                _items[_head] = default;
-                _head = Advance(_head);
-                _count--;
-                return true;
-            }
-        }
-
-        public async ValueTask<bool> WaitToReadAsync(CancellationToken ct)
-        {
-            while (true)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                long observedVersion;
-                lock (_gate)
-                {
-                    if (_count > 0)
-                        return true;
-
-                    if (Volatile.Read(ref _disposed) == 1)
-                        return false;
-
-                    observedVersion = _itemsAvailable.Version;
-                }
-
-                await _itemsAvailable.WaitAsync(observedVersion, ct).ConfigureAwait(false);
-            }
-        }
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 1)
-                return;
-
-            lock (_gate)
-            {
-                Array.Clear(_items);
-                _count = 0;
-                _head = 0;
-                _tail = 0;
-            }
-
-            _itemsAvailable.Set();
-            _itemsAvailable.Dispose();
-        }
-
-        private void RemoveOldestCore()
-        {
-            _items[_head] = default;
-            _head = Advance(_head);
-            _count--;
-        }
-
-        private int Advance(int index)
-            => index + 1 == _items.Length ? 0 : index + 1;
-    }
-
-    private sealed class AsyncSignal : IDisposable
-    {
-        private volatile TaskCompletionSource<bool>? _waiters;
-        private long _version;
-        private int _disposed;
-
-        public long Version => Volatile.Read(ref _version);
-
-        public void Set()
-        {
-            if (Volatile.Read(ref _disposed) == 1)
-                return;
-
-            Interlocked.Increment(ref _version);
-            Interlocked.Exchange(ref _waiters, null)?.TrySetResult(true);
-        }
-
-        public ValueTask WaitAsync(long observedVersion, CancellationToken ct)
-        {
-            if (Volatile.Read(ref _disposed) == 1 || Volatile.Read(ref _version) != observedVersion)
-                return ValueTask.CompletedTask;
-
-            while (true)
-            {
-                var current = _waiters;
-                if (Volatile.Read(ref _disposed) == 1 || Volatile.Read(ref _version) != observedVersion)
-                    return ValueTask.CompletedTask;
-
-                if (current is null)
-                {
-                    var created = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    var prior = Interlocked.CompareExchange(ref _waiters, created, null);
-                    current = prior ?? created;
-                    if (prior is not null)
-                        continue;
-                }
-
-                if (Volatile.Read(ref _disposed) == 1 || Volatile.Read(ref _version) != observedVersion)
-                    return ValueTask.CompletedTask;
-
-                return new ValueTask(current.Task.WaitAsync(ct));
-            }
-        }
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 1)
-                return;
-
-            Interlocked.Increment(ref _version);
-            Interlocked.Exchange(ref _waiters, null)?.TrySetResult(true);
         }
     }
 
