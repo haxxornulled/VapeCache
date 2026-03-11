@@ -225,7 +225,7 @@ If companies can't run production without paying, they won't adopt at all.
 - Auto-converts to Apache 2.0 after 2 years
 
 **Option 2 - Polyform (Non-Commercial):**
-- Free for non-commercial use
+- Free for broad developer and internal commercial use under BUSL-1.1 Additional Use Grant
 - Commercial license required for revenue-generating apps
 
 **Recommendation:** Start with **Apache 2.0 core + proprietary add-ons**. Avoid custom licenses initially.
