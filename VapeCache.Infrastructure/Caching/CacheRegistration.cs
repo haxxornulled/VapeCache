@@ -30,11 +30,16 @@ public static class CacheRegistration
         services.AddMemoryCache();
         services.AddOptions<InMemorySpillOptions>();
         services.AddOptions<HybridFailoverOptions>();
+        services.AddOptions<RedisPubSubOptions>()
+            .ValidateOnStart();
         services.AddOptions<RedisMultiplexerOptions>()
             .ValidateOnStart();
         services.TryAddSingleton<RedisMultiplexerOptionsValidator>();
+        services.TryAddSingleton<RedisPubSubOptionsValidator>();
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<RedisMultiplexerOptions>, RedisMultiplexerOptionsValidator>());
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<RedisPubSubOptions>, RedisPubSubOptionsValidator>());
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, RedisMultiplexerOptionsStartupHostedService>());
 
@@ -86,6 +91,7 @@ public static class CacheRegistration
 
         // Hybrid command executor - automatically switches between Redis and in-memory based on circuit breaker state
         services.AddSingleton<IRedisCommandExecutor, HybridCommandExecutor>();
+        services.AddSingleton<IRedisPubSubService, RedisPubSubService>();
         services.AddSingleton<IRedisMultiplexerDiagnostics>(sp => sp.GetRequiredService<RedisCommandExecutor>());
 
         services.TryAddSingleton<CacheStampedeOptions>();

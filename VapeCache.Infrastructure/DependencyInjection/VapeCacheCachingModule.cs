@@ -46,7 +46,9 @@ public sealed class VapeCacheCachingModule : Module
         RegisterStaticOptions(builder, new CacheStampedeOptions());
         RegisterStaticOptions(builder, new RedisCircuitBreakerOptions());
         RegisterStaticOptions(builder, new RedisMultiplexerOptions());
+        RegisterStaticOptions(builder, new RedisPubSubOptions());
         builder.RegisterType<RedisMultiplexerOptionsValidator>().AsSelf().SingleInstance();
+        builder.RegisterType<RedisPubSubOptionsValidator>().AsSelf().SingleInstance();
         builder.RegisterType<RedisMultiplexerOptionsStartupValidator>().As<IStartable>().SingleInstance();
         builder.RegisterType<MemoryCache>().As<IMemoryCache>().SingleInstance();
 
@@ -90,6 +92,9 @@ public sealed class VapeCacheCachingModule : Module
             .SingleInstance();
         builder.Register(ctx => (IRedisCommandExecutor)ctx.Resolve<HybridCommandExecutor>())
             .As<IRedisCommandExecutor>()
+            .SingleInstance();
+        builder.RegisterType<RedisPubSubService>()
+            .As<IRedisPubSubService>()
             .SingleInstance();
         builder.Register(ctx => new StampedeProtectedCacheService(
                 ctx.Resolve<HybridCacheService>(),

@@ -9,8 +9,61 @@ internal static class RedisRespProtocol
 {
     private static readonly byte[] OkLine = "+OK\r\n"u8.ToArray();
     private static readonly byte[] PongLine = "+PONG\r\n"u8.ToArray();
+    private static readonly byte[] PublishCommandToken = "PUBLISH"u8.ToArray();
+    private static readonly byte[] SubscribeCommandToken = "SUBSCRIBE"u8.ToArray();
+    private static readonly byte[] UnsubscribeCommandToken = "UNSUBSCRIBE"u8.ToArray();
 
     public static ReadOnlyMemory<byte> PingCommand { get; } = "*1\r\n$4\r\nPING\r\n"u8.ToArray();
+
+    /// <summary>
+    /// Gets the RESP command length for PUBLISH channel payload.
+    /// </summary>
+    public static int GetPublishCommandLength(string channel, int payloadLength)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(payloadLength);
+
+        return GetHeaderLen(3)
+               + GetBulkLen(PublishCommandToken.Length) + PublishCommandToken.Length + 2
+               + GetBulkStringLen(channel) + 2
+               + GetBulkLen(payloadLength) + payloadLength + 2;
+    }
+
+    /// <summary>
+    /// Writes a RESP PUBLISH command.
+    /// </summary>
+    public static int WritePublishCommand(Span<byte> destination, string channel, ReadOnlySpan<byte> payload)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 3);
+        idx += WriteBulkString(destination.Slice(idx), PublishCommandToken);
+        idx += WriteBulkString(destination.Slice(idx), channel);
+        idx += WriteBulkBytes(destination.Slice(idx), payload);
+        return idx;
+    }
+
+    /// <summary>
+    /// Gets the RESP command length for SUBSCRIBE channel.
+    /// </summary>
+    public static int GetSubscribeCommandLength(string channel)
+        => GetCommandLength(2, SubscribeCommandToken, channel);
+
+    /// <summary>
+    /// Writes a RESP SUBSCRIBE command.
+    /// </summary>
+    public static int WriteSubscribeCommand(Span<byte> destination, string channel)
+        => WriteCommand(destination, 2, SubscribeCommandToken, channel);
+
+    /// <summary>
+    /// Gets the RESP command length for UNSUBSCRIBE channel.
+    /// </summary>
+    public static int GetUnsubscribeCommandLength(string channel)
+        => GetCommandLength(2, UnsubscribeCommandToken, channel);
+
+    /// <summary>
+    /// Writes a RESP UNSUBSCRIBE command.
+    /// </summary>
+    public static int WriteUnsubscribeCommand(Span<byte> destination, string channel)
+        => WriteCommand(destination, 2, UnsubscribeCommandToken, channel);
 
     // QUICK WIN #2: Cached common RESP command prefixes to avoid repeated encoding
     // These are the most frequently used command prefixes in hot paths
