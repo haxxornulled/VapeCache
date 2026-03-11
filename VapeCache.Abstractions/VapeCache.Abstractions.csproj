@@ -7,9 +7,9 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Abstractions</PackageId>
     <Title>VapeCache Abstractions</Title>
-    <Version>1.2.2</Version>
-    <Authors>HaxxorNulled</Authors>
-    <Company>HaxxorNulled</Company>
+    <Version>1.2.5</Version>
+    <Authors>DFWFORSALE INC</Authors>
+    <Company>DFWFORSALE INC</Company>
     <Product>VapeCache</Product>
     <Description>Public contracts, interfaces, and configuration types for VapeCache. Use this package when you need the shared API surface without the Redis transport implementation.</Description>
     <PackageTags>redis;cache;abstractions;configuration;dotnet</PackageTags>
@@ -21,15 +21,15 @@
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RepositoryBranch>main</RepositoryBranch>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.1 release: dependency alignment update for OSS package restore and release automation.</PackageReleaseNotes>
-    <Copyright>Copyright (c) 2026 HaxxorNulled</Copyright>
+    <PackageReleaseNotes>1.2.5 release: package version bump and branding alignment for DFWFORSALE INC.</PackageReleaseNotes>
+    <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\PACKAGE_README.md" Pack="true" PackagePath="\" />
     <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
     <None Include="..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
@@ -43,5 +43,6 @@
   </ItemGroup>
 
 </Project>
+
 
 
