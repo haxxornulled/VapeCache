@@ -20,6 +20,8 @@ if (-not [System.IO.Path]::IsPathRooted($PackageOutput))
 $resolvedPackageVersion = Resolve-ReleasePackageVersion -PackageVersion $PackageVersion
 $packages = Get-ReleasePackageVersionInfo
 
+Assert-ReleasePackageBranding
+
 if ([string]::IsNullOrWhiteSpace($ApiKey))
 {
     throw "NuGet API key required. Pass -ApiKey or set NUGET_API_KEY."

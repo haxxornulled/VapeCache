@@ -21,6 +21,46 @@ function Get-ReleasePackageProjects
     )
 }
 
+function Assert-ReleasePackageBranding
+{
+    $expectedAuthors = "DFWFORSALE INC"
+    $expectedCompany = "DFWFORSALE INC"
+    $requiredCopyrightToken = "DFWFORSALE INC"
+
+    foreach ($project in Get-ReleasePackageProjects)
+    {
+        $projectPath = Join-Path (Get-ReleaseRepoRoot) $project
+        if (-not (Test-Path -LiteralPath $projectPath))
+        {
+            throw "Release package project not found: $project"
+        }
+
+        [xml]$projectXml = Get-Content -LiteralPath $projectPath
+        $authorsNode = $projectXml.SelectSingleNode("/Project/PropertyGroup/Authors")
+        $companyNode = $projectXml.SelectSingleNode("/Project/PropertyGroup/Company")
+        $copyrightNode = $projectXml.SelectSingleNode("/Project/PropertyGroup/Copyright")
+
+        $authors = if ($null -eq $authorsNode) { "" } else { $authorsNode.InnerText.Trim() }
+        $company = if ($null -eq $companyNode) { "" } else { $companyNode.InnerText.Trim() }
+        $copyright = if ($null -eq $copyrightNode) { "" } else { $copyrightNode.InnerText.Trim() }
+
+        if ($authors -ne $expectedAuthors)
+        {
+            throw "Authors branding mismatch in $project. Expected '$expectedAuthors' but found '$authors'."
+        }
+
+        if ($company -ne $expectedCompany)
+        {
+            throw "Company branding mismatch in $project. Expected '$expectedCompany' but found '$company'."
+        }
+
+        if ([string]::IsNullOrWhiteSpace($copyright) -or $copyright -notlike "*$requiredCopyrightToken*")
+        {
+            throw "Copyright branding mismatch in $project. Expected to contain '$requiredCopyrightToken' but found '$copyright'."
+        }
+    }
+}
+
 function Get-ReleasePackageVersionInfo
 {
     $infos = foreach ($project in Get-ReleasePackageProjects)
