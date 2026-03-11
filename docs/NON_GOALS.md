@@ -62,16 +62,21 @@ Still not in scope:
 **Workaround:** Use StackExchange.Redis for Lua alongside VapeCache for caching.
 
 ### Pub/Sub
-❌ **No SUBSCRIBE/PUBLISH commands**
+⚠️ **Basic PUB/SUB is supported via `IRedisPubSubService`**
 
-**Why:** Pub/Sub requires fundamentally different architecture:
-- Dedicated connection per subscriber (conflicts with multiplexing)
-- Fire-and-forget semantics (no backpressure)
-- No ordering guarantees across publishers
+Supported now:
+- Dedicated pub/sub service (`IRedisPubSubService`) with:
+  - `PublishAsync(...)`
+  - `SubscribeAsync(...)`
+  - per-subscription bounded delivery queue
+  - reconnect + resubscribe behavior
 
-**Planned:** Not planned (non-goal).
+Still out of scope:
+- Pattern subscriptions (`PSUBSCRIBE`)
+- Delivery guarantees beyond Redis pub/sub semantics
+- Treating pub/sub as a durable message broker replacement
 
-**Workaround:** Use StackExchange.Redis for Pub/Sub alongside VapeCache for caching.
+**Recommendation:** Use StackExchange.Redis or a broker when you need advanced pub/sub routing/guarantees.
 
 ### Streams
 ❌ **No XADD/XREAD/XGROUP commands**
@@ -218,7 +223,7 @@ await redis.GetSubscriber().SubscribeAsync("channel", handler);
 | Circuit breaker | ✅ Built-in | ❌ Manual | Use VapeCache |
 | Stampede protection | ✅ Built-in | ❌ Manual | Use VapeCache |
 | OpenTelemetry | ✅ Native | ⚠️ Manual | Use VapeCache |
-| Pub/Sub | ❌ Not supported | ✅ Native | Use SER |
+| Pub/Sub | ⚠️ Basic channels | ✅ Native | Use VapeCache for simple channel pub/sub; use SER for advanced patterns |
 | Lua scripting | ❌ Not supported | ✅ Native | Use SER |
 | Streams | ❌ Not supported | ✅ Native | Use SER |
 | Cluster mode (cache-path redirects) | ✅ Partial | ✅ Native | Use VapeCache for cache path, SER for full orchestration |
@@ -236,7 +241,7 @@ await redis.GetSubscriber().SubscribeAsync("channel", handler);
 **A:** Partially. Core cache-path commands handle MOVED/ASK redirects. Full cluster orchestration across every command is still out of scope.
 
 ### Q: When will Pub/Sub be supported?
-**A:** Not planned. Pub/Sub requires different architecture, so it's out of scope for VapeCache.
+**A:** Basic channel pub/sub is available now through `IRedisPubSubService`. Advanced pattern/pubsub-broker scenarios remain out of scope.
 
 ### Q: What if I need a command that's not implemented?
 **A:** Three options:
@@ -245,7 +250,7 @@ await redis.GetSubscriber().SubscribeAsync("channel", handler);
 3. Implement it yourself and contribute a PR
 
 ### Q: Is VapeCache production-ready?
-**A:** Yes, for caching use cases. Pub/Sub/Lua/Streams remain out of scope; cluster support is partial and cache-path focused.
+**A:** Yes, for caching use cases. Basic pub/sub channels are supported; Lua/Streams remain out of scope; cluster support is partial and cache-path focused.
 
 ## References
 

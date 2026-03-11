@@ -1,6 +1,6 @@
 # API Expansion Backlog
 
-This backlog tracks **future** Redis commands and features that are not yet implemented. It reflects the current codebase and avoids non-goals like Pub/Sub and Lua scripting.
+This backlog tracks **future** Redis commands and features that are not yet implemented. It reflects the current codebase and avoids non-goals like Lua scripting.
 
 ## Current Coverage
 
@@ -33,7 +33,6 @@ See [REDIS_PROTOCOL_SUPPORT.md](REDIS_PROTOCOL_SUPPORT.md) for the full supporte
 ## Non-Goals
 
 These are intentionally out of scope:
-- Pub/Sub
 - Lua scripting
 - Cluster redirects (MOVED/ASK)
 - RESP3 push messages
