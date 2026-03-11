@@ -3,6 +3,11 @@ function Get-ReleaseRepoRoot
     Split-Path $PSScriptRoot -Parent
 }
 
+function Get-ReleaseRepositoryUrl
+{
+    "https://github.com/haxxornulled/VapeCache"
+}
+
 function Get-ReleasePackageProjects
 {
     @(
@@ -69,6 +74,9 @@ function Get-ReleasePackageVersionInfo
         [xml]$projectXml = Get-Content -LiteralPath $projectPath
         $packageId = $projectXml.SelectNodes("/Project/PropertyGroup/PackageId") | Select-Object -First 1
         $version = $projectXml.SelectNodes("/Project/PropertyGroup/Version") | Select-Object -First 1
+        $repositoryUrl = $projectXml.SelectNodes("/Project/PropertyGroup/RepositoryUrl") | Select-Object -First 1
+        $packageProjectUrl = $projectXml.SelectNodes("/Project/PropertyGroup/PackageProjectUrl") | Select-Object -First 1
+        $expectedRepositoryUrl = Get-ReleaseRepositoryUrl
 
         if ($null -eq $packageId -or [string]::IsNullOrWhiteSpace($packageId.InnerText))
         {
@@ -80,10 +88,32 @@ function Get-ReleasePackageVersionInfo
             throw "Version not found in $project"
         }
 
+        if ($null -eq $repositoryUrl -or [string]::IsNullOrWhiteSpace($repositoryUrl.InnerText))
+        {
+            throw "RepositoryUrl not found in $project"
+        }
+
+        if ($repositoryUrl.InnerText.Trim() -ne $expectedRepositoryUrl)
+        {
+            throw "RepositoryUrl mismatch in $project. Expected '$expectedRepositoryUrl' but found '$($repositoryUrl.InnerText.Trim())'."
+        }
+
+        if ($null -eq $packageProjectUrl -or [string]::IsNullOrWhiteSpace($packageProjectUrl.InnerText))
+        {
+            throw "PackageProjectUrl not found in $project"
+        }
+
+        if ($packageProjectUrl.InnerText.Trim() -ne $expectedRepositoryUrl)
+        {
+            throw "PackageProjectUrl mismatch in $project. Expected '$expectedRepositoryUrl' but found '$($packageProjectUrl.InnerText.Trim())'."
+        }
+
         [pscustomobject]@{
-            Project   = $project
-            PackageId = $packageId.InnerText.Trim()
-            Version   = $version.InnerText.Trim()
+            Project          = $project
+            PackageId        = $packageId.InnerText.Trim()
+            Version          = $version.InnerText.Trim()
+            RepositoryUrl    = $repositoryUrl.InnerText.Trim()
+            PackageProjectUrl = $packageProjectUrl.InnerText.Trim()
         }
     }
 
