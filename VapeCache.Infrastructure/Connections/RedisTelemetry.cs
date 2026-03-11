@@ -98,6 +98,21 @@ public static class RedisTelemetry
         "redis.queue.wait.ms",
         unit: "ms",
         description: "Time spent waiting for a write queue slot");
+    /// <summary>
+    /// Defines parsed RESP frames.
+    /// </summary>
+    public static readonly Counter<long> ParserFrames = Meter.CreateCounter<long>("redis.parser.frames");
+    /// <summary>
+    /// Defines parsed RESP bytes.
+    /// </summary>
+    public static readonly Counter<long> ParserBytesParsed = Meter.CreateCounter<long>("redis.parser.bytes.parsed");
+    /// <summary>
+    /// Defines RESP frame parse duration.
+    /// </summary>
+    public static readonly Histogram<double> ParserFrameMs = Meter.CreateHistogram<double>(
+        "redis.parser.frame.ms",
+        unit: "ms",
+        description: "Time spent parsing a top-level RESP frame");
 
     private static readonly ConcurrentDictionary<int, Func<QueueDepthSnapshot>> QueueDepthProviders = new();
     private static readonly ConcurrentDictionary<int, Func<MuxLaneUsageSnapshot>> MuxLaneUsageProviders = new();
@@ -220,6 +235,15 @@ public static class RedisTelemetry
     {
         QueueDepthProviders.Clear();
         MuxLaneUsageProviders.Clear();
+    }
+
+    internal static void RecordParserFrame(long bytesParsed, long elapsedStopwatchTicks)
+    {
+        var nonNegativeBytes = Math.Max(0, bytesParsed);
+        ParserFrames.Add(1);
+        ParserBytesParsed.Add(nonNegativeBytes);
+        if (elapsedStopwatchTicks > 0)
+            ParserFrameMs.Record(elapsedStopwatchTicks * 1000d / Stopwatch.Frequency);
     }
 
     internal static void RegisterQueueDepthProvider(int connectionId, Func<QueueDepthSnapshot> provider)
