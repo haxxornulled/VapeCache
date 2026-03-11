@@ -71,6 +71,7 @@ jobs:
         run: dotnet restore ${{ steps.solution.outputs.path }} --configfile NuGet.config
 
       - name: Pack release packages
+        shell: pwsh
         run: |
           pwsh -File tools/pack-release-packages.ps1 `
             -OutputDir artifacts/github-packages `
