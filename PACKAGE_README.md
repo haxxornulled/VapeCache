@@ -40,3 +40,13 @@ dotnet add package VapeCache.Features.Invalidation
 ## Source
 
 https://github.com/haxxornulled/VapeCache
+
+## License
+
+VapeCache uses BUSL-1.1 with an Additional Use Grant.
+
+- Allowed: production use, SaaS/commercial apps, modification, redistribution
+- Restricted: offering VapeCache as a hosted caching service, or embedding it as the core of a commercial caching product
+- Change date: March 11, 2029 (converts to Apache 2.0)
+
+See LICENSE in the package for full legal terms.

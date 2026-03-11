@@ -2,6 +2,26 @@
 
 Business Source License 1.1 (BUSL-1.1)
 
+## Plain-Language Summary (for convenience)
+
+VapeCache is licensed under the Business Source License (BUSL-1.1).
+
+You are free to:
+
+- use VapeCache in production
+- run it in SaaS or commercial applications
+- modify the source
+- redistribute the source
+
+You may NOT:
+
+- offer VapeCache as a hosted caching service
+- embed VapeCache as the core of a commercial caching product
+
+On March 11, 2029, the code will automatically convert to Apache 2.0.
+
+This summary is informational. The legal terms are defined by the BUSL text and parameters below.
+
 License text copyright (c) 2017 MariaDB Corporation Ab, All Rights Reserved.
 "Business Source License" is a trademark of MariaDB Corporation Ab.
 
@@ -13,7 +33,7 @@ Licensed Work: The VapeCache software and documentation distributed in this repo
 
 Additional Use Grant: You may make production use of the Licensed Work in your own internal business applications (including commercial applications and hosted SaaS applications), provided that you do not offer the Licensed Work to third parties as a managed or hosted caching/database service, and you do not embed the Licensed Work in a commercial product whose primary value is providing caching/database infrastructure.
 
-Change Date: 2029-03-11
+Change Date: 2029-03-11 (March 11, 2029)
 
 Change License: Apache License, Version 2.0
 

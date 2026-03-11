@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.DependencyInjection</PackageId>
     <Title>VapeCache Extensions for Dependency Injection</Title>
-    <Version>1.2.6</Version>
+    <Version>1.2.7</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.DependencyInjection</Product>
@@ -24,7 +24,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.6 release: updated licensing terms to BUSL-1.1 with Additional Use Grant and retained DFWFORSALE INC branding.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.7 release: refreshed BUSL-1.1 license file content in package artifacts and maintained DFWFORSALE INC branding.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
