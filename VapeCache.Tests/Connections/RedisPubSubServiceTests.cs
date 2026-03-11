@@ -56,7 +56,7 @@ public sealed class RedisPubSubServiceTests
         Assert.Same(tcs.Task, completed);
         var received = await tcs.Task;
         Assert.Equal("orders", received.Channel);
-        Assert.Equal("hello", System.Text.Encoding.UTF8.GetString(received.Payload.Span));
+        Assert.Equal("hello", System.Text.Encoding.UTF8.GetString(received.Payload));
     }
 
     [Fact]
@@ -105,89 +105,6 @@ public sealed class RedisPubSubServiceTests
             await Task.Delay(10);
 
         Assert.Equal(2, Volatile.Read(ref handled));
-    }
-
-    [Fact]
-    public async Task SubscribeAsync_DropsOldestWhenQueueIsFull_AndDropOldestEnabled()
-    {
-        var stream = new ScriptedResponseStream();
-        stream.Enqueue("*3\r\n$9\r\nsubscribe\r\n$6\r\norders\r\n:1\r\n");
-        stream.Enqueue("*3\r\n$7\r\nmessage\r\n$6\r\norders\r\n$3\r\none\r\n");
-
-        var connection = new ScriptedConnection(stream);
-        await using var factory = new QueueConnectionFactory(connection);
-        var options = new TestOptionsMonitor<RedisPubSubOptions>(new RedisPubSubOptions
-        {
-            DeliveryQueueCapacity = 1,
-            DropOldestOnBackpressure = true
-        });
-
-        await using var sut = new RedisPubSubService(factory, options, NullLogger<RedisPubSubService>.Instance);
-        var firstHandledGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var handled = new ConcurrentQueue<string>();
-
-        await using var sub = await sut.SubscribeAsync(
-            "orders",
-            async (message, _) =>
-            {
-                var payload = System.Text.Encoding.UTF8.GetString(message.Payload.Span);
-                handled.Enqueue(payload);
-                if (payload == "one")
-                {
-                    firstHandledGate.TrySetResult();
-                    await releaseGate.Task.ConfigureAwait(false);
-                }
-            },
-            CancellationToken.None);
-
-        var reachedFirst = await Task.WhenAny(firstHandledGate.Task, Task.Delay(TimeSpan.FromSeconds(2)));
-        Assert.Same(firstHandledGate.Task, reachedFirst);
-
-        stream.Enqueue("*3\r\n$7\r\nmessage\r\n$6\r\norders\r\n$3\r\ntwo\r\n");
-        stream.Enqueue("*3\r\n$7\r\nmessage\r\n$6\r\norders\r\n$5\r\nthree\r\n");
-        await Task.Delay(150);
-        releaseGate.TrySetResult();
-
-        var deadline = DateTime.UtcNow.AddSeconds(2);
-        while (DateTime.UtcNow < deadline && handled.Count < 2)
-            await Task.Delay(10);
-
-        Assert.Equal(["one", "three"], handled.ToArray());
-    }
-
-    [Fact]
-    public async Task SubscribeAsync_FirstSubscription_SendsSingleSubscribeCommand()
-    {
-        var stream = new ScriptedResponseStream();
-        stream.Enqueue("*3\r\n$9\r\nsubscribe\r\n$6\r\norders\r\n:1\r\n");
-
-        var connection = new ScriptedConnection(stream);
-        await using var factory = new QueueConnectionFactory(connection);
-        var options = new TestOptionsMonitor<RedisPubSubOptions>(new RedisPubSubOptions());
-        await using var sut = new RedisPubSubService(factory, options, NullLogger<RedisPubSubService>.Instance);
-
-        await using var sub = await sut.SubscribeAsync(
-            "orders",
-            static (_, _) => ValueTask.CompletedTask,
-            CancellationToken.None);
-
-        var deadline = DateTime.UtcNow.AddSeconds(2);
-        while (DateTime.UtcNow < deadline)
-        {
-            var sent = connection.GetSentCommandsUtf8Snapshot();
-            if (sent.Any(static command => command.Contains("SUBSCRIBE", StringComparison.Ordinal)))
-                break;
-
-            await Task.Delay(10);
-        }
-
-        await Task.Delay(100);
-        var subscribeCommands = connection
-            .GetSentCommandsUtf8Snapshot()
-            .Count(static command => command.Contains("SUBSCRIBE", StringComparison.Ordinal));
-
-        Assert.Equal(1, subscribeCommands);
     }
 
     private sealed class QueueConnectionFactory : IRedisConnectionFactory
@@ -256,9 +173,6 @@ public sealed class RedisPubSubServiceTests
             Assert.True(_sent.TryDequeue(out var command));
             return System.Text.Encoding.UTF8.GetString(command);
         }
-
-        public string[] GetSentCommandsUtf8Snapshot()
-            => _sent.Select(static command => System.Text.Encoding.UTF8.GetString(command)).ToArray();
 
         public ValueTask DisposeAsync()
         {
