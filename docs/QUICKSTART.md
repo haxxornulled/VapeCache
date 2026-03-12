@@ -254,8 +254,32 @@ builder.Services.AddVapeCacheOutputCaching(options =>
     options.AddBasePolicy(policy => policy.Expire(TimeSpan.FromSeconds(30)));
 });
 
+builder.Services.AddVapeCacheAspNetPolicies(policies =>
+{
+    policies.AddPolicy("products", policy => policy
+        .Ttl(TimeSpan.FromMinutes(5))
+        .VaryByQuery()
+        .Tags("products"));
+});
+
 var app = builder.Build();
 app.UseVapeCacheOutputCaching();
+
+app.MapGet("/products/{id:int}", (int id) => Results.Ok(new { id }))
+    .CacheWithVapeCache("products");
+
+app.MapGet("/search", (string q) => Results.Ok(new { q }))
+    .CacheWithVapeCache(policy => policy
+        .Ttl(TimeSpan.FromSeconds(60))
+        .VaryByQuery()
+        .Tags("search"));
+```
+
+MVC/controller usage:
+
+```csharp
+[VapeCachePolicy("products", TtlSeconds = 300, VaryByQuery = true, CacheTags = new[] { "products" })]
+public IActionResult GetProduct(int id) => Ok(new { id });
 ```
 
 For multi-node/web-garden apps, add failover affinity hints:

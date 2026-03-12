@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace VapeCache.Extensions.AspNetCore;
 
@@ -56,6 +58,38 @@ public static class VapeCacheAspNetCoreCachingExtensions
 
         services.AddOutputCache(options => configureOutputCache?.Invoke(options));
         services.Replace(ServiceDescriptor.Singleton<IOutputCacheStore, VapeCacheOutputCacheStore>());
+        RegisterMvcPolicyConvention(services);
+
+        return services;
+    }
+
+    /// <summary>
+    /// Adds named ASP.NET Core output-cache policies using VapeCache-friendly builders.
+    /// </summary>
+    public static IServiceCollection AddVapeCacheAspNetPolicies(
+        this IServiceCollection services,
+        Action<VapeCacheAspNetPolicyRegistry> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var registry = new VapeCacheAspNetPolicyRegistry();
+        configure(registry);
+        var policies = registry.Snapshot();
+
+        services.AddOutputCache();
+        services.Configure<OutputCacheOptions>(options =>
+        {
+            foreach (var entry in policies)
+            {
+                var policyOptions = entry.Value;
+                options.AddPolicy(entry.Key, policyBuilder =>
+                {
+                    VapeCacheHttpPolicyApplier.Apply(policyOptions, policyBuilder);
+                });
+            }
+        });
+        RegisterMvcPolicyConvention(services);
 
         return services;
     }
@@ -112,5 +146,40 @@ public static class VapeCacheAspNetCoreCachingExtensions
         return string.IsNullOrWhiteSpace(policyName)
             ? builder.CacheOutput()
             : builder.CacheOutput(policyName);
+    }
+
+    /// <summary>
+    /// Applies inline output-cache behavior for a minimal API endpoint using a VapeCache policy builder.
+    /// </summary>
+    public static RouteHandlerBuilder CacheWithVapeCache(
+        this RouteHandlerBuilder builder,
+        Action<VapeCacheHttpPolicyBuilder> configurePolicy,
+        bool excludeDefaultPolicy = false)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configurePolicy);
+
+        var options = new VapeCacheHttpPolicyOptions();
+        configurePolicy(new VapeCacheHttpPolicyBuilder(options));
+        return builder.CacheOutput(policyBuilder => VapeCacheHttpPolicyApplier.Apply(options, policyBuilder), excludeDefaultPolicy);
+    }
+
+    /// <summary>
+    /// Applies inline output-cache behavior for a minimal API endpoint using options.
+    /// </summary>
+    public static RouteHandlerBuilder CacheWithVapeCache(
+        this RouteHandlerBuilder builder,
+        VapeCacheHttpPolicyOptions policy,
+        bool excludeDefaultPolicy = false)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(policy);
+        return builder.CacheOutput(policyBuilder => VapeCacheHttpPolicyApplier.Apply(policy, policyBuilder), excludeDefaultPolicy);
+    }
+
+    private static void RegisterMvcPolicyConvention(IServiceCollection services)
+    {
+        services.TryAddEnumerable(
+            ServiceDescriptor.Transient<IConfigureOptions<MvcOptions>, VapeCachePolicyMvcOptionsSetup>());
     }
 }
