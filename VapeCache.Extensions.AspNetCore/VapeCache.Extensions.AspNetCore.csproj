@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.AspNetCore</PackageId>
     <Title>VapeCache Extensions for ASP.NET Core</Title>
-    <Version>1.2.7</Version>
+    <Version>1.2.8</Version>
     <Description>ASP.NET Core output cache integration for VapeCache. Registers VapeCache as the backing store for ASP.NET Core output caching.</Description>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
@@ -44,5 +44,6 @@
   </ItemGroup>
 
 </Project>
+
 
 

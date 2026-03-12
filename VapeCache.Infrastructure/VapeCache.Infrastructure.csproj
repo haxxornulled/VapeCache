@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Runtime</PackageId>
     <Title>VapeCache</Title>
-    <Version>1.2.7</Version>
+    <Version>1.2.8</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache</Product>
@@ -62,5 +62,6 @@
   </ItemGroup>
 
 </Project>
+
 
 
