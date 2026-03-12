@@ -282,15 +282,6 @@ public static class RedisTelemetry
         Interlocked.Add(ref _parserBytesTotal, nonNegativeBytes);
     }
 
-    internal static void RecordParserFrame(long bytesParsed, long elapsedStopwatchTicks)
-    {
-        var nonNegativeBytes = Math.Max(0, bytesParsed);
-        ParserFrames.Add(1);
-        ParserBytesParsed.Add(nonNegativeBytes);
-        if (elapsedStopwatchTicks > 0)
-            ParserFrameMs.Record(elapsedStopwatchTicks * 1000d / Stopwatch.Frequency);
-    }
-
     internal static void RegisterQueueDepthProvider(int connectionId, Func<QueueDepthSnapshot> provider)
     {
         QueueDepthProviders[connectionId] = provider;
