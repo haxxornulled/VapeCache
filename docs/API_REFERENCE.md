@@ -219,6 +219,20 @@ Key behavior:
 - `EnableClusterRedirection=true` enables bounded MOVED/ASK retries.
 - `MaxClusterRedirects` limits redirect hops for one command to prevent loops.
 
+### `IRedisConnectionStringBuilder`
+
+Namespace: `VapeCache.Abstractions.Connections`
+
+```csharp
+public interface IRedisConnectionStringBuilder
+{
+    string Build(RedisConnectionOptions options);
+}
+```
+
+Use this builder instead of manual string concatenation when creating `redis://`/`rediss://` URIs.
+It enforces host-only input, TLS-option consistency, and safe IPv6 authority formatting.
+
 ### Named profiles
 
 ```csharp

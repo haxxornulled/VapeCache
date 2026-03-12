@@ -5,6 +5,8 @@ param(
     [int]$MaxDegree = 72,
     [ValidateSet("optimized", "apples", "both")]
     [string]$Track = "both",
+    [ValidateSet("raw", "hybrid")]
+    [string]$VapeExecutorMode = "raw",
     [ValidateSet("FullTilt", "Balanced", "LowLatency", "Custom")]
     [string]$MuxProfile = "FullTilt",
     [int]$MuxConnections = 8,
@@ -207,6 +209,7 @@ $env:VAPECACHE_RUN_COMPARISON = "true"
 $env:VAPECACHE_BENCH_SHOPPERS = "$ShopperCount"
 $env:VAPECACHE_MAX_CART_SIZE = "$MaxCartSize"
 $env:VAPECACHE_BENCH_TRACK = $Track
+$env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE = $VapeExecutorMode
 $env:VAPECACHE_BENCH_CLEANUP_RUN_KEYS = $CleanupRunKeys.ToLowerInvariant()
 $env:VAPECACHE_BENCH_LOG_LEVEL = $BenchLogLevel
 $env:VAPECACHE_GROCERYSTORE_VERBOSE = $GroceryVerbose.ToLowerInvariant()
@@ -237,6 +240,7 @@ Write-Host "Shoppers: $ShopperCount"
 Write-Host "Max cart size: $MaxCartSize"
 Write-Host "Max degree: $(if ($MaxDegree -gt 0) { "$MaxDegree (override)" } else { "auto" })"
 Write-Host "Track: $Track"
+Write-Host "Vape executor mode: $VapeExecutorMode"
 if ($Track -eq "both") {
     Write-Host "Both-track isolation: enabled"
 }
@@ -372,6 +376,8 @@ function Parse-BenchmarkOutput([object[]]$OutputLines) {
 function Invoke-BenchmarkRun([string]$RunTrack) {
     $hadTrack = Test-Path Env:VAPECACHE_BENCH_TRACK
     $previousTrack = $env:VAPECACHE_BENCH_TRACK
+    $hadExecutorMode = Test-Path Env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE
+    $previousExecutorMode = $env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE
     $muxEnvNames = @(
         "VAPECACHE_BENCH_MUX_PROFILE",
         "VAPECACHE_BENCH_MUX_CONNECTIONS",
@@ -387,10 +393,13 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
         $previousMuxEnv[$name] = [Environment]::GetEnvironmentVariable($name)
     }
     $env:VAPECACHE_BENCH_TRACK = $RunTrack
+    $env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE = $VapeExecutorMode
     $settings = Get-EffectiveMuxSettings -RunTrack $RunTrack
     Set-MuxEnvironment -Settings $settings
+    $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
     try {
         Write-Host ("  [TrackConfig] {0}: Profile={1} Connections={2} InFlight={3} Coalesce={4} Adaptive={5} SocketReader={6} DedicatedWorkers={7} TimeoutMs={8}" -f $RunTrack, $settings.Profile, $settings.Connections, $settings.InFlight, $settings.Coalesce, $settings.Adaptive, $settings.SocketReader, $settings.DedicatedWorkers, $settings.ResponseTimeoutMs)
+        $PSNativeCommandUseErrorActionPreference = $false
         $runOutput = @(dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1)
         $parsed = Parse-BenchmarkOutput -OutputLines $runOutput
         return [pscustomobject]@{
@@ -405,6 +414,15 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
         else {
             Remove-Item Env:VAPECACHE_BENCH_TRACK -ErrorAction SilentlyContinue
         }
+
+        if ($hadExecutorMode) {
+            $env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE = $previousExecutorMode
+        }
+        else {
+            Remove-Item Env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE -ErrorAction SilentlyContinue
+        }
+
+        $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
 
         foreach ($name in $muxEnvNames) {
             $value = $previousMuxEnv[$name]

@@ -22,6 +22,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     private readonly Coalescer _coalescer;
     private readonly CoalescedWriteBatch _coalesceBatch = new();
     private readonly SocketSendSegmentWindow _socketSendWindow = new();
+    private readonly SocketIoAwaitableEventArgs _sendArgs = new();
     private readonly ReadOnlyMemory<byte>[][] _coalesceSegmentsPool8 = new ReadOnlyMemory<byte>[8][];
     private int _coalesceSegmentsPool8Count;
     private readonly long[][] _commitOffsetsPool8 = new long[8][];
@@ -276,6 +277,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     public void Dispose()
     {
         _coalesceBatch.Dispose();
+        _sendArgs.Dispose();
         while (_coalesceSegmentsPool8Count > 0)
         {
             var arr = _coalesceSegmentsPool8[--_coalesceSegmentsPool8Count];
@@ -446,7 +448,17 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
                 int sent;
                 try
                 {
-                    sent = await socket.SendAsync(_socketSendWindow, SocketFlags.None).WaitAsync(ct).ConfigureAwait(false);
+                    _sendArgs.ResetForOperation();
+                    _sendArgs.SetBufferList(sendSegments, _socketSendWindow.Head, _socketSendWindow.Count);
+                    if (socket.SendAsync(_sendArgs))
+                    {
+                        _sendArgs.RegisterCancellation(ct);
+                        sent = await _sendArgs.WaitAsync().ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        sent = _sendArgs.CompleteInlineOrThrow();
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -519,6 +531,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         private int _count;
 
         public int Count => _count;
+        public int Head => _head;
 
         public bool IsReadOnly => true;
 

@@ -49,4 +49,39 @@ public sealed class SocketIoAwaitableEventArgsTests
 
         Assert.Throws<ArgumentOutOfRangeException>(() => args.SetBuffer(Array.Empty<ArraySegment<byte>>(), 0));
     }
+
+    [Fact]
+    public void SetBufferList_with_offset_uses_requested_slice()
+    {
+        var args = new SocketIoAwaitableEventArgs();
+        var buffers = new[]
+        {
+            new ArraySegment<byte>(new byte[] { 1, 2 }, 0, 2),
+            new ArraySegment<byte>(new byte[] { 3, 4, 5 }, 1, 2),
+            new ArraySegment<byte>(new byte[] { 6, 7, 8, 9 }, 2, 2)
+        };
+
+        args.SetBufferList(buffers, offset: 1, count: 2);
+        var selected = args.BufferList!.ToArray();
+
+        Assert.Equal(buffers[1], selected[0]);
+        Assert.Equal(buffers[2], selected[1]);
+
+        args.ReturnBufferList();
+    }
+
+    [Fact]
+    public void SetBufferList_throws_for_invalid_offset_and_count_window()
+    {
+        var args = new SocketIoAwaitableEventArgs();
+        var buffers = new[]
+        {
+            new ArraySegment<byte>(new byte[] { 1 }),
+            new ArraySegment<byte>(new byte[] { 2 }),
+            new ArraySegment<byte>(new byte[] { 3 })
+        };
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => args.SetBufferList(buffers, offset: -1, count: 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => args.SetBufferList(buffers, offset: 2, count: 2));
+    }
 }

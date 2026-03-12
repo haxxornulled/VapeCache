@@ -105,6 +105,31 @@ public sealed class RedisCommandExecutorAutoscalerTests
     }
 
     [Fact]
+    public void DedicatedPubSubAndBlockingLanes_AreIsolatedAndReportedInDiagnostics()
+    {
+        using var harness = CreateHarness(new RedisMultiplexerOptions
+        {
+            Connections = 4,
+            BulkLaneConnections = 1,
+            PubSubLaneConnections = 1,
+            BlockingLaneConnections = 1,
+            EnableAutoscaling = false
+        });
+
+        var lanes = harness.Executor.GetMuxLaneSnapshots();
+
+        Assert.Equal(4, lanes.Count);
+        Assert.Contains(lanes, lane => lane.Role == "read-write");
+        Assert.Contains(lanes, lane => lane.Role == "bulk-read-write");
+        Assert.Contains(lanes, lane => lane.Role == "pubsub-read-write");
+        Assert.Contains(lanes, lane => lane.Role == "blocking-read-write");
+        Assert.Equal(1, GetConnectionArray(harness.Executor, "_conns").Length);
+        Assert.Equal(1, GetConnectionArray(harness.Executor, "_bulkConns").Length);
+        Assert.Equal(1, GetConnectionArray(harness.Executor, "_pubSubConns").Length);
+        Assert.Equal(1, GetConnectionArray(harness.Executor, "_blockingConns").Length);
+    }
+
+    [Fact]
     public async Task AutoAdjustBulkLanes_ReconcilesBulkCount_WhenTotalLaneBudgetScales()
     {
         using var harness = CreateHarness(new RedisMultiplexerOptions

@@ -13,13 +13,13 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $repoRoot
 
 function Resolve-SolutionPath {
-    foreach ($candidate in @("VapeCache.slnx", "VapeCache.sln")) {
+    foreach ($candidate in @("VapeCache.slnx")) {
         if (Test-Path $candidate) {
             return $candidate
         }
     }
 
-    throw "Could not find 'VapeCache.slnx' or 'VapeCache.sln' in $repoRoot."
+    throw "Could not find 'VapeCache.slnx' in $repoRoot."
 }
 
 function Invoke-DotNetOrThrow {

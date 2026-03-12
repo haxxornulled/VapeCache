@@ -54,6 +54,22 @@ Equivalent environment variable:
 setx VAPECACHE_REDIS_CONNECTIONSTRING "redis://localhost:6379/0"
 ```
 
+If you build Redis URIs in code, use the runtime builder (don’t manually concatenate strings):
+
+```csharp
+using VapeCache.Abstractions.Connections;
+
+var csBuilder = new RedisConnectionStringBuilder();
+var redisUri = csBuilder.Build(new RedisConnectionOptions
+{
+    Host = "redis.internal",
+    Port = 6380,
+    Database = 0,
+    UseTls = true,
+    TlsHost = "redis.internal"
+});
+```
+
 Cluster + RESP3 (optional):
 
 ```json

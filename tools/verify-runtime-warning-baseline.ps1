@@ -21,13 +21,13 @@ function Resolve-SolutionPath {
         return $RequestedPath
     }
 
-    foreach ($candidate in @("VapeCache.slnx", "VapeCache.sln")) {
+    foreach ($candidate in @("VapeCache.slnx")) {
         if (Test-Path $candidate) {
             return $candidate
         }
     }
 
-    throw "Could not find a solution file. Checked '$RequestedPath', 'VapeCache.slnx', and 'VapeCache.sln'."
+    throw "Could not find a solution file. Checked '$RequestedPath' and 'VapeCache.slnx'."
 }
 
 function Get-RuntimeWarningSnapshot {

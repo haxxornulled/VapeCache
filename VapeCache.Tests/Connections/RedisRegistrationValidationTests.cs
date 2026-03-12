@@ -157,6 +157,7 @@ public sealed class RedisRegistrationValidationTests
         using var container = builder.Build();
 
         Assert.NotNull(container);
+        Assert.NotNull(container.Resolve<IRedisConnectionStringBuilder>());
     }
 
     [Fact]

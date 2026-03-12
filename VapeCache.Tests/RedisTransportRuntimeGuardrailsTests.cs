@@ -100,6 +100,8 @@ public sealed class RedisTransportRuntimeGuardrailsTests
             AutoAdjustBulkLanes = true,
             BulkLaneTargetRatio = double.NaN,
             BulkLaneResponseTimeout = TimeSpan.Zero,
+            PubSubLaneConnections = -1,
+            BlockingLaneConnections = -2,
             MinConnections = 4,
             MaxConnections = 2,
             AutoscaleSampleInterval = TimeSpan.Zero,
@@ -143,6 +145,8 @@ public sealed class RedisTransportRuntimeGuardrailsTests
         Assert.True(effective.AutoAdjustBulkLanes);
         Assert.Equal(0.25, effective.BulkLaneTargetRatio);
         Assert.Equal(TimeSpan.FromSeconds(5), effective.BulkLaneResponseTimeout);
+        Assert.Equal(0, effective.PubSubLaneConnections);
+        Assert.Equal(0, effective.BlockingLaneConnections);
         Assert.Equal(4, effective.MinConnections);
         Assert.Equal(4, effective.MaxConnections);
         Assert.Equal(TimeSpan.FromSeconds(1), effective.AutoscaleSampleInterval);

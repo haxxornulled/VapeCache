@@ -6,7 +6,7 @@ using BenchmarkDotNet.Toolchains.CsProj;
 namespace VapeCache.Benchmarks;
 
 /// <summary>
-/// BenchmarkDotNet's default CsProjGenerator prefers the solution root when a .sln is present and then searches
+/// BenchmarkDotNet's default CsProjGenerator prefers the solution root when a solution file is present and then searches
 /// the entire tree for &lt;AssemblyName&gt;.csproj. If you have two copies of the repository under the same root,
 /// that search finds multiple matches and throws.
 /// This generator resolves the benchmark project's csproj by walking up from the benchmark assembly location
