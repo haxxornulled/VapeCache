@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.DependencyInjection</PackageId>
     <Title>VapeCache Extensions for Dependency Injection</Title>
-    <Version>1.2.7</Version>
+    <Version>1.2.8</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.DependencyInjection</Product>
@@ -45,4 +45,5 @@
   </ItemGroup>
 
 </Project>
+
 
