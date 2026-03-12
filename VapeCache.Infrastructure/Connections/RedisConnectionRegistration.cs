@@ -26,6 +26,7 @@ public static class RedisConnectionRegistration
             ServiceDescriptor.Singleton<IValidateOptions<RedisConnectionOptions>, RedisConnectionOptionsValidator>());
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, RedisConnectionOptionsStartupHostedService>());
+        services.TryAddSingleton<IRedisConnectionStringBuilder, RedisConnectionStringBuilder>();
 
         // Register the raw factory first (without circuit breaker)
         services.AddSingleton<RedisConnectionFactory>();
