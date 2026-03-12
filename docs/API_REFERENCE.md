@@ -410,6 +410,15 @@ services.AddVapeCacheOutputCaching(
         store.DefaultTtl = TimeSpan.FromSeconds(30);
         store.EnableTagIndexing = true;
     });
+
+services.AddVapeCacheAspNetPolicies(policies =>
+{
+    policies.AddPolicy("products", policy => policy
+        .Ttl(TimeSpan.FromMinutes(5))
+        .VaryByQuery()
+        .VaryByHeaders("x-tenant-id")
+        .Tags("products", "catalog"));
+});
 ```
 
 ```csharp
@@ -421,6 +430,22 @@ Minimal API endpoint hook:
 ```csharp
 app.MapGet("/products/{id:int}", (int id) => Results.Ok(new { id }))
    .CacheWithVapeCache();
+
+app.MapGet("/search", (string q) => Results.Ok(new { q }))
+   .CacheWithVapeCache(policy => policy
+       .Ttl(TimeSpan.FromSeconds(60))
+       .VaryByQuery()
+       .Tags("search"));
+
+app.MapGet("/products/{id:int}", (int id) => Results.Ok(new { id }))
+   .CacheWithVapeCache("products");
+```
+
+MVC/controller attribute hook:
+
+```csharp
+[VapeCachePolicy("products", TtlSeconds = 300, VaryByQuery = true, CacheTags = new[] { "products" })]
+public IActionResult GetProduct(int id) => Ok(new { id });
 ```
 
 Store options:

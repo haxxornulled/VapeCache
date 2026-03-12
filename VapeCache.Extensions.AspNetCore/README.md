@@ -38,6 +38,39 @@ app.MapGet("/products/{id:int}", async (int id) => $"product:{id}")
     .CacheWithVapeCache();
 ```
 
+### Named policy registry (dev-friendly)
+
+```csharp
+builder.Services.AddVapeCacheAspNetPolicies(policies =>
+{
+    policies.AddPolicy("products", policy => policy
+        .Ttl(TimeSpan.FromMinutes(5))
+        .Tags("products", "catalog")
+        .VaryByQuery()
+        .VaryByHeaders("x-tenant-id"));
+});
+
+app.MapGet("/products/{id:int}", async (int id) => $"product:{id}")
+    .CacheWithVapeCache("products");
+```
+
+### Inline minimal API policy
+
+```csharp
+app.MapGet("/search", (string q) => Results.Ok($"query:{q}"))
+    .CacheWithVapeCache(policy => policy
+        .Ttl(TimeSpan.FromSeconds(60))
+        .VaryByQuery()
+        .Tags("search"));
+```
+
+### MVC/controller attribute
+
+```csharp
+[VapeCachePolicy("products", TtlSeconds = 300, VaryByQuery = true, CacheTags = new[] { "products" })]
+public IActionResult GetProduct(int id) => Ok(new { id });
+```
+
 For MVC/Blazor endpoints, use ASP.NET Core output cache policies/attributes as usual.  
 This package replaces the default output-cache store with `VapeCacheOutputCacheStore`.
 When `EnableTagIndexing = true`, tag invalidation metadata is stored in VapeCache so tag evictions work across nodes and survive process restarts.
