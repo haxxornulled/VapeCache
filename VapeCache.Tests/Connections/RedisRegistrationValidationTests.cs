@@ -1,8 +1,10 @@
 using Autofac;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
@@ -111,6 +113,22 @@ public sealed class RedisRegistrationValidationTests
     }
 
     [Fact]
+    public async Task ServiceRegistrations_Start_WhenPubSubAndBlockingLanesAreConfiguredWithinBudget()
+    {
+        using var provider = BuildServiceProvider(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal",
+            ["RedisMultiplexer:Connections"] = "4",
+            ["RedisMultiplexer:BulkLaneConnections"] = "1",
+            ["RedisMultiplexer:PubSubLaneConnections"] = "1",
+            ["RedisMultiplexer:BlockingLaneConnections"] = "1"
+        });
+
+        var multiplexerValidator = GetStartupValidator(provider, "RedisMultiplexerOptionsStartupHostedService");
+        await multiplexerValidator.StartAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public void AutofacConnectionsModule_FailsContainerBuild_WhenRedisEndpointIsMissing()
     {
         var builder = new ContainerBuilder();
@@ -149,6 +167,34 @@ public sealed class RedisRegistrationValidationTests
         Assert.False(options.AllowAuthFallbackToPasswordOnly);
     }
 
+    [Fact]
+    public void ServiceRegistrations_ApplyMemoryCacheSizeLimit_FromInMemorySpill()
+    {
+        using var provider = BuildServiceProvider(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal",
+            ["InMemorySpill:MemoryCacheSizeLimitBytes"] = "1024"
+        });
+
+        var memoryOptions = provider.GetRequiredService<IOptions<MemoryCacheOptions>>().Value;
+        Assert.Equal(1024, memoryOptions.SizeLimit);
+    }
+
+    [Fact]
+    public void ServiceRegistrations_Fail_WhenInMemorySpillSizeLimitIsNegative()
+    {
+        using var provider = BuildServiceProvider(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal",
+            ["InMemorySpill:MemoryCacheSizeLimitBytes"] = "-1"
+        });
+
+        var ex = Assert.Throws<OptionsValidationException>(() =>
+            _ = provider.GetRequiredService<IOptions<InMemorySpillOptions>>().Value);
+
+        Assert.Contains("MemoryCacheSizeLimitBytes must be greater than or equal to zero.", ex.Failures);
+    }
+
     private static ServiceProvider BuildServiceProvider(IReadOnlyDictionary<string, string?>? settings = null)
     {
         var configuration = new ConfigurationBuilder();
@@ -165,6 +211,8 @@ public sealed class RedisRegistrationValidationTests
             .Bind(root.GetSection("RedisConnection"));
         services.AddOptions<RedisMultiplexerOptions>()
             .Bind(root.GetSection("RedisMultiplexer"));
+        services.AddOptions<InMemorySpillOptions>()
+            .Bind(root.GetSection("InMemorySpill"));
         return services.BuildServiceProvider();
     }
 

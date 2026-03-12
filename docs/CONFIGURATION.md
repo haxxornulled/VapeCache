@@ -268,6 +268,7 @@ Controls large-payload spill behavior for the in-memory fallback cache.
 ```json
 {
   "InMemorySpill": {
+    "MemoryCacheSizeLimitBytes": 536870912,
     "EnableSpillToDisk": false,
     "SpillThresholdBytes": 262144,
     "InlinePrefixBytes": 4096,
@@ -280,6 +281,7 @@ Controls large-payload spill behavior for the in-memory fallback cache.
 ```
 
 **Notes**
+- `MemoryCacheSizeLimitBytes` sets a hard cap (bytes) for the in-memory fallback cache. Set `0` for default unbounded behavior.
 - Values larger than `SpillThresholdBytes` are stored with an in-memory prefix and a disk tail.
 - `EnableSpillToDisk` requires a writable spill store registration (`AddVapeCachePersistence(...)`); otherwise fallback remains memory-only and emits diagnostics as `mode=noop`.
 - Register a custom `ISpillEncryptionProvider` to encrypt spill files.
@@ -402,6 +404,7 @@ Every option can be overridden via environment variables using `__` as the separ
 $env:RedisConnection__Host = "prod-redis.example.com"
 $env:RedisConnection__Password = "secret"
 $env:RedisCircuitBreaker__ConsecutiveFailuresToOpen = "3"
+$env:InMemorySpill__MemoryCacheSizeLimitBytes = "536870912"
 ```
 
 Connection string override:

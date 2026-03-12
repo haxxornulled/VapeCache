@@ -6,6 +6,12 @@
 public sealed class InMemorySpillOptions
 {
     /// <summary>
+    /// Gets or sets the maximum in-memory fallback cache size budget in bytes.
+    /// Set to 0 to use the default unbounded memory-cache behavior.
+    /// </summary>
+    public long MemoryCacheSizeLimitBytes { get; set; }
+
+    /// <summary>
     /// Gets or sets the enable spill to disk.
     /// </summary>
     public bool EnableSpillToDisk { get; set; }

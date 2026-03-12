@@ -13,7 +13,7 @@ No service locator patterns and no route clutter in `Program.cs`.
 
 ## Minimal API Endpoints (Wrapper Surface)
 
-When you enable endpoint mapping (`WithAutoMappedEndpoints(...)` with `options.Enabled = true` or `MapVapeCacheEndpoints(...)`), the wrapper surface is:
+When you enable endpoint mapping (`WithAutoMappedEndpoints(...)` with `options.Enabled = true` or `MapVapeCacheEndpoints(...)`), the diagnostics wrapper surface is:
 
 - `GET /vapecache/status`
 - `GET /vapecache/stats`
@@ -21,8 +21,10 @@ When you enable endpoint mapping (`WithAutoMappedEndpoints(...)` with `options.E
 - `GET /vapecache/dashboard` (built-in realtime UI)
 - `GET /vapecache/intent/{key}`
 - `GET /vapecache/intent?take=50`
-- optional admin: `POST /vapecache/breaker/force-open`
-- optional admin: `POST /vapecache/breaker/clear`
+- admin control surface (separate prefix): `POST /vapecache/admin/breaker/force-open`
+- admin control surface (separate prefix): `POST /vapecache/admin/breaker/clear`
+
+Use `MapVapeCacheAdminEndpoints(...)` (or `WithAutoMappedEndpoints` with `IncludeBreakerControlEndpoints = true`) for breaker controls and keep that prefix internal-only.
 
 The built-in dashboard is implemented as a Vite + TypeScript frontend under `VapeCache.Extensions.Aspire/dashboard-ui` and served by Aspire endpoints from embedded assets.
 
@@ -392,7 +394,11 @@ builder.AddVapeCache()
     .WithAutoMappedEndpoints(options =>
     {
         options.Enabled = true;
-    });     // /vapecache/status + /vapecache/stats + /vapecache/stream
+        options.AdminPrefix = "/internal/vapecache-admin";
+        options.IncludeBreakerControlEndpoints = true;
+        options.RequireAuthorizationOnAdminEndpoints = true;
+        options.AdminAuthorizationPolicy = "VapeCacheAdmin";
+    });     // /vapecache/status + /vapecache/stats + /vapecache/stream (+ admin controls on AdminPrefix)
 
 var app = builder.Build();
 

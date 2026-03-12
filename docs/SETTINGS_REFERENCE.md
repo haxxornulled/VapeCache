@@ -54,14 +54,17 @@ Options for automatic mapping of VapeCache operational endpoints.
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
-| Enabled | bool | false | (No XML summary.) |
-| Prefix | string | "/vapecache" | (No XML summary.) |
-| IncludeBreakerControlEndpoints | bool | false | (No XML summary.) |
-| IncludeIntentEndpoints | bool | false | (No XML summary.) |
-| EnableLiveStream | bool | false | (No XML summary.) |
-| EnableDashboard | bool | false | (No XML summary.) |
-| LiveSampleInterval | TimeSpan | TimeSpan.FromSeconds(1) | (No XML summary.) |
-| LiveChannelCapacity | int | 256 | (No XML summary.) |
+| Enabled | bool | false | Whether endpoint auto-mapping is enabled. |
+| Prefix | string | "/vapecache" | Route prefix for read-only diagnostics endpoints. |
+| IncludeBreakerControlEndpoints | bool | false | When true, map breaker control endpoints under `AdminPrefix`. |
+| AdminPrefix | string | "/vapecache/admin" | Route prefix for admin-only breaker controls. |
+| RequireAuthorizationOnAdminEndpoints | bool | false | When true, apply `RequireAuthorization()` to auto-mapped admin control endpoints. |
+| AdminAuthorizationPolicy | string? | null | Optional policy name applied to auto-mapped admin control endpoints. |
+| IncludeIntentEndpoints | bool | false | Whether intent inspection endpoints are mapped. |
+| EnableLiveStream | bool | false | Whether the live SSE stream endpoint is mapped. |
+| EnableDashboard | bool | false | Whether the built-in dashboard endpoint is mapped. |
+| LiveSampleInterval | TimeSpan | TimeSpan.FromSeconds(1) | Sampling interval for live metrics feed. |
+| LiveChannelCapacity | int | 256 | Bounded channel capacity for live metrics samples. |
 
 ## PosSearchDemoOptions
 
@@ -240,6 +243,7 @@ Controls how the hybrid cache keeps local in-memory fallback state warm while Re
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
+| MemoryCacheSizeLimitBytes | long | 0 | Gets or sets the maximum in-memory fallback cache size budget in bytes. Set to 0 to use the default unbounded memory-cache behavior. |
 | EnableSpillToDisk | bool | false | (No XML summary.) |
 | SpillThresholdBytes | int | 256 * 1024 | (No XML summary.) |
 | InlinePrefixBytes | int | 4096 | (No XML summary.) |

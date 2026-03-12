@@ -242,6 +242,7 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
         {
             if (options.Ttl is not null)
                 entry.AbsoluteExpirationRelativeToNow = options.Ttl;
+            entry.Size = Math.Max(1L, value.Length);
 
             entry.RegisterPostEvictionCallback(static (_, _, reason, _) =>
             {
@@ -264,6 +265,7 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
             if (options.Ttl is not null)
                 entry.AbsoluteExpirationRelativeToNow = options.Ttl;
 
+            entry.Size = Math.Max(1L, entryValue.TotalLength);
             entry.Value = entryValue;
             entry.RegisterPostEvictionCallback(static (_, value, reason, state) =>
             {
