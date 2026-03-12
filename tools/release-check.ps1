@@ -22,9 +22,10 @@ function Invoke-Step {
 
     Write-Host ""
     Write-Host "==> $Name"
+    Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
     & $Action
-    if ($LASTEXITCODE -ne 0) {
-        throw "Step failed: $Name (exit code: $LASTEXITCODE)"
+    if ($null -ne $global:LASTEXITCODE -and $global:LASTEXITCODE -ne 0) {
+        throw "Step failed: $Name (exit code: $global:LASTEXITCODE)"
     }
 }
 
