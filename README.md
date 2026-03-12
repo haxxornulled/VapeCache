@@ -17,9 +17,10 @@ OSS scope in this repository: production-ready runtime packages for core caching
 
 ## Maturity and Evidence
 
-Current project status: `Early Adoption`.
+Current project status: `Production-Capable`.
 
-- Production-capable features are present, but ecosystem adoption is still building.
+- Production runtime features are in place, including failover paths, stampede controls, reconnect handling, and observability.
+- Stability, compatibility, and release gates are documented and enforced in-repo.
 - Benchmark claims follow strict disclosure rules in [docs/BENCHMARK_CLAIMS_POLICY.md](docs/BENCHMARK_CLAIMS_POLICY.md).
 - Release and compatibility governance is documented in:
   - [docs/STABILITY_POLICY.md](docs/STABILITY_POLICY.md)
