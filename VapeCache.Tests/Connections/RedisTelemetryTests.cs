@@ -29,6 +29,8 @@ public sealed class RedisTelemetryTests
         AssertMetric(measurements, "redis.mux.lane.transport.resets", expectedValue: 0, expectedTags: [("connection.id", "-1")]);
         AssertMetric(measurements, "redis.mux.lane.inflight", expectedValue: 0, expectedTags: [("connection.id", "-1"), ("max_inflight", "0")]);
         AssertMetric(measurements, "redis.mux.lane.inflight.utilization", expectedValue: 0, expectedTags: [("connection.id", "-1")]);
+        AssertMetric(measurements, "redis.parser.frames_per_sec", expectedValue: 0, expectedTags: [("scope", "global")]);
+        AssertMetric(measurements, "redis.parser.bytes_per_sec", expectedValue: 0, expectedTags: [("scope", "global")]);
     }
 
     [Fact]

@@ -19,12 +19,13 @@ Project: `VapeCache.PerfGates.Tests`
 - `AwaitableSocketArgs_SimulatedCompletion_ZeroAlloc` (Tier1, must be 0 B)
 - `RedisMetrics_WithTracingDisabled_DoesNotAllocatePerOperation` (Tier1, must be 0 B)
 - `BurstyDispatch_P95P99_StaysWithinBudget` (Tier2, burst-tail guard)
+- `RedisRespProtocol_HotPath_ThroughputAndTailLatency_StayWithinBudget` (Tier2, GET/SET/MGET/MSET throughput + p95/p99 guard)
 
 Command:
 - `dotnet test -c Release VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj`
 
 ## Standard test suite
-- `dotnet test -c Release VapeCache.sln`
+- `dotnet test -c Release VapeCache.slnx`
 
 ## CI ratio/latency/allocation gates
 - `tools/run-contention-perf-gate.ps1` validates client-suite Vape/SER ratios from BenchmarkDotNet `comparison.md` artifacts.

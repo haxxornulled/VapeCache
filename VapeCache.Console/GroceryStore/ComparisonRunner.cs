@@ -32,6 +32,12 @@ public static class ComparisonRunner
         StackExchangeRedis
     }
 
+    private enum VapeExecutorMode
+    {
+        Raw,
+        HybridFailover
+    }
+
     private readonly record struct HarnessSettings(
         int Runs,
         int WarmupRuns,
@@ -362,9 +368,16 @@ public static class ComparisonRunner
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_MUX_PROFILE"),
             configuration["GroceryStoreComparison:MuxProfile"],
             RedisTransportProfile.FullTilt);
+        var muxBulkLaneConnections = muxConnections <= 1
+            ? 0
+            : Math.Max(1, Math.Min(muxConnections - 1, muxConnections / 4));
+        var executorMode = GetVapeExecutorModeFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_VAPE_EXECUTOR_MODE"),
+            configuration["GroceryStoreComparison:VapeExecutorMode"],
+            VapeExecutorMode.Raw);
 
         System.Console.WriteLine(
-            $"[VapeConfig] Mux.Profile={muxProfile}, Mux.Connections={muxConnections}, Mux.MaxInFlight={muxInFlight}, Mux.Coalesce={muxCoalesce}, Mux.AdaptiveCoalesce={muxAdaptiveCoalescing}, Mux.SocketReader={muxSocketRespReader}, Mux.DedicatedWorkers={muxDedicatedLaneWorkers}, Mux.ResponseTimeoutMs={muxResponseTimeoutMs}");
+            $"[VapeConfig] ExecutorMode={executorMode}, Mux.Profile={muxProfile}, Mux.Connections={muxConnections}, Mux.BulkLanes={muxBulkLaneConnections}, Mux.MaxInFlight={muxInFlight}, Mux.Coalesce={muxCoalesce}, Mux.AdaptiveCoalesce={muxAdaptiveCoalescing}, Mux.SocketReader={muxSocketRespReader}, Mux.DedicatedWorkers={muxDedicatedLaneWorkers}, Mux.ResponseTimeoutMs={muxResponseTimeoutMs}");
         System.Console.WriteLine($"[VapeConfig] KeyPrefix={keyPrefix}");
 
         // Logging
@@ -415,6 +428,12 @@ public static class ComparisonRunner
                 .GetProperty(nameof(RedisMultiplexerOptions.Connections))!
                 .SetValue(options, muxConnections);
             typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.BulkLaneConnections))!
+                .SetValue(options, muxBulkLaneConnections);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.AutoAdjustBulkLanes))!
+                .SetValue(options, false);
+            typeof(RedisMultiplexerOptions)
                 .GetProperty(nameof(RedisMultiplexerOptions.MaxInFlightPerConnection))!
                 .SetValue(options, muxInFlight);
             typeof(RedisMultiplexerOptions)
@@ -432,12 +451,9 @@ public static class ComparisonRunner
             typeof(RedisMultiplexerOptions)
                 .GetProperty(nameof(RedisMultiplexerOptions.ResponseTimeout))!
                 .SetValue(options, muxResponseTimeoutMs <= 0 ? TimeSpan.Zero : TimeSpan.FromMilliseconds(muxResponseTimeoutMs));
-        });
-        services.AddOptions<RedisCircuitBreakerOptions>().Configure(options =>
-        {
-            typeof(RedisCircuitBreakerOptions)
-                .GetProperty(nameof(RedisCircuitBreakerOptions.Enabled))!
-                .SetValue(options, false);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.BulkLaneResponseTimeout))!
+                .SetValue(options, muxResponseTimeoutMs <= 0 ? TimeSpan.FromSeconds(5) : TimeSpan.FromMilliseconds(muxResponseTimeoutMs));
         });
         services.AddOptions<CacheStampedeOptions>().Configure(options =>
         {
@@ -446,15 +462,30 @@ public static class ComparisonRunner
                 .SetValue(options, false);
         });
 
-        RegisterInternalBenchmarkServices(services);
         services.AddVapecacheRedisConnections();
-        services.AddSingleton<IRedisCommandExecutor>(_ =>
+        if (executorMode == VapeExecutorMode.Raw)
         {
-            var executorType = typeof(RedisConnectionRegistration).Assembly.GetType(
-                "VapeCache.Infrastructure.Connections.RedisCommandExecutor",
-                throwOnError: true)!;
-            return (IRedisCommandExecutor)ActivatorUtilities.CreateInstance(_, executorType);
-        });
+            services.AddOptions<RedisCircuitBreakerOptions>().Configure(options =>
+            {
+                typeof(RedisCircuitBreakerOptions)
+                    .GetProperty(nameof(RedisCircuitBreakerOptions.Enabled))!
+                    .SetValue(options, false);
+            });
+
+            RegisterInternalBenchmarkServices(services);
+            services.AddSingleton<IRedisCommandExecutor>(_ =>
+            {
+                var executorType = typeof(RedisConnectionRegistration).Assembly.GetType(
+                    "VapeCache.Infrastructure.Connections.RedisCommandExecutor",
+                    throwOnError: true)!;
+                return (IRedisCommandExecutor)ActivatorUtilities.CreateInstance(_, executorType);
+            });
+        }
+        else
+        {
+            services.AddVapecacheCaching();
+        }
+
         if (track == GroceryComparisonTrack.ApplesToApples)
             services.AddSingleton<IGroceryStoreService>(sp =>
                 new VapeCacheRawParityGroceryStoreService(
@@ -994,6 +1025,23 @@ public static class ComparisonRunner
             "low-latency" => RedisTransportProfile.LowLatency,
             "latency" => RedisTransportProfile.LowLatency,
             "custom" => RedisTransportProfile.Custom,
+            _ => fallback
+        };
+    }
+
+    private static VapeExecutorMode GetVapeExecutorModeFromSources(string? envValue, string? configValue, VapeExecutorMode fallback)
+    {
+        var resolved = !string.IsNullOrWhiteSpace(envValue) ? envValue : configValue;
+        if (string.IsNullOrWhiteSpace(resolved))
+            return fallback;
+
+        return resolved.Trim().ToLowerInvariant() switch
+        {
+            "raw" => VapeExecutorMode.Raw,
+            "hybrid" => VapeExecutorMode.HybridFailover,
+            "hybridfailover" => VapeExecutorMode.HybridFailover,
+            "hybrid-failover" => VapeExecutorMode.HybridFailover,
+            "resilient" => VapeExecutorMode.HybridFailover,
             _ => fallback
         };
     }

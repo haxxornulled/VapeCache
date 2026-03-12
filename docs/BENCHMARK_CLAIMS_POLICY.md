@@ -7,6 +7,13 @@ This policy defines how VapeCache benchmark claims are written and published.
 Keep benchmark messaging factual, reproducible, and useful for engineering decisions.  
 Avoid marketing-style "winner" claims without context.
 
+## Executor Mode
+
+- `raw`: benchmark mode for head-to-head throughput claims. This bypasses VapeCache hybrid failover and disables the Redis circuit breaker for the VapeCache provider.
+- `hybrid`: resiliency drill mode. This uses the normal hybrid executor and circuit breaker so Redis shutdown tests exercise failover instead of surfacing raw transport exceptions.
+
+Do not use `hybrid` mode for authoritative VapeCache-vs-SER throughput claims.
+
 ## Report Classes
 
 Use both classes and label them explicitly in every report.
@@ -73,7 +80,7 @@ A release claim is acceptable only when all are true:
 Before publishing benchmark claims for a commit, run:
 
 ```powershell
-dotnet build VapeCache.sln -c Release
+dotnet build VapeCache.slnx -c Release
 dotnet test VapeCache.Tests/VapeCache.Tests.csproj -c Release
 dotnet test VapeCache.PerfGates.Tests/VapeCache.PerfGates.Tests.csproj -c Release
 ```
@@ -88,6 +95,7 @@ Strict/fair grocery report:
 powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -Trials 5 `
   -Track both `
+  -VapeExecutorMode raw `
   -DisableTrackDefaults `
   -ShopperCount 50000 `
   -MaxCartSize 40 `
@@ -100,7 +108,19 @@ Tuned/showcase grocery report:
 powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -Trials 5 `
   -Track both `
+  -VapeExecutorMode raw `
   -ShopperCount 50000 `
   -MaxCartSize 40 `
   -FailBelowRatio 1.0
+```
+
+Failover drill:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
+  -Trials 1 `
+  -Track apples `
+  -VapeExecutorMode hybrid `
+  -ShopperCount 10000 `
+  -MaxCartSize 40
 ```

@@ -40,6 +40,7 @@ internal static class RedisRuntimeOptionsNormalizer
     private const int MaxAutoscaleConnections = 256;
     private const int MinBulkLaneConnections = 0;
     private const int MaxBulkLaneConnections = MaxMultiplexerConnections - 1;
+    private const int MinReservedRoleLaneConnections = 0;
     private const double MinPositiveThreshold = 0.01d;
     private const double MinBulkLaneTargetRatio = 0d;
     private const double MaxBulkLaneTargetRatio = 0.90d;
@@ -192,6 +193,8 @@ internal static class RedisRuntimeOptionsNormalizer
         var autoAdjustBulkLanes = profiled.AutoAdjustBulkLanes;
         var bulkLaneTargetRatio = NormalizeBulkLaneTargetRatio(profiled.BulkLaneTargetRatio);
         var bulkLaneResponseTimeout = NormalizePositive(profiled.BulkLaneResponseTimeout, DefaultBulkLaneResponseTimeout);
+        var pubSubLaneConnections = Math.Max(MinReservedRoleLaneConnections, profiled.PubSubLaneConnections);
+        var blockingLaneConnections = Math.Max(MinReservedRoleLaneConnections, profiled.BlockingLaneConnections);
         var autoscaleSampleInterval = NormalizePositive(profiled.AutoscaleSampleInterval, DefaultAutoscaleSampleInterval);
         var scaleUpWindow = NormalizePositive(profiled.ScaleUpWindow, DefaultScaleUpWindow);
         var scaleDownWindow = NormalizePositive(profiled.ScaleDownWindow, DefaultScaleDownWindow);
@@ -231,6 +234,8 @@ internal static class RedisRuntimeOptionsNormalizer
             AutoAdjustBulkLanes = autoAdjustBulkLanes,
             BulkLaneTargetRatio = bulkLaneTargetRatio,
             BulkLaneResponseTimeout = bulkLaneResponseTimeout,
+            PubSubLaneConnections = pubSubLaneConnections,
+            BlockingLaneConnections = blockingLaneConnections,
             MinConnections = minConnections,
             MaxConnections = maxConnections,
             AutoscaleSampleInterval = autoscaleSampleInterval,

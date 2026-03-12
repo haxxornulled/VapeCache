@@ -78,7 +78,6 @@ public static class RedisTelemetry
     /// Defines the bytes received.
     /// </summary>
     public static readonly Counter<long> BytesReceived = Meter.CreateCounter<long>("redis.bytes.received");
-    /// <summary>
     /// Defines the coalesced write batches.
     /// </summary>
     public static readonly Counter<long> CoalescedWriteBatches = Meter.CreateCounter<long>("redis.coalesced.batches");
@@ -116,6 +115,14 @@ public static class RedisTelemetry
 
     private static readonly ConcurrentDictionary<int, Func<QueueDepthSnapshot>> QueueDepthProviders = new();
     private static readonly ConcurrentDictionary<int, Func<MuxLaneUsageSnapshot>> MuxLaneUsageProviders = new();
+    private static long _parserFramesTotal;
+    private static long _parserBytesTotal;
+    private static long _parserRateLastFramesTotal;
+    private static long _parserRateLastBytesTotal;
+    private static long _parserRateLastTimestamp = Stopwatch.GetTimestamp();
+    private static double _parserFramesPerSecond;
+    private static double _parserBytesPerSecond;
+    private static int _parserRateUpdateInProgress;
 
     /// <summary>
     /// Executes create observable gauge.
@@ -215,6 +222,22 @@ public static class RedisTelemetry
         ObserveMuxLaneInFlightUtilization,
         unit: "ratio",
         description: "Current in-flight utilization (0..1) on each mux lane");
+    /// <summary>
+    /// Executes create observable gauge.
+    /// </summary>
+    public static readonly ObservableGauge<double> ParserFramesPerSecond = Meter.CreateObservableGauge(
+        "redis.parser.frames_per_sec",
+        ObserveParserFramesPerSecond,
+        unit: "frames/s",
+        description: "Estimated top-level RESP frames parsed per second");
+    /// <summary>
+    /// Executes create observable gauge.
+    /// </summary>
+    public static readonly ObservableGauge<double> ParserBytesPerSecond = Meter.CreateObservableGauge(
+        "redis.parser.bytes_per_sec",
+        ObserveParserBytesPerSecond,
+        unit: "bytes/s",
+        description: "Estimated top-level RESP bytes parsed per second");
 
     internal static void EnsureInitialized()
     {
@@ -229,12 +252,34 @@ public static class RedisTelemetry
         _ = MuxLaneTransportResets;
         _ = MuxLaneInFlight;
         _ = MuxLaneInFlightUtilization;
+        _ = ParserFramesPerSecond;
+        _ = ParserBytesPerSecond;
     }
 
     internal static void ResetForTesting()
     {
         QueueDepthProviders.Clear();
         MuxLaneUsageProviders.Clear();
+        Volatile.Write(ref _parserFramesTotal, 0);
+        Volatile.Write(ref _parserBytesTotal, 0);
+        Volatile.Write(ref _parserRateLastFramesTotal, 0);
+        Volatile.Write(ref _parserRateLastBytesTotal, 0);
+        Volatile.Write(ref _parserFramesPerSecond, 0d);
+        Volatile.Write(ref _parserBytesPerSecond, 0d);
+        Volatile.Write(ref _parserRateLastTimestamp, Stopwatch.GetTimestamp());
+        Volatile.Write(ref _parserRateUpdateInProgress, 0);
+    }
+
+    internal static void RecordParserFrame(long bytesParsed, long elapsedStopwatchTicks)
+    {
+        var nonNegativeBytes = Math.Max(0, bytesParsed);
+        ParserFrames.Add(1);
+        ParserBytesParsed.Add(nonNegativeBytes);
+        if (elapsedStopwatchTicks > 0)
+            ParserFrameMs.Record(elapsedStopwatchTicks * 1000d / Stopwatch.Frequency);
+
+        Interlocked.Increment(ref _parserFramesTotal);
+        Interlocked.Add(ref _parserBytesTotal, nonNegativeBytes);
     }
 
     internal static void RecordParserFrame(long bytesParsed, long elapsedStopwatchTicks)
@@ -570,6 +615,62 @@ public static class RedisTelemetry
             yield return new Measurement<double>(
                 utilization,
                 new TagList { { "connection.id", entry.Key } });
+        }
+    }
+
+    private static IEnumerable<Measurement<double>> ObserveParserFramesPerSecond()
+    {
+        UpdateParserRateSnapshot();
+        yield return new Measurement<double>(
+            Volatile.Read(ref _parserFramesPerSecond),
+            new TagList { { "scope", "global" } });
+    }
+
+    private static IEnumerable<Measurement<double>> ObserveParserBytesPerSecond()
+    {
+        UpdateParserRateSnapshot();
+        yield return new Measurement<double>(
+            Volatile.Read(ref _parserBytesPerSecond),
+            new TagList { { "scope", "global" } });
+    }
+
+    private static void UpdateParserRateSnapshot()
+    {
+        var now = Stopwatch.GetTimestamp();
+        var previous = Volatile.Read(ref _parserRateLastTimestamp);
+        var elapsedTicks = now - previous;
+        if (elapsedTicks <= Stopwatch.Frequency / 4)
+            return;
+
+        if (Interlocked.CompareExchange(ref _parserRateUpdateInProgress, 1, 0) != 0)
+            return;
+
+        try
+        {
+            now = Stopwatch.GetTimestamp();
+            previous = Volatile.Read(ref _parserRateLastTimestamp);
+            elapsedTicks = now - previous;
+            if (elapsedTicks <= 0)
+                return;
+
+            var elapsedSeconds = elapsedTicks / (double)Stopwatch.Frequency;
+            var framesTotal = Volatile.Read(ref _parserFramesTotal);
+            var bytesTotal = Volatile.Read(ref _parserBytesTotal);
+            var lastFrames = Volatile.Read(ref _parserRateLastFramesTotal);
+            var lastBytes = Volatile.Read(ref _parserRateLastBytesTotal);
+
+            var frameDelta = Math.Max(0, framesTotal - lastFrames);
+            var bytesDelta = Math.Max(0, bytesTotal - lastBytes);
+
+            Volatile.Write(ref _parserFramesPerSecond, frameDelta / elapsedSeconds);
+            Volatile.Write(ref _parserBytesPerSecond, bytesDelta / elapsedSeconds);
+            Volatile.Write(ref _parserRateLastFramesTotal, framesTotal);
+            Volatile.Write(ref _parserRateLastBytesTotal, bytesTotal);
+            Volatile.Write(ref _parserRateLastTimestamp, now);
+        }
+        finally
+        {
+            Volatile.Write(ref _parserRateUpdateInProgress, 0);
         }
     }
 

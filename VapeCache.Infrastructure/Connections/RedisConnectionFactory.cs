@@ -15,9 +15,18 @@ namespace VapeCache.Infrastructure.Connections;
 
 internal sealed partial class RedisConnectionFactory(
     IOptionsMonitor<RedisConnectionOptions> options,
+    IRedisConnectionStringBuilder connectionStringBuilder,
     ILogger<RedisConnectionFactory> logger,
     IEnumerable<IRedisConnectionObserver> observers) : IRedisConnectionFactory
 {
+    internal RedisConnectionFactory(
+        IOptionsMonitor<RedisConnectionOptions> options,
+        ILogger<RedisConnectionFactory> logger,
+        IEnumerable<IRedisConnectionObserver> observers)
+        : this(options, new RedisConnectionStringBuilder(), logger, observers)
+    {
+    }
+
     private int _disposed;
     private static long _ids;
     private int _loggedConnectionStringResolution;
@@ -63,6 +72,12 @@ internal sealed partial class RedisConnectionFactory(
         Stream? stream = null;
         try
         {
+            // Canonicalize/validate the final runtime endpoint through the builder before dialing sockets.
+            effective = effective with
+            {
+                ConnectionString = connectionStringBuilder.Build(effective)
+            };
+
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(effective.ConnectTimeout);
 

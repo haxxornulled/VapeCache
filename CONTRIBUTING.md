@@ -13,12 +13,12 @@ Thanks for your interest in improving VapeCache. This guide keeps the repo consi
 
 ## Build
 ```bash
-dotnet build VapeCache.sln -c Release
+dotnet build VapeCache.slnx -c Release
 ```
 
 ## Test
 ```bash
-dotnet test VapeCache.sln -c Release
+dotnet test VapeCache.slnx -c Release
 ```
 
 Integration tests require Redis. Configure via:

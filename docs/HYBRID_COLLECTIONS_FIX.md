@@ -351,7 +351,7 @@ await _store.SaveSessionAsync(sessionId, session);  // HASH
 ## Build Verification
 
 ```bash
-dotnet build "c:\Visual Studio Projects\VapeCache\VapeCache.sln"
+dotnet build "c:\Visual Studio Projects\VapeCache\VapeCache.slnx"
 ```
 
 **Result:**

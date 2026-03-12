@@ -35,6 +35,39 @@ builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
 ```
 
+## Safe Connection String Building (Junior-Friendly)
+
+If you need to build a Redis URI in code, use `RedisConnectionStringBuilder` instead of hand-writing strings.
+If your host is Autofac-based, you can resolve `IRedisConnectionStringBuilder` from the container.
+
+```csharp
+using VapeCache.Abstractions.Connections;
+
+var options = new RedisConnectionOptions
+{
+    Host = "redis.internal",
+    Port = 6380,
+    Database = 0,
+    Username = "svc-cache",
+    Password = "secret",
+    UseTls = true,
+    TlsHost = "redis.internal"
+};
+
+var builder = new RedisConnectionStringBuilder();
+var connectionString = builder.Build(options);
+// rediss://svc-cache:secret@redis.internal:6380/0?tls=true&sni=redis.internal
+```
+
+Rules enforced by the builder:
+
+- `Host` must be host-only (no `redis://` prefix and no `:port` suffix).
+- `Username` requires a non-empty `Password`.
+- `TlsHost` and `AllowInvalidCert` require `UseTls=true`.
+- Raw IPv6 hosts are normalized to bracketed authority format.
+
+This same builder is now used in the runtime connection factory to validate/canonicalize the effective connection endpoint before socket connect.
+
 ## RedisConnection (RedisConnectionOptions)
 
 Controls connection pooling and socket behavior.

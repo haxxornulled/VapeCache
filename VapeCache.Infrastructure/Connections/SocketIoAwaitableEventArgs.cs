@@ -55,8 +55,14 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
     /// Sets value.
     /// </summary>
     public void SetBufferList(ArraySegment<byte>[] buffers, int count)
+        => SetBufferList(buffers, 0, count);
+
+    /// <summary>
+    /// Sets value.
+    /// </summary>
+    public void SetBufferList(ArraySegment<byte>[] buffers, int offset, int count)
     {
-        if ((uint)count == 0 || count > buffers.Length)
+        if ((uint)count == 0 || offset < 0 || count > buffers.Length - offset)
             throw new ArgumentOutOfRangeException(nameof(count));
 
         BufferList = null;
@@ -83,7 +89,7 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
             subset = new ArraySegment<byte>[count];
         }
 
-        Array.Copy(buffers, 0, subset, 0, count);
+        Array.Copy(buffers, offset, subset, 0, count);
         for (var i = count; i < subset.Length; i++)
             subset[i] = EmptySegment;
 

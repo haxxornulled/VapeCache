@@ -127,17 +127,35 @@ internal sealed class RedisMultiplexerOptionsValidator : IValidateOptions<RedisM
         if (!options.AutoAdjustBulkLanes && options.BulkLaneConnections > 0 && options.Connections <= 1)
             AddFailure(ref failures, "RedisMultiplexer:BulkLaneConnections requires RedisMultiplexer:Connections > 1 for lane isolation.");
 
+        var fixedReservedLaneConnections = options.PubSubLaneConnections + options.BlockingLaneConnections;
+        if (options.Connections > 0 && fixedReservedLaneConnections >= options.Connections)
+            AddFailure(ref failures, "RedisMultiplexer:PubSubLaneConnections + RedisMultiplexer:BlockingLaneConnections must be <= RedisMultiplexer:Connections - 1.");
+
+        if (!options.AutoAdjustBulkLanes &&
+            options.Connections > 0 &&
+            options.BulkLaneConnections + fixedReservedLaneConnections >= options.Connections)
+            AddFailure(ref failures, "RedisMultiplexer:BulkLaneConnections + RedisMultiplexer:PubSubLaneConnections + RedisMultiplexer:BlockingLaneConnections must be <= RedisMultiplexer:Connections - 1.");
+
         if (options.BulkLaneResponseTimeout <= TimeSpan.Zero)
             AddFailure(ref failures, "RedisMultiplexer:BulkLaneResponseTimeout must be > 0.");
 
+        var scalableLaneBudget = options.Connections > 0
+            ? Math.Max(1, options.Connections - fixedReservedLaneConnections)
+            : 1;
         var bulkLaneIsolationEnabled = options.AutoAdjustBulkLanes
-            ? options.Connections > 1 && options.BulkLaneTargetRatio > 0
-            : options.BulkLaneConnections > 0;
+            ? scalableLaneBudget > 1 && options.BulkLaneTargetRatio > 0
+            : options.BulkLaneConnections > 0 && scalableLaneBudget > 1;
 
         if (bulkLaneIsolationEnabled &&
             options.ResponseTimeout > TimeSpan.Zero &&
             options.BulkLaneResponseTimeout < options.ResponseTimeout)
             AddFailure(ref failures, "RedisMultiplexer:BulkLaneResponseTimeout must be >= RedisMultiplexer:ResponseTimeout when bulk lanes are enabled.");
+
+        if (options.PubSubLaneConnections < 0)
+            AddFailure(ref failures, "RedisMultiplexer:PubSubLaneConnections must be >= 0.");
+
+        if (options.BlockingLaneConnections < 0)
+            AddFailure(ref failures, "RedisMultiplexer:BlockingLaneConnections must be >= 0.");
 
         if (options.EmergencyScaleUpTimeoutRatePerSecThreshold <= 0)
             AddFailure(ref failures, "RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold must be > 0.");
