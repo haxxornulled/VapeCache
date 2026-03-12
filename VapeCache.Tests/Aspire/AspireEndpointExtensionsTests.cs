@@ -2,8 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -126,6 +128,50 @@ public sealed class AspireEndpointExtensionsTests
 
         Assert.Equal(HttpStatusCode.NotFound, byKey.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, recent.StatusCode);
+    }
+
+    [Fact]
+    public async Task MapVapeCacheAdminEndpoints_MapsBreakerControl_OnDedicatedPrefix()
+    {
+        await using var app = await CreateAdminOnlyAppAsync(prefix: "/internal/vapecache-admin");
+        using var client = app.GetTestClient();
+
+        var open = await client.PostAsJsonAsync(
+            "/internal/vapecache-admin/breaker/force-open",
+            new VapeCacheForceOpenRequest("admin-surface-test"));
+        Assert.Equal(HttpStatusCode.OK, open.StatusCode);
+
+        var clear = await client.PostAsync("/internal/vapecache-admin/breaker/clear", content: null);
+        Assert.Equal(HttpStatusCode.OK, clear.StatusCode);
+
+        var status = await client.GetAsync("/internal/vapecache-admin/status");
+        Assert.Equal(HttpStatusCode.NotFound, status.StatusCode);
+    }
+
+    [Fact]
+    public async Task MapVapeCacheAdminEndpoints_CanRequireAuthorization_WithPolicy()
+    {
+        const string policy = "VapeCacheAdmin";
+        await using var app = await CreateAdminOnlyAppAsync(
+            prefix: "/internal/vapecache-admin",
+            requireAuthorization: true,
+            authorizationPolicy: policy);
+
+        var endpoints = app.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Where(static e => e.RoutePattern.RawText is not null)
+            .ToArray();
+
+        var controlEndpoints = endpoints
+            .Where(static e => e.RoutePattern.RawText!.StartsWith("/internal/vapecache-admin/breaker/", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.NotEmpty(controlEndpoints);
+        foreach (var endpoint in controlEndpoints)
+        {
+            var metadata = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>();
+            Assert.Contains(metadata, x => string.Equals(x.Policy, policy, StringComparison.Ordinal));
+        }
     }
 
     [Fact]
@@ -272,6 +318,59 @@ public sealed class AspireEndpointExtensionsTests
         Assert.Equal(HttpStatusCode.NotFound, status.StatusCode);
     }
 
+    [Fact]
+    public async Task WithAutoMappedEndpoints_MapsBreakerControl_OnDedicatedAdminPrefix()
+    {
+        await using var app = await CreateAutoMappedAppAsync(
+            enabled: true,
+            includeBreakerControlEndpoints: true,
+            prefix: "/vapecache",
+            adminPrefix: "/internal/vapecache-admin");
+        using var client = app.GetTestClient();
+
+        var legacyOpen = await client.PostAsJsonAsync(
+            "/vapecache/breaker/force-open",
+            new VapeCacheForceOpenRequest("legacy"));
+        Assert.Equal(HttpStatusCode.NotFound, legacyOpen.StatusCode);
+
+        var adminOpen = await client.PostAsJsonAsync(
+            "/internal/vapecache-admin/breaker/force-open",
+            new VapeCacheForceOpenRequest("admin"));
+        Assert.Equal(HttpStatusCode.OK, adminOpen.StatusCode);
+
+        var adminClear = await client.PostAsync("/internal/vapecache-admin/breaker/clear", content: null);
+        Assert.Equal(HttpStatusCode.OK, adminClear.StatusCode);
+    }
+
+    [Fact]
+    public async Task WithAutoMappedEndpoints_CanRequireAuthorization_OnAdminControlPrefix()
+    {
+        const string policy = "VapeCacheAdmin";
+        await using var app = await CreateAutoMappedAppAsync(
+            enabled: true,
+            includeBreakerControlEndpoints: true,
+            prefix: "/vapecache",
+            adminPrefix: "/internal/vapecache-admin",
+            requireAuthorizationOnAdminEndpoints: true,
+            adminAuthorizationPolicy: policy);
+
+        var endpoints = app.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Where(static e => e.RoutePattern.RawText is not null)
+            .ToArray();
+
+        var controlEndpoints = endpoints
+            .Where(static e => e.RoutePattern.RawText!.StartsWith("/internal/vapecache-admin/breaker/", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.NotEmpty(controlEndpoints);
+        foreach (var endpoint in controlEndpoints)
+        {
+            var metadata = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>();
+            Assert.Contains(metadata, x => string.Equals(x.Policy, policy, StringComparison.Ordinal));
+        }
+    }
+
     private static async Task<WebApplication> CreateAppAsync(
         bool includeBreakerControlEndpoints,
         string prefix = "/vapecache",
@@ -317,7 +416,13 @@ public sealed class AspireEndpointExtensionsTests
         return app;
     }
 
-    private static async Task<WebApplication> CreateAutoMappedAppAsync(bool enabled)
+    private static async Task<WebApplication> CreateAutoMappedAppAsync(
+        bool enabled,
+        bool includeBreakerControlEndpoints = false,
+        string prefix = "/vapecache",
+        string adminPrefix = "/vapecache/admin",
+        bool requireAuthorizationOnAdminEndpoints = false,
+        string? adminAuthorizationPolicy = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -332,8 +437,11 @@ public sealed class AspireEndpointExtensionsTests
             .WithAutoMappedEndpoints(options =>
             {
                 options.Enabled = enabled;
-                options.Prefix = "/vapecache";
-                options.IncludeBreakerControlEndpoints = false;
+                options.Prefix = prefix;
+                options.AdminPrefix = adminPrefix;
+                options.IncludeBreakerControlEndpoints = includeBreakerControlEndpoints;
+                options.RequireAuthorizationOnAdminEndpoints = requireAuthorizationOnAdminEndpoints;
+                options.AdminAuthorizationPolicy = adminAuthorizationPolicy;
                 options.IncludeIntentEndpoints = true;
                 options.EnableLiveStream = true;
                 options.EnableDashboard = true;
@@ -343,6 +451,31 @@ public sealed class AspireEndpointExtensionsTests
             .Bind(builder.Configuration.GetSection("RedisConnection"));
 
         var app = builder.Build();
+        await app.StartAsync();
+        return app;
+    }
+
+    private static async Task<WebApplication> CreateAdminOnlyAppAsync(
+        string prefix,
+        bool requireAuthorization = false,
+        string? authorizationPolicy = null)
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal"
+        });
+        builder.Services.AddVapecacheRedisConnections();
+        builder.Services.AddVapecacheCaching();
+        builder.Services.AddOptions<RedisConnectionOptions>()
+            .Bind(builder.Configuration.GetSection("RedisConnection"));
+
+        var app = builder.Build();
+        app.MapVapeCacheAdminEndpoints(prefix, requireAuthorization, authorizationPolicy);
         await app.StartAsync();
         return app;
     }

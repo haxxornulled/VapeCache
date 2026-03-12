@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+using System.Text.Json;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -29,6 +30,13 @@ public static class CacheRegistration
 
         services.AddMemoryCache();
         services.AddOptions<InMemorySpillOptions>();
+        services.AddOptions<MemoryCacheOptions>()
+            .Configure<IOptions<InMemorySpillOptions>>((memoryOptions, spillOptions) =>
+            {
+                var configuredSizeLimit = spillOptions.Value.MemoryCacheSizeLimitBytes;
+                if (configuredSizeLimit > 0)
+                    memoryOptions.SizeLimit = configuredSizeLimit;
+            });
         services.AddOptions<HybridFailoverOptions>();
         services.AddOptions<RedisPubSubOptions>()
             .ValidateOnStart();
@@ -118,6 +126,9 @@ public static class CacheRegistration
             .Validate(o => o.FallbackMirrorWriteTtlWhenMissing > TimeSpan.Zero, "FallbackMirrorWriteTtlWhenMissing must be greater than zero.")
             .Validate(o => o.MaxMirrorPayloadBytes >= 0, "MaxMirrorPayloadBytes must be greater than or equal to zero.")
             .ValidateOnStart();
+        services.AddOptions<InMemorySpillOptions>()
+            .Validate(o => o.MemoryCacheSizeLimitBytes >= 0, "MemoryCacheSizeLimitBytes must be greater than or equal to zero.")
+            .ValidateOnStart();
         // Default cache service is the hybrid implementation with stampede protection applied directly.
         services.AddSingleton<StampedeProtectedCacheService>(sp => new StampedeProtectedCacheService(
             sp.GetRequiredService<HybridCacheService>(),
@@ -164,3 +175,4 @@ public static class CacheRegistration
                 SampledAtUtc: DateTimeOffset.UtcNow);
     }
 }
+

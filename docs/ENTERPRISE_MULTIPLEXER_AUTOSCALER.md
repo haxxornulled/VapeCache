@@ -159,8 +159,8 @@ When endpoints are enabled:
 - `GET /vapecache/status`
 - `GET /vapecache/stats`
 - `GET /vapecache/stream` (SSE)
-- optional: `POST /vapecache/breaker/force-open`
-- optional: `POST /vapecache/breaker/clear`
+- optional admin-only: `POST /vapecache/admin/breaker/force-open`
+- optional admin-only: `POST /vapecache/admin/breaker/clear`
 
 Autoscaler diagnostics payload fields:
 

@@ -281,6 +281,16 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .Validate(static o => o.MaxMirrorPayloadBytes >= 0, "HybridFailover:MaxMirrorPayloadBytes must be >= 0.")
             .ValidateOnStart();
 
+        services
+            .AddOptions<InMemorySpillOptions>()
+            .Bind(context.Configuration.GetSection("InMemorySpill"))
+            .Validate(static o => o.MemoryCacheSizeLimitBytes >= 0, "InMemorySpill:MemoryCacheSizeLimitBytes must be >= 0.")
+            .Validate(static o => o.SpillThresholdBytes >= 0, "InMemorySpill:SpillThresholdBytes must be >= 0.")
+            .Validate(static o => o.InlinePrefixBytes >= 0, "InMemorySpill:InlinePrefixBytes must be >= 0.")
+            .Validate(static o => o.OrphanCleanupInterval >= TimeSpan.Zero, "InMemorySpill:OrphanCleanupInterval must be >= 0.")
+            .Validate(static o => o.OrphanMaxAge >= TimeSpan.Zero, "InMemorySpill:OrphanMaxAge must be >= 0.")
+            .ValidateOnStart();
+
         // Grocery Store Demo Services
         services.AddSingleton<VapeCache.Console.GroceryStore.GroceryStoreService>();
         services.AddHostedService<VapeCache.Console.GroceryStore.GroceryStoreStressTest>();

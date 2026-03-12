@@ -21,7 +21,9 @@ builder.AddVapeCache()
     {
         options.Enabled = true;
         options.Prefix = "/vapecache";
-        options.IncludeBreakerControlEndpoints = false;
+        options.IncludeBreakerControlEndpoints = true;
+        options.RequireAuthorizationOnAdminEndpoints = true;
+        options.AdminAuthorizationPolicy = "VapeCacheAdmin";
     });
 
 var app = builder.Build();
@@ -33,8 +35,8 @@ Mapped routes:
 - `GET /vapecache/status`
 - `GET /vapecache/stats`
 - `GET /vapecache/stream` (SSE realtime channel, `event: vapecache-stats`)
-- `POST /vapecache/breaker/force-open` (optional when enabled)
-- `POST /vapecache/breaker/clear` (optional when enabled)
+- `POST /vapecache/admin/breaker/force-open` (optional when enabled)
+- `POST /vapecache/admin/breaker/clear` (optional when enabled)
 
 `/status` and `/stats` include stampede protection counters:
 - `stampedeKeyRejected`
@@ -94,7 +96,7 @@ This runs the same typed collection APIs (`LIST`, `SET`, `HASH`, simple cache) t
 
 ## 4) Security Notes
 
-- Keep breaker-control routes behind authN/authZ.
+- Keep breaker-control routes on a separate internal admin prefix with authN/authZ.
 - Use read-only status routes for public diagnostics.
 - Do not expose force-open/clear routes without explicit protection.
 

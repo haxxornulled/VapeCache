@@ -57,10 +57,19 @@ public static class AspireEndpointAutoMapExtensions
                 {
                     endpointRouteBuilder.MapVapeCacheEndpoints(
                         endpointOptions.Prefix,
-                        endpointOptions.IncludeBreakerControlEndpoints,
+                        includeBreakerControlEndpoints: false,
                         endpointOptions.EnableLiveStream,
                         endpointOptions.IncludeIntentEndpoints,
                         endpointOptions.EnableDashboard);
+
+                    if (endpointOptions.IncludeBreakerControlEndpoints)
+                    {
+                        endpointRouteBuilder.MapVapeCacheAdminEndpoints(
+                            endpointOptions.AdminPrefix,
+                            endpointOptions.RequireAuthorizationOnAdminEndpoints,
+                            endpointOptions.AdminAuthorizationPolicy);
+                    }
+
                     return;
                 }
 
@@ -69,10 +78,18 @@ public static class AspireEndpointAutoMapExtensions
                 {
                     endpoints.MapVapeCacheEndpoints(
                         endpointOptions.Prefix,
-                        endpointOptions.IncludeBreakerControlEndpoints,
+                        includeBreakerControlEndpoints: false,
                         endpointOptions.EnableLiveStream,
                         endpointOptions.IncludeIntentEndpoints,
                         endpointOptions.EnableDashboard);
+
+                    if (endpointOptions.IncludeBreakerControlEndpoints)
+                    {
+                        endpoints.MapVapeCacheAdminEndpoints(
+                            endpointOptions.AdminPrefix,
+                            endpointOptions.RequireAuthorizationOnAdminEndpoints,
+                            endpointOptions.AdminAuthorizationPolicy);
+                    }
                 });
             };
         }

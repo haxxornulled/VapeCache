@@ -38,7 +38,8 @@ public sealed class VapeCacheDependencyInjectionExtensionsTests
                 ["RedisMultiplexer:Connections"] = "6",
                 ["RedisCircuitBreaker:ConsecutiveFailuresToOpen"] = "4",
                 ["HybridFailover:FallbackWarmReadTtl"] = "00:02:00",
-                ["CacheStampede:MaxKeys"] = "64000"
+                ["CacheStampede:MaxKeys"] = "64000",
+                ["InMemorySpill:MemoryCacheSizeLimitBytes"] = "1048576"
             })
             .Build();
 
@@ -52,6 +53,7 @@ public sealed class VapeCacheDependencyInjectionExtensionsTests
         var breaker = provider.GetRequiredService<IOptions<RedisCircuitBreakerOptions>>().Value;
         var failover = provider.GetRequiredService<IOptions<HybridFailoverOptions>>().Value;
         var stampede = provider.GetRequiredService<IOptions<CacheStampedeOptions>>().Value;
+        var spill = provider.GetRequiredService<IOptions<InMemorySpillOptions>>().Value;
 
         Assert.Equal("redis.internal", connection.Host);
         Assert.Equal(6380, connection.Port);
@@ -60,6 +62,7 @@ public sealed class VapeCacheDependencyInjectionExtensionsTests
         Assert.Equal(4, breaker.ConsecutiveFailuresToOpen);
         Assert.Equal(TimeSpan.FromMinutes(2), failover.FallbackWarmReadTtl);
         Assert.Equal(64000, stampede.MaxKeys);
+        Assert.Equal(1_048_576, spill.MemoryCacheSizeLimitBytes);
     }
 
     [Fact]
@@ -79,6 +82,7 @@ public sealed class VapeCacheDependencyInjectionExtensionsTests
         {
             options.BindRedisConnection = false;
             options.BindCacheStampede = false;
+            options.BindInMemorySpill = false;
         });
         services.AddOptions<RedisConnectionOptions>()
             .Bind(configuration.GetSection("ManualRedis"));
@@ -87,8 +91,10 @@ public sealed class VapeCacheDependencyInjectionExtensionsTests
 
         var connection = provider.GetRequiredService<IOptions<RedisConnectionOptions>>().Value;
         var stampede = provider.GetRequiredService<IOptions<CacheStampedeOptions>>().Value;
+        var spill = provider.GetRequiredService<IOptions<InMemorySpillOptions>>().Value;
 
         Assert.NotEqual("redis.internal", connection.Host);
         Assert.NotEqual(75000, stampede.MaxKeys);
+        Assert.Equal(0, spill.MemoryCacheSizeLimitBytes);
     }
 }

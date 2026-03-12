@@ -9,7 +9,7 @@ You get service discovery, health checks, telemetry, and wrapper endpoints in on
 ✅ **Health Checks** - Redis connectivity and circuit breaker monitoring
 ✅ **Telemetry** - Cache hit/miss metrics visible in Aspire Dashboard
 ✅ **Distributed Tracing** - End-to-end traces for Redis operations
-✅ **Wrapper Endpoints** - `MapVapeCacheEndpoints(...)` for status/stats/admin surfaces
+✅ **Wrapper Endpoints** - `MapVapeCacheEndpoints(...)` for diagnostics and `MapVapeCacheAdminEndpoints(...)` for control routes
 ✅ **SEQ by Default** - OTLP exporter falls back to Seq when no endpoint is configured
 ✅ **Fluent Telemetry API** - `.UseSeq(...)`, custom headers, and wrapper callbacks
 ✅ **Fluent Stampede Profiles** - `.WithCacheStampedeProfile(...)` with optional overrides
@@ -307,27 +307,39 @@ Maps wrapper-facing HTTP endpoints:
 - `GET {prefix}/dashboard` (built-in realtime dashboard UI, optional)
 - `GET {prefix}/dashboard/dashboard.js` (dashboard script)
 - `GET {prefix}/dashboard/dashboard.css` (dashboard styles)
-- `POST {prefix}/breaker/force-open` (optional)
-- `POST {prefix}/breaker/clear` (optional)
+- optional legacy: `POST {prefix}/breaker/force-open`
+- optional legacy: `POST {prefix}/breaker/clear`
 
 Minimal API contract notes:
 - `status` returns backend state, cache stats, breaker state, and autoscaler diagnostics (when available).
 - `stats` returns cache counters + hit-rate + autoscaler diagnostics (when available).
 - `stream` emits SSE `event: vapecache-stats` frames with the live sample payload.
-- breaker endpoints are intentionally opt-in and should be protected with authN/authZ.
+- control endpoints are intentionally opt-in and should be mapped on an internal admin prefix.
 
 ```csharp
 var app = builder.Build();
 
 app.MapVapeCacheEndpoints("/vapecache");
 
-// Optional admin controls (protect with authN/authZ):
-app.MapVapeCacheEndpoints(
-    prefix: "/vapecache-admin",
-    includeBreakerControlEndpoints: true,
-    includeLiveStreamEndpoint: true,
-    includeIntentEndpoints: true,
-    includeDashboardEndpoint: true);
+// Admin controls on an internal control-plane prefix:
+app.MapVapeCacheAdminEndpoints("/internal/vapecache-admin");
+```
+
+### `MapVapeCacheAdminEndpoints(prefix = "/vapecache/admin", requireAuthorization = false, authorizationPolicy = null)`
+
+Maps admin-only breaker control endpoints:
+
+- `POST {prefix}/breaker/force-open`
+- `POST {prefix}/breaker/clear`
+
+Set `requireAuthorization: true` to apply `RequireAuthorization()` in one line, or pass `authorizationPolicy` for `RequireAuthorization(policy)`.
+Keep this prefix internal-only.
+
+```csharp
+app.MapVapeCacheAdminEndpoints(
+    prefix: "/internal/vapecache-admin",
+    requireAuthorization: true,
+    authorizationPolicy: "VapeCacheAdmin");
 ```
 
 `GET {prefix}/status` and `GET {prefix}/stats` include the stampede hardening counters:
@@ -441,13 +453,18 @@ builder.AddVapeCache()
     {
         options.Enabled = true;
         options.Prefix = "/cache";
-        options.IncludeBreakerControlEndpoints = false;
+        options.AdminPrefix = "/internal/cache-admin";
+        options.IncludeBreakerControlEndpoints = true;
+        options.RequireAuthorizationOnAdminEndpoints = true;
+        options.AdminAuthorizationPolicy = "VapeCacheAdmin";
         options.EnableLiveStream = true;
         options.EnableDashboard = true;
         options.LiveSampleInterval = TimeSpan.FromMilliseconds(500);
         options.LiveChannelCapacity = 512;
     });
 ```
+
+When `IncludeBreakerControlEndpoints` is enabled, auto-mapping keeps `Prefix` read-only and maps control routes under `AdminPrefix`.
 
 Dashboard UI frontend source is maintained in `VapeCache.Extensions.Aspire/dashboard-ui` (Vite + TypeScript).
 To rebuild the shipped dashboard assets (`DashboardAssets/`):

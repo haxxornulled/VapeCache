@@ -31,6 +31,11 @@ public sealed class VapeCacheConfigurationBindingOptions
     public string CacheStampedeSectionName { get; set; } = "CacheStampede";
 
     /// <summary>
+    /// Gets or sets the in-memory spill/fallback options section name.
+    /// </summary>
+    public string InMemorySpillSectionName { get; set; } = "InMemorySpill";
+
+    /// <summary>
     /// Gets or sets a value indicating whether Redis connection options are bound.
     /// </summary>
     public bool BindRedisConnection { get; set; } = true;
@@ -54,4 +59,9 @@ public sealed class VapeCacheConfigurationBindingOptions
     /// Gets or sets a value indicating whether cache stampede options are bound.
     /// </summary>
     public bool BindCacheStampede { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether in-memory spill/fallback options are bound.
+    /// </summary>
+    public bool BindInMemorySpill { get; set; } = true;
 }

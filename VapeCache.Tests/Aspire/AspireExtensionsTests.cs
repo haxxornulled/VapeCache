@@ -106,6 +106,9 @@ public sealed class AspireExtensionsTests
         Assert.False(options.EnableLiveStream);
         Assert.False(options.EnableDashboard);
         Assert.False(options.IncludeBreakerControlEndpoints);
+        Assert.Equal("/vapecache/admin", options.AdminPrefix);
+        Assert.False(options.RequireAuthorizationOnAdminEndpoints);
+        Assert.Null(options.AdminAuthorizationPolicy);
     }
 
     [Fact]

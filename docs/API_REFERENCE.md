@@ -351,6 +351,11 @@ app.MapVapeCacheEndpoints(
     includeLiveStreamEndpoint: true,
     includeIntentEndpoints: true,
     includeDashboardEndpoint: true);
+
+app.MapVapeCacheAdminEndpoints(
+    prefix: "/internal/vapecache-admin",
+    requireAuthorization: true,
+    authorizationPolicy: "VapeCacheAdmin");
 ```
 
 Default wrapper routes:
@@ -360,8 +365,12 @@ Default wrapper routes:
 - `GET /vapecache/dashboard`
 - `GET /vapecache/intent/{key}`
 - `GET /vapecache/intent?take=50`
-- `POST /vapecache/breaker/force-open` (opt-in)
-- `POST /vapecache/breaker/clear` (opt-in)
+
+Admin-only control routes (map on a separate internal prefix):
+- `POST /vapecache/admin/breaker/force-open` (opt-in)
+- `POST /vapecache/admin/breaker/clear` (opt-in)
+
+Use `requireAuthorization: true` (or a named `authorizationPolicy`) to enforce auth on the admin control group in one call.
 
 Status/stats payloads include spill diagnostics:
 - `spill.mode` (`noop` or `file`)
@@ -457,7 +466,7 @@ public interface ISpillStoreDiagnostics
 - Redis/network failures can propagate from the Redis executor.
 - Hybrid cache mode can fail over to in-memory behavior based on breaker state.
 - Stampede lock-wait timeout surfaces as `TimeoutException`.
-- Wrapper breaker control endpoints should be protected with authN/authZ when enabled.
+- Wrapper breaker control endpoints should be mapped on an internal admin prefix with authN/authZ when enabled.
 
 Bottom line: autoscaling, wrapper endpoints, and extra diagnostics are operational layers. Core cache correctness does not depend on them.
 

@@ -48,6 +48,9 @@ public sealed class VapeCacheDependencyInjectionBuilder
         if (options.BindCacheStampede && !string.IsNullOrWhiteSpace(options.CacheStampedeSectionName))
             Services.AddOptions<CacheStampedeOptions>().Bind(configuration.GetSection(options.CacheStampedeSectionName));
 
+        if (options.BindInMemorySpill && !string.IsNullOrWhiteSpace(options.InMemorySpillSectionName))
+            Services.AddOptions<InMemorySpillOptions>().Bind(configuration.GetSection(options.InMemorySpillSectionName));
+
         return this;
     }
 

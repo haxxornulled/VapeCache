@@ -272,35 +272,49 @@ public static class AspireEndpointExtensions
 
         if (includeBreakerControlEndpoints)
         {
-            group.MapPost("/breaker/force-open", static (
-                VapeCacheForceOpenRequest? request,
-                IRedisFailoverController failover) =>
-            {
-                var reason = string.IsNullOrWhiteSpace(request?.Reason)
-                    ? "manual-force-open"
-                    : request.Reason.Trim();
-
-                failover.ForceOpen(reason);
-                return Results.Ok(new VapeCacheBreakerControlResponse(
-                    IsForcedOpen: failover.IsForcedOpen,
-                    Reason: failover.Reason));
-            })
-            .WithName("VapeCacheBreakerForceOpen")
-            .WithMetadata(new IgnoreAntiforgeryTokenAttribute())
-            .DisableAntiforgery();
-
-            group.MapPost("/breaker/clear", static (IRedisFailoverController failover) =>
-            {
-                failover.ClearForcedOpen();
-                return Results.Ok(new VapeCacheBreakerControlResponse(
-                    IsForcedOpen: failover.IsForcedOpen,
-                    Reason: failover.Reason));
-            })
-            .WithName("VapeCacheBreakerClear")
-            .WithMetadata(new IgnoreAntiforgeryTokenAttribute())
-            .DisableAntiforgery();
+            MapBreakerControlEndpoints(group);
         }
 
+        return group;
+    }
+
+    /// <summary>
+    /// Maps admin-only breaker control routes under a dedicated prefix.
+    /// Use this for internal management surfaces instead of exposing control routes on public API paths.
+    /// </summary>
+    /// <param name="endpoints">Endpoint route builder.</param>
+    /// <param name="prefix">Admin route prefix (default: /vapecache/admin).</param>
+    /// <param name="requireAuthorization">
+    /// When true, applies <c>RequireAuthorization()</c> to the admin route group.
+    /// </param>
+    /// <param name="authorizationPolicy">
+    /// Optional policy name. When provided, applies <c>RequireAuthorization(policy)</c> to the admin route group.
+    /// </param>
+    /// <returns>A route group builder for additional customization.</returns>
+    public static RouteGroupBuilder MapVapeCacheAdminEndpoints(
+        this IEndpointRouteBuilder endpoints,
+        string prefix = "/vapecache/admin",
+        bool requireAuthorization = false,
+        string? authorizationPolicy = null)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+        if (string.IsNullOrWhiteSpace(prefix))
+            throw new ArgumentException("Endpoint prefix is required.", nameof(prefix));
+
+        var normalizedPrefix = NormalizePrefix(prefix);
+        var group = endpoints.MapGroup(normalizedPrefix)
+            .WithTags("VapeCacheAdmin");
+
+        if (!string.IsNullOrWhiteSpace(authorizationPolicy))
+        {
+            group.RequireAuthorization(authorizationPolicy);
+        }
+        else if (requireAuthorization)
+        {
+            group.RequireAuthorization();
+        }
+
+        MapBreakerControlEndpoints(group);
         return group;
     }
 
@@ -378,6 +392,37 @@ npm run build</code></pre>
         string IndexHtml,
         string Script,
         string Style);
+
+    private static void MapBreakerControlEndpoints(RouteGroupBuilder group)
+    {
+        group.MapPost("/breaker/force-open", static (
+            VapeCacheForceOpenRequest? request,
+            IRedisFailoverController failover) =>
+        {
+            var reason = string.IsNullOrWhiteSpace(request?.Reason)
+                ? "manual-force-open"
+                : request.Reason.Trim();
+
+            failover.ForceOpen(reason);
+            return Results.Ok(new VapeCacheBreakerControlResponse(
+                IsForcedOpen: failover.IsForcedOpen,
+                Reason: failover.Reason));
+        })
+        .WithName("VapeCacheBreakerForceOpen")
+        .WithMetadata(new IgnoreAntiforgeryTokenAttribute())
+        .DisableAntiforgery();
+
+        group.MapPost("/breaker/clear", static (IRedisFailoverController failover) =>
+        {
+            failover.ClearForcedOpen();
+            return Results.Ok(new VapeCacheBreakerControlResponse(
+                IsForcedOpen: failover.IsForcedOpen,
+                Reason: failover.Reason));
+        })
+        .WithName("VapeCacheBreakerClear")
+        .WithMetadata(new IgnoreAntiforgeryTokenAttribute())
+        .DisableAntiforgery();
+    }
 }
 
 /// <summary>
