@@ -1,33 +1,33 @@
 # Production Readiness Criteria
 
-This document defines objective gates for moving from "promising OSS" to "default production dependency."
+This document defines objective gates for sustaining production quality and maturing toward ecosystem default status.
 
 ## Current Status
 
-Current status: `Early Adoption`
+Current status: `Production-Capable (Active Hardening)`
 
 Interpretation:
 
-- usable for evaluation and controlled production pilots
-- not yet presented as ecosystem default
+- suitable for production use with documented runbooks and release controls
+- reliability hardening and ecosystem rollout continue in public
 - benchmark claims are constrained by `docs/BENCHMARK_CLAIMS_POLICY.md`
 
 ## Readiness Levels
 
-### Level 0: Early Adoption
+### Level 1: Production-Capable
 
 - CI/release pipelines are green
 - package install and restore work from NuGet
 - docs are aligned with package names and install flow
 
-### Level 1: Production Candidate
+### Level 2: Production-Scaled
 
 - sustained zero P0 regressions for 60 days
 - release runbook followed for at least two successful releases
 - NuGet consumer validation workflow is green for 30 consecutive days
 - reconnect/failover drills pass in CI and one external environment
 
-### Level 2: Production Default
+### Level 3: Production Default
 
 - sustained zero P0 regressions for 90 days
 - at least 3 external production references or case studies
@@ -71,5 +71,5 @@ Adoption is tracked, not guessed:
 - external contributor count
 - external production reports
 
-Until Level 2 is achieved, messaging should remain "production-capable with active hardening."
+Until Level 3 is achieved, messaging should remain "production-capable with active hardening."
 
