@@ -22,7 +22,10 @@ public sealed class VapeCacheConnectionsModule : Module
         RegisterStaticOptions(builder, new RedisCircuitBreakerOptions());
         builder.RegisterType<RedisConnectionOptionsValidator>().AsSelf().SingleInstance();
         builder.RegisterType<RedisConnectionOptionsStartupValidator>().As<IStartable>().SingleInstance();
-        builder.RegisterType<RedisConnectionStringBuilder>().As<IRedisConnectionStringBuilder>().SingleInstance();
+        builder.RegisterType<RedisConnectionStringBuilder>()
+            .As<IRedisConnectionStringBuilder>()
+            .SingleInstance()
+            .IfNotRegistered(typeof(IRedisConnectionStringBuilder));
 
         builder.RegisterType<RedisConnectionFactory>().AsSelf().SingleInstance();
         builder.RegisterType<CircuitBreakerRedisConnectionFactory>().As<IRedisConnectionFactory>().SingleInstance();

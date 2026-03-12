@@ -19,6 +19,7 @@ public sealed class VapeCacheDependencyInjectionExtensionsTests
         Assert.NotNull(builder);
         Assert.Contains(services, static d => d.ServiceType == typeof(IRedisConnectionFactory));
         Assert.Contains(services, static d => d.ServiceType == typeof(IRedisConnectionPool));
+        Assert.Contains(services, static d => d.ServiceType == typeof(IRedisConnectionStringBuilder));
         Assert.Contains(services, static d => d.ServiceType == typeof(ICacheService));
         Assert.Contains(services, static d => d.ServiceType == typeof(IVapeCache));
 
