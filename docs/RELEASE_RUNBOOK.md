@@ -40,6 +40,8 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
    - `VapeCache.Features.Invalidation`
    - `VapeCache.Runtime`
    - `VapeCache.Extensions.DependencyInjection`
+   - `VapeCache.Extensions.Logging`
+   - `VapeCache.Extensions.PubSub`
    - `VapeCache.Extensions.AspNetCore`
    - `VapeCache.Extensions.Aspire`
 6. Push the release commit/tag to the public OSS repo.

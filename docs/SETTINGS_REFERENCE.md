@@ -45,6 +45,22 @@ Runtime options for scraping redis_exporter and projecting Redis server metrics 
 | PollInterval | TimeSpan | TimeSpan.FromSeconds(5) | Polling cadence for exporter scrapes. |
 | RequestTimeout | TimeSpan | TimeSpan.FromSeconds(2) | Per-request timeout for exporter scrapes. |
 
+## RedisPubSubOptions
+
+Controls Redis pub/sub delivery behavior.
+
+- Namespace: VapeCache.Abstractions.Connections
+- Source: VapeCache.Abstractions/Connections/RedisPubSubOptions.cs
+- Configuration Section: RedisPubSub
+
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| Enabled | bool | true | Enables Redis pub/sub service registration and message processing. |
+| DeliveryQueueCapacity | int | 512 | Per-subscription delivery queue capacity before backpressure handling applies. |
+| DropOldestOnBackpressure | bool | true | When true, drops oldest queued message first when the queue is full; otherwise drops newest. |
+| ReconnectDelayMin | TimeSpan | TimeSpan.FromMilliseconds(250) | Initial delay before reconnecting subscriber connection after failures. |
+| ReconnectDelayMax | TimeSpan | TimeSpan.FromSeconds(5) | Maximum reconnect backoff delay for subscriber connection retries. |
+
 ## VapeCacheEndpointOptions
 
 Options for automatic mapping of VapeCache operational endpoints.

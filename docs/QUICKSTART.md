@@ -27,6 +27,18 @@ Optional, if you want DI-facade wiring (clean architecture style):
 dotnet add package VapeCache.Extensions.DependencyInjection
 ```
 
+Optional, if you want centralized Serilog + OTEL logging wiring:
+
+```bash
+dotnet add package VapeCache.Extensions.Logging
+```
+
+Optional, if you need Redis pub/sub:
+
+```bash
+dotnet add package VapeCache.Extensions.PubSub
+```
+
 ## 2. Run Redis
 
 ```bash
@@ -89,6 +101,8 @@ Use this when wiring services directly:
 ```csharp
 using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Extensions.Logging;
+using VapeCache.Extensions.PubSub;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 
@@ -98,6 +112,7 @@ builder.Services.AddOptions<RedisConnectionOptions>()
     .Bind(builder.Configuration.GetSection("RedisConnection"));
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCachePubSub(); // optional: only when pub/sub is required
 
 builder.Services.AddOptions<CacheStampedeOptions>()
     .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
@@ -110,13 +125,30 @@ builder.Services.AddOptions<CacheStampedeOptions>()
     .Bind(builder.Configuration.GetSection("CacheStampede"));
 ```
 
+Optional production logging baseline:
+
+```csharp
+using Serilog;
+using VapeCache.Extensions.Logging;
+
+builder.Host.UseSerilog((context, services, loggerConfig) =>
+{
+    loggerConfig.ConfigureVapeCacheLogging(
+        context.Configuration,
+        services,
+        context.HostingEnvironment.EnvironmentName);
+});
+```
+
 Alternative with DI facade package:
 
 ```csharp
 using VapeCache.Extensions.DependencyInjection;
+using VapeCache.Extensions.PubSub;
 using VapeCache.Abstractions.Caching;
 
 builder.Services.AddVapeCache(builder.Configuration)
+    .UseRedisPubSub(builder.Configuration)
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced);
 ```
 

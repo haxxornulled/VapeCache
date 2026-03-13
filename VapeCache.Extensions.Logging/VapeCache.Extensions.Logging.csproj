@@ -6,14 +6,14 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>true</IsPackable>
-    <PackageId>VapeCache.Runtime</PackageId>
-    <Title>VapeCache</Title>
+    <PackageId>VapeCache.Extensions.Logging</PackageId>
+    <Title>VapeCache Extensions for Logging</Title>
     <Version>1.2.9</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
-    <Product>VapeCache</Product>
-    <Description>Redis transport and caching runtime for VapeCache. Includes multiplexed connections, circuit breaking, pooling, and OpenTelemetry hooks for production cache workloads.</Description>
-    <PackageTags>redis;cache;distributed-cache;circuit-breaker;opentelemetry;dotnet</PackageTags>
+    <Product>VapeCache.Extensions.Logging</Product>
+    <Description>Centralized Serilog and OpenTelemetry logging wiring for VapeCache hosts. Includes production-safe level defaults and optional file, Seq, console, and OTEL sinks.</Description>
+    <PackageTags>logging;serilog;opentelemetry;file-sink;seq;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
@@ -24,7 +24,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.9 release: stabilized Redis telemetry parser metrics, hardened connection registration across DI and Autofac, and refreshed production-capable documentation.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.9 release: extracted enterprise-grade Serilog + OTEL logging wiring into a dedicated package with optional rolling file sink support.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
@@ -36,26 +36,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="VapeCache.Tests" />
-    <InternalsVisibleTo Include="VapeCache.Benchmarks" />
-    <InternalsVisibleTo Include="VapeCache.Benchmarks.Runner" />
-    <InternalsVisibleTo Include="VapeCache.PerfGates.Tests" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Autofac" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
-    <PackageReference Include="Polly" Version="8.6.5" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
+    <PackageReference Include="Serilog" Version="4.3.0" />
+    <PackageReference Include="Serilog.Enrichers.Span" Version="3.1.0" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.OpenTelemetry" Version="4.2.0" />
+    <PackageReference Include="Serilog.Sinks.Seq" Version="9.0.0" />
   </ItemGroup>
 
 </Project>
-
-
-
-

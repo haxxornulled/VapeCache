@@ -404,23 +404,6 @@ ALERT RedisBreakerOpen
   }
 ```
 
-## Future Extensions
-
-### VapeCache.Extensions.Serilog (Planned)
-- VapeCache-specific enrichers (ConnectionId, PoolSize, etc.)
-- Pre-configured SEQ sink with recommended settings
-- Custom Serilog formatter for VapeCache events
-
-### VapeCache.Extensions.OpenTelemetry (Planned)
-- `AddVapeCacheMetrics()` extension
-- `AddVapeCacheTracing()` extension
-- Pre-configured exporters (Prometheus, Zipkin, Jaeger)
-
-### VapeCache.Extensions.HealthChecks (Planned)
-- Redis connectivity health check
-- Pool health check (idle count, faulted connections)
-- Cache hit rate health check
-
 ## Summary
 
 | Aspect | Status | Notes |
@@ -429,8 +412,8 @@ ALERT RedisBreakerOpen
 | **OpenTelemetry Metrics** | ✅ Production-ready | 20+ metrics covering Redis, pool, cache |
 | **OpenTelemetry Tracing** | ✅ Production-ready | Distributed tracing with Activity spans |
 | **SEQ Integration** | ✅ Works today | VapeCache.Console has example config |
-| **.NET Aspire Integration** | 🚧 Planned | VapeCache.Extensions.Aspire package (2 weeks) |
-| **Prometheus Integration** | 🚧 Planned | VapeCache.Extensions.OpenTelemetry package (2 weeks) |
+| **.NET Aspire Integration** | ✅ Works today | VapeCache.Extensions.Aspire package |
+| **Prometheus Integration** | ✅ Works today | Standard OpenTelemetry exporter wiring |
 | **Application Insights** | ✅ Works today | Standard OpenTelemetry integration |
 | **Performance Impact** | ✅ Minimal | 1-2% CPU overhead with telemetry enabled |
 

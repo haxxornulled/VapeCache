@@ -156,7 +156,10 @@ public sealed class RedisCommandExecutorTests
     {
         var method = typeof(RedisCommandExecutor).GetMethod(
             "MapGetResponseAsync",
-            BindingFlags.NonPublic | BindingFlags.Static);
+            BindingFlags.NonPublic | BindingFlags.Static,
+            binder: null,
+            types: new[] { typeof(ValueTask<RedisRespReader.RespValue>) },
+            modifiers: null);
         Assert.NotNull(method);
 
         var valueTask = new ValueTask<RedisRespReader.RespValue>(resp);

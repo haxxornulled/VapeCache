@@ -139,7 +139,7 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
 
         _subscriberWakeup.Release();
 
-        if (sendSubscribe)
+        if (sendSubscribe && !_subscriberNeedsResubscribe)
         {
             try
             {
@@ -266,7 +266,7 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
 
     private async ValueTask SendSubscribeAsync(string channel, CancellationToken ct)
     {
-        await EnsureSubscriberConnectedAndResubscribedAsync(ct).ConfigureAwait(false);
+        await EnsureSubscriberConnectionAsync(ct).ConfigureAwait(false);
         var command = BuildSubscribeCommand(channel);
 
         await _subscriberSendGate.WaitAsync(ct).ConfigureAwait(false);
@@ -283,13 +283,17 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
 
     private async ValueTask SendUnsubscribeAsync(string channel, CancellationToken ct)
     {
-        await EnsureSubscriberConnectedAndResubscribedAsync(ct).ConfigureAwait(false);
+        if (_subscriberNeedsResubscribe)
+            return;
+
         var command = BuildUnsubscribeCommand(channel);
 
         await _subscriberSendGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var connection = _subscriberConnection ?? throw new InvalidOperationException("Subscriber connection is unavailable.");
+            var connection = Volatile.Read(ref _subscriberConnection);
+            if (connection is null)
+                return;
             await SendCommandAsync(connection, command, ct).ConfigureAwait(false);
         }
         finally
@@ -306,6 +310,28 @@ internal sealed partial class RedisPubSubService : IRedisPubSubService
         var created = await _factory.CreateOrThrowAsync(ct).ConfigureAwait(false);
         _publisherConnection = created;
         _publisherReader = new RedisRespReaderState(created.Stream);
+    }
+
+    private async ValueTask EnsureSubscriberConnectionAsync(CancellationToken ct)
+    {
+        if (_subscriberConnection is not null && _subscriberReader is not null)
+            return;
+
+        await _subscriberConnectionGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_subscriberConnection is not null && _subscriberReader is not null)
+                return;
+
+            var created = await _factory.CreateOrThrowAsync(ct).ConfigureAwait(false);
+            _subscriberConnection = created;
+            _subscriberReader = new RedisRespReaderState(created.Stream);
+            _subscriberNeedsResubscribe = true;
+        }
+        finally
+        {
+            _subscriberConnectionGate.Release();
+        }
     }
 
     private async ValueTask EnsureSubscriberConnectedAndResubscribedAsync(CancellationToken ct)

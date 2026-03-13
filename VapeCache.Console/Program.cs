@@ -14,6 +14,7 @@ using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Console.Hosting;
 using VapeCache.Console.Plugins;
+using VapeCache.Extensions.Logging;
 using VapeCache.Infrastructure.Connections;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.DependencyInjection;
@@ -68,7 +69,10 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
     })
     .UseSerilog(static (context, services, loggerConfig) =>
     {
-        loggerConfig.ConfigureVapeCacheLogging(context.Configuration, services);
+        loggerConfig.ConfigureVapeCacheLogging(
+            context.Configuration,
+            services,
+            context.HostingEnvironment.EnvironmentName);
     })
     .ConfigureServices(static (context, services) =>
     {

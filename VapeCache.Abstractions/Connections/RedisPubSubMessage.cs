@@ -5,5 +5,5 @@ namespace VapeCache.Abstractions.Connections;
 /// </summary>
 public readonly record struct RedisPubSubMessage(
     string Channel,
-    byte[] Payload,
+    ReadOnlyMemory<byte> Payload,
     DateTimeOffset ReceivedAtUtc);

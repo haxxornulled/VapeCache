@@ -41,7 +41,7 @@ public sealed class RedisPubSubIntegrationTests
             channel,
             (message, _) =>
             {
-                var text = System.Text.Encoding.UTF8.GetString(message.Payload);
+                var text = System.Text.Encoding.UTF8.GetString(message.Payload.Span);
                 if (string.Equals(text, expectedPayload, StringComparison.Ordinal))
                     received.TrySetResult(text);
                 return ValueTask.CompletedTask;

@@ -49,6 +49,18 @@ If you want a DI composition facade for clean architecture wiring:
 dotnet add package VapeCache.Extensions.DependencyInjection
 ```
 
+If you want centralized Serilog + OTEL logging wiring with rolling file sink support:
+
+```bash
+dotnet add package VapeCache.Extensions.Logging
+```
+
+If you need Redis pub/sub support:
+
+```bash
+dotnet add package VapeCache.Extensions.PubSub
+```
+
 2. Run Redis
 
 ```bash
@@ -75,6 +87,8 @@ docker run --name vapecache-redis -p 6379:6379 -d redis:7
 ```csharp
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Extensions.Logging;
+using VapeCache.Extensions.PubSub;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 
@@ -85,6 +99,7 @@ builder.Services.AddOptions<RedisConnectionOptions>()
 
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCachePubSub(); // optional: only when pub/sub is needed
 
 builder.Services.AddOptions<CacheStampedeOptions>()
     .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
@@ -151,6 +166,8 @@ See:
 | `VapeCache.Abstractions` | Public contracts and option/value types |
 | `VapeCache.Features.Invalidation` | Optional key/tag/zone invalidation policies |
 | `VapeCache.Extensions.DependencyInjection` | One-call IServiceCollection wiring facade for runtime + config binding |
+| `VapeCache.Extensions.Logging` | Optional Serilog + OTEL logging wiring with file/Seq/console sinks |
+| `VapeCache.Extensions.PubSub` | Optional Redis pub/sub package (publish/subscribe, bounded queues, reconnect/resubscribe) |
 | `VapeCache.Extensions.AspNetCore` | ASP.NET Core output-cache integration |
 | `VapeCache.Extensions.Aspire` | Aspire wiring, health checks, endpoint helpers |
 

@@ -1,26 +1,33 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using Serilog;
 using Serilog.Events;
 using Serilog.Sinks.OpenTelemetry;
 using System.Globalization;
 
-namespace VapeCache.Infrastructure.DependencyInjection;
+namespace VapeCache.Extensions.Logging;
 
 /// <summary>
-/// Centralizes Serilog host configuration in the infrastructure boundary.
+/// Centralized Serilog host configuration for VapeCache hosts.
 /// </summary>
 public static class VapeCacheSerilogExtensions
 {
     private const string DefaultConsoleOutputTemplate = "[{Timestamp:HH:mm:ss} {Level:u3}] ({TraceId}:{SpanId}) {Message:lj}{NewLine}{Exception}";
 
     /// <summary>
-    /// Executes configure vape cache logging.
+    /// Configures Serilog sinks and defaults for VapeCache hosts.
     /// </summary>
     public static LoggerConfiguration ConfigureVapeCacheLogging(
         this LoggerConfiguration loggerConfiguration,
         IConfiguration configuration,
-        IServiceProvider services)
+        IServiceProvider services,
+        string? environmentName = null)
     {
+        ArgumentNullException.ThrowIfNull(loggerConfiguration);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(services);
+
+        ApplyEnvironmentMinimumLevelDefaults(loggerConfiguration, configuration, environmentName);
+
         loggerConfiguration
             .ReadFrom.Configuration(configuration)
             .ReadFrom.Services(services)
@@ -28,9 +35,30 @@ public static class VapeCacheSerilogExtensions
 
         ConfigureSeqSink(configuration, loggerConfiguration);
         ConfigureFallbackConsoleSink(configuration, loggerConfiguration);
+        ConfigureFileSink(configuration, loggerConfiguration, environmentName);
         ConfigureOpenTelemetrySink(configuration, loggerConfiguration);
         ConfigureGroceryStoreOverrides(configuration, loggerConfiguration);
         return loggerConfiguration;
+    }
+
+    private static void ApplyEnvironmentMinimumLevelDefaults(
+        LoggerConfiguration loggerConfiguration,
+        IConfiguration configuration,
+        string? environmentName)
+    {
+        if (!string.IsNullOrWhiteSpace(configuration["Serilog:MinimumLevel:Default"]))
+            return;
+
+        var isProduction = string.IsNullOrWhiteSpace(environmentName) ||
+                           environmentName.Equals("Production", StringComparison.OrdinalIgnoreCase);
+
+        if (!isProduction)
+            return;
+
+        loggerConfiguration
+            .MinimumLevel.Warning()
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+            .MinimumLevel.Override("System", LogEventLevel.Warning);
     }
 
     private static void ConfigureSeqSink(IConfiguration configuration, LoggerConfiguration loggerConfiguration)
@@ -44,7 +72,7 @@ public static class VapeCacheSerilogExtensions
             return;
 
         var apiKey = configuration["Serilog:Seq:ApiKey"];
-        var restrictedToMinimumLevel = ResolveLogLevel(configuration["Serilog:Seq:RestrictedToMinimumLevel"]);
+        var restrictedToMinimumLevel = ResolveLogLevel(configuration["Serilog:Seq:RestrictedToMinimumLevel"], LogEventLevel.Information);
         var batchPostingLimit = Math.Max(1, configuration.GetValue<int?>("Serilog:Seq:BatchPostingLimit") ?? 1000);
         var periodMilliseconds = Math.Max(200, configuration.GetValue<int?>("Serilog:Seq:PeriodMs") ?? 2000);
 
@@ -72,11 +100,57 @@ public static class VapeCacheSerilogExtensions
             formatProvider: CultureInfo.InvariantCulture);
     }
 
-    private static LogEventLevel ResolveLogLevel(string? configuredLevel)
+    private static void ConfigureFileSink(IConfiguration configuration, LoggerConfiguration loggerConfiguration, string? environmentName)
+    {
+        var enabled = configuration.GetValue<bool?>("Serilog:File:Enabled") ?? false;
+        if (!enabled || HasConfiguredSink(configuration, "File"))
+            return;
+
+        var path = configuration["Serilog:File:Path"];
+        if (string.IsNullOrWhiteSpace(path))
+            path = "logs/vapecache-.log";
+
+        var outputTemplate = configuration["Serilog:File:OutputTemplate"];
+        if (string.IsNullOrWhiteSpace(outputTemplate))
+            outputTemplate = DefaultConsoleOutputTemplate;
+
+        var isProduction = string.IsNullOrWhiteSpace(environmentName) ||
+                           environmentName.Equals("Production", StringComparison.OrdinalIgnoreCase);
+        var defaultLevel = isProduction ? LogEventLevel.Warning : LogEventLevel.Information;
+        var restrictedToMinimumLevel = ResolveLogLevel(configuration["Serilog:File:RestrictedToMinimumLevel"], defaultLevel);
+
+        var retainedFileCountLimit = configuration.GetValue<int?>("Serilog:File:RetainedFileCountLimit") ?? 14;
+        var fileSizeLimitBytes = configuration.GetValue<long?>("Serilog:File:FileSizeLimitBytes") ?? 104_857_600;
+        var rollOnFileSizeLimit = configuration.GetValue<bool?>("Serilog:File:RollOnFileSizeLimit") ?? true;
+        var shared = configuration.GetValue<bool?>("Serilog:File:Shared") ?? true;
+        var flushSeconds = Math.Max(1, configuration.GetValue<int?>("Serilog:File:FlushToDiskIntervalSeconds") ?? 2);
+        var rollingInterval = ResolveRollingInterval(configuration["Serilog:File:RollingInterval"]);
+
+        loggerConfiguration.WriteTo.File(
+            path: path,
+            restrictedToMinimumLevel: restrictedToMinimumLevel,
+            outputTemplate: outputTemplate,
+            formatProvider: CultureInfo.InvariantCulture,
+            rollingInterval: rollingInterval,
+            retainedFileCountLimit: retainedFileCountLimit,
+            fileSizeLimitBytes: fileSizeLimitBytes,
+            rollOnFileSizeLimit: rollOnFileSizeLimit,
+            shared: shared,
+            flushToDiskInterval: TimeSpan.FromSeconds(flushSeconds));
+    }
+
+    private static LogEventLevel ResolveLogLevel(string? configuredLevel, LogEventLevel fallbackLevel)
     {
         return Enum.TryParse(configuredLevel, ignoreCase: true, out LogEventLevel parsedLevel)
             ? parsedLevel
-            : LogEventLevel.Information;
+            : fallbackLevel;
+    }
+
+    private static RollingInterval ResolveRollingInterval(string? configuredRollingInterval)
+    {
+        return Enum.TryParse(configuredRollingInterval, ignoreCase: true, out RollingInterval parsed)
+            ? parsed
+            : RollingInterval.Day;
     }
 
     private static bool HasConfiguredSink(IConfiguration configuration, string sinkName)
@@ -187,7 +261,7 @@ public static class VapeCacheSerilogExtensions
         var serviceName = configuration["Serilog:Properties:Application"];
         if (string.IsNullOrWhiteSpace(serviceName))
             serviceName = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME");
-        serviceName ??= "VapeCache.Console";
+        serviceName ??= "VapeCache";
 
         var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
         if (string.IsNullOrWhiteSpace(environment))

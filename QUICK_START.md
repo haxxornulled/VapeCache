@@ -19,6 +19,8 @@ Optional integrations:
 ```bash
 dotnet add package VapeCache.Extensions.Aspire
 dotnet add package VapeCache.Extensions.AspNetCore
+dotnet add package VapeCache.Extensions.Logging
+dotnet add package VapeCache.Extensions.PubSub
 ```
 
 ## Run Redis
@@ -54,6 +56,7 @@ setx VAPECACHE_REDIS_CONNECTIONSTRING "redis://localhost:6379/0"
 
 ```csharp
 using VapeCache.Abstractions.Connections;
+using VapeCache.Extensions.PubSub;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 
@@ -64,6 +67,7 @@ builder.Services.AddOptions<RedisConnectionOptions>()
 
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCachePubSub(); // optional: only when pub/sub support is needed
 
 var app = builder.Build();
 app.MapHealthChecks("/health");

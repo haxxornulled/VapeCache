@@ -3,6 +3,7 @@
 This is the source of truth for the public API surface:
 - `VapeCache.Abstractions`
 - `VapeCache.Infrastructure` fluent options extensions
+- `VapeCache.Extensions.PubSub` optional pub/sub registration extensions
 - `VapeCache.Extensions.Aspire` host/wrapper integrations
 
 Use this page for exact signatures and endpoint contracts.
@@ -233,6 +234,32 @@ public interface IRedisConnectionStringBuilder
 Use this builder instead of manual string concatenation when creating `redis://`/`rediss://` URIs.
 It enforces host-only input, TLS-option consistency, and safe IPv6 authority formatting.
 
+### `IRedisPubSubService` (optional package)
+
+Namespace: `VapeCache.Abstractions.Connections`
+
+Install package: `VapeCache.Extensions.PubSub`
+
+```csharp
+public interface IRedisPubSubService : IAsyncDisposable
+{
+    ValueTask<long> PublishAsync(string channel, ReadOnlyMemory<byte> payload, CancellationToken ct = default);
+    ValueTask<IRedisPubSubSubscription> SubscribeAsync(
+        string channel,
+        Func<RedisPubSubMessage, CancellationToken, ValueTask> handler,
+        CancellationToken ct = default);
+}
+```
+
+`RedisPubSubMessage`:
+
+```csharp
+public readonly record struct RedisPubSubMessage(
+    string Channel,
+    ReadOnlyMemory<byte> Payload,
+    DateTimeOffset ReceivedAtUtc);
+```
+
 ### Named profiles
 
 ```csharp
@@ -337,6 +364,28 @@ if (!lease.IsNull)
 ```
 
 `RedisValueLease` is a sealed reference type and must be disposed when pooled.
+
+## Logging Integration API
+
+Namespace: `VapeCache.Extensions.Logging`
+
+Install package: `VapeCache.Extensions.Logging`
+
+```csharp
+builder.Host.UseSerilog((context, services, loggerConfig) =>
+{
+    loggerConfig.ConfigureVapeCacheLogging(
+        context.Configuration,
+        services,
+        context.HostingEnvironment.EnvironmentName);
+});
+```
+
+Capabilities:
+- production-safe minimum level defaults when `Serilog:MinimumLevel:Default` is not configured
+- optional rolling file sink (`Serilog:File:*`)
+- optional Seq sink (`Serilog:Seq:*`)
+- optional OpenTelemetry sink (`Serilog:OpenTelemetry:*`)
 
 ## Aspire Wrapper APIs
 

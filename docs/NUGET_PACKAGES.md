@@ -39,6 +39,20 @@ DI facade package for clean architecture wiring. Registers runtime services and 
 dotnet add package VapeCache.Extensions.DependencyInjection
 ```
 
+### VapeCache.Extensions.Logging
+Optional logging package for Serilog + OpenTelemetry host wiring. Includes production-safe defaults and optional rolling file sink support.
+
+```bash
+dotnet add package VapeCache.Extensions.Logging
+```
+
+### VapeCache.Extensions.PubSub
+Optional Redis pub/sub package. Adds explicit pub/sub registration for `IRedisPubSubService` with bounded delivery queues and reconnect/resubscribe behavior.
+
+```bash
+dotnet add package VapeCache.Extensions.PubSub
+```
+
 ### VapeCache.Extensions.AspNetCore
 ASP.NET Core output-cache integration with VapeCache storage.
 

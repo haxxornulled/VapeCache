@@ -6,14 +6,14 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>true</IsPackable>
-    <PackageId>VapeCache.Runtime</PackageId>
-    <Title>VapeCache</Title>
+    <PackageId>VapeCache.Extensions.PubSub</PackageId>
+    <Title>VapeCache Extensions for Redis Pub/Sub</Title>
     <Version>1.2.9</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
-    <Product>VapeCache</Product>
-    <Description>Redis transport and caching runtime for VapeCache. Includes multiplexed connections, circuit breaking, pooling, and OpenTelemetry hooks for production cache workloads.</Description>
-    <PackageTags>redis;cache;distributed-cache;circuit-breaker;opentelemetry;dotnet</PackageTags>
+    <Product>VapeCache.Extensions.PubSub</Product>
+    <Description>Optional Redis pub/sub capability package for VapeCache. Adds bounded subscription queues, reconnect/resubscribe behavior, and DI/Autofac registration helpers.</Description>
+    <PackageTags>redis;pubsub;cache;distributed-cache;autofac;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
@@ -24,7 +24,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.9 release: stabilized Redis telemetry parser metrics, hardened connection registration across DI and Autofac, and refreshed production-capable documentation.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.9 release: extracted Redis pub/sub into an opt-in package with explicit DI and Autofac wiring.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
@@ -36,26 +36,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="VapeCache.Tests" />
-    <InternalsVisibleTo Include="VapeCache.Benchmarks" />
-    <InternalsVisibleTo Include="VapeCache.Benchmarks.Runner" />
-    <InternalsVisibleTo Include="VapeCache.PerfGates.Tests" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="Autofac" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
-    <PackageReference Include="Polly" Version="8.6.5" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.1" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.DependencyInjection\VapeCache.Extensions.DependencyInjection.csproj" />
+    <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
-
-
-
-

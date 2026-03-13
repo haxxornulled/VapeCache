@@ -62,7 +62,7 @@ Still not in scope:
 **Workaround:** Use StackExchange.Redis for Lua alongside VapeCache for caching.
 
 ### Pub/Sub
-⚠️ **Basic PUB/SUB is supported via `IRedisPubSubService`**
+⚠️ **Basic PUB/SUB is supported via `IRedisPubSubService` (opt-in package: `VapeCache.Extensions.PubSub`)**
 
 Supported now:
 - Dedicated pub/sub service (`IRedisPubSubService`) with:
@@ -196,14 +196,14 @@ Use **VapeCache + StackExchange.Redis** together:
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
 
-// StackExchange.Redis for Pub/Sub (when needed)
+// StackExchange.Redis for advanced Pub/Sub workflows (pattern subscriptions, broker semantics)
 builder.Services.AddSingleton<IConnectionMultiplexer>(ConnectionMultiplexer.Connect("localhost:6379"));
 
 // Use ICacheService for caching
 var cache = serviceProvider.GetRequiredService<ICacheService>();
 await cache.SetAsync("key", value, options, ct);
 
-// Use IConnectionMultiplexer for Pub/Sub
+// Use IConnectionMultiplexer for advanced Pub/Sub
 var redis = serviceProvider.GetRequiredService<IConnectionMultiplexer>();
 await redis.GetSubscriber().SubscribeAsync("channel", handler);
 ```
@@ -240,8 +240,8 @@ await redis.GetSubscriber().SubscribeAsync("channel", handler);
 ### Q: Does VapeCache support Redis cluster?
 **A:** Partially. Core cache-path commands handle MOVED/ASK redirects. Full cluster orchestration across every command is still out of scope.
 
-### Q: When will Pub/Sub be supported?
-**A:** Basic channel pub/sub is available now through `IRedisPubSubService`. Advanced pattern/pubsub-broker scenarios remain out of scope.
+### Q: How much Pub/Sub is supported?
+**A:** Basic channel pub/sub is available now through `IRedisPubSubService` (via `VapeCache.Extensions.PubSub`). Advanced pattern/pubsub-broker scenarios remain out of scope.
 
 ### Q: What if I need a command that's not implemented?
 **A:** Three options:

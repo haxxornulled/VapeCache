@@ -14,6 +14,8 @@ Optional integrations:
 
 ```bash
 dotnet add package VapeCache.Extensions.DependencyInjection
+dotnet add package VapeCache.Extensions.Logging
+dotnet add package VapeCache.Extensions.PubSub
 dotnet add package VapeCache.Extensions.AspNetCore
 dotnet add package VapeCache.Extensions.Aspire
 dotnet add package VapeCache.Features.Invalidation
@@ -25,6 +27,8 @@ dotnet add package VapeCache.Features.Invalidation
 - `VapeCache.Core`: shared primitives used by other VapeCache packages
 - `VapeCache.Abstractions`: public contracts, options, and shared value types
 - `VapeCache.Extensions.DependencyInjection`: one-call DI facade for runtime registration
+- `VapeCache.Extensions.Logging`: optional Serilog + OTEL logging package with file sink support
+- `VapeCache.Extensions.PubSub`: optional Redis pub/sub registration package for publish/subscribe workloads
 - `VapeCache.Extensions.AspNetCore`: ASP.NET Core output-cache integration
 - `VapeCache.Extensions.Aspire`: Aspire integration, health checks, and telemetry wiring
 - `VapeCache.Features.Invalidation`: optional invalidation policies for keys, tags, and zones
