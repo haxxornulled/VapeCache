@@ -1,8 +1,8 @@
 # ASP.NET Core Policy Extension Design (1.x Safe)
 
-Status: Draft  
+Status: Implemented (1.x Additive)  
 Owner: VapeCache OSS  
-Last updated: 2026-03-11
+Last updated: 2026-03-12
 
 ## 1. TL;DR
 
@@ -259,12 +259,22 @@ No OSS/Enterprise fork in programming model is required.
 
 ## 15. Deliverables Checklist
 
-- [ ] Add `AddVapeCacheAspNetPolicies(...)` and options model
-- [ ] Add policy metadata attribute for MVC
-- [ ] Add minimal API inline policy overload
-- [ ] Add compatibility tests (old/new paths)
-- [ ] Add policy docs page with migration examples
-- [ ] Keep existing quickstart path valid and tested
+- [x] Add `AddVapeCacheAspNetPolicies(...)` and options model
+- [x] Add policy metadata attribute for MVC
+- [x] Add minimal API inline policy overload
+- [x] Add compatibility tests (old/new paths)
+- [x] Add policy docs page with migration examples
+- [x] Keep existing quickstart path valid and tested
+
+Implementation references:
+
+- `VapeCache.Extensions.AspNetCore/VapeCacheAspNetCoreCachingExtensions.cs`
+- `VapeCache.Extensions.AspNetCore/VapeCacheHttpPolicyOptions.cs`
+- `VapeCache.Extensions.AspNetCore/VapeCacheHttpPolicyBuilder.cs`
+- `VapeCache.Extensions.AspNetCore/VapeCachePolicyAttribute.cs`
+- `VapeCache.Extensions.AspNetCore/VapeCachePolicyMvcOptionsSetup.cs`
+- `VapeCache.Tests/AspNetCore/VapeCacheAspNetPolicyErgonomicsTests.cs`
+- `docs/ASPNETCORE_POLICY_EXTENSION.md`
 
 ## 16. Callout: What This Does Not Do
 

@@ -112,6 +112,35 @@ app.Run();
 
 6. Go deeper: [docs/QUICKSTART.md](docs/QUICKSTART.md)
 
+## ASP.NET Core Policy Ergonomics
+
+VapeCache now supports native ASP.NET Core output-cache ergonomics for both minimal APIs and MVC while keeping the runtime engine untouched.
+
+```csharp
+builder.Services.AddVapeCacheOutputCaching();
+builder.Services.AddVapeCacheAspNetPolicies(policies =>
+{
+    policies.AddPolicy("products", policy => policy
+        .Ttl(TimeSpan.FromMinutes(5))
+        .VaryByQuery()
+        .Tags("products"));
+});
+
+app.MapGet("/products/{id:int}", (int id) => Results.Ok(new { id }))
+   .CacheWithVapeCache("products");
+```
+
+MVC/controller attributes are also supported:
+
+```csharp
+[VapeCachePolicy("products", TtlSeconds = 300, VaryByQuery = true, CacheTags = new[] { "products" })]
+public IActionResult GetProduct(int id) => Ok(new { id });
+```
+
+See:
+- [docs/ASPNETCORE_POLICY_EXTENSION.md](docs/ASPNETCORE_POLICY_EXTENSION.md)
+- [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md)
+
 ## Production Packages (OSS)
 
 | Package | Purpose |
@@ -140,6 +169,7 @@ The following are not shipped from this OSS repository:
 - [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md)
 - [docs/CACHE_INVALIDATION.md](docs/CACHE_INVALIDATION.md)
 - [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md)
+- [docs/ASPNETCORE_POLICY_EXTENSION.md](docs/ASPNETCORE_POLICY_EXTENSION.md)
 - [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md)
 - [docs/PRODUCTION_GUARDRAILS.md](docs/PRODUCTION_GUARDRAILS.md)
 - [docs/STABILITY_POLICY.md](docs/STABILITY_POLICY.md)
