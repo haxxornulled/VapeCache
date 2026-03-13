@@ -432,4 +432,4 @@ Use both comparison tracks when reporting against StackExchange.Redis:
 
 ---
 
-**Questions?** See [TYPED_COLLECTIONS.md](TYPED_COLLECTIONS.md) for API details or [PHASE_2_3_COMPLETE.md](PHASE_2_3_COMPLETE.md) for implementation guide.
+**Questions?** See [TYPED_COLLECTIONS.md](TYPED_COLLECTIONS.md) for API details.

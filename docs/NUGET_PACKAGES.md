@@ -59,9 +59,34 @@ OSS includes only the packages above.
 
 Not shipped from this OSS repo:
 
+- adaptive autoscaling of multiplexed lanes
 - enterprise licensing/control-plane packages
 - durable spill persistence package
-- reconciliation package
+- reconciliation package for post-outage write replay
+
+Clarification:
+- multiplexing itself is OSS
+- adaptive autoscaling is Enterprise
+
+See [OSS_VS_ENTERPRISE.md](OSS_VS_ENTERPRISE.md) for the canonical boundary.
+
+## License Summary
+
+VapeCache is licensed under BUSL-1.1 with an Additional Use Grant.
+
+Allowed:
+- production use
+- commercial application use
+- SaaS use
+- internal business use
+
+Not allowed:
+- offering VapeCache itself as a hosted caching/database service
+- embedding VapeCache as the core of a commercial caching/database infrastructure product
+
+Current versions convert to Apache 2.0 on 2029-03-11.
+
+See [LICENSE_FAQ.md](LICENSE_FAQ.md) and [../LICENSE](../LICENSE).
 
 ## Release Notes
 

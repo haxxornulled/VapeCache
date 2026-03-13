@@ -14,6 +14,7 @@ It is designed for predictable behavior under load, Redis trouble, and high-thro
 - ASP.NET Core and Aspire integrations
 
 OSS scope in this repository: production-ready runtime packages for core caching, invalidation, ASP.NET Core integration, and Aspire integration.
+For OSS/Enterprise boundaries, see [docs/OSS_VS_ENTERPRISE.md](docs/OSS_VS_ENTERPRISE.md).
 
 ## Maturity and Evidence
 
@@ -157,9 +158,12 @@ See:
 
 The following are not shipped from this OSS repository:
 
+- adaptive autoscaling of multiplexed lanes
 - enterprise licensing and control-plane features
 - durable spill persistence package
 - reconciliation package for post-outage write replay
+
+Multiplexing itself is OSS; adaptive autoscaling is Enterprise.
 
 ## Documentation
 
@@ -171,6 +175,8 @@ The following are not shipped from this OSS repository:
 - [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md)
 - [docs/ASPNETCORE_POLICY_EXTENSION.md](docs/ASPNETCORE_POLICY_EXTENSION.md)
 - [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md)
+- [docs/OSS_VS_ENTERPRISE.md](docs/OSS_VS_ENTERPRISE.md)
+- [docs/LICENSE_FAQ.md](docs/LICENSE_FAQ.md)
 - [docs/PRODUCTION_GUARDRAILS.md](docs/PRODUCTION_GUARDRAILS.md)
 - [docs/STABILITY_POLICY.md](docs/STABILITY_POLICY.md)
 - [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md)
@@ -191,14 +197,15 @@ You are free to:
 
 - use VapeCache in production
 - run it in SaaS or commercial applications
+- use it for internal business systems
 - modify the source
 - redistribute the source
 
 You may NOT:
 
-- offer VapeCache as a hosted caching service
-- embed VapeCache as the core of a commercial caching product
+- offer VapeCache as a hosted caching/database service
+- embed VapeCache as the core of a commercial caching/database infrastructure product
 
 On March 11, 2029, the code will automatically convert to Apache 2.0.
 
-See [LICENSE](LICENSE) for the full terms.
+See [LICENSE](LICENSE) for full terms and [docs/LICENSE_FAQ.md](docs/LICENSE_FAQ.md) for quick answers.

@@ -306,11 +306,11 @@ tls-ca-cert-file /etc/redis/tls/ca.pem
 
 #### 4. Configure VapeCache for Mutual TLS
 
-**Problem:** VapeCache doesn't currently support client certificates (roadmap item).
+**Problem:** VapeCache does not expose first-class client-certificate configuration in the standard options surface.
 
 **Workaround:** Use `SslStream` directly with custom `RemoteCertificateValidationCallback`.
 
-**Feature Request:** [Add mutual TLS support to VapeCache](https://github.com/haxxornulled/VapeCache/issues/new) (coming in v1.1).
+**Tracking:** [Mutual TLS support request](https://github.com/haxxornulled/VapeCache/issues/new).
 
 ---
 
@@ -505,24 +505,12 @@ VapeCache provides audit trail for **SOC 2 Type II**:
 
 ---
 
-## Roadmap
+## Current Coverage
 
-### v1.0 (Current)
 - ✅ TLS 1.2/1.3 support
 - ✅ Let's Encrypt compatibility
 - ✅ Production safety checks
 - ✅ SNI support
-
-### v1.1 (Q2 2025)
-- [ ] Mutual TLS (client certificates)
-- [ ] Custom certificate validation callbacks
-- [ ] CRL/OCSP stapling
-- [ ] Certificate pinning (optional)
-
-### v2.0 (Q3 2025)
-- [ ] TLS session resumption
-- [ ] ALPN negotiation
-- [ ] Zero-downtime certificate rotation
 
 ---
 

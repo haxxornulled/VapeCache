@@ -144,7 +144,7 @@ builder.AddVapeCache()
 
 **Setup:**
 ```csharp
-// Install VapeCache.Extensions.OpenTelemetry (future)
+// Install VapeCache.Extensions.OpenTelemetry
 builder.Services.AddOpenTelemetry()
     .WithMetrics(m => m
         .AddVapeCacheMetrics()

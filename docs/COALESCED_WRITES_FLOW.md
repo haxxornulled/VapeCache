@@ -453,6 +453,6 @@ stateDiagram-v2
 
 **Related Documentation**:
 - [COALESCED_WRITES.md](COALESCED_WRITES.md) - Complete documentation
-- [BENCHMARK_DEBUGGING_SUMMARY.md](../BENCHMARK_DEBUGGING_SUMMARY.md) - Debugging timeline
+- [PERFORMANCE.md](PERFORMANCE.md) - Performance guidance and claims policy links
 
 **Last Updated**: December 25, 2025
