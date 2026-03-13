@@ -27,7 +27,7 @@ dotnet add package VapeCache.Features.Invalidation
 - `VapeCache.Core`: shared primitives used by other VapeCache packages
 - `VapeCache.Abstractions`: public contracts, options, and shared value types
 - `VapeCache.Extensions.DependencyInjection`: one-call DI facade for runtime registration
-- `VapeCache.Extensions.Logging`: optional Serilog + OTEL logging package with file sink support
+- `VapeCache.Extensions.Logging`: optional Serilog + OTEL logging package with file sink support and optional JSON formatting (`Serilog:Json:*`)
 - `VapeCache.Extensions.PubSub`: optional Redis pub/sub registration package for publish/subscribe workloads
 - `VapeCache.Extensions.AspNetCore`: ASP.NET Core output-cache integration
 - `VapeCache.Extensions.Aspire`: Aspire integration, health checks, and telemetry wiring

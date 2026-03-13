@@ -49,7 +49,7 @@ If you want a DI composition facade for clean architecture wiring:
 dotnet add package VapeCache.Extensions.DependencyInjection
 ```
 
-If you want centralized Serilog + OTEL logging wiring with rolling file sink support:
+If you want centralized Serilog + OTEL logging wiring with rolling file sink support and optional JSON formatting:
 
 ```bash
 dotnet add package VapeCache.Extensions.Logging
@@ -166,7 +166,7 @@ See:
 | `VapeCache.Abstractions` | Public contracts and option/value types |
 | `VapeCache.Features.Invalidation` | Optional key/tag/zone invalidation policies |
 | `VapeCache.Extensions.DependencyInjection` | One-call IServiceCollection wiring facade for runtime + config binding |
-| `VapeCache.Extensions.Logging` | Optional Serilog + OTEL logging wiring with file/Seq/console sinks |
+| `VapeCache.Extensions.Logging` | Optional Serilog + OTEL logging wiring with file/Seq/console sinks and pluggable JSON formatting |
 | `VapeCache.Extensions.PubSub` | Optional Redis pub/sub package (publish/subscribe, bounded queues, reconnect/resubscribe) |
 | `VapeCache.Extensions.AspNetCore` | ASP.NET Core output-cache integration |
 | `VapeCache.Extensions.Aspire` | Aspire wiring, health checks, endpoint helpers |

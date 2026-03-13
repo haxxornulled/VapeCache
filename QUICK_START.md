@@ -52,6 +52,24 @@ Equivalent environment override:
 setx VAPECACHE_REDIS_CONNECTIONSTRING "redis://localhost:6379/0"
 ```
 
+Optional JSON logs for shipping/parsing pipelines:
+
+```json
+{
+  "Serilog": {
+    "File": {
+      "Enabled": true,
+      "Path": "logs/vapecache-.log"
+    },
+    "Json": {
+      "Enabled": true,
+      "FileEnabled": true,
+      "Formatter": "Compact"
+    }
+  }
+}
+```
+
 ## Register Services
 
 ```csharp

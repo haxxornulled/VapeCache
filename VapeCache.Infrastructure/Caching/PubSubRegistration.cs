@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Guards;
 using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Infrastructure.Caching;
@@ -16,7 +17,7 @@ public static class PubSubRegistration
     /// </summary>
     public static IServiceCollection AddVapecachePubSubServices(this IServiceCollection services)
     {
-        ArgumentNullException.ThrowIfNull(services);
+        ParanoiaThrowGuard.Against.NotNull(services);
 
         services.AddOptions<RedisPubSubOptions>()
             .ValidateOnStart();

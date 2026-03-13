@@ -140,6 +140,25 @@ builder.Host.UseSerilog((context, services, loggerConfig) =>
 });
 ```
 
+Optional JSON log output (good for log shipping/parsing pipelines):
+
+```json
+{
+  "Serilog": {
+    "File": {
+      "Enabled": true,
+      "Path": "logs/vapecache-.log"
+    },
+    "Json": {
+      "Enabled": true,
+      "FileEnabled": true,
+      "ConsoleEnabled": false,
+      "Formatter": "Compact"
+    }
+  }
+}
+```
+
 Alternative with DI facade package:
 
 ```csharp

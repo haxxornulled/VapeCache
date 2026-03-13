@@ -1,4 +1,5 @@
 using Autofac;
+using VapeCache.Guards;
 using VapeCache.Infrastructure.DependencyInjection;
 
 namespace VapeCache.Extensions.PubSub;
@@ -13,7 +14,7 @@ public static class VapeCachePubSubAutofacExtensions
     /// </summary>
     public static ContainerBuilder AddVapeCachePubSub(this ContainerBuilder builder)
     {
-        ArgumentNullException.ThrowIfNull(builder);
+        ParanoiaThrowGuard.Against.NotNull(builder);
         builder.RegisterModule<VapeCachePubSubModule>();
         return builder;
     }

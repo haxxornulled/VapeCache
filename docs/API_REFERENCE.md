@@ -386,6 +386,22 @@ Capabilities:
 - optional rolling file sink (`Serilog:File:*`)
 - optional Seq sink (`Serilog:Seq:*`)
 - optional OpenTelemetry sink (`Serilog:OpenTelemetry:*`)
+- optional JSON formatting for file/console sinks (`Serilog:Json:*`)
+
+JSON extension point:
+
+```csharp
+public interface IVapeCacheJsonLogFormatterResolver
+{
+    ITextFormatter? ResolveFormatter(IConfiguration configuration, VapeCacheJsonSinkTarget target);
+}
+```
+
+Default implementation: `DefaultVapeCacheJsonLogFormatterResolver`.
+
+When `Serilog:Json:Enabled=true`, the default resolver applies JSON formatters to:
+- `File` sink by default (`Serilog:Json:FileEnabled=true` default)
+- `Console` sink when explicitly enabled (`Serilog:Json:ConsoleEnabled=true`)
 
 ## Aspire Wrapper APIs
 

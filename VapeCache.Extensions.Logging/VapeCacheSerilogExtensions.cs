@@ -1,8 +1,10 @@
 using Microsoft.Extensions.Configuration;
 using Serilog;
 using Serilog.Events;
+using Serilog.Formatting;
 using Serilog.Sinks.OpenTelemetry;
 using System.Globalization;
+using VapeCache.Guards;
 
 namespace VapeCache.Extensions.Logging;
 
@@ -22,11 +24,12 @@ public static class VapeCacheSerilogExtensions
         IServiceProvider services,
         string? environmentName = null)
     {
-        ArgumentNullException.ThrowIfNull(loggerConfiguration);
-        ArgumentNullException.ThrowIfNull(configuration);
-        ArgumentNullException.ThrowIfNull(services);
+        ParanoiaThrowGuard.Against.NotNull(loggerConfiguration);
+        ParanoiaThrowGuard.Against.NotNull(configuration);
+        ParanoiaThrowGuard.Against.NotNull(services);
 
         ApplyEnvironmentMinimumLevelDefaults(loggerConfiguration, configuration, environmentName);
+        var jsonFormatterResolver = ResolveJsonFormatterResolver(services);
 
         loggerConfiguration
             .ReadFrom.Configuration(configuration)
@@ -34,11 +37,17 @@ public static class VapeCacheSerilogExtensions
             .Enrich.FromLogContext();
 
         ConfigureSeqSink(configuration, loggerConfiguration);
-        ConfigureFallbackConsoleSink(configuration, loggerConfiguration);
-        ConfigureFileSink(configuration, loggerConfiguration, environmentName);
+        ConfigureFallbackConsoleSink(configuration, loggerConfiguration, jsonFormatterResolver);
+        ConfigureFileSink(configuration, loggerConfiguration, environmentName, jsonFormatterResolver);
         ConfigureOpenTelemetrySink(configuration, loggerConfiguration);
         ConfigureGroceryStoreOverrides(configuration, loggerConfiguration);
         return loggerConfiguration;
+    }
+
+    private static IVapeCacheJsonLogFormatterResolver ResolveJsonFormatterResolver(IServiceProvider services)
+    {
+        return services.GetService(typeof(IVapeCacheJsonLogFormatterResolver)) as IVapeCacheJsonLogFormatterResolver
+               ?? DefaultVapeCacheJsonLogFormatterResolver.Instance;
     }
 
     private static void ApplyEnvironmentMinimumLevelDefaults(
@@ -85,22 +94,36 @@ public static class VapeCacheSerilogExtensions
             formatProvider: CultureInfo.InvariantCulture);
     }
 
-    private static void ConfigureFallbackConsoleSink(IConfiguration configuration, LoggerConfiguration loggerConfiguration)
+    private static void ConfigureFallbackConsoleSink(
+        IConfiguration configuration,
+        LoggerConfiguration loggerConfiguration,
+        IVapeCacheJsonLogFormatterResolver jsonFormatterResolver)
     {
         var enabled = configuration.GetValue<bool?>("Serilog:FallbackConsole:Enabled") ?? true;
         if (!enabled || HasConfiguredSink(configuration, "Console"))
             return;
 
+        var formatter = jsonFormatterResolver.ResolveFormatter(configuration, VapeCacheJsonSinkTarget.Console);
+        if (formatter is not null)
+        {
+            loggerConfiguration.WriteTo.Console(formatter);
+            return;
+        }
+
         var outputTemplate = configuration["Serilog:FallbackConsole:OutputTemplate"];
         if (string.IsNullOrWhiteSpace(outputTemplate))
             outputTemplate = DefaultConsoleOutputTemplate;
-
+        
         loggerConfiguration.WriteTo.Console(
             outputTemplate: outputTemplate,
             formatProvider: CultureInfo.InvariantCulture);
     }
 
-    private static void ConfigureFileSink(IConfiguration configuration, LoggerConfiguration loggerConfiguration, string? environmentName)
+    private static void ConfigureFileSink(
+        IConfiguration configuration,
+        LoggerConfiguration loggerConfiguration,
+        string? environmentName,
+        IVapeCacheJsonLogFormatterResolver jsonFormatterResolver)
     {
         var enabled = configuration.GetValue<bool?>("Serilog:File:Enabled") ?? false;
         if (!enabled || HasConfiguredSink(configuration, "File"))
@@ -125,12 +148,53 @@ public static class VapeCacheSerilogExtensions
         var shared = configuration.GetValue<bool?>("Serilog:File:Shared") ?? true;
         var flushSeconds = Math.Max(1, configuration.GetValue<int?>("Serilog:File:FlushToDiskIntervalSeconds") ?? 2);
         var rollingInterval = ResolveRollingInterval(configuration["Serilog:File:RollingInterval"]);
+        var jsonFormatter = jsonFormatterResolver.ResolveFormatter(configuration, VapeCacheJsonSinkTarget.File);
+
+        if (jsonFormatter is not null)
+        {
+            ConfigureJsonFileSink(
+                loggerConfiguration,
+                jsonFormatter,
+                path,
+                restrictedToMinimumLevel,
+                rollingInterval,
+                retainedFileCountLimit,
+                fileSizeLimitBytes,
+                rollOnFileSizeLimit,
+                shared,
+                flushSeconds);
+            return;
+        }
 
         loggerConfiguration.WriteTo.File(
             path: path,
             restrictedToMinimumLevel: restrictedToMinimumLevel,
             outputTemplate: outputTemplate,
             formatProvider: CultureInfo.InvariantCulture,
+            rollingInterval: rollingInterval,
+            retainedFileCountLimit: retainedFileCountLimit,
+            fileSizeLimitBytes: fileSizeLimitBytes,
+            rollOnFileSizeLimit: rollOnFileSizeLimit,
+            shared: shared,
+            flushToDiskInterval: TimeSpan.FromSeconds(flushSeconds));
+    }
+
+    private static void ConfigureJsonFileSink(
+        LoggerConfiguration loggerConfiguration,
+        ITextFormatter formatter,
+        string path,
+        LogEventLevel restrictedToMinimumLevel,
+        RollingInterval rollingInterval,
+        int retainedFileCountLimit,
+        long fileSizeLimitBytes,
+        bool rollOnFileSizeLimit,
+        bool shared,
+        int flushSeconds)
+    {
+        loggerConfiguration.WriteTo.File(
+            formatter: formatter,
+            path: path,
+            restrictedToMinimumLevel: restrictedToMinimumLevel,
             rollingInterval: rollingInterval,
             retainedFileCountLimit: retainedFileCountLimit,
             fileSizeLimitBytes: fileSizeLimitBytes,

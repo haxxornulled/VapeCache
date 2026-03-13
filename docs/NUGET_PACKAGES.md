@@ -40,7 +40,7 @@ dotnet add package VapeCache.Extensions.DependencyInjection
 ```
 
 ### VapeCache.Extensions.Logging
-Optional logging package for Serilog + OpenTelemetry host wiring. Includes production-safe defaults and optional rolling file sink support.
+Optional logging package for Serilog + OpenTelemetry host wiring. Includes production-safe defaults, optional rolling file sink support, and optional JSON formatter routing (`Serilog:Json:*`).
 
 ```bash
 dotnet add package VapeCache.Extensions.Logging

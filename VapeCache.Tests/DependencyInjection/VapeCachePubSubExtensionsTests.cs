@@ -7,12 +7,72 @@ using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Extensions.DependencyInjection;
 using VapeCache.Extensions.PubSub;
+using VapeCache.Infrastructure.Caching;
 using Moq;
 
 namespace VapeCache.Tests.DependencyInjection;
 
 public sealed class VapeCachePubSubExtensionsTests
 {
+    [Fact]
+    public void AddVapeCachePubSub_ThrowsWhenServicesIsNull()
+    {
+        var configuration = new ConfigurationBuilder().Build();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            VapeCachePubSubServiceCollectionExtensions.AddVapeCachePubSub(
+                services: null!,
+                configuration,
+                sectionName: "RedisPubSub"));
+    }
+
+    [Fact]
+    public void AddVapeCachePubSub_ThrowsWhenConfigurationIsNull()
+    {
+        var services = new ServiceCollection();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            services.AddVapeCachePubSub(
+                configuration: null!,
+                sectionName: "RedisPubSub"));
+    }
+
+    [Fact]
+    public void AddVapeCachePubSub_ThrowsWhenSectionNameIsWhitespace()
+    {
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder().Build();
+
+        Assert.Throws<ArgumentException>(() =>
+            services.AddVapeCachePubSub(
+                configuration,
+                sectionName: "   "));
+    }
+
+    [Fact]
+    public void UseRedisPubSub_ThrowsWhenBuilderIsNull()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            VapeCachePubSubBuilderExtensions.UseRedisPubSub(
+                builder: null!));
+    }
+
+    [Fact]
+    public void AddVapeCachePubSub_AutofacExtension_ThrowsWhenBuilderIsNull()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            VapeCachePubSubAutofacExtensions.AddVapeCachePubSub(
+                builder: null!));
+    }
+
+    [Fact]
+    public void PubSubRegistration_ThrowsWhenServicesIsNull()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            PubSubRegistration.AddVapecachePubSubServices(
+                services: null!));
+    }
+
     [Fact]
     public void AddVapeCache_DoesNotRegisterPubSubByDefault()
     {
@@ -58,6 +118,39 @@ public sealed class VapeCachePubSubExtensionsTests
         Assert.Contains(
             services,
             static descriptor => descriptor.ServiceType == typeof(IRedisPubSubService));
+    }
+
+    [Fact]
+    public void UseRedisPubSub_OnBuilder_WithConfiguration_RegistersAndBindsOptions()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["RedisPubSub:DeliveryQueueCapacity"] = "128"
+            })
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddVapeCache()
+            .UseRedisPubSub(configuration);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RedisPubSubOptions>>().Value;
+
+        Assert.Equal(128, options.DeliveryQueueCapacity);
+        Assert.Contains(
+            services,
+            static descriptor => descriptor.ServiceType == typeof(IRedisPubSubService));
+    }
+
+    [Fact]
+    public void UseRedisPubSub_OnBuilder_WithNullConfiguration_Throws()
+    {
+        var services = new ServiceCollection();
+        var builder = services.AddVapeCache();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            builder.UseRedisPubSub(configuration: null!));
     }
 
     [Fact]

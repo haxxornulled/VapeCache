@@ -4,6 +4,18 @@ Generated from source (*Options.cs) on 2026-03-08 16:16:10 UTC.
 
 This reference is source-of-truth for every options setting and default currently implemented.
 
+## Serilog JSON Settings (VapeCache.Extensions.Logging)
+
+These keys are consumed by `VapeCache.Extensions.Logging` to apply JSON formatters to sinks without requiring custom sink code.
+
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `Serilog:Json:Enabled` | bool | `false` | Master switch for JSON formatting behavior. |
+| `Serilog:Json:FileEnabled` | bool | `true` | Applies JSON formatting to the file sink when enabled. |
+| `Serilog:Json:ConsoleEnabled` | bool | `false` | Applies JSON formatting to fallback console sink when enabled. |
+| `Serilog:Json:Formatter` | string | `"Compact"` | Formatter profile: `Compact`, `RenderedCompact`, or `Json`. |
+| `Serilog:Json:RenderMessage` | bool | `true` | Used by `Json` formatter profile to include rendered message text. |
+
 ## RedisStressOptions
 
 - Namespace: VapeCache.Console.Stress

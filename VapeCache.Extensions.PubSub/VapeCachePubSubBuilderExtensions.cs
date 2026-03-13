@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using VapeCache.Guards;
 using VapeCache.Extensions.DependencyInjection;
 
 namespace VapeCache.Extensions.PubSub;
@@ -14,7 +15,7 @@ public static class VapeCachePubSubBuilderExtensions
     public static VapeCacheDependencyInjectionBuilder UseRedisPubSub(
         this VapeCacheDependencyInjectionBuilder builder)
     {
-        ArgumentNullException.ThrowIfNull(builder);
+        ParanoiaThrowGuard.Against.NotNull(builder);
         builder.Services.AddVapeCachePubSub();
         return builder;
     }
@@ -27,7 +28,7 @@ public static class VapeCachePubSubBuilderExtensions
         IConfiguration configuration,
         string sectionName = "RedisPubSub")
     {
-        ArgumentNullException.ThrowIfNull(builder);
+        ParanoiaThrowGuard.Against.NotNull(builder);
         builder.Services.AddVapeCachePubSub(configuration, sectionName);
         return builder;
     }

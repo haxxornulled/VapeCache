@@ -33,6 +33,7 @@
     <None Include="..\PACKAGE_README.md" Pack="true" PackagePath="\" />
     <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
     <None Include="..\LICENSE" Pack="true" PackagePath="\" />
+    <Compile Include="..\shared\Guards\ParanoiaThrowGuard.cs" Link="Internal\ParanoiaThrowGuard.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Guards;
 using VapeCache.Infrastructure.Caching;
 
 namespace VapeCache.Extensions.PubSub;
@@ -24,9 +25,9 @@ public static class VapeCachePubSubServiceCollectionExtensions
         IConfiguration configuration,
         string sectionName = "RedisPubSub")
     {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(configuration);
-        ArgumentException.ThrowIfNullOrWhiteSpace(sectionName);
+        ParanoiaThrowGuard.Against.NotNull(services);
+        ParanoiaThrowGuard.Against.NotNull(configuration);
+        sectionName = ParanoiaThrowGuard.Against.NotNullOrWhiteSpace(sectionName);
 
         services.AddOptions<RedisPubSubOptions>()
             .Bind(configuration.GetSection(sectionName));
