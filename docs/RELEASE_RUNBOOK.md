@@ -23,6 +23,14 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 
 ## Release Steps
 
+Preferred one-command path:
+
+```powershell
+pwsh ./tools/release-orchestrator.ps1 -Configuration Release -PackageVersion 1.2.10
+```
+
+The orchestrator enforces preflight checks, release-check gates, package packing + smoke tests, feed publishing, remote sync, tag push, and GitHub release updates.
+
 1. Confirm local/remote sync.
    - `git fetch origin --tags`
    - `git fetch oss --tags`

@@ -159,17 +159,19 @@ See:
 
 ## Production Packages (OSS)
 
-| Package | Purpose |
-|---|---|
-| `VapeCache.Runtime` | Core runtime, Redis transport, fallback behavior, telemetry |
-| `VapeCache.Core` | Shared primitives package (transitive dependency, usually not installed directly) |
-| `VapeCache.Abstractions` | Public contracts and option/value types |
-| `VapeCache.Features.Invalidation` | Optional key/tag/zone invalidation policies |
-| `VapeCache.Extensions.DependencyInjection` | One-call IServiceCollection wiring facade for runtime + config binding |
-| `VapeCache.Extensions.Logging` | Optional Serilog + OTEL logging wiring with file/Seq/console sinks and pluggable JSON formatting |
-| `VapeCache.Extensions.PubSub` | Optional Redis pub/sub package (publish/subscribe, bounded queues, reconnect/resubscribe) |
-| `VapeCache.Extensions.AspNetCore` | ASP.NET Core output-cache integration |
-| `VapeCache.Extensions.Aspire` | Aspire wiring, health checks, endpoint helpers |
+| Package | NuGet | Purpose | Docs |
+|---|---|---|---|
+| `VapeCache.Runtime` | [VapeCache.Runtime](https://www.nuget.org/packages/VapeCache.Runtime) | Core runtime, Redis transport, fallback behavior, telemetry | [API Reference](docs/API_REFERENCE.md) |
+| `VapeCache.Core` | [VapeCache.Core](https://www.nuget.org/packages/VapeCache.Core) | Shared primitives package (transitive dependency, usually not installed directly) | [Package Matrix](docs/NUGET_PACKAGES.md) |
+| `VapeCache.Abstractions` | [VapeCache.Abstractions](https://www.nuget.org/packages/VapeCache.Abstractions) | Public contracts and option/value types | [API Reference](docs/API_REFERENCE.md) |
+| `VapeCache.Features.Invalidation` | [VapeCache.Features.Invalidation](https://www.nuget.org/packages/VapeCache.Features.Invalidation) | Optional key/tag/zone invalidation policies | [Cache Invalidation](docs/CACHE_INVALIDATION.md) |
+| `VapeCache.Extensions.DependencyInjection` | [VapeCache.Extensions.DependencyInjection](https://www.nuget.org/packages/VapeCache.Extensions.DependencyInjection) | One-call IServiceCollection wiring facade for runtime + config binding | [Quickstart](docs/QUICKSTART.md) |
+| `VapeCache.Extensions.Logging` | [VapeCache.Extensions.Logging](https://www.nuget.org/packages/VapeCache.Extensions.Logging) | Optional Serilog + OTEL logging wiring with file/Seq/console sinks and pluggable JSON formatting | [Logging + Telemetry](docs/LOGGING_TELEMETRY_CONFIGURATION.md) |
+| `VapeCache.Extensions.PubSub` | [VapeCache.Extensions.PubSub](https://www.nuget.org/packages/VapeCache.Extensions.PubSub) | Optional Redis pub/sub package (publish/subscribe, bounded queues, reconnect/resubscribe) | [API Reference](docs/API_REFERENCE.md) |
+| `VapeCache.Extensions.AspNetCore` | [VapeCache.Extensions.AspNetCore](https://www.nuget.org/packages/VapeCache.Extensions.AspNetCore) | ASP.NET Core output-cache integration | [ASP.NET Core Pipeline](docs/ASPNETCORE_PIPELINE_CACHING.md) |
+| `VapeCache.Extensions.Aspire` | [VapeCache.Extensions.Aspire](https://www.nuget.org/packages/VapeCache.Extensions.Aspire) | Aspire wiring, health checks, endpoint helpers | [Aspire Integration](docs/ASPIRE_INTEGRATION.md) |
+
+Full package install matrix: [docs/NUGET_PACKAGES.md](docs/NUGET_PACKAGES.md)
 
 ## Out Of OSS Scope
 
@@ -184,20 +186,13 @@ Multiplexing itself is OSS; adaptive autoscaling is Enterprise.
 
 ## Documentation
 
-- [docs/INDEX.md](docs/INDEX.md)
-- [docs/QUICKSTART.md](docs/QUICKSTART.md)
-- [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
-- [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md)
-- [docs/CACHE_INVALIDATION.md](docs/CACHE_INVALIDATION.md)
-- [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md)
-- [docs/ASPNETCORE_POLICY_EXTENSION.md](docs/ASPNETCORE_POLICY_EXTENSION.md)
-- [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md)
-- [docs/OSS_VS_ENTERPRISE.md](docs/OSS_VS_ENTERPRISE.md)
-- [docs/LICENSE_FAQ.md](docs/LICENSE_FAQ.md)
-- [docs/PRODUCTION_GUARDRAILS.md](docs/PRODUCTION_GUARDRAILS.md)
-- [docs/STABILITY_POLICY.md](docs/STABILITY_POLICY.md)
-- [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md)
-- [docs/RELEASE_RUNBOOK.md](docs/RELEASE_RUNBOOK.md)
+- Start here: [docs/INDEX.md](docs/INDEX.md)
+- Getting started: [docs/QUICKSTART.md](docs/QUICKSTART.md), [docs/CONFIGURATION.md](docs/CONFIGURATION.md), [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md), [docs/NUGET_PACKAGES.md](docs/NUGET_PACKAGES.md)
+- Core runtime: [docs/API_REFERENCE.md](docs/API_REFERENCE.md), [docs/CACHE_INVALIDATION.md](docs/CACHE_INVALIDATION.md), [docs/CACHE_TAGS_AND_ZONES.md](docs/CACHE_TAGS_AND_ZONES.md)
+- ASP.NET Core: [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md), [docs/ASPNETCORE_POLICY_EXTENSION.md](docs/ASPNETCORE_POLICY_EXTENSION.md)
+- Integrations: [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md), [docs/LOGGING_TELEMETRY_CONFIGURATION.md](docs/LOGGING_TELEMETRY_CONFIGURATION.md)
+- Ops and releases: [docs/PRODUCTION_GUARDRAILS.md](docs/PRODUCTION_GUARDRAILS.md), [docs/STABILITY_POLICY.md](docs/STABILITY_POLICY.md), [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md), [docs/RELEASE_RUNBOOK.md](docs/RELEASE_RUNBOOK.md)
+- OSS and licensing: [docs/OSS_VS_ENTERPRISE.md](docs/OSS_VS_ENTERPRISE.md), [docs/LICENSE_FAQ.md](docs/LICENSE_FAQ.md)
 
 ## Build And Test
 
