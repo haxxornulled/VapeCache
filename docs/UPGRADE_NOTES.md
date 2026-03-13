@@ -54,3 +54,11 @@ This keeps diagnostics and admin surfaces disabled by default.
 - `1` = Redis
 - `0` = in-memory fallback
 - `-1` = unknown / not initialized
+
+## Allocation Profile Update
+
+Recent hot-path allocation work was validated with baseline/current captures.
+
+- Output-cache store path (`VapeCacheOutputCacheStore`): `3940.00` -> `3772.00 bytes/call` (`-4.26%`).
+- Redis set/get hot path (`IRedisCommandExecutor`): `3777.87` -> `3604.11 bytes/call` (`-4.60%`).
+- Redis map-response hotspot pair (map-get/map-set await paths): `~299.45` -> `~82.01 sampled bytes/call` combined (`~72.6%` reduction).
