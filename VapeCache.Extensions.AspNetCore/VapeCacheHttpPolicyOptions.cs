@@ -108,10 +108,26 @@ internal static class VapeCacheHttpPolicyApplier
         if (values is null)
             return Array.Empty<string>();
 
-        return values
-            .Where(static value => !string.IsNullOrWhiteSpace(value))
-            .Select(static value => value.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        List<string>? normalized = null;
+        HashSet<string>? dedupe = null;
+
+        foreach (var value in values)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                continue;
+
+            var trimmed = value.Trim();
+            if (trimmed.Length == 0)
+                continue;
+
+            dedupe ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!dedupe.Add(trimmed))
+                continue;
+
+            normalized ??= new List<string>(capacity: 4);
+            normalized.Add(trimmed);
+        }
+
+        return normalized is null ? Array.Empty<string>() : normalized.ToArray();
     }
 }

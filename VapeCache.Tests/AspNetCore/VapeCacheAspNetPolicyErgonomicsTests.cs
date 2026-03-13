@@ -2,6 +2,8 @@ using System.Buffers;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using VapeCache.Abstractions.Caching;
@@ -195,6 +197,45 @@ public sealed class VapeCacheAspNetPolicyErgonomicsTests
             registry.AddPolicy("intent-invalid", policy => policy.WithIntent(" ")));
     }
 
+    [Fact]
+    public async Task VapeCachePolicyAttribute_ActionPolicy_WinsOverControllerPolicy()
+    {
+        await using var app = await CreateAppAsync(
+            configureApp: builder => builder.MapControllers(),
+            configureServices: services =>
+            {
+                services.AddControllers().AddApplicationPart(typeof(MvcPolicyOverrideApiController).Assembly);
+            });
+
+        var endpoint = app.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Single(endpoint => endpoint.RoutePattern.RawText?.Contains("api/policy-override", StringComparison.OrdinalIgnoreCase) == true);
+
+        var outputCacheMetadata = endpoint.Metadata.OfType<OutputCacheAttribute>().ToArray();
+        Assert.Single(outputCacheMetadata);
+        Assert.Equal("action-policy", outputCacheMetadata[0].PolicyName);
+        Assert.Equal(["action"], outputCacheMetadata[0].Tags ?? Array.Empty<string>());
+    }
+
+    [Fact]
+    public async Task VapeCachePolicyAttribute_DoesNotDuplicate_WhenNativeOutputCacheIsPresent()
+    {
+        await using var app = await CreateAppAsync(
+            configureApp: builder => builder.MapControllers(),
+            configureServices: services =>
+            {
+                services.AddControllers().AddApplicationPart(typeof(MvcNativeOutputCacheApiController).Assembly);
+            });
+
+        var endpoint = app.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Single(endpoint => endpoint.RoutePattern.RawText?.Contains("api/native-output-cache", StringComparison.OrdinalIgnoreCase) == true);
+
+        var outputCacheMetadata = endpoint.Metadata.OfType<OutputCacheAttribute>().ToArray();
+        Assert.Single(outputCacheMetadata);
+        Assert.True(outputCacheMetadata[0].NoStore);
+    }
+
     private static async Task<WebApplication> CreateAppAsync(
         Action<WebApplication> configureApp,
         Action<IServiceCollection>? configureServices = null)
@@ -278,5 +319,33 @@ public sealed class MvcCounterApiController : ControllerBase
     public static void Reset()
     {
         Interlocked.Exchange(ref _counter, 0);
+    }
+}
+
+[ApiController]
+[Route("api/policy-override")]
+[VapeCachePolicy("controller-policy", TtlSeconds = 10, CacheTags = ["controller"])]
+public sealed class MvcPolicyOverrideApiController : ControllerBase
+{
+    [HttpGet("{id:int}")]
+    [VapeCachePolicy("action-policy", TtlSeconds = 30, CacheTags = ["action"])]
+    public IActionResult Get(int id)
+    {
+        _ = id;
+        return Content("ok");
+    }
+}
+
+[ApiController]
+[Route("api/native-output-cache")]
+public sealed class MvcNativeOutputCacheApiController : ControllerBase
+{
+    [HttpGet("{id:int}")]
+    [OutputCache(NoStore = true)]
+    [VapeCachePolicy("action-policy", TtlSeconds = 30, CacheTags = ["action"])]
+    public IActionResult Get(int id)
+    {
+        _ = id;
+        return Content("ok");
     }
 }
