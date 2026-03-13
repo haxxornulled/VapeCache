@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document sets clear expectations for VapeCache's scope and positioning. Before v1.0, we're defining what VapeCache **is** and **is not** to avoid scope creep and maintain focus on our strengths.
+This document sets clear expectations for VapeCache's scope and positioning so the codebase stays focused and maintainable.
 
 ## What VapeCache Is ✅
 
@@ -57,7 +57,7 @@ Still not in scope:
 
 **Why:** Lua scripting has complex failure semantics, script management overhead, and testing challenges. Most caching patterns don't need it.
 
-**Planned:** Not planned (non-goal).
+**Status:** Out of scope for this codebase.
 
 **Workaround:** Use StackExchange.Redis for Lua alongside VapeCache for caching.
 
@@ -86,7 +86,7 @@ Still out of scope:
 - Complex consumer group state management
 - Blocking reads (dedicated connections)
 
-**Planned:** Future consideration (depends on RESP3 adoption and demand).
+**Status:** Out of scope for this codebase.
 
 **Workaround:** Use StackExchange.Redis or Redis.OM for Streams.
 
@@ -110,7 +110,7 @@ Still not in scope:
 - Multiplexing assumes independent operations
 - Locking (WATCH) requires dedicated connection
 
-**Planned:** Not planned (non-goal).
+**Status:** Out of scope for this codebase.
 
 **Workaround:** Use StackExchange.Redis for transactions, or design for eventual consistency.
 
@@ -144,17 +144,17 @@ VapeCache uses explicit serialization via `ICacheCodecProvider`. No magic:
 
 **Workaround:** Use `SystemTextJsonCodecProvider` (default) or implement custom `ICacheCodec<T>`.
 
-## API Freeze Commitment (v1.0)
+## API Compatibility Commitment
 
-Once published to NuGet, `VapeCache.Abstractions` will follow **semantic versioning**:
+`VapeCache.Abstractions` follows **semantic versioning**:
 
 - **MAJOR (x.0.0):** Breaking changes (avoid at all costs)
-- **MINOR (1.x.0):** New features, backward-compatible
-- **PATCH (1.0.x):** Bug fixes only
+- **MINOR (x.y.0):** New features, backward-compatible
+- **PATCH (x.y.z):** Bug fixes only
 
-**Current API Surface (20 commands):** Intentionally small to allow expansion without breaking changes.
+**Current API surface:** Intentionally focused to allow expansion without breaking changes.
 
-### What's Frozen (v1.0)
+### Stable Contracts (1.x)
 - `ICacheService` interface (GetAsync, SetAsync, RemoveAsync, GetOrSetAsync)
 - `IVapeCache` interface (typed cache API)
 - `IRedisCommandExecutor` interface (command methods)
@@ -255,6 +255,5 @@ await redis.GetSubscriber().SubscribeAsync("channel", handler);
 ## References
 
 - [Redis Protocol Support](REDIS_PROTOCOL_SUPPORT.md) - Detailed command support matrix
-- [API Expansion Plan](API_EXPANSION_PLAN.md) - Roadmap for new features
-- [Gap Analysis](GAP_ANALYSIS.md) - Known limitations and mitigation strategies
+- [OSS vs Enterprise](OSS_VS_ENTERPRISE.md) - Product boundary and scope
 - [GitHub Issues](https://github.com/haxxornulled/VapeCache/issues) - Feature requests and bug reports

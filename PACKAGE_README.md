@@ -29,6 +29,14 @@ dotnet add package VapeCache.Features.Invalidation
 - `VapeCache.Extensions.Aspire`: Aspire integration, health checks, and telemetry wiring
 - `VapeCache.Features.Invalidation`: optional invalidation policies for keys, tags, and zones
 
+## OSS vs Enterprise Boundary
+
+- Multiplexed transport is part of OSS.
+- Adaptive autoscaling of multiplexed lanes is Enterprise.
+- Enterprise capabilities focus on operational leverage (autoscaling, durable persistence, reconciliation, control-plane/admin/licensing), not basic OSS usability.
+
+See: https://github.com/haxxornulled/VapeCache/blob/main/docs/OSS_VS_ENTERPRISE.md
+
 ## Documentation
 
 - Quick start: https://github.com/haxxornulled/VapeCache/blob/main/docs/QUICKSTART.md
@@ -36,6 +44,7 @@ dotnet add package VapeCache.Features.Invalidation
 - Settings reference: https://github.com/haxxornulled/VapeCache/blob/main/docs/SETTINGS_REFERENCE.md
 - ASP.NET Core integration: https://github.com/haxxornulled/VapeCache/blob/main/docs/ASPNETCORE_PIPELINE_CACHING.md
 - Aspire integration: https://github.com/haxxornulled/VapeCache/blob/main/docs/ASPIRE_INTEGRATION.md
+- License FAQ: https://github.com/haxxornulled/VapeCache/blob/main/docs/LICENSE_FAQ.md
 
 ## Source
 
@@ -45,8 +54,8 @@ https://github.com/haxxornulled/VapeCache
 
 VapeCache uses BUSL-1.1 with an Additional Use Grant.
 
-- Allowed: production use, SaaS/commercial apps, modification, redistribution
-- Restricted: offering VapeCache as a hosted caching service, or embedding it as the core of a commercial caching product
+- Allowed: production use, commercial application use, SaaS use, internal business use, modification, redistribution
+- Restricted: offering VapeCache as a hosted caching/database service, or embedding it as the core of a commercial caching/database infrastructure product
 - Change date: March 11, 2029 (converts to Apache 2.0)
 
-See LICENSE in the package for full legal terms.
+See LICENSE in the package for full legal terms and the docs FAQ for quick guidance.

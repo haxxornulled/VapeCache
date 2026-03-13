@@ -784,11 +784,9 @@ services.Configure<RedisCircuitBreakerOptions>(options =>
 });
 ```
 
-### Dynamic Configuration (Hot Reload)
+### Dynamic Configuration
 
-VapeCache supports .NET configuration hot reload. Change `appsettings.json` and the circuit breaker will use new settings on the next retry.
-
-⚠️ **Note**: Currently, settings are read at startup. Hot reload support is planned for a future release.
+Circuit breaker settings are bound at startup. Apply configuration changes by restarting the process.
 
 ---
 

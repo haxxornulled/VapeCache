@@ -1031,4 +1031,4 @@ The implementation combines:
 - [CoalescedWriteBatch.cs](../VapeCache.Infrastructure/Connections/CoalescedWriteBatch.cs)
 - [SocketIoAwaitableEventArgs.cs](../VapeCache.Infrastructure/Connections/SocketIoAwaitableEventArgs.cs)
 - [RedisMultiplexedConnection.cs](../VapeCache.Infrastructure/Connections/RedisMultiplexedConnection.cs)
-- [BENCHMARK_DEBUGGING_SUMMARY.md](../BENCHMARK_DEBUGGING_SUMMARY.md)
+- [PERFORMANCE.md](PERFORMANCE.md)

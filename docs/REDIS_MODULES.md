@@ -338,33 +338,16 @@ for (var i = 0; i < items.Length; i++)
 return result; // ["ReJSON", "ft"]
 ```
 
-## Roadmap
+## Current Coverage
 
-### Phase 3 (Detection): ✅ COMPLETE
-- [x] IRedisModuleDetector interface
-- [x] MODULE LIST command implementation
-- [x] HasRedisJsonAsync() helper
-- [x] In-memory caching of results
-- [x] Error handling for old Redis versions
-
-### Phase 4 (RedisJSON): ✅ COMPLETE
-- [x] JSON.SET, JSON.GET, JSON.DEL commands
-- [x] JSONPath query support (JSON.GET with path)
-- [x] Partial updates (JSON.SET with path)
-- [x] Automatic fallback to serialized JSON when module unavailable
-
-### Phase 5 (Other Modules): ✅ COMPLETE
-- [x] RediSearch integration (full-text search)
-- [x] RedisBloom integration (probabilistic filters)
-- [x] RedisTimeSeries integration
+- Redis module detection via `IRedisModuleDetector` and `MODULE LIST`
+- RedisJSON support (`JSON.SET`, `JSON.GET`, `JSON.DEL`)
+- RediSearch integration
+- RedisBloom integration
+- RedisTimeSeries integration
 
 ## See Also
 
 - [TYPED_COLLECTIONS.md](TYPED_COLLECTIONS.md) - Typed LIST/SET/HASH APIs
-- [RICH_API_DESIGN.md](RICH_API_DESIGN.md) - Overall API design
 - [RedisJSON Documentation](https://redis.io/docs/stack/json/)
 - [Redis Modules Hub](https://redis.io/modules)
-
----
-
-**Next Steps:** Expand module helpers (JSON.NUMINCRBY, JSON.ARRAPPEND) and add more RediSearch query options.

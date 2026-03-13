@@ -1,6 +1,6 @@
 # Package Compatibility Plan
 
-This plan governs package compatibility decisions for OSS releases.
+This document governs package compatibility decisions for OSS releases.
 
 ## Problem Statement
 
@@ -34,17 +34,4 @@ Mitigations:
 - migration note in `docs/UPGRADE_NOTES.md`
 - consumer validation workflow to catch dependency graph regressions early
 
-## Future Major Version Strategy (2.x+)
-
-If package topology changes:
-
-- publish a compatibility matrix before release
-- provide side-by-side package mapping
-- ship migration snippets for common installs
-
-Example mapping template:
-
-- `Old.Package.Id` -> `New.Package.Id`
-- min supported version
-- required code/config changes
 
