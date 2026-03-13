@@ -12,6 +12,40 @@ namespace VapeCache.Tests.AspNetCore;
 public sealed class VapeCacheAspNetPolicyErgonomicsTests
 {
     [Fact]
+    public async Task AddVapeCacheAspNetPolicies_VaryByQuery_CachesPerQueryValue()
+    {
+        var counter = 0;
+        await using var app = await CreateAppAsync(
+            configureApp: builder =>
+            {
+                builder.MapGet("/query", (string q) => $"{q}:{Interlocked.Increment(ref counter)}")
+                    .CacheWithVapeCache("query-policy");
+            },
+            configureServices: services =>
+            {
+                services.AddVapeCacheAspNetPolicies(policies =>
+                {
+                    policies.AddPolicy("query-policy", policy => policy
+                        .Ttl(TimeSpan.FromSeconds(20))
+                        .VaryByQuery());
+                });
+            });
+
+        using var client = app.GetTestClient();
+
+        var alphaFirst = await client.GetStringAsync("/query?q=alpha");
+        var alphaSecond = await client.GetStringAsync("/query?q=alpha");
+        var betaFirst = await client.GetStringAsync("/query?q=beta");
+        var betaSecond = await client.GetStringAsync("/query?q=beta");
+
+        Assert.Equal("alpha:1", alphaFirst);
+        Assert.Equal("alpha:1", alphaSecond);
+        Assert.Equal("beta:2", betaFirst);
+        Assert.Equal("beta:2", betaSecond);
+        Assert.Equal(2, counter);
+    }
+
+    [Fact]
     public async Task CacheWithVapeCache_InlinePolicy_CachesEndpointResponses()
     {
         var counter = 0;
@@ -105,6 +139,60 @@ public sealed class VapeCacheAspNetPolicyErgonomicsTests
 
         Assert.Equal("1", first);
         Assert.Equal("1", second);
+    }
+
+    [Fact]
+    public void VapeCachePolicyAttribute_ToOutputCacheAttribute_Throws_WhenTtlIsNegative()
+    {
+        var attribute = new VapeCachePolicyAttribute
+        {
+            TtlSeconds = -1
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => attribute.ToOutputCacheAttribute());
+        Assert.Contains("negative", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void VapeCachePolicyAttribute_ToOutputCacheAttribute_UsesExplicitQueryKeys_WhenProvided()
+    {
+        var attribute = new VapeCachePolicyAttribute
+        {
+            TtlSeconds = 60,
+            VaryByQuery = true,
+            VaryByQueryKeys = ["tenant", "culture", "tenant"]
+        };
+
+        var output = attribute.ToOutputCacheAttribute();
+        Assert.Equal(["tenant", "culture"], output.VaryByQueryKeys ?? Array.Empty<string>());
+    }
+
+    [Fact]
+    public void AddVapeCacheAspNetPolicies_ThrowsOnDuplicatePolicyNames()
+    {
+        var services = new ServiceCollection();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            services.AddVapeCacheAspNetPolicies(policies =>
+            {
+                policies.AddPolicy("products", policy => policy.Ttl(TimeSpan.FromMinutes(1)));
+                policies.AddPolicy("products", policy => policy.Ttl(TimeSpan.FromMinutes(5)));
+            }));
+
+        Assert.Contains("already registered", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void VapeCacheHttpPolicyBuilder_ValidatesInputs()
+    {
+        var registry = new VapeCacheAspNetPolicyRegistry();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            registry.AddPolicy("ttl-invalid", policy => policy.Ttl(TimeSpan.Zero)));
+        Assert.Throws<ArgumentException>(() =>
+            registry.AddPolicy("prefix-invalid", policy => policy.CacheKeyPrefix("  ")));
+        Assert.Throws<ArgumentException>(() =>
+            registry.AddPolicy("intent-invalid", policy => policy.WithIntent(" ")));
     }
 
     private static async Task<WebApplication> CreateAppAsync(
