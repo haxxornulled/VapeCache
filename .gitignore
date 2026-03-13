@@ -59,6 +59,7 @@ nul
 tmp/
 .tmp/
 artifacts/
+/Codex/
 **/TestResults/
 tools/VapeCache.DocCommenter/
 VapeCache.UI/wwwroot/js/reconnect-modal.js
