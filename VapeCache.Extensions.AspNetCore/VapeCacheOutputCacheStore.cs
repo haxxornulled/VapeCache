@@ -17,6 +17,13 @@ public sealed partial class VapeCacheOutputCacheStore(
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly byte[] EnvelopePrefix = "VCOUT1:"u8.ToArray();
+    private static readonly CacheIntent OutputCacheIntentWithoutTags = new(
+        CacheIntentKind.ComputedView,
+        Reason: "aspnetcore-output-cache",
+        Owner: "aspnetcore-output-cache-store",
+        Tags: null);
+    private string[]? _cachedSetIntentTags;
+    private CacheIntent? _cachedSetIntent;
 
     /// <inheritdoc />
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken cancellationToken)
@@ -64,14 +71,9 @@ public sealed partial class VapeCacheOutputCacheStore(
         var normalizedKey = BuildCacheKey(key);
         var normalizedTags = NormalizeTags(tags);
         var ttl = validFor > TimeSpan.Zero ? validFor : options.DefaultTtl;
-
         var entryOptions = new CacheEntryOptions(
             Ttl: ttl,
-            Intent: new CacheIntent(
-                CacheIntentKind.ComputedView,
-                Reason: "aspnetcore-output-cache",
-                Owner: "aspnetcore-output-cache-store",
-                Tags: normalizedTags));
+            Intent: ResolveSetIntent(normalizedTags));
 
         if (!options.EnableTagIndexing || normalizedTags.Length == 0)
         {
@@ -217,7 +219,11 @@ public sealed partial class VapeCacheOutputCacheStore(
         if (tags is null || tags.Length == 0)
             return Array.Empty<string>();
 
-        var result = new List<string>(tags.Length);
+        if (CanReuseInputTags(tags))
+            return tags;
+
+        var result = new string[tags.Length];
+        var count = 0;
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var tag in tags)
@@ -227,10 +233,63 @@ public sealed partial class VapeCacheOutputCacheStore(
 
             var normalized = tag.Trim();
             if (seen.Add(normalized))
-                result.Add(normalized);
+                result[count++] = normalized;
         }
 
-        return result.ToArray();
+        if (count == 0)
+            return Array.Empty<string>();
+
+        if (count == result.Length)
+            return result;
+
+        var trimmed = GC.AllocateUninitializedArray<string>(count);
+        Array.Copy(result, trimmed, count);
+        return trimmed;
+    }
+
+    private static bool CanReuseInputTags(string[] tags)
+    {
+        for (var i = 0; i < tags.Length; i++)
+        {
+            var tag = tags[i];
+            if (string.IsNullOrWhiteSpace(tag))
+                return false;
+
+            if (char.IsWhiteSpace(tag[0]) || char.IsWhiteSpace(tag[^1]))
+                return false;
+
+            for (var j = 0; j < i; j++)
+            {
+                if (string.Equals(tags[j], tag, StringComparison.Ordinal))
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    private CacheIntent ResolveSetIntent(string[] normalizedTags)
+    {
+        if (normalizedTags.Length == 0)
+            return OutputCacheIntentWithoutTags;
+
+        var cachedTags = Volatile.Read(ref _cachedSetIntentTags);
+        if (ReferenceEquals(cachedTags, normalizedTags))
+        {
+            var cachedIntent = Volatile.Read(ref _cachedSetIntent);
+            if (cachedIntent is not null)
+                return cachedIntent;
+        }
+
+        var created = new CacheIntent(
+            CacheIntentKind.ComputedView,
+            Reason: "aspnetcore-output-cache",
+            Owner: "aspnetcore-output-cache-store",
+            Tags: normalizedTags);
+
+        Volatile.Write(ref _cachedSetIntentTags, normalizedTags);
+        Volatile.Write(ref _cachedSetIntent, created);
+        return created;
     }
 
     private sealed class OutputCacheEnvelope

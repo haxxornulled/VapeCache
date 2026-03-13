@@ -21,6 +21,21 @@ This tracker maps .NET 10 performance guidance to concrete VapeCache work items.
 - `VapeCache.Reconciliation`: converted `RedisReconciliationReaper` logs to source-generated `LoggerMessage`.
 - `VapeCache.Tests`: added scripted coverage for special doubles (`+inf`, `-inf`, `NaN`) and SCAN cursor parsing.
 
+### Allocation profiling update (2026-03-13)
+
+- `VapeCache.Extensions.AspNetCore`: output-cache `CacheIntent` reuse + tag normalization fast-path reduced allocation pressure.
+  - Baseline exact allocation: `3940.00 bytes/call`
+  - Current exact allocation: `3772.00 bytes/call`
+  - Net change: `-4.26%`
+- `VapeCache.Infrastructure`: pooled async builder applied to Redis map-response await paths (`MapGet` / `MapSet` mapping helpers).
+  - Baseline exact allocation: `3777.87 bytes/call`
+  - Current exact allocation: `3604.11 bytes/call`
+  - Net change: `-4.60%`
+- Redis map-response hotspot pair (`MapGet` + `MapSet` await paths):
+  - Baseline sampled cost: `~299.45 bytes/call` combined
+  - Current sampled cost: `~82.01 bytes/call` combined
+  - Net sampled reduction: `~72.6%`
+
 ## High-priority next passes
 
 1. Logger hot paths (`CA1848`, `CA1873`)

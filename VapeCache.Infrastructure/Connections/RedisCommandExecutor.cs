@@ -4424,26 +4424,27 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
 
         return AwaitMapGetResponseAsync(respTask);
-
-        static async ValueTask<byte[]?> AwaitMapGetResponseAsync(ValueTask<RedisRespReader.RespValue> task)
-        {
-            var resp = await task.ConfigureAwait(false);
-            return MapGetResponse(resp);
-        }
-
-        static byte[]? MapGetResponse(RedisRespReader.RespValue resp)
-        {
-            return resp.Kind switch
-            {
-                RedisRespReader.RespKind.NullBulkString => null,
-                RedisRespReader.RespKind.BulkString => resp.Bulk,
-                RedisRespReader.RespKind.Error => throw new InvalidOperationException($"Redis error: {resp.Text}"),
-                _ => throw new InvalidOperationException($"Unexpected GET response: {resp.Kind}")
-            };
-        }
     }
 
-    private ValueTask<byte[]?> MapGetResponseAsync(
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<byte[]?> AwaitMapGetResponseAsync(ValueTask<RedisRespReader.RespValue> task)
+    {
+        var resp = await task.ConfigureAwait(false);
+        return MapGetResponse(resp);
+    }
+
+    private static byte[]? MapGetResponse(RedisRespReader.RespValue resp)
+    {
+        return resp.Kind switch
+        {
+            RedisRespReader.RespKind.NullBulkString => null,
+            RedisRespReader.RespKind.BulkString => resp.Bulk,
+            RedisRespReader.RespKind.Error => throw new InvalidOperationException($"Redis error: {resp.Text}"),
+            _ => throw new InvalidOperationException($"Unexpected GET response: {resp.Kind}")
+        };
+    }
+
+    private static ValueTask<byte[]?> MapGetResponseAsync(
         RedisMultiplexedConnection conn,
         ValueTask<RedisRespReader.RespValue> respTask,
         string op)
@@ -4460,23 +4461,23 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             return ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, op, resp);
         }
 
-        return AwaitMapGetResponseAsync(this, conn, respTask, op);
+        return AwaitMapGetResponseWithResetAsync(conn, respTask, op);
+    }
 
-        static async ValueTask<byte[]?> AwaitMapGetResponseAsync(
-            RedisCommandExecutor executor,
-            RedisMultiplexedConnection conn,
-            ValueTask<RedisRespReader.RespValue> task,
-            string op)
-        {
-            var resp = await task.ConfigureAwait(false);
-            if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
-                return null;
-            if (resp.Kind == RedisRespReader.RespKind.BulkString)
-                return resp.Bulk;
-            if (resp.Kind == RedisRespReader.RespKind.Error)
-                throw new InvalidOperationException($"Redis error: {resp.Text}");
-            return await ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, op, resp).ConfigureAwait(false);
-        }
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<byte[]?> AwaitMapGetResponseWithResetAsync(
+        RedisMultiplexedConnection conn,
+        ValueTask<RedisRespReader.RespValue> task,
+        string op)
+    {
+        var resp = await task.ConfigureAwait(false);
+        if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
+            return null;
+        if (resp.Kind == RedisRespReader.RespKind.BulkString)
+            return resp.Bulk;
+        if (resp.Kind == RedisRespReader.RespKind.Error)
+            throw new InvalidOperationException($"Redis error: {resp.Text}");
+        return await ThrowUnexpectedResponseAndResetAsync<byte[]?>(conn, op, resp).ConfigureAwait(false);
     }
 
     private static ValueTask<RedisValueLease> MapLeaseResponseAsync(ValueTask<RedisRespReader.RespValue> respTask, string op)
@@ -4546,32 +4547,33 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
 
         return AwaitMapSetResponseAsync(respTask, rented);
+    }
 
-        static async ValueTask<bool> AwaitMapSetResponseAsync(ValueTask<RedisRespReader.RespValue> task, byte[]? rented)
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<bool> AwaitMapSetResponseAsync(ValueTask<RedisRespReader.RespValue> task, byte[]? rented)
+    {
+        try
         {
-            try
-            {
-                var resp = await task.ConfigureAwait(false);
-                return MapSetResponse(resp);
-            }
-            finally
-            {
-                if (rented is not null)
-                    ArrayPool<byte>.Shared.Return(rented);
-            }
+            var resp = await task.ConfigureAwait(false);
+            return MapSetResponse(resp);
         }
-
-        static bool MapSetResponse(RedisRespReader.RespValue resp)
+        finally
         {
-            if (resp.Kind == RedisRespReader.RespKind.Error)
-                throw new InvalidOperationException($"Redis error: {resp.Text}");
-
-            return resp.Kind == RedisRespReader.RespKind.SimpleString &&
-                   (ReferenceEquals(resp.Text, RedisRespReader.OkSimpleString) || resp.Text == "OK");
+            if (rented is not null)
+                ArrayPool<byte>.Shared.Return(rented);
         }
     }
 
-    private ValueTask<bool> MapSetResponseAsync(
+    private static bool MapSetResponse(RedisRespReader.RespValue resp)
+    {
+        if (resp.Kind == RedisRespReader.RespKind.Error)
+            throw new InvalidOperationException($"Redis error: {resp.Text}");
+
+        return resp.Kind == RedisRespReader.RespKind.SimpleString &&
+               (ReferenceEquals(resp.Text, RedisRespReader.OkSimpleString) || resp.Text == "OK");
+    }
+
+    private static ValueTask<bool> MapSetResponseAsync(
         RedisMultiplexedConnection conn,
         ValueTask<RedisRespReader.RespValue> respTask,
         byte[]? rented = null)
@@ -4594,24 +4596,24 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             return ThrowUnexpectedResponseAndResetAsync<bool>(conn, "SET", resp);
         }
 
-        return AwaitMapSetResponseAsync(this, conn, respTask, rented);
+        return AwaitMapSetResponseWithResetAsync(conn, respTask, rented);
+    }
 
-        static async ValueTask<bool> AwaitMapSetResponseAsync(
-            RedisCommandExecutor executor,
-            RedisMultiplexedConnection conn,
-            ValueTask<RedisRespReader.RespValue> task,
-            byte[]? rented)
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<bool> AwaitMapSetResponseWithResetAsync(
+        RedisMultiplexedConnection conn,
+        ValueTask<RedisRespReader.RespValue> task,
+        byte[]? rented)
+    {
+        try
         {
-            try
-            {
-                var resp = await task.ConfigureAwait(false);
-                return await ReadSetResponseAsync(conn, resp).ConfigureAwait(false);
-            }
-            finally
-            {
-                if (rented is not null)
-                    ArrayPool<byte>.Shared.Return(rented);
-            }
+            var resp = await task.ConfigureAwait(false);
+            return await ReadSetResponseAsync(conn, resp).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (rented is not null)
+                ArrayPool<byte>.Shared.Return(rented);
         }
     }
 
