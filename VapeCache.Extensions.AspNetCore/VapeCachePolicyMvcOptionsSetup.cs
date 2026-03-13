@@ -19,25 +19,66 @@ internal sealed class VapeCachePolicyApplicationModelConvention : IApplicationMo
     {
         foreach (var controller in application.Controllers)
         {
-            ApplyAttributeMapping(controller.Attributes, controller.Selectors);
+            var controllerPolicy = FindPolicyAttribute(controller.Attributes);
+            var controllerHasNativeOutputCache = HasNativeOutputCacheAttribute(controller.Attributes);
 
             foreach (var action in controller.Actions)
-                ApplyAttributeMapping(action.Attributes, action.Selectors);
+            {
+                if (controllerHasNativeOutputCache || HasNativeOutputCacheAttribute(action.Attributes))
+                    continue;
+
+                var policy = FindPolicyAttribute(action.Attributes) ?? controllerPolicy;
+                if (policy is null)
+                    continue;
+
+                ApplySelectorMetadata(policy, action.Selectors);
+            }
         }
     }
 
-    private static void ApplyAttributeMapping(IReadOnlyList<object> attributes, IList<SelectorModel> selectors)
+    private static VapeCachePolicyAttribute? FindPolicyAttribute(IReadOnlyList<object> attributes)
     {
-        var policyAttribute = attributes.OfType<VapeCachePolicyAttribute>().FirstOrDefault();
-        if (policyAttribute is null)
-            return;
-
-        foreach (var selector in selectors)
+        for (var index = 0; index < attributes.Count; index++)
         {
-            if (selector.EndpointMetadata.Any(static metadata => metadata is OutputCacheAttribute))
+            if (attributes[index] is VapeCachePolicyAttribute policyAttribute)
+                return policyAttribute;
+        }
+
+        return null;
+    }
+
+    private static bool HasNativeOutputCacheAttribute(IReadOnlyList<object> attributes)
+    {
+        for (var index = 0; index < attributes.Count; index++)
+        {
+            if (attributes[index] is OutputCacheAttribute)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static void ApplySelectorMetadata(VapeCachePolicyAttribute policy, IList<SelectorModel> selectors)
+    {
+        for (var selectorIndex = 0; selectorIndex < selectors.Count; selectorIndex++)
+        {
+            var selector = selectors[selectorIndex];
+            var endpointMetadata = selector.EndpointMetadata;
+            var hasOutputCacheMetadata = false;
+
+            for (var metadataIndex = 0; metadataIndex < endpointMetadata.Count; metadataIndex++)
+            {
+                if (endpointMetadata[metadataIndex] is not OutputCacheAttribute)
+                    continue;
+
+                hasOutputCacheMetadata = true;
+                break;
+            }
+
+            if (hasOutputCacheMetadata)
                 continue;
 
-            selector.EndpointMetadata.Add(policyAttribute.ToOutputCacheAttribute());
+            endpointMetadata.Add(policy.ToOutputCacheAttribute());
         }
     }
 }

@@ -133,6 +133,6 @@ public sealed class VapeCacheAspNetPolicyRegistry
 
     internal IReadOnlyDictionary<string, VapeCacheHttpPolicyOptions> Snapshot()
     {
-        return _policies.ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        return new Dictionary<string, VapeCacheHttpPolicyOptions>(_policies, StringComparer.OrdinalIgnoreCase);
     }
 }
