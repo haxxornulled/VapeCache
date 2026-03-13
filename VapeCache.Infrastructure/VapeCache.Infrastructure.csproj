@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Runtime</PackageId>
     <Title>VapeCache</Title>
-    <Version>1.2.9</Version>
+    <Version>1.2.10</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache</Product>
@@ -24,7 +24,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.9 release: stabilized Redis telemetry parser metrics, hardened connection registration across DI and Autofac, and refreshed production-capable documentation.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.10 release: stabilized Redis telemetry parser metrics, hardened connection registration across DI and Autofac, and refreshed production-capable documentation.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
@@ -56,6 +56,7 @@
   </ItemGroup>
 
 </Project>
+
 
 
 

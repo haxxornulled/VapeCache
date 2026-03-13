@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.Logging</PackageId>
     <Title>VapeCache Extensions for Logging</Title>
-    <Version>1.2.9</Version>
+    <Version>1.2.10</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.Logging</Product>
@@ -24,7 +24,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.9 release: extracted enterprise-grade Serilog + OTEL logging wiring into a dedicated package with optional rolling file sink support.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.10 release: extracted enterprise-grade Serilog + OTEL logging wiring into a dedicated package with optional rolling file sink support.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
@@ -49,3 +49,4 @@
   </ItemGroup>
 
 </Project>
+

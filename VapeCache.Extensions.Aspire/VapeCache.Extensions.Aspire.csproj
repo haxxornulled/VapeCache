@@ -12,7 +12,7 @@
     <!-- NuGet Package Metadata -->
     <PackageId>VapeCache.Extensions.Aspire</PackageId>
     <Title>VapeCache Extensions for Aspire</Title>
-    <Version>1.2.9</Version>
+    <Version>1.2.10</Version>
     <Description>.NET Aspire integration for VapeCache. Adds service discovery, health checks, and OpenTelemetry wiring for Aspire-hosted applications.</Description>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
@@ -28,7 +28,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.9 release: stabilized Redis telemetry parser metrics, hardened connection registration across DI and Autofac, and refreshed production-capable documentation.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.10 release: stabilized Redis telemetry parser metrics, hardened connection registration across DI and Autofac, and refreshed production-capable documentation.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
@@ -69,6 +69,7 @@
   </ItemGroup>
 
 </Project>
+
 
 
 
