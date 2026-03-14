@@ -21,6 +21,19 @@ VapeCache emits three signal types:
 
 No sink backend is hardcoded in runtime packages.
 
+### 2.1 Signal Topology
+
+```mermaid
+flowchart LR
+    RT["Runtime components"] --> LOG["ILogger<T> logs"]
+    RT --> MET["Meter instruments"]
+    RT --> TRC["ActivitySource spans"]
+
+    LOG --> SINK["Host-configured sinks (console/file/Seq/OTLP)"]
+    MET --> OTEL["OpenTelemetry metrics pipeline"]
+    TRC --> OTELT["OpenTelemetry trace pipeline"]
+```
+
 ## 3. Metric Meters
 
 ### 3.1 Redis meter
@@ -63,6 +76,26 @@ Base tags include:
 
 - `db.system=redis`
 - `db.operation` (for command spans)
+
+### 4.1 Request Correlation Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App
+    participant Cache as HybridCacheService
+    participant Redis as Redis transport
+    participant OTel as OTEL exporter
+
+    App->>Cache: cache get/set operation
+    Cache->>Cache: record cache.* counters + op latency
+    Cache->>Redis: redis command
+    Redis->>Redis: optional redis.command Activity + redis.cmd.* metrics
+    Redis-->>Cache: response / error
+    Cache->>Cache: hit/miss/fallback/breaker metrics
+    Cache-->>App: result
+    Cache->>OTel: emit metrics/spans/logs through host pipeline
+```
 
 ## 5. Instrumentation Toggles
 
@@ -111,6 +144,21 @@ At minimum, production deployments should monitor:
 - breaker opens (`cache.redis.breaker.opened`)
 - fallback rate (`cache.fallback.to_memory`)
 - p95/p99 latency from `cache.op.ms` and `redis.cmd.ms` (when enabled)
+
+### 8.1 Alerting Decision Flow
+
+```mermaid
+flowchart TD
+    A["Observe cache and redis metrics"] --> B{"redis.connect.failures rising?"}
+    B -- Yes --> C["Check network/auth/TLS and endpoint health"]
+    B -- No --> D{"redis.pool.timeouts > baseline?"}
+    D -- Yes --> E["Tune pool/mux in-flight and workload pressure"]
+    D -- No --> F{"breaker opens or fallback spikes?"}
+    F -- Yes --> G["Inspect Redis failures and app timeout budgets"]
+    F -- No --> H{"p95/p99 latency regressed?"}
+    H -- Yes --> I["Enable command instrumentation and inspect hot paths"]
+    H -- No --> J["System within expected envelope"]
+```
 
 ## 9. Cardinality Notes
 

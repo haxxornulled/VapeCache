@@ -9,6 +9,7 @@ This index reflects the OSS runtime surface in this repository.
 - [CONFIGURATION.md](CONFIGURATION.md)
 - [SETTINGS_REFERENCE.md](SETTINGS_REFERENCE.md)
 - [NUGET_PACKAGES.md](NUGET_PACKAGES.md)
+- [GITHUB_BRANDING.md](GITHUB_BRANDING.md)
 - [LICENSE_FAQ.md](LICENSE_FAQ.md)
 - [OSS_VS_ENTERPRISE.md](OSS_VS_ENTERPRISE.md)
 
@@ -43,6 +44,7 @@ This index reflects the OSS runtime surface in this repository.
 - [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md)
 - [PACKAGE_COMPATIBILITY_PLAN.md](PACKAGE_COMPATIBILITY_PLAN.md)
 - [RELEASE_RUNBOOK.md](RELEASE_RUNBOOK.md)
+- [PROCESS_MODEL.md](PROCESS_MODEL.md)
 - [UPGRADE_NOTES.md](UPGRADE_NOTES.md)
 
 ## Supporting References

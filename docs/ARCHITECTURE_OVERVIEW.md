@@ -34,6 +34,32 @@ Canonical dependency rule: dependencies point inward.
 
 Enforcement tests: `VapeCache.Tests/Architecture/CleanArchitectureDependencyTests.cs`.
 
+### 2.1 Layer Diagram
+
+```mermaid
+flowchart TB
+    subgraph Outer["Adapters / Hosts"]
+        EXT["VapeCache.Extensions.*"]
+        CONSOLE["VapeCache.Console"]
+        UI["VapeCache.UI"]
+        TESTS["Tests/Benchmarks"]
+    end
+
+    INF["VapeCache.Infrastructure"]
+    ABS["VapeCache.Abstractions"]
+    APP["VapeCache.Application"]
+    CORE["VapeCache.Core"]
+
+    EXT --> ABS
+    CONSOLE --> ABS
+    UI --> ABS
+    TESTS --> ABS
+    TESTS --> INF
+
+    INF --> ABS
+    APP --> CORE
+```
+
 ## 3. Runtime Composition
 
 ### 3.1 Microsoft DI
@@ -81,6 +107,42 @@ RedisCommandExecutor
   -> socket/TLS transport
 ```
 
+### 4.1 Request Path Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Caller
+    participant VC as IVapeCache/VapeCacheClient
+    participant SP as StampedeProtectedCacheService
+    participant HY as HybridCacheService
+    participant RC as RedisCacheService
+    participant FB as InMemory fallback
+
+    Caller->>VC: GetOrCreateAsync(key, factory, options)
+    VC->>SP: GetOrSetAsync(...)
+    SP->>HY: GetAsync(key)
+
+    alt Redis allowed and healthy
+        HY->>RC: GET key
+        RC-->>HY: bytes/null
+        alt hit
+            HY-->>SP: payload
+            SP-->>VC: deserialize + return
+        else miss
+            SP->>SP: acquire per-key semaphore
+            SP->>Caller: invoke factory
+            SP->>HY: SetAsync(key, payload, options)
+            HY->>RC: SET key payload
+            HY-->>SP: success
+            SP-->>VC: return created value
+        end
+    else breaker open or Redis error
+        HY->>FB: GET/SET fallback path
+        HY-->>SP: fallback payload/result
+    end
+```
+
 ## 5. Operation Flows
 
 ### 5.1 Get
@@ -113,6 +175,21 @@ Two complementary invalidation paths exist:
 - policy-driven invalidation orchestration in `VapeCache.Features.Invalidation` and `VapeCache.Application.Caching.Invalidation`
 
 Tag/zone versioning is read-time validated and avoids full key scans.
+
+### 6.1 Tag/Zone Version Flow
+
+```mermaid
+flowchart LR
+    W["Write with tags/zones"] --> E["Wrap payload with tag versions"]
+    E --> S["Store payload in Redis/fallback"]
+    I["InvalidateTag/InvalidateZone"] --> V["Increment version key"]
+    R["Read key"] --> C{"Envelope has tag versions?"}
+    C -- No --> RET["Return payload"]
+    C -- Yes --> L["Load current tag versions"]
+    L --> M{"Stored == current?"}
+    M -- Yes --> RET
+    M -- No --> DROP["Treat as stale and remove lazily"]
+```
 
 ## 7. ASP.NET Core Boundary
 
@@ -150,3 +227,20 @@ Optional sink/platform wiring is externalized in `VapeCache.Extensions.Logging` 
 - keep transport/protocol concerns in `Infrastructure`
 - expose public capability through `Abstractions` first, then wire adapters
 - avoid leaking framework-specific types into cache/runtime contracts
+
+## 11. Runtime Process Model
+
+```mermaid
+flowchart TD
+    A["Incoming request / cache call"] --> B["Key + options resolved"]
+    B --> C["Stampede gate + validation"]
+    C --> D{"Breaker allows Redis?"}
+    D -- Yes --> E["Redis path (mux lanes + RESP)"]
+    D -- No --> F["Fallback path (in-memory)"]
+    E --> G{"Hit?"}
+    F --> G
+    G -- Yes --> H["Deserialize and return"]
+    G -- No --> I["Factory/materialization"]
+    I --> J["Set + tag envelope + telemetry"]
+    J --> H
+```

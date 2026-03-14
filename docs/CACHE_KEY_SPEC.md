@@ -21,6 +21,16 @@ This spec covers:
 
 Key values are treated as opaque, case-sensitive strings.
 
+### 2.3 Key Composition Diagram
+
+```mermaid
+flowchart LR
+    R["Region name"] --> K["{region}:{id}"]
+    I["Entity/Query id"] --> K
+    V["Version segment (optional)"] --> K2["{region}:{id}:v{n}"]
+    K --> K2
+```
+
 ### 2.2 Region keys
 
 `IVapeCache.Region(name).Key<T>(id)` produces:
@@ -88,6 +98,19 @@ Default `KeyPrefix`: `vapecache:output`
 
 Payload format is 8-byte little-endian `Int64` version.
 
+### 4.4 Namespace Map
+
+```mermaid
+flowchart TD
+    ROOT["Redis keyspace"] --> APP["app:* / query:* (application keys)"]
+    ROOT --> TAG["vapecache:tag:v1:{tag}"]
+    ROOT --> OUT["vapecache:output:{framework-key}"]
+    ROOT --> OUTTAG["vapecache:output:tag-version:{tag}"]
+
+    classDef reserved fill:#ffe9e9,stroke:#d9534f,stroke-width:1px;
+    class TAG,OUTTAG reserved;
+```
+
 ## 5. Tagged Payload Envelopes
 
 ### 5.1 Hybrid cache tagged envelope
@@ -120,6 +143,33 @@ JSON object with:
 
 If tag indexing is disabled or tags are empty, payload is stored directly.
 
+### 5.3 Tagged Envelope Read Validation Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Reader as Cache read path
+    participant Store as Redis/Fallback
+    participant Tags as Tag version store
+
+    Reader->>Store: GET key
+    Store-->>Reader: bytes
+    Reader->>Reader: detect VCTAG1/VCOUT1 prefix
+    alt envelope present
+        Reader->>Tags: GET current versions for tags
+        Tags-->>Reader: current versions
+        Reader->>Reader: compare stored vs current
+        alt versions match
+            Reader-->>Reader: return payload
+        else mismatch
+            Reader->>Store: remove stale key (best effort)
+            Reader-->>Reader: treat as miss
+        end
+    else direct payload
+        Reader-->>Reader: return payload
+    end
+```
+
 ## 6. Collision Avoidance Guidance
 
 To avoid collisions and operational ambiguity:
@@ -143,3 +193,16 @@ For stable keys:
 
 - Invalidation is version-based for tags/zones and does not require full Redis key scans.
 - Stale tagged entries are lazily discarded on read when stored and current tag versions differ.
+
+### 8.1 Key Safety Checklist
+
+```mermaid
+flowchart TD
+    A["Define cache key"] --> B{"Deterministic inputs only?"}
+    B -- No --> X["Refactor key builder"]
+    B -- Yes --> C{"Includes scope/tenant?"}
+    C -- No --> X
+    C -- Yes --> D{"Namespace avoids reserved prefixes?"}
+    D -- No --> X
+    D -- Yes --> E["Approved for production use"]
+```

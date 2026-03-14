@@ -13,6 +13,18 @@ Current OSS runtime provides the primitives required for EF-style second-level c
 
 The first-party package currently provides interceptor contracts and bridge wiring; it does not yet claim full transparent result materialization caching for all query shapes.
 
+### 1.1 Integration Topology
+
+```mermaid
+flowchart LR
+    EF["EF Core query/update pipeline"] --> INT["EF cache interceptor contracts"]
+    INT --> VC["IVapeCache / ICacheTagService"]
+    VC --> HY["Hybrid cache runtime"]
+    HY --> REDIS["Redis backend"]
+    HY --> FALLBACK["In-memory fallback"]
+    INT --> OBS["Observer callbacks / OTEL package"]
+```
+
 ## 1.1 Package Wiring
 
 ```csharp
@@ -110,6 +122,31 @@ var value = await cache.GetOrCreateAsync(
     ct);
 ```
 
+### 3.1 Read Path Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App
+    participant EF as EF query execution
+    participant Key as Deterministic key builder
+    participant Cache as IVapeCache
+    participant Db as Database
+
+    App->>EF: execute query
+    EF->>Key: build deterministic cache key
+    Key-->>EF: ef:q:* key
+    EF->>Cache: GetOrCreateAsync(key, factory, options)
+    alt cache hit
+        Cache-->>EF: materialized result
+    else cache miss
+        Cache->>Db: execute query factory
+        Db-->>Cache: rows/result
+        Cache-->>EF: cache + return result
+    end
+    EF-->>App: result
+```
+
 ## 4. Write/Invalidation Pattern (Supported Today)
 
 After a successful write transaction (`SaveChanges`), invalidate affected entity zones/tags.
@@ -120,7 +157,25 @@ Options:
   - `InvalidateZoneAsync("ef:products")`
 - policy-driven invalidation:
   - publish `InvalidateEntityCacheCommand`
-  - use `EntityCacheChangedEvent`-based policies
+- use `EntityCacheChangedEvent`-based policies
+
+### 4.1 Write + Invalidation Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App
+    participant DbCtx as DbContext/SaveChanges
+    participant Plan as Invalidation planner
+    participant Tags as ICacheTagService
+
+    App->>DbCtx: SaveChanges
+    DbCtx-->>DbCtx: transaction commit successful
+    DbCtx->>Plan: capture affected entities/zones
+    Plan->>Tags: InvalidateZoneAsync / InvalidateTagAsync
+    Tags-->>Plan: incremented version(s)
+    Plan-->>App: invalidation complete
+```
 
 ## 5. Deterministic Query Key Requirements
 
@@ -179,3 +234,16 @@ Any EF adapter implementation should include:
 - invalidation correctness tests after writes
 - fallback behavior tests during Redis outages
 - concurrency tests for stampede/coalesced misses on hot EF queries
+
+### 10.1 Observer Correlation Model
+
+```mermaid
+flowchart TD
+    A["OnQueryCacheKeyBuilt"] --> B["CommandId + ContextInstanceId established"]
+    B --> C["OnQueryExecutionCompleted"]
+    C --> D{"SaveChanges occurred?"}
+    D -- No --> E["Read-only query path complete"]
+    D -- Yes --> F["OnInvalidationPlanCaptured"]
+    F --> G["OnZoneInvalidated / OnZoneInvalidationFailed"]
+    G --> H["Profiler joins by CommandId/ContextInstanceId"]
+```

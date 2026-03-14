@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry</PackageId>
     <Title>VapeCache EF Core OpenTelemetry Extensions</Title>
-    <Version>1.2.12</Version>
+    <Version>1.2.13</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry</Product>
