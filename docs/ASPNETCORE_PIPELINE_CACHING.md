@@ -51,6 +51,13 @@ Minimal API:
 ```csharp
 app.MapGet("/products/{id:int}", async (int id) => Results.Ok(new { id }))
    .CacheWithVapeCache();
+
+var api = app.MapGroup("/api")
+   .CacheWithVapeCache(policy => policy
+       .Ttl(TimeSpan.FromSeconds(30))
+       .Tags("api-group"));
+
+api.MapGet("/products/{id:int}", (int id) => Results.Ok(new { id }));
 ```
 
 MVC / Razor / Blazor Web App:

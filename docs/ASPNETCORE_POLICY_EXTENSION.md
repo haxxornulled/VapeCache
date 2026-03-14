@@ -46,6 +46,17 @@ app.MapGet("/products/{id:int}", (int id) => Results.Ok(new { id }))
     .CacheWithVapeCache("products");
 ```
 
+Route group policy:
+
+```csharp
+var api = app.MapGroup("/api")
+    .CacheWithVapeCache(policy => policy
+        .Ttl(TimeSpan.FromSeconds(30))
+        .Tags("api-group"));
+
+api.MapGet("/products/{id:int}", (int id) => Results.Ok(new { id }));
+```
+
 Inline policy:
 
 ```csharp

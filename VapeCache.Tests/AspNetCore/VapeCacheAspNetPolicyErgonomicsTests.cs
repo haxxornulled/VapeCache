@@ -69,6 +69,29 @@ public sealed class VapeCacheAspNetPolicyErgonomicsTests
     }
 
     [Fact]
+    public async Task CacheWithVapeCache_OnRouteGroup_AppliesPolicyToChildEndpoints()
+    {
+        var counter = 0;
+        await using var app = await CreateAppAsync(builder =>
+        {
+            var group = builder.MapGroup("/group")
+                .CacheWithVapeCache(policy => policy
+                    .Ttl(TimeSpan.FromSeconds(20))
+                    .Tags("group"));
+
+            group.MapGet("/value", () => Interlocked.Increment(ref counter).ToString());
+        });
+
+        using var client = app.GetTestClient();
+        var first = await client.GetStringAsync("/group/value");
+        var second = await client.GetStringAsync("/group/value");
+
+        Assert.Equal("1", first);
+        Assert.Equal("1", second);
+        Assert.Equal(1, counter);
+    }
+
+    [Fact]
     public async Task AddVapeCacheAspNetPolicies_NamedNoStorePolicy_DisablesCaching()
     {
         var counter = 0;

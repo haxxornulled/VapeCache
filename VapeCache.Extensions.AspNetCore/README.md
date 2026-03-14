@@ -64,6 +64,17 @@ app.MapGet("/search", (string q) => Results.Ok($"query:{q}"))
         .Tags("search"));
 ```
 
+### Route group policy
+
+```csharp
+var api = app.MapGroup("/api")
+    .CacheWithVapeCache(policy => policy
+        .Ttl(TimeSpan.FromSeconds(30))
+        .Tags("api-group"));
+
+api.MapGet("/products/{id:int}", (int id) => Results.Ok(new { id }));
+```
+
 ### MVC/controller attribute
 
 ```csharp

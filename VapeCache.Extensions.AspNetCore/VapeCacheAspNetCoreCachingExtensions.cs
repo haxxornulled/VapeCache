@@ -149,6 +149,20 @@ public static class VapeCacheAspNetCoreCachingExtensions
     }
 
     /// <summary>
+    /// Applies output-cache metadata to endpoint convention builders (including route groups) using VapeCache-backed store.
+    /// </summary>
+    public static TBuilder CacheWithVapeCache<TBuilder>(
+        this TBuilder builder,
+        string? policyName = null)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        return string.IsNullOrWhiteSpace(policyName)
+            ? builder.CacheOutput()
+            : builder.CacheOutput(policyName);
+    }
+
+    /// <summary>
     /// Applies inline output-cache behavior for a minimal API endpoint using a VapeCache policy builder.
     /// </summary>
     public static RouteHandlerBuilder CacheWithVapeCache(
@@ -165,12 +179,43 @@ public static class VapeCacheAspNetCoreCachingExtensions
     }
 
     /// <summary>
+    /// Applies inline output-cache behavior to endpoint convention builders (including route groups) using a VapeCache policy builder.
+    /// </summary>
+    public static TBuilder CacheWithVapeCache<TBuilder>(
+        this TBuilder builder,
+        Action<VapeCacheHttpPolicyBuilder> configurePolicy,
+        bool excludeDefaultPolicy = false)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configurePolicy);
+
+        var options = new VapeCacheHttpPolicyOptions();
+        configurePolicy(new VapeCacheHttpPolicyBuilder(options));
+        return builder.CacheOutput(policyBuilder => VapeCacheHttpPolicyApplier.Apply(options, policyBuilder), excludeDefaultPolicy);
+    }
+
+    /// <summary>
     /// Applies inline output-cache behavior for a minimal API endpoint using options.
     /// </summary>
     public static RouteHandlerBuilder CacheWithVapeCache(
         this RouteHandlerBuilder builder,
         VapeCacheHttpPolicyOptions policy,
         bool excludeDefaultPolicy = false)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(policy);
+        return builder.CacheOutput(policyBuilder => VapeCacheHttpPolicyApplier.Apply(policy, policyBuilder), excludeDefaultPolicy);
+    }
+
+    /// <summary>
+    /// Applies inline output-cache behavior to endpoint convention builders (including route groups) using options.
+    /// </summary>
+    public static TBuilder CacheWithVapeCache<TBuilder>(
+        this TBuilder builder,
+        VapeCacheHttpPolicyOptions policy,
+        bool excludeDefaultPolicy = false)
+        where TBuilder : IEndpointConventionBuilder
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(policy);

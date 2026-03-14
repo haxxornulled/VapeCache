@@ -30,7 +30,8 @@ public sealed partial class VapeCacheOutputCacheStore(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
-        var normalizedKey = BuildCacheKey(key);
+        var keyPrefix = ResolveKeyPrefix(optionsMonitor.CurrentValue);
+        var normalizedKey = BuildCacheKey(key, keyPrefix);
         var stored = await cache.GetAsync(normalizedKey, cancellationToken).ConfigureAwait(false);
         if (stored is null)
             return null;
@@ -48,7 +49,7 @@ public sealed partial class VapeCacheOutputCacheStore(
         if (envelope.TagVersions.Count == 0)
             return envelope.Payload;
 
-        if (await AreTagVersionsCurrentAsync(envelope.TagVersions, cancellationToken).ConfigureAwait(false))
+        if (await AreTagVersionsCurrentAsync(envelope.TagVersions, keyPrefix, cancellationToken).ConfigureAwait(false))
             return envelope.Payload;
 
         await cache.RemoveAsync(normalizedKey, cancellationToken).ConfigureAwait(false);
@@ -68,7 +69,8 @@ public sealed partial class VapeCacheOutputCacheStore(
         ArgumentNullException.ThrowIfNull(value);
 
         var options = optionsMonitor.CurrentValue;
-        var normalizedKey = BuildCacheKey(key);
+        var keyPrefix = ResolveKeyPrefix(options);
+        var normalizedKey = BuildCacheKey(key, keyPrefix);
         var normalizedTags = NormalizeTags(tags);
         var ttl = validFor > TimeSpan.Zero ? validFor : options.DefaultTtl;
         var entryOptions = new CacheEntryOptions(
@@ -81,7 +83,7 @@ public sealed partial class VapeCacheOutputCacheStore(
             return;
         }
 
-        var tagVersions = await CaptureTagVersionsAsync(normalizedTags, cancellationToken).ConfigureAwait(false);
+        var tagVersions = await CaptureTagVersionsAsync(normalizedTags, keyPrefix, cancellationToken).ConfigureAwait(false);
         var wrappedPayload = SerializeEnvelope(new OutputCacheEnvelope
         {
             Payload = value,
@@ -101,11 +103,12 @@ public sealed partial class VapeCacheOutputCacheStore(
             return;
 
         var normalizedTag = tag.Trim();
-        var currentVersion = await GetTagVersionAsync(normalizedTag, cancellationToken).ConfigureAwait(false);
+        var keyPrefix = ResolveKeyPrefix(options);
+        var currentVersion = await GetTagVersionAsync(normalizedTag, keyPrefix, cancellationToken).ConfigureAwait(false);
         var nextVersion = currentVersion == long.MaxValue ? 1 : currentVersion + 1;
 
         await cache.SetAsync(
-            BuildTagVersionKey(normalizedTag),
+            BuildTagVersionKey(normalizedTag, keyPrefix),
             SerializeTagVersion(nextVersion),
             new CacheEntryOptions(
                 Intent: new CacheIntent(
@@ -118,22 +121,26 @@ public sealed partial class VapeCacheOutputCacheStore(
         LogEvictedOutputCacheTag(logger, normalizedTag, nextVersion);
     }
 
-    private async ValueTask<Dictionary<string, long>> CaptureTagVersionsAsync(string[] normalizedTags, CancellationToken cancellationToken)
+    private async ValueTask<Dictionary<string, long>> CaptureTagVersionsAsync(
+        string[] normalizedTags,
+        string keyPrefix,
+        CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, long>(normalizedTags.Length, StringComparer.Ordinal);
         foreach (var tag in normalizedTags)
-            result[tag] = await GetTagVersionAsync(tag, cancellationToken).ConfigureAwait(false);
+            result[tag] = await GetTagVersionAsync(tag, keyPrefix, cancellationToken).ConfigureAwait(false);
 
         return result;
     }
 
     private async ValueTask<bool> AreTagVersionsCurrentAsync(
         IReadOnlyDictionary<string, long> expectedVersions,
+        string keyPrefix,
         CancellationToken cancellationToken)
     {
         foreach (var entry in expectedVersions)
         {
-            var current = await GetTagVersionAsync(entry.Key, cancellationToken).ConfigureAwait(false);
+            var current = await GetTagVersionAsync(entry.Key, keyPrefix, cancellationToken).ConfigureAwait(false);
             if (current != entry.Value)
                 return false;
         }
@@ -141,15 +148,16 @@ public sealed partial class VapeCacheOutputCacheStore(
         return true;
     }
 
-    private async ValueTask<long> GetTagVersionAsync(string tag, CancellationToken cancellationToken)
+    private async ValueTask<long> GetTagVersionAsync(string tag, string keyPrefix, CancellationToken cancellationToken)
     {
-        var payload = await cache.GetAsync(BuildTagVersionKey(tag), cancellationToken).ConfigureAwait(false);
+        var payload = await cache.GetAsync(BuildTagVersionKey(tag, keyPrefix), cancellationToken).ConfigureAwait(false);
         return TryDeserializeTagVersion(payload, out var version)
             ? version
             : 0;
     }
 
-    private string BuildTagVersionKey(string tag) => $"{ResolveKeyPrefix()}:tag-version:{tag}";
+    private static string BuildTagVersionKey(string tag, string keyPrefix)
+        => string.Concat(keyPrefix, ":tag-version:", tag);
 
     private static byte[] SerializeTagVersion(long version)
     {
@@ -203,16 +211,10 @@ public sealed partial class VapeCacheOutputCacheStore(
         }
     }
 
-    private string BuildCacheKey(string key)
-    {
-        return $"{ResolveKeyPrefix()}:{key}";
-    }
+    private static string BuildCacheKey(string key, string keyPrefix) => string.Concat(keyPrefix, ":", key);
 
-    private string ResolveKeyPrefix()
-    {
-        var options = optionsMonitor.CurrentValue;
-        return string.IsNullOrWhiteSpace(options.KeyPrefix) ? "vapecache:output" : options.KeyPrefix.Trim();
-    }
+    private static string ResolveKeyPrefix(VapeCacheOutputCacheStoreOptions options)
+        => string.IsNullOrWhiteSpace(options.KeyPrefix) ? "vapecache:output" : options.KeyPrefix.Trim();
 
     private static string[] NormalizeTags(string[]? tags)
     {
@@ -224,7 +226,6 @@ public sealed partial class VapeCacheOutputCacheStore(
 
         var result = new string[tags.Length];
         var count = 0;
-        var seen = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var tag in tags)
         {
@@ -232,7 +233,17 @@ public sealed partial class VapeCacheOutputCacheStore(
                 continue;
 
             var normalized = tag.Trim();
-            if (seen.Add(normalized))
+            var duplicate = false;
+            for (var i = 0; i < count; i++)
+            {
+                if (!string.Equals(result[i], normalized, StringComparison.Ordinal))
+                    continue;
+
+                duplicate = true;
+                break;
+            }
+
+            if (!duplicate)
                 result[count++] = normalized;
         }
 
