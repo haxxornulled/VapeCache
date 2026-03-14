@@ -66,12 +66,18 @@ function Assert-Command
 function Get-GitText
 {
     param([Parameter(Mandatory = $true)][string[]]$Args)
-    $text = (& git @Args).Trim()
+    $raw = & git @Args
     if ($LASTEXITCODE -ne 0)
     {
         throw "git $($Args -join ' ') failed."
     }
 
+    if ($null -eq $raw)
+    {
+        return ""
+    }
+
+    $text = ($raw | Out-String).Trim()
     return $text
 }
 
