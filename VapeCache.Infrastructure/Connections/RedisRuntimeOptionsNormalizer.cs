@@ -201,17 +201,27 @@ internal static class RedisRuntimeOptionsNormalizer
         var scaleUpCooldown = NormalizePositive(profiled.ScaleUpCooldown, DefaultScaleUpCooldown);
         var scaleDownCooldown = NormalizePositive(profiled.ScaleDownCooldown, DefaultScaleDownCooldown);
         var scaleUpInflightUtilization = Math.Clamp(profiled.ScaleUpInflightUtilization, 0.10, 0.98);
-        var scaleDownInflightUtilization = Math.Clamp(profiled.ScaleDownInflightUtilization, 0.01, 0.70);
+        var scaleDownInflightUtilization = NormalizeScaleDownInflightUtilization(
+            profiled.ScaleDownInflightUtilization,
+            scaleUpInflightUtilization);
         var scaleUpQueueDepthThreshold = Math.Max(1, profiled.ScaleUpQueueDepthThreshold);
         var scaleUpTimeoutRatePerSecThreshold = Math.Max(MinPositiveThreshold, profiled.ScaleUpTimeoutRatePerSecThreshold);
         var scaleUpP99LatencyMsThreshold = Math.Max(1.0, profiled.ScaleUpP99LatencyMsThreshold);
-        var scaleDownP95LatencyMsThreshold = Math.Max(0.5, profiled.ScaleDownP95LatencyMsThreshold);
-        var emergencyScaleUpTimeoutRatePerSecThreshold = Math.Max(MinPositiveThreshold, profiled.EmergencyScaleUpTimeoutRatePerSecThreshold);
+        var scaleDownP95LatencyMsThreshold = NormalizeScaleDownP95LatencyMsThreshold(
+            profiled.ScaleDownP95LatencyMsThreshold,
+            scaleUpP99LatencyMsThreshold);
+        var emergencyScaleUpTimeoutRatePerSecThreshold = Math.Max(
+            Math.Max(MinPositiveThreshold, profiled.EmergencyScaleUpTimeoutRatePerSecThreshold),
+            scaleUpTimeoutRatePerSecThreshold);
         var scaleDownDrainTimeout = NormalizePositive(profiled.ScaleDownDrainTimeout, DefaultScaleDownDrainTimeout);
         var maxScaleEventsPerMinute = Math.Max(1, profiled.MaxScaleEventsPerMinute);
         var flapToggleThreshold = Math.Max(2, profiled.FlapToggleThreshold);
         var autoscaleFreezeDuration = NormalizePositive(profiled.AutoscaleFreezeDuration, DefaultAutoscaleFreezeDuration);
         var reconnectStormFailureRatePerSecThreshold = Math.Max(MinPositiveThreshold, profiled.ReconnectStormFailureRatePerSecThreshold);
+        if (scaleDownWindow < scaleUpWindow)
+            scaleDownWindow = scaleUpWindow;
+        if (scaleDownCooldown < scaleUpCooldown)
+            scaleDownCooldown = scaleUpCooldown;
 
         return profiled with
         {
@@ -351,5 +361,18 @@ internal static class RedisRuntimeOptionsNormalizer
             return DefaultBulkLaneTargetRatio;
 
         return Math.Clamp(value, MinBulkLaneTargetRatio, MaxBulkLaneTargetRatio);
+    }
+
+    private static double NormalizeScaleDownInflightUtilization(double configuredScaleDown, double normalizedScaleUp)
+    {
+        var normalizedScaleDown = Math.Clamp(configuredScaleDown, 0.01, 0.70);
+        var maxScaleDown = Math.Max(0.01, normalizedScaleUp - 0.01);
+        return Math.Min(normalizedScaleDown, maxScaleDown);
+    }
+
+    private static double NormalizeScaleDownP95LatencyMsThreshold(double configuredScaleDownP95, double normalizedScaleUpP99)
+    {
+        var normalizedScaleDownP95 = Math.Max(0.5, configuredScaleDownP95);
+        return Math.Min(normalizedScaleDownP95, normalizedScaleUpP99);
     }
 }

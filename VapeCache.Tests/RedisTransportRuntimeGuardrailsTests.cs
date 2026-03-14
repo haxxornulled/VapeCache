@@ -198,4 +198,36 @@ public sealed class RedisTransportRuntimeGuardrailsTests
 
         Assert.Equal(options, effective);
     }
+
+    [Fact]
+    public void ApplyRuntimeMultiplexer_NormalizesAutoscalerThresholdRelationships()
+    {
+        var options = new RedisMultiplexerOptions
+        {
+            TransportProfile = RedisTransportProfile.Custom,
+            ScaleUpInflightUtilization = 0.30,
+            ScaleDownInflightUtilization = 0.60,
+            ScaleUpP99LatencyMsThreshold = 10,
+            ScaleDownP95LatencyMsThreshold = 25,
+            ScaleUpWindow = TimeSpan.FromSeconds(20),
+            ScaleDownWindow = TimeSpan.FromSeconds(5),
+            ScaleUpCooldown = TimeSpan.FromSeconds(40),
+            ScaleDownCooldown = TimeSpan.FromSeconds(10),
+            ScaleUpTimeoutRatePerSecThreshold = 5.0,
+            EmergencyScaleUpTimeoutRatePerSecThreshold = 2.0
+        };
+
+        var effective = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(options);
+
+        Assert.Equal(0.30, effective.ScaleUpInflightUtilization, 2);
+        Assert.Equal(0.29, effective.ScaleDownInflightUtilization, 2);
+        Assert.Equal(10.0, effective.ScaleUpP99LatencyMsThreshold);
+        Assert.Equal(10.0, effective.ScaleDownP95LatencyMsThreshold);
+        Assert.Equal(TimeSpan.FromSeconds(20), effective.ScaleUpWindow);
+        Assert.Equal(TimeSpan.FromSeconds(20), effective.ScaleDownWindow);
+        Assert.Equal(TimeSpan.FromSeconds(40), effective.ScaleUpCooldown);
+        Assert.Equal(TimeSpan.FromSeconds(40), effective.ScaleDownCooldown);
+        Assert.Equal(5.0, effective.ScaleUpTimeoutRatePerSecThreshold);
+        Assert.Equal(5.0, effective.EmergencyScaleUpTimeoutRatePerSecThreshold);
+    }
 }

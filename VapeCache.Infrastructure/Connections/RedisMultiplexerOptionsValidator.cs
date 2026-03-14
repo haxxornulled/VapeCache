@@ -100,6 +100,8 @@ internal sealed class RedisMultiplexerOptionsValidator : IValidateOptions<RedisM
 
         if (options.ScaleDownInflightUtilization < 0 || options.ScaleDownInflightUtilization >= 1)
             AddFailure(ref failures, "RedisMultiplexer:ScaleDownInflightUtilization must be in [0,1).");
+        else if (options.ScaleDownInflightUtilization >= options.ScaleUpInflightUtilization)
+            AddFailure(ref failures, "RedisMultiplexer:ScaleDownInflightUtilization must be < RedisMultiplexer:ScaleUpInflightUtilization.");
 
         if (options.ScaleUpQueueDepthThreshold <= 0)
             AddFailure(ref failures, "RedisMultiplexer:ScaleUpQueueDepthThreshold must be > 0.");
@@ -112,6 +114,14 @@ internal sealed class RedisMultiplexerOptionsValidator : IValidateOptions<RedisM
 
         if (options.ScaleDownP95LatencyMsThreshold <= 0)
             AddFailure(ref failures, "RedisMultiplexer:ScaleDownP95LatencyMsThreshold must be > 0.");
+        else if (options.ScaleDownP95LatencyMsThreshold > options.ScaleUpP99LatencyMsThreshold)
+            AddFailure(ref failures, "RedisMultiplexer:ScaleDownP95LatencyMsThreshold must be <= RedisMultiplexer:ScaleUpP99LatencyMsThreshold.");
+
+        if (options.ScaleDownWindow < options.ScaleUpWindow)
+            AddFailure(ref failures, "RedisMultiplexer:ScaleDownWindow must be >= RedisMultiplexer:ScaleUpWindow.");
+
+        if (options.ScaleDownCooldown < options.ScaleUpCooldown)
+            AddFailure(ref failures, "RedisMultiplexer:ScaleDownCooldown must be >= RedisMultiplexer:ScaleUpCooldown.");
 
         if (options.BulkLaneConnections < 0)
             AddFailure(ref failures, "RedisMultiplexer:BulkLaneConnections must be >= 0.");
@@ -159,6 +169,8 @@ internal sealed class RedisMultiplexerOptionsValidator : IValidateOptions<RedisM
 
         if (options.EmergencyScaleUpTimeoutRatePerSecThreshold <= 0)
             AddFailure(ref failures, "RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold must be > 0.");
+        else if (options.EmergencyScaleUpTimeoutRatePerSecThreshold < options.ScaleUpTimeoutRatePerSecThreshold)
+            AddFailure(ref failures, "RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold must be >= RedisMultiplexer:ScaleUpTimeoutRatePerSecThreshold.");
 
         if (options.ScaleDownDrainTimeout <= TimeSpan.Zero)
             AddFailure(ref failures, "RedisMultiplexer:ScaleDownDrainTimeout must be > 0.");

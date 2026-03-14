@@ -113,6 +113,35 @@ public sealed class RedisRegistrationValidationTests
     }
 
     [Fact]
+    public async Task ServiceRegistrations_FailHostStartup_WhenAutoscalerThresholdRelationshipsAreInvalid()
+    {
+        using var provider = BuildServiceProvider(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal",
+            ["RedisMultiplexer:ScaleUpInflightUtilization"] = "0.40",
+            ["RedisMultiplexer:ScaleDownInflightUtilization"] = "0.60",
+            ["RedisMultiplexer:ScaleUpP99LatencyMsThreshold"] = "30",
+            ["RedisMultiplexer:ScaleDownP95LatencyMsThreshold"] = "40",
+            ["RedisMultiplexer:ScaleUpWindow"] = "00:00:30",
+            ["RedisMultiplexer:ScaleDownWindow"] = "00:00:10",
+            ["RedisMultiplexer:ScaleUpCooldown"] = "00:00:20",
+            ["RedisMultiplexer:ScaleDownCooldown"] = "00:00:05",
+            ["RedisMultiplexer:ScaleUpTimeoutRatePerSecThreshold"] = "4",
+            ["RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold"] = "2"
+        });
+        var validator = GetStartupValidator(provider, "RedisMultiplexerOptionsStartupHostedService");
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => validator.StartAsync(CancellationToken.None));
+        var validation = AssertOptionsValidationFailure(ex);
+
+        Assert.Contains("RedisMultiplexer:ScaleDownInflightUtilization must be < RedisMultiplexer:ScaleUpInflightUtilization.", validation.Failures);
+        Assert.Contains("RedisMultiplexer:ScaleDownP95LatencyMsThreshold must be <= RedisMultiplexer:ScaleUpP99LatencyMsThreshold.", validation.Failures);
+        Assert.Contains("RedisMultiplexer:ScaleDownWindow must be >= RedisMultiplexer:ScaleUpWindow.", validation.Failures);
+        Assert.Contains("RedisMultiplexer:ScaleDownCooldown must be >= RedisMultiplexer:ScaleUpCooldown.", validation.Failures);
+        Assert.Contains("RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold must be >= RedisMultiplexer:ScaleUpTimeoutRatePerSecThreshold.", validation.Failures);
+    }
+
+    [Fact]
     public async Task ServiceRegistrations_Start_WhenPubSubAndBlockingLanesAreConfiguredWithinBudget()
     {
         using var provider = BuildServiceProvider(new Dictionary<string, string?>

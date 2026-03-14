@@ -3112,6 +3112,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
     private void ApplyAutoscaleOptions(RedisMultiplexerOptions o)
     {
+        o = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(o);
+
         RedisMultiplexedConnection[]? fastConnsToDispose = null;
         RedisMultiplexedConnection[]? bulkConnsToDispose = null;
         RedisMultiplexedConnection[]? pubSubConnsToDispose = null;

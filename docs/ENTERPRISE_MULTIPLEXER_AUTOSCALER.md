@@ -119,6 +119,16 @@ stateDiagram-v2
 | `AutoscaleFreezeDuration` | timespan | Freeze period after guardrail trigger | 1-5 min |
 | `ReconnectStormFailureRatePerSecThreshold` | double | Failure-rate trigger for reconnect-storm freeze | 1-5/s |
 
+### Startup Guardrail Invariants
+
+These autoscaler relationships are validated at startup and normalized at runtime:
+
+- `ScaleDownInflightUtilization < ScaleUpInflightUtilization`
+- `ScaleDownP95LatencyMsThreshold <= ScaleUpP99LatencyMsThreshold`
+- `ScaleDownWindow >= ScaleUpWindow`
+- `ScaleDownCooldown >= ScaleUpCooldown`
+- `EmergencyScaleUpTimeoutRatePerSecThreshold >= ScaleUpTimeoutRatePerSecThreshold`
+
 ## Recommended Enterprise Baseline
 
 ```json
