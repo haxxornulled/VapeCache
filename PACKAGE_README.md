@@ -16,6 +16,7 @@ Optional integrations:
 dotnet add package VapeCache.Extensions.DependencyInjection
 dotnet add package VapeCache.Extensions.Logging
 dotnet add package VapeCache.Extensions.PubSub
+dotnet add package VapeCache.Extensions.Streams
 dotnet add package VapeCache.Extensions.EntityFrameworkCore
 dotnet add package VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry
 dotnet add package VapeCache.Extensions.AspNetCore
@@ -31,6 +32,7 @@ dotnet add package VapeCache.Features.Invalidation
 - `VapeCache.Extensions.DependencyInjection`: one-call DI facade for runtime registration
 - `VapeCache.Extensions.Logging`: optional Serilog + OTEL logging package with file sink support and optional JSON formatting (`Serilog:Json:*`)
 - `VapeCache.Extensions.PubSub`: optional Redis pub/sub registration package for publish/subscribe workloads
+- `VapeCache.Extensions.Streams`: optional Redis 8.6 stream package for idempotent producer workflows (`XADD IDMP/IDMPAUTO`, `XCFGSET`)
 - `VapeCache.Extensions.EntityFrameworkCore`: EF Core second-level cache interceptor contracts, deterministic query key builder, and save-changes invalidation bridge wiring
 - `VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry`: optional OTEL metrics/activity package for EF Core cache interceptor events
 - `VapeCache.Extensions.AspNetCore`: ASP.NET Core output-cache integration

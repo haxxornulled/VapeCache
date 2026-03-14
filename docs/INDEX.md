@@ -31,6 +31,7 @@ This index reflects the OSS runtime surface in this repository.
 - [.NET Aspire package README](../VapeCache.Extensions.Aspire/README.md)
 - [EF Core package README](../VapeCache.Extensions.EntityFrameworkCore/README.md)
 - [EF Core OTEL package README](../VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry/README.md)
+- [Streams package README](../VapeCache.Extensions.Streams/README.md)
 
 ## 4. Operations
 

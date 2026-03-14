@@ -13,6 +13,7 @@ namespace VapeCache.Infrastructure.Connections;
 internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 {
     private readonly ConcurrentDictionary<string, CacheEntry> _store = new();
+    private readonly ConcurrentDictionary<string, InMemoryStreamState> _streamState = new(StringComparer.Ordinal);
     private readonly Timer _expirationTimer;
     private int _cleanupOffset;
 
@@ -1376,6 +1377,70 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    public ValueTask<string> XAddIdempotentAsync(
+        string key,
+        string producerId,
+        string? idempotentId,
+        bool useAutoIdempotentId,
+        string entryId,
+        (string Field, ReadOnlyMemory<byte> Value)[] fields,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(producerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entryId);
+        ArgumentNullException.ThrowIfNull(fields);
+        if (fields.Length == 0)
+            throw new ArgumentException("XADD requires at least one field/value pair.", nameof(fields));
+        if (!useAutoIdempotentId && string.IsNullOrWhiteSpace(idempotentId))
+            throw new ArgumentException("idempotentId is required when useAutoIdempotentId=false.", nameof(idempotentId));
+
+        var resolvedIdempotentId = useAutoIdempotentId
+            ? ComputeAutoIdempotentId(fields)
+            : idempotentId!;
+
+        var state = _streamState.GetOrAdd(key, static _ => new InMemoryStreamState());
+        lock (state.Sync)
+        {
+            if (!state.IdempotentIdToEntryId.TryGetValue((producerId, resolvedIdempotentId), out var existing))
+            {
+                var streamEntryId = string.Equals(entryId, "*", StringComparison.Ordinal)
+                    ? $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}-{++state.Sequence}"
+                    : entryId;
+                state.IdempotentIdToEntryId[(producerId, resolvedIdempotentId)] = streamEntryId;
+                existing = streamEntryId;
+            }
+
+            return ValueTask.FromResult(existing);
+        }
+    }
+
+    public ValueTask<bool> XCfgSetIdempotenceAsync(
+        string key,
+        int? durationSeconds,
+        int? maxSize,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        if (!durationSeconds.HasValue && !maxSize.HasValue)
+            throw new ArgumentException("XCFGSET requires durationSeconds and/or maxSize.");
+
+        // Fallback in-memory implementation keeps semantics minimal and always acknowledges config.
+        return ValueTask.FromResult(true);
+    }
+
+    public ValueTask<bool> HotKeysStartAsync(RedisHotKeysCollectionOptions options, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return ValueTask.FromResult(true);
+    }
+
+    public ValueTask<bool> HotKeysStopAsync(CancellationToken ct)
+        => ValueTask.FromResult(true);
+
+    public ValueTask<string[]> HotKeysGetAsync(CancellationToken ct)
+        => ValueTask.FromResult(Array.Empty<string>());
+
     // ========== Scan Commands ==========
 
     /// <summary>
@@ -1538,6 +1603,27 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         public ConcurrentDictionary<byte[], byte>? BloomValue { get; set; }
         public SortedDictionary<long, double>? TimeSeriesValue { get; set; }
         public DateTimeOffset? ExpiresAt { get; set; }
+    }
+
+    private sealed class InMemoryStreamState
+    {
+        public object Sync { get; } = new();
+        public long Sequence { get; set; }
+        public Dictionary<(string ProducerId, string IdempotentId), string> IdempotentIdToEntryId { get; } =
+            new();
+    }
+
+    private static string ComputeAutoIdempotentId((string Field, ReadOnlyMemory<byte> Value)[] fields)
+    {
+        HashCode hash = default;
+        for (var i = 0; i < fields.Length; i++)
+        {
+            hash.Add(fields[i].Field, StringComparer.Ordinal);
+            hash.AddBytes(fields[i].Value.Span);
+        }
+
+        var value = hash.ToHashCode();
+        return value.ToString("X8", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private enum EntryType

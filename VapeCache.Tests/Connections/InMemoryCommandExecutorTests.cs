@@ -149,6 +149,48 @@ public sealed class InMemoryCommandExecutorTests
     }
 
     [Fact]
+    public async Task TimeSeries_Add_NaN_IsAccepted()
+    {
+        var executor = new InMemoryCommandExecutor();
+        var key = "ts:nan";
+
+        await executor.TsCreateAsync(key, default);
+        await executor.TsAddAsync(key, 1, double.NaN, default);
+
+        var range = await executor.TsRangeAsync(key, 1, 1, default);
+        Assert.Single(range);
+        Assert.True(double.IsNaN(range[0].Value));
+    }
+
+    [Fact]
+    public async Task Streams_IdempotentXAdd_ReturnsSameEntryId_ForSameProducerAndIdempotentId()
+    {
+        var executor = new InMemoryCommandExecutor();
+        var key = "stream:orders";
+        var fields = new[] { ("orderId", (ReadOnlyMemory<byte>)"123"u8.ToArray()) };
+
+        var first = await executor.XAddIdempotentAsync(
+            key,
+            producerId: "producer-a",
+            idempotentId: "tx-123",
+            useAutoIdempotentId: false,
+            entryId: "*",
+            fields,
+            default);
+
+        var second = await executor.XAddIdempotentAsync(
+            key,
+            producerId: "producer-a",
+            idempotentId: "tx-123",
+            useAutoIdempotentId: false,
+            entryId: "*",
+            fields,
+            default);
+
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
     public async Task JsonGetLease_ReturnsStoredBytes()
     {
         var executor = new InMemoryCommandExecutor();

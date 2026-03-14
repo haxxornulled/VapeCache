@@ -18,6 +18,7 @@ function Get-ReleasePackageProjects
         "VapeCache.Extensions.DependencyInjection/VapeCache.Extensions.DependencyInjection.csproj",
         "VapeCache.Extensions.Logging/VapeCache.Extensions.Logging.csproj",
         "VapeCache.Extensions.PubSub/VapeCache.Extensions.PubSub.csproj",
+        "VapeCache.Extensions.Streams/VapeCache.Extensions.Streams.csproj",
         "VapeCache.Extensions.EntityFrameworkCore/VapeCache.Extensions.EntityFrameworkCore.csproj",
         "VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry/VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry.csproj",
         "VapeCache.Extensions.AspNetCore/VapeCache.Extensions.AspNetCore.csproj",

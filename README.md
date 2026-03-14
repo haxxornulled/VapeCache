@@ -61,6 +61,12 @@ If you need Redis pub/sub support:
 dotnet add package VapeCache.Extensions.PubSub
 ```
 
+If you need Redis 8.6 stream idempotent producer support:
+
+```bash
+dotnet add package VapeCache.Extensions.Streams
+```
+
 If you need EF Core second-level cache interceptor contracts and invalidation bridge wiring:
 
 ```bash
@@ -101,6 +107,7 @@ using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Extensions.Logging;
 using VapeCache.Extensions.PubSub;
+using VapeCache.Extensions.Streams;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 
@@ -112,6 +119,7 @@ builder.Services.AddOptions<RedisConnectionOptions>()
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
 builder.Services.AddVapeCachePubSub(); // optional: only when pub/sub is needed
+builder.Services.AddVapeCacheStreams(); // optional: only when stream idempotent producer support is needed
 
 builder.Services.AddOptions<CacheStampedeOptions>()
     .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
@@ -180,6 +188,7 @@ See:
 | `VapeCache.Extensions.DependencyInjection` | [VapeCache.Extensions.DependencyInjection](https://www.nuget.org/packages/VapeCache.Extensions.DependencyInjection) | One-call IServiceCollection wiring facade for runtime + config binding | [Quickstart](docs/QUICKSTART.md) |
 | `VapeCache.Extensions.Logging` | [VapeCache.Extensions.Logging](https://www.nuget.org/packages/VapeCache.Extensions.Logging) | Optional Serilog + OTEL logging wiring with file/Seq/console sinks and pluggable JSON formatting | [Logging + Telemetry](docs/LOGGING_TELEMETRY_CONFIGURATION.md) |
 | `VapeCache.Extensions.PubSub` | [VapeCache.Extensions.PubSub](https://www.nuget.org/packages/VapeCache.Extensions.PubSub) | Optional Redis pub/sub package (publish/subscribe, bounded queues, reconnect/resubscribe) | [API Reference](docs/API_REFERENCE.md) |
+| `VapeCache.Extensions.Streams` | [VapeCache.Extensions.Streams](https://www.nuget.org/packages/VapeCache.Extensions.Streams) | Optional Redis 8.6 streams package for idempotent producers (`XADD IDMP/IDMPAUTO`, `XCFGSET`) | [Package README](VapeCache.Extensions.Streams/README.md) |
 | `VapeCache.Extensions.EntityFrameworkCore` | [VapeCache.Extensions.EntityFrameworkCore](https://www.nuget.org/packages/VapeCache.Extensions.EntityFrameworkCore) | EF Core second-level cache interceptor contracts, deterministic query-key builder, and SaveChanges invalidation bridge wiring | [EF Core Second-Level Cache](docs/EFCORE_SECOND_LEVEL_CACHE.md) |
 | `VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry` | [VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry](https://www.nuget.org/packages/VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry) | OpenTelemetry metrics/activity package for EF Core cache interceptor events and profiler correlation | [EF Core package README](VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry/README.md) |
 | `VapeCache.Extensions.AspNetCore` | [VapeCache.Extensions.AspNetCore](https://www.nuget.org/packages/VapeCache.Extensions.AspNetCore) | ASP.NET Core output-cache integration | [ASP.NET Core Pipeline](docs/ASPNETCORE_PIPELINE_CACHING.md) |

@@ -59,6 +59,15 @@ VapeCache targets cache-friendly Redis command flows with RESP2/RESP3 parsing su
 - `TS.ADD` → `TsAddAsync`
 - `TS.RANGE` → `TsRangeAsync`
 
+### Streams (Redis 8.6 idempotent producer surface)
+- `XADD ... IDMP/IDMPAUTO` → `XAddIdempotentAsync`
+- `XCFGSET` (idempotence retention knobs) → `XCfgSetIdempotenceAsync`
+
+### Hotkeys (Redis 8.6 diagnostics)
+- `HOTKEYS START` → `HotKeysStartAsync`
+- `HOTKEYS STOP` → `HotKeysStopAsync`
+- `HOTKEYS GET` → `HotKeysGetAsync`
+
 ### Scan / Streaming
 - `SCAN` → `ScanAsync`
 - `SSCAN` → `SScanAsync`
@@ -106,6 +115,7 @@ VapeCache also parses RESP3 structural types used in modern deployments:
 - Pub/Sub
 - Lua scripting
 - Transactions (MULTI/EXEC)
+- Full stream consumer-group runtime (`XREAD`/`XREADGROUP`)
 - Full cluster orchestration (slot-map ownership across the entire command surface)
 - RESP3 client-side caching orchestration
 

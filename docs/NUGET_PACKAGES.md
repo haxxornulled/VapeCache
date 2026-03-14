@@ -53,6 +53,13 @@ Optional Redis pub/sub package. Adds explicit pub/sub registration for `IRedisPu
 dotnet add package VapeCache.Extensions.PubSub
 ```
 
+### VapeCache.Extensions.Streams
+Optional Redis Streams package for idempotent producer flows on Redis 8.6 (`XADD IDMP/IDMPAUTO` and `XCFGSET` idempotence retention config).
+
+```bash
+dotnet add package VapeCache.Extensions.Streams
+```
+
 ### VapeCache.Extensions.EntityFrameworkCore
 Optional EF Core adapter package for second-level cache interceptor contracts, deterministic query-key generation, and save-changes invalidation bridge wiring.
 

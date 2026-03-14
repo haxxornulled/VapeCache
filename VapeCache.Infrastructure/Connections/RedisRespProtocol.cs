@@ -2178,6 +2178,246 @@ internal static class RedisRespProtocol
         return idx;
     }
 
+    // XADD (Redis Streams, Redis 8.6 IDMP / IDMPAUTO)
+    public static int GetXAddIdempotentCommandLength(
+        string key,
+        string producerId,
+        string? idempotentId,
+        bool useAutoIdempotentId,
+        string entryId,
+        (string Field, int ValueLength)[] fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        if (fields.Length == 0)
+            throw new ArgumentException("XADD requires at least one field/value pair.", nameof(fields));
+
+        var parts = 2 + (useAutoIdempotentId ? 2 : 3) + 1 + (fields.Length * 2);
+        var len = GetHeaderLen(parts)
+                  + GetBulkStringLen("XADD") + 2
+                  + GetBulkStringLen(key) + 2;
+
+        if (useAutoIdempotentId)
+        {
+            len += GetBulkStringLen("IDMPAUTO") + 2
+                   + GetBulkStringLen(producerId) + 2;
+        }
+        else
+        {
+            var resolvedIdempotentId = idempotentId ?? throw new ArgumentNullException(nameof(idempotentId));
+            len += GetBulkStringLen("IDMP") + 2
+                   + GetBulkStringLen(producerId) + 2
+                   + GetBulkStringLen(resolvedIdempotentId) + 2;
+        }
+
+        len += GetBulkStringLen(entryId) + 2;
+        for (var i = 0; i < fields.Length; i++)
+        {
+            len += GetBulkStringLen(fields[i].Field) + 2
+                   + GetBulkLen(fields[i].ValueLength) + fields[i].ValueLength + 2;
+        }
+
+        return len;
+    }
+
+    public static int WriteXAddIdempotentCommand(
+        Span<byte> destination,
+        string key,
+        string producerId,
+        string? idempotentId,
+        bool useAutoIdempotentId,
+        string entryId,
+        (string Field, ReadOnlyMemory<byte> Value)[] fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        if (fields.Length == 0)
+            throw new ArgumentException("XADD requires at least one field/value pair.", nameof(fields));
+
+        var parts = 2 + (useAutoIdempotentId ? 2 : 3) + 1 + (fields.Length * 2);
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), parts);
+        idx += WriteBulkString(destination.Slice(idx), "XADD");
+        idx += WriteBulkString(destination.Slice(idx), key);
+
+        if (useAutoIdempotentId)
+        {
+            idx += WriteBulkString(destination.Slice(idx), "IDMPAUTO");
+            idx += WriteBulkString(destination.Slice(idx), producerId);
+        }
+        else
+        {
+            var resolvedIdempotentId = idempotentId ?? throw new ArgumentNullException(nameof(idempotentId));
+            idx += WriteBulkString(destination.Slice(idx), "IDMP");
+            idx += WriteBulkString(destination.Slice(idx), producerId);
+            idx += WriteBulkString(destination.Slice(idx), resolvedIdempotentId);
+        }
+
+        idx += WriteBulkString(destination.Slice(idx), entryId);
+        for (var i = 0; i < fields.Length; i++)
+        {
+            idx += WriteBulkString(destination.Slice(idx), fields[i].Field);
+            idx += WriteBulkBytes(destination.Slice(idx), fields[i].Value.Span);
+        }
+
+        return idx;
+    }
+
+    // XCFGSET key [IDMP-DURATION duration] [IDMP-MAXSIZE maxsize]
+    public static int GetXCfgSetIdempotenceCommandLength(string key, int? durationSeconds, int? maxSize)
+    {
+        var parts = 2;
+        if (durationSeconds.HasValue)
+            parts += 2;
+        if (maxSize.HasValue)
+            parts += 2;
+        if (parts == 2)
+            throw new ArgumentException("XCFGSET requires at least one idempotence option.");
+
+        var len = GetHeaderLen(parts)
+                  + GetBulkStringLen("XCFGSET") + 2
+                  + GetBulkStringLen(key) + 2;
+
+        if (durationSeconds.HasValue)
+        {
+            var secondsLen = GetIntLength(durationSeconds.Value);
+            len += GetBulkStringLen("IDMP-DURATION") + 2
+                   + GetBulkLen(secondsLen) + secondsLen + 2;
+        }
+
+        if (maxSize.HasValue)
+        {
+            var maxSizeLen = GetIntLength(maxSize.Value);
+            len += GetBulkStringLen("IDMP-MAXSIZE") + 2
+                   + GetBulkLen(maxSizeLen) + maxSizeLen + 2;
+        }
+
+        return len;
+    }
+
+    public static int WriteXCfgSetIdempotenceCommand(
+        Span<byte> destination,
+        string key,
+        int? durationSeconds,
+        int? maxSize)
+    {
+        var parts = 2;
+        if (durationSeconds.HasValue)
+            parts += 2;
+        if (maxSize.HasValue)
+            parts += 2;
+        if (parts == 2)
+            throw new ArgumentException("XCFGSET requires at least one idempotence option.");
+
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), parts);
+        idx += WriteBulkString(destination.Slice(idx), "XCFGSET");
+        idx += WriteBulkString(destination.Slice(idx), key);
+
+        if (durationSeconds.HasValue)
+        {
+            idx += WriteBulkString(destination.Slice(idx), "IDMP-DURATION");
+            idx += WriteBulkInt(destination.Slice(idx), durationSeconds.Value);
+        }
+
+        if (maxSize.HasValue)
+        {
+            idx += WriteBulkString(destination.Slice(idx), "IDMP-MAXSIZE");
+            idx += WriteBulkInt(destination.Slice(idx), maxSize.Value);
+        }
+
+        return idx;
+    }
+
+    // HOTKEYS START/STOP/GET (Redis 8.6)
+    public static int GetHotKeysStartCommandLength(
+        int metricsCount,
+        bool includeCpu,
+        bool includeNet,
+        int topK,
+        long durationMilliseconds,
+        int sampleRatio,
+        long[]? slots)
+    {
+        var slotCount = slots?.Length ?? 0;
+        var parts = 10 + metricsCount + (slotCount > 0 ? 2 + slotCount : 0);
+        var topKLen = GetIntLength(topK);
+        var durationLen = GetIntLength(durationMilliseconds);
+        var sampleLen = GetIntLength(sampleRatio);
+        var len = GetHeaderLen(parts)
+                  + GetBulkStringLen("HOTKEYS") + 2
+                  + GetBulkStringLen("START") + 2
+                  + GetBulkStringLen("METRICS") + 2
+                  + GetBulkLen(GetIntLength(metricsCount)) + GetIntLength(metricsCount) + 2;
+
+        if (includeCpu)
+            len += GetBulkStringLen("CPU") + 2;
+        if (includeNet)
+            len += GetBulkStringLen("NET") + 2;
+
+        len += GetBulkStringLen("COUNT") + 2
+               + GetBulkLen(topKLen) + topKLen + 2
+               + GetBulkStringLen("DURATION") + 2
+               + GetBulkLen(durationLen) + durationLen + 2
+               + GetBulkStringLen("SAMPLE") + 2
+               + GetBulkLen(sampleLen) + sampleLen + 2;
+
+        if (slotCount > 0)
+        {
+            len += GetBulkStringLen("SLOTS") + 2;
+            len += GetBulkLen(GetIntLength(slotCount)) + GetIntLength(slotCount) + 2;
+            for (var i = 0; i < slotCount; i++)
+            {
+                var slotLen = GetIntLength(slots![i]);
+                len += GetBulkLen(slotLen) + slotLen + 2;
+            }
+        }
+
+        return len;
+    }
+
+    public static int WriteHotKeysStartCommand(
+        Span<byte> destination,
+        bool includeCpu,
+        bool includeNet,
+        int topK,
+        long durationMilliseconds,
+        int sampleRatio,
+        long[]? slots)
+    {
+        var metricsCount = (includeCpu ? 1 : 0) + (includeNet ? 1 : 0);
+        var slotCount = slots?.Length ?? 0;
+        var parts = 10 + metricsCount + (slotCount > 0 ? 2 + slotCount : 0);
+
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), parts);
+        idx += WriteBulkString(destination.Slice(idx), "HOTKEYS");
+        idx += WriteBulkString(destination.Slice(idx), "START");
+        idx += WriteBulkString(destination.Slice(idx), "METRICS");
+        idx += WriteBulkInt(destination.Slice(idx), metricsCount);
+        if (includeCpu)
+            idx += WriteBulkString(destination.Slice(idx), "CPU");
+        if (includeNet)
+            idx += WriteBulkString(destination.Slice(idx), "NET");
+        idx += WriteBulkString(destination.Slice(idx), "COUNT");
+        idx += WriteBulkInt(destination.Slice(idx), topK);
+        idx += WriteBulkString(destination.Slice(idx), "DURATION");
+        idx += WriteBulkLong(destination.Slice(idx), durationMilliseconds);
+        idx += WriteBulkString(destination.Slice(idx), "SAMPLE");
+        idx += WriteBulkInt(destination.Slice(idx), sampleRatio);
+
+        if (slotCount > 0)
+        {
+            idx += WriteBulkString(destination.Slice(idx), "SLOTS");
+            idx += WriteBulkInt(destination.Slice(idx), slotCount);
+            for (var i = 0; i < slotCount; i++)
+                idx += WriteBulkLong(destination.Slice(idx), slots![i]);
+        }
+
+        return idx;
+    }
+
+    public static ReadOnlyMemory<byte> HotKeysStopCommand { get; } = "*2\r\n$7\r\nHOTKEYS\r\n$4\r\nSTOP\r\n"u8.ToArray();
+    public static ReadOnlyMemory<byte> HotKeysGetCommand { get; } = "*2\r\n$7\r\nHOTKEYS\r\n$3\r\nGET\r\n"u8.ToArray();
+
     // MODULE LIST (detect installed modules like RedisJSON)
     public static ReadOnlyMemory<byte> ModuleListCommand { get; } = "*2\r\n$6\r\nMODULE\r\n$4\r\nLIST\r\n"u8.ToArray();
 }

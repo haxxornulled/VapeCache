@@ -2088,6 +2088,119 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
         }
     }
 
+    public async ValueTask<string> XAddIdempotentAsync(
+        string key,
+        string producerId,
+        string? idempotentId,
+        bool useAutoIdempotentId,
+        string entryId,
+        (string Field, ReadOnlyMemory<byte> Value)[] fields,
+        CancellationToken ct)
+    {
+        if (_breaker.Enabled && _breakerState.IsOpen)
+        {
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent(_fallback.Name);
+            return await _fallback.XAddIdempotentAsync(key, producerId, idempotentId, useAutoIdempotentId, entryId, fields, ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            var result = await _redis.XAddIdempotentAsync(key, producerId, idempotentId, useAutoIdempotentId, entryId, fields, ct).ConfigureAwait(false);
+            _breakerController.MarkRedisSuccess();
+            _current.SetCurrent("redis");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _breakerController.MarkRedisFailure();
+            _stats.IncFallbackToMemory();
+            _current.SetCurrent(_fallback.Name);
+            LogRedisKeyFallback(_logger, ex, "XADD", key);
+            return await _fallback.XAddIdempotentAsync(key, producerId, idempotentId, useAutoIdempotentId, entryId, fields, ct).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask<bool> XCfgSetIdempotenceAsync(string key, int? durationSeconds, int? maxSize, CancellationToken ct)
+    {
+        try
+        {
+            if (_breaker.Enabled && _breakerState.IsOpen)
+                LogBreakerOpenCapabilityDiscovery(_logger, "XCFGSET");
+
+            return await _redis.XCfgSetIdempotenceAsync(key, durationSeconds, maxSize, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogRedisCapabilityDiscoveryFailed(_logger, ex, "XCFGSET");
+            throw;
+        }
+    }
+
+    public async ValueTask<bool> HotKeysStartAsync(RedisHotKeysCollectionOptions options, CancellationToken ct)
+    {
+        try
+        {
+            if (_breaker.Enabled && _breakerState.IsOpen)
+                LogBreakerOpenCapabilityDiscovery(_logger, "HOTKEYS START");
+
+            return await _redis.HotKeysStartAsync(options, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogRedisCapabilityDiscoveryFailed(_logger, ex, "HOTKEYS START");
+            throw;
+        }
+    }
+
+    public async ValueTask<bool> HotKeysStopAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (_breaker.Enabled && _breakerState.IsOpen)
+                LogBreakerOpenCapabilityDiscovery(_logger, "HOTKEYS STOP");
+
+            return await _redis.HotKeysStopAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogRedisCapabilityDiscoveryFailed(_logger, ex, "HOTKEYS STOP");
+            throw;
+        }
+    }
+
+    public async ValueTask<string[]> HotKeysGetAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (_breaker.Enabled && _breakerState.IsOpen)
+                LogBreakerOpenCapabilityDiscovery(_logger, "HOTKEYS GET");
+
+            return await _redis.HotKeysGetAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogRedisCapabilityDiscoveryFailed(_logger, ex, "HOTKEYS GET");
+            throw;
+        }
+    }
+
     // ========== Scan Operations ==========
 
     /// <summary>

@@ -281,6 +281,42 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// </summary>
     ValueTask<(long Timestamp, double Value)[]> TsRangeAsync(string key, long from, long to, CancellationToken ct);
 
+    // Streams (XADD/XCFGSET)
+    /// <summary>
+    /// Executes idempotent stream append using Redis 8.6 IDMP/IDMPAUTO semantics.
+    /// </summary>
+    ValueTask<string> XAddIdempotentAsync(
+        string key,
+        string producerId,
+        string? idempotentId,
+        bool useAutoIdempotentId,
+        string entryId,
+        (string Field, ReadOnlyMemory<byte> Value)[] fields,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Executes per-stream idempotence retention configuration.
+    /// </summary>
+    ValueTask<bool> XCfgSetIdempotenceAsync(
+        string key,
+        int? durationSeconds,
+        int? maxSize,
+        CancellationToken ct);
+
+    // Hotkeys (Redis 8.6)
+    /// <summary>
+    /// Starts HOTKEYS collection for CPU/network diagnostics.
+    /// </summary>
+    ValueTask<bool> HotKeysStartAsync(RedisHotKeysCollectionOptions options, CancellationToken ct);
+    /// <summary>
+    /// Stops HOTKEYS collection.
+    /// </summary>
+    ValueTask<bool> HotKeysStopAsync(CancellationToken ct);
+    /// <summary>
+    /// Gets HOTKEYS collection results as normalized text entries.
+    /// </summary>
+    ValueTask<string[]> HotKeysGetAsync(CancellationToken ct);
+
     // Scan/streaming
     /// <summary>
     /// Executes scan async.

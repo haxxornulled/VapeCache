@@ -287,6 +287,76 @@ public class RedisRespProtocolTests
         Assert.DoesNotContain("value-two", text, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void XAddIdempotent_WithExplicitId_LengthMatchesWriter()
+    {
+        var fields = new (string Field, ReadOnlyMemory<byte> Value)[]
+        {
+            ("orderId", "123"u8.ToArray()),
+            ("state", "created"u8.ToArray())
+        };
+        var fieldLengths = fields.Select(static x => (x.Field, x.Value.Length)).ToArray();
+
+        var len = RedisRespProtocol.GetXAddIdempotentCommandLength(
+            key: "stream:orders",
+            producerId: "orders-api",
+            idempotentId: "tx-1",
+            useAutoIdempotentId: false,
+            entryId: "*",
+            fields: fieldLengths);
+
+        var buffer = new byte[len];
+        var written = RedisRespProtocol.WriteXAddIdempotentCommand(
+            buffer,
+            key: "stream:orders",
+            producerId: "orders-api",
+            idempotentId: "tx-1",
+            useAutoIdempotentId: false,
+            entryId: "*",
+            fields: fields);
+
+        Assert.Equal(len, written);
+        var text = Encoding.ASCII.GetString(buffer);
+        Assert.StartsWith("*10\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$4\r\nXADD\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$4\r\nIDMP\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$4\r\ntx-1\r\n", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HotKeysStart_WithCpuNetAndSlots_LengthMatchesWriter()
+    {
+        long[] slots = [11, 22];
+        var len = RedisRespProtocol.GetHotKeysStartCommandLength(
+            metricsCount: 2,
+            includeCpu: true,
+            includeNet: true,
+            topK: 10,
+            durationMilliseconds: 5_000,
+            sampleRatio: 10,
+            slots: slots);
+
+        var buffer = new byte[len];
+        var written = RedisRespProtocol.WriteHotKeysStartCommand(
+            buffer,
+            includeCpu: true,
+            includeNet: true,
+            topK: 10,
+            durationMilliseconds: 5_000,
+            sampleRatio: 10,
+            slots: slots);
+
+        Assert.Equal(len, written);
+        var text = Encoding.ASCII.GetString(buffer);
+        Assert.StartsWith("*16\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$7\r\nHOTKEYS\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$5\r\nSTART\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$7\r\nMETRICS\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$3\r\nCPU\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$3\r\nNET\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$5\r\nSLOTS\r\n", text, StringComparison.Ordinal);
+    }
+
     private static void AssertSingleKeyCommand(
         string key,
         string expectedCommandBulk,

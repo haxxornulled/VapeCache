@@ -79,16 +79,21 @@ Still out of scope:
 **Recommendation:** Use StackExchange.Redis or a broker when you need advanced pub/sub routing/guarantees.
 
 ### Streams
-❌ **No XADD/XREAD/XGROUP commands**
+⚠️ **Targeted stream producer support is available; full stream runtime is out of scope**
 
-**Why:** Streams require:
-- RESP3 for optimal performance (push messages)
-- Complex consumer group state management
-- Blocking reads (dedicated connections)
+Supported now:
+- Redis 8.6 idempotent producer flow via opt-in package `VapeCache.Extensions.Streams`
+  - `XADD ... IDMP/IDMPAUTO`
+  - `XCFGSET` idempotence retention configuration
 
-**Status:** Out of scope for this codebase.
+Still out of scope:
+- `XREAD`/`XREADGROUP` consumer loops
+- consumer-group orchestration and pending-entry recovery
+- durable broker semantics and workflow orchestration
 
-**Workaround:** Use StackExchange.Redis or Redis.OM for Streams.
+**Why:** consumer-group runtime semantics and blocking consumption are a separate operational problem space from cache/runtime transport.
+
+**Workaround:** pair with StackExchange.Redis for advanced stream consumer/group behavior.
 
 ### RESP3 Advanced Features
 ⚠️ **Core RESP3 support is in; advanced RESP3 features remain scoped**
@@ -225,7 +230,7 @@ await redis.GetSubscriber().SubscribeAsync("channel", handler);
 | OpenTelemetry | ✅ Native | ⚠️ Manual | Use VapeCache |
 | Pub/Sub | ⚠️ Basic channels | ✅ Native | Use VapeCache for simple channel pub/sub; use SER for advanced patterns |
 | Lua scripting | ❌ Not supported | ✅ Native | Use SER |
-| Streams | ❌ Not supported | ✅ Native | Use SER |
+| Streams | ⚠️ Idempotent producer support only | ✅ Native | Use VapeCache Streams package for producer idempotency; use SER for full stream consumers |
 | Cluster mode (cache-path redirects) | ✅ Partial | ✅ Native | Use VapeCache for cache path, SER for full orchestration |
 | 200+ commands | ❌ 20 commands | ✅ Full surface | Use SER |
 
@@ -250,7 +255,7 @@ await redis.GetSubscriber().SubscribeAsync("channel", handler);
 3. Implement it yourself and contribute a PR
 
 ### Q: Is VapeCache production-ready?
-**A:** Yes, for caching use cases. Basic pub/sub channels are supported; Lua/Streams remain out of scope; cluster support is partial and cache-path focused.
+**A:** Yes, for caching use cases. Basic pub/sub channels are supported; streams have targeted idempotent producer support via `VapeCache.Extensions.Streams`; Lua remains out of scope; cluster support is partial and cache-path focused.
 
 ## References
 

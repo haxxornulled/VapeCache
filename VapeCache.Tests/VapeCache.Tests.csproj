@@ -34,6 +34,7 @@
     <ProjectReference Include="..\VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry\VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.Logging\VapeCache.Extensions.Logging.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.PubSub\VapeCache.Extensions.PubSub.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.Streams\VapeCache.Extensions.Streams.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
     <ProjectReference Include="..\VapeCache.Console\VapeCache.Console.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj" />

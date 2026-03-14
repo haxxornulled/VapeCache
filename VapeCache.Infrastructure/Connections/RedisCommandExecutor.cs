@@ -360,7 +360,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private static string FormatDouble(double value)
     {
         if (double.IsNaN(value))
-            throw new ArgumentOutOfRangeException(nameof(value), "NaN is not a valid Redis score.");
+            return "nan";
         if (double.IsPositiveInfinity(value))
             return "+inf";
         if (double.IsNegativeInfinity(value))
@@ -6853,6 +6853,348 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
+    }
+
+    public async ValueTask<string> XAddIdempotentAsync(
+        string key,
+        string producerId,
+        string? idempotentId,
+        bool useAutoIdempotentId,
+        string entryId,
+        (string Field, ReadOnlyMemory<byte> Value)[] fields,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(producerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entryId);
+        ArgumentNullException.ThrowIfNull(fields);
+        if (fields.Length == 0)
+            throw new ArgumentException("XADD requires at least one field/value pair.", nameof(fields));
+        if (!useAutoIdempotentId && string.IsNullOrWhiteSpace(idempotentId))
+            throw new ArgumentException("idempotentId is required when useAutoIdempotentId=false.", nameof(idempotentId));
+
+        using var activity = StartCommandActivity("XADD");
+        activity?.SetTag("db.redis.key", key);
+        var sw = Stopwatch.StartNew();
+        RecordCommandCall();
+
+        var fieldsForLength = new (string Field, int ValueLength)[fields.Length];
+        for (var i = 0; i < fields.Length; i++)
+            fieldsForLength[i] = (fields[i].Field, fields[i].Value.Length);
+
+        var len = RedisRespProtocol.GetXAddIdempotentCommandLength(
+            key,
+            producerId,
+            idempotentId,
+            useAutoIdempotentId,
+            entryId,
+            fieldsForLength);
+
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteXAddIdempotentCommand(
+                rented.AsSpan(0, len),
+                key,
+                producerId,
+                idempotentId,
+                useAutoIdempotentId,
+                entryId,
+                fields);
+
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: true,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null;
+
+            try
+            {
+                if (TryReadRespText(resp, out var streamEntryId))
+                    return streamEntryId;
+
+                throw new InvalidOperationException($"Unexpected XADD response: {resp.Kind}");
+            }
+            catch (InvalidOperationException ex)
+            {
+                await conn.ResetTransportAsync(ex).ConfigureAwait(false);
+                throw;
+            }
+            finally
+            {
+                RedisRespReader.ReturnBuffers(resp);
+            }
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public async ValueTask<bool> XCfgSetIdempotenceAsync(
+        string key,
+        int? durationSeconds,
+        int? maxSize,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        if (!durationSeconds.HasValue && !maxSize.HasValue)
+            throw new ArgumentException("XCFGSET requires durationSeconds and/or maxSize.");
+
+        using var activity = StartCommandActivity("XCFGSET");
+        activity?.SetTag("db.redis.key", key);
+        var sw = Stopwatch.StartNew();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetXCfgSetIdempotenceCommandLength(key, durationSeconds, maxSize);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = Next();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteXCfgSetIdempotenceCommand(rented.AsSpan(0, len), key, durationSeconds, maxSize);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null;
+
+            return string.Equals(await ReadSimpleStringResponseAsync(conn, "XCFGSET", resp).ConfigureAwait(false), "OK", StringComparison.Ordinal);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public async ValueTask<bool> HotKeysStartAsync(RedisHotKeysCollectionOptions options, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var includeCpu = options.IncludeCpu;
+        var includeNet = options.IncludeNet;
+        if (!includeCpu && !includeNet)
+            throw new ArgumentException("At least one HOTKEYS metric must be enabled (CPU or NET).", nameof(options));
+
+        var topK = Math.Max(1, options.TopK);
+        var sampleRatio = Math.Max(1, options.SampleRatio);
+        var durationMs = Math.Max(1L, (long)Math.Ceiling(options.Duration.TotalMilliseconds));
+        var slots = options.Slots is { Length: > 0 } ? options.Slots : null;
+        var metricsCount = (includeCpu ? 1 : 0) + (includeNet ? 1 : 0);
+
+        using var activity = StartCommandActivity("HOTKEYS START");
+        var sw = Stopwatch.StartNew();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetHotKeysStartCommandLength(
+            metricsCount,
+            includeCpu,
+            includeNet,
+            topK,
+            durationMs,
+            sampleRatio,
+            slots);
+
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextBulk();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteHotKeysStartCommand(
+                rented.AsSpan(0, len),
+                includeCpu,
+                includeNet,
+                topK,
+                durationMs,
+                sampleRatio,
+                slots);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null;
+
+            if (resp.Kind == RedisRespReader.RespKind.Integer)
+                return resp.IntegerValue >= 0;
+
+            var ack = await ReadSimpleStringResponseAsync(conn, "HOTKEYS START", resp).ConfigureAwait(false);
+            return string.Equals(ack, "OK", StringComparison.Ordinal);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public async ValueTask<bool> HotKeysStopAsync(CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("HOTKEYS STOP");
+        var sw = Stopwatch.StartNew();
+        RecordCommandCall();
+
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextBulk();
+            var resp = await conn.ExecuteAsync(
+                RedisRespProtocol.HotKeysStopCommand,
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: null).ConfigureAwait(false);
+
+            if (resp.Kind == RedisRespReader.RespKind.Integer)
+                return resp.IntegerValue >= 0;
+
+            var ack = await ReadSimpleStringResponseAsync(conn, "HOTKEYS STOP", resp).ConfigureAwait(false);
+            return string.Equals(ack, "OK", StringComparison.Ordinal);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+        }
+    }
+
+    public async ValueTask<string[]> HotKeysGetAsync(CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("HOTKEYS GET");
+        var sw = Stopwatch.StartNew();
+        RecordCommandCall();
+
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextBulk();
+            var resp = await conn.ExecuteAsync(
+                RedisRespProtocol.HotKeysGetCommand,
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: true,
+                ct,
+                headerBuffer: null).ConfigureAwait(false);
+
+            try
+            {
+                return ParseHotKeysResponseAsText(resp);
+            }
+            catch (InvalidOperationException ex)
+            {
+                await conn.ResetTransportAsync(ex).ConfigureAwait(false);
+                throw;
+            }
+            finally
+            {
+                RedisRespReader.ReturnBuffers(resp);
+            }
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+        }
+    }
+
+    private static string[] ParseHotKeysResponseAsText(RedisRespReader.RespValue response)
+    {
+        if (response.Kind is RedisRespReader.RespKind.NullArray)
+            return Array.Empty<string>();
+
+        if (response.Kind is not RedisRespReader.RespKind.Array || response.ArrayItems is null)
+            return [FormatRespValue(response, 0)];
+
+        var items = response.ArrayItems;
+        var count = response.ArrayLength;
+        if (count == 0)
+            return Array.Empty<string>();
+
+        var result = new string[count];
+        for (var i = 0; i < count; i++)
+            result[i] = FormatRespValue(items[i], 0);
+        return result;
+    }
+
+    private static string FormatRespValue(RedisRespReader.RespValue value, int depth)
+    {
+        return value.Kind switch
+        {
+            RedisRespReader.RespKind.Integer => value.IntegerValue.ToString(CultureInfo.InvariantCulture),
+            RedisRespReader.RespKind.SimpleString => value.Text ?? string.Empty,
+            RedisRespReader.RespKind.BulkString => Encoding.UTF8.GetString(value.Bulk ?? Array.Empty<byte>(), 0, GetBulkLength(value)),
+            RedisRespReader.RespKind.NullBulkString => "(null)",
+            RedisRespReader.RespKind.NullArray => "[]",
+            RedisRespReader.RespKind.Error => $"(error){value.Text}",
+            RedisRespReader.RespKind.Array => FormatRespArray(value, depth),
+            RedisRespReader.RespKind.Push => FormatRespArray(value, depth),
+            _ => value.Kind.ToString()
+        };
+    }
+
+    private static string FormatRespArray(RedisRespReader.RespValue value, int depth)
+    {
+        if (depth >= 4 || value.ArrayItems is null)
+            return "[...]";
+
+        var items = value.ArrayItems;
+        var length = value.ArrayLength;
+        if (length == 0)
+            return "[]";
+
+        var take = Math.Min(length, 12);
+        var parts = new string[take];
+        for (var i = 0; i < take; i++)
+            parts[i] = FormatRespValue(items[i], depth + 1);
+
+        if (length > take)
+            return $"[{string.Join(", ", parts)}, ...]";
+
+        return $"[{string.Join(", ", parts)}]";
     }
 
     // ========== Scan Commands ==========

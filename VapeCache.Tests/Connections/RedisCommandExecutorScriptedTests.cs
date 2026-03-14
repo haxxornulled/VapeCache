@@ -337,8 +337,43 @@ public sealed class RedisCommandExecutorScriptedTests
         stream.Enqueue(":100\r\n");
         Assert.Equal(100, await sut.TsAddAsync("ts1", 100, 1.0, default));
 
+        stream.Enqueue(":101\r\n");
+        Assert.Equal(101, await sut.TsAddAsync("ts1", 101, double.NaN, default));
+
         stream.Enqueue("*1\r\n*2\r\n:100\r\n$1\r\n1\r\n");
         Assert.Single(await sut.TsRangeAsync("ts1", 0, 1000, default));
+
+        stream.Enqueue("$15\r\n1741350000000-0\r\n");
+        var streamId = await sut.XAddIdempotentAsync(
+            "stream:orders",
+            producerId: "producer-a",
+            idempotentId: "tx-001",
+            useAutoIdempotentId: false,
+            entryId: "*",
+            fields: [("orderId", (ReadOnlyMemory<byte>)"123"u8.ToArray())],
+            default);
+        Assert.Equal("1741350000000-0", streamId);
+
+        stream.Enqueue("+OK\r\n");
+        Assert.True(await sut.XCfgSetIdempotenceAsync("stream:orders", durationSeconds: 600, maxSize: 256, default));
+
+        stream.Enqueue("+OK\r\n");
+        Assert.True(await sut.HotKeysStartAsync(new RedisHotKeysCollectionOptions
+        {
+            IncludeCpu = true,
+            IncludeNet = true,
+            TopK = 10,
+            Duration = TimeSpan.FromSeconds(5),
+            SampleRatio = 10
+        }, default));
+
+        stream.Enqueue("*2\r\n$3\r\nCPU\r\n*1\r\n*2\r\n$7\r\norder:1\r\n:42\r\n");
+        var hotkeys = await sut.HotKeysGetAsync(default);
+        Assert.True(hotkeys.Length >= 2);
+        Assert.Contains("CPU", hotkeys[0], StringComparison.OrdinalIgnoreCase);
+
+        stream.Enqueue("+OK\r\n");
+        Assert.True(await sut.HotKeysStopAsync(default));
 
         // Server + stream + extended fallback-only methods
         stream.Enqueue("+PONG\r\n");
