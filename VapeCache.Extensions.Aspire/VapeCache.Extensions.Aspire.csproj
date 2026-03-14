@@ -10,7 +10,7 @@
     <!-- NuGet Package Metadata -->
     <PackageId>VapeCache.Extensions.Aspire</PackageId>
     <Title>VapeCache Extensions for Aspire</Title>
-    <Version>1.2.11</Version>
+    <Version>1.2.12</Version>
     <Description>.NET Aspire integration for VapeCache. Adds service discovery, health checks, and OpenTelemetry wiring for Aspire-hosted applications.</Description>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>

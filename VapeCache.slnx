@@ -7,6 +7,8 @@
   <Project Path="VapeCache.Console/VapeCache.Console.csproj" />
   <Project Path="VapeCache.Core/VapeCache.Core.csproj" />
   <Project Path="VapeCache.Extensions.DependencyInjection/VapeCache.Extensions.DependencyInjection.csproj" />
+  <Project Path="VapeCache.Extensions.EntityFrameworkCore/VapeCache.Extensions.EntityFrameworkCore.csproj" />
+  <Project Path="VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry/VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry.csproj" />
   <Project Path="VapeCache.Extensions.Logging/VapeCache.Extensions.Logging.csproj" />
   <Project Path="VapeCache.Extensions.PubSub/VapeCache.Extensions.PubSub.csproj" />
   <Project Path="VapeCache.Extensions.Aspire/VapeCache.Extensions.Aspire.csproj" />

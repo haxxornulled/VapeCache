@@ -3,16 +3,16 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <LangVersion>14.0</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>true</IsPackable>
-    <PackageId>VapeCache.Features.Invalidation</PackageId>
-    <Title>VapeCache Invalidation Features</Title>
+    <PackageId>VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry</PackageId>
+    <Title>VapeCache EF Core OpenTelemetry Extensions</Title>
     <Version>1.2.12</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
-    <Product>VapeCache.Features.Invalidation</Product>
-    <Description>Optional invalidation policy package for VapeCache. Adds policy-driven tag, zone, and key invalidation orchestration with runtime options support.</Description>
-    <PackageTags>cache;redis;invalidation;tags;zones;policy;dotnet</PackageTags>
+    <Product>VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry</Product>
+    <Description>OpenTelemetry metrics and activity hooks for VapeCache EF Core interceptor events. Enables profiler and Aspire-ready observability for query-key generation and cache invalidation flows.</Description>
+    <PackageTags>efcore;opentelemetry;metrics;tracing;aspire;cache;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
@@ -23,24 +23,17 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.10 release: stabilized Redis telemetry parser metrics, hardened connection registration across DI and Autofac, and refreshed production-capable documentation.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.12 release: introduced EF Core OpenTelemetry observer package with metrics/activity emission for query and invalidation lifecycle events.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Autofac" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
-  </ItemGroup>
-  <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
     <None Include="..\LICENSE" Pack="true" PackagePath="\" />
+    <Compile Include="..\shared\Guards\ParanoiaThrowGuard.cs" Link="Internal\ParanoiaThrowGuard.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VapeCache.Extensions.EntityFrameworkCore\VapeCache.Extensions.EntityFrameworkCore.csproj" />
   </ItemGroup>
 </Project>

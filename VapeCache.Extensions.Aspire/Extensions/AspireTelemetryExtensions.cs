@@ -36,10 +36,12 @@ public static class AspireTelemetryExtensions
     /// <strong>Meters registered:</strong>
     /// - VapeCache.Cache (cache hit/miss, operations)
     /// - VapeCache.Redis (Redis commands, connection pool)
+    /// - VapeCache.EFCore.Cache (EF Core cache interceptor telemetry; emitted when EF Core OTEL package is installed)
     /// </para>
     /// <para>
     /// <strong>Activity sources registered:</strong>
     /// - VapeCache.Redis (distributed tracing for Redis operations)
+    /// - VapeCache.EFCore.Cache (EF Core cache interceptor traces; emitted when EF Core OTEL package is installed)
     /// </para>
     /// </remarks>
     /// <example>
@@ -80,6 +82,7 @@ public static class AspireTelemetryExtensions
                 metrics.AddMeter("VapeCache.Cache");   // Cache hit/miss, operations
                 metrics.AddMeter("VapeCache.Redis");   // Redis commands, pool metrics
                 metrics.AddMeter("VapeCache.RedisServer"); // redis_exporter server metrics
+                metrics.AddMeter("VapeCache.EFCore.Cache"); // EF Core query/invalidation cache telemetry
 
                 // Configure histogram buckets for cache operation latency
                 // Optimized for sub-millisecond to multi-second operations
@@ -106,6 +109,14 @@ public static class AspireTelemetryExtensions
                         Boundaries = DefaultLatencyHistogramBoundaries
                     });
 
+                // Configure histogram buckets for EF Core second-level cache execution timing.
+                metrics.AddView(
+                    instrumentName: "efcore.cache.query.execution.ms",
+                    new ExplicitBucketHistogramConfiguration
+                    {
+                        Boundaries = DefaultLatencyHistogramBoundaries
+                    });
+
                 if (exporter is not null)
                 {
                     metrics.AddOtlpExporter(otlp =>
@@ -124,6 +135,7 @@ public static class AspireTelemetryExtensions
                 // Register VapeCache activity sources for distributed tracing
                 // This enables end-to-end trace visualization in Aspire Dashboard
                 tracing.AddSource("VapeCache.Redis");
+                tracing.AddSource("VapeCache.EFCore.Cache");
 
                 if (exporter is not null)
                 {

@@ -7,8 +7,8 @@ You get service discovery, health checks, telemetry, and wrapper endpoints in on
 
 ✅ **Service Discovery** - Auto-configure Redis connection from Aspire resources
 ✅ **Health Checks** - Redis connectivity and circuit breaker monitoring
-✅ **Telemetry** - Cache hit/miss metrics visible in Aspire Dashboard
-✅ **Distributed Tracing** - End-to-end traces for Redis operations
+✅ **Telemetry** - Cache/Redis metrics visible in Aspire Dashboard (plus EF Core cache telemetry when installed)
+✅ **Distributed Tracing** - End-to-end traces for Redis operations (plus EF Core cache traces when installed)
 ✅ **Wrapper Endpoints** - `MapVapeCacheEndpoints(...)` for diagnostics and `MapVapeCacheAdminEndpoints(...)` for control routes
 ✅ **SEQ by Default** - OTLP exporter falls back to Seq when no endpoint is configured
 ✅ **Fluent Telemetry API** - `.UseSeq(...)`, custom headers, and wrapper callbacks
@@ -117,11 +117,17 @@ Navigate to `http://localhost:15888` to view:
 - `redis.mux.lane.bytes.received` - Cumulative bytes received by lane
 - `redis.mux.lane.operations` - Cumulative operations started by lane
 - `redis.mux.lane.failures` - Cumulative transport/connect failures by lane
+- `efcore.cache.query.execution.completed` - EF Core query executions observed by interceptor cache pipeline
+- `efcore.cache.query.execution.failed` - EF Core query execution failures observed by interceptor cache pipeline
+- `efcore.cache.query.execution.ms` - EF Core query execution duration histogram
+- `efcore.cache.invalidation.zone.invalidated` - EF Core-derived zone invalidations completed
+- `efcore.cache.invalidation.zone.failed` - EF Core-derived zone invalidations failed
 
 ### Traces
 
 End-to-end distributed traces showing:
 - Cache operation → Pool acquisition → Redis command → Response parsing
+- EF Core second-level cache events when `VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry` is installed
 
 ### Health Checks
 
@@ -206,6 +212,7 @@ app.MapHealthChecks("/health/redis", new HealthCheckOptions
 ### `WithAspireTelemetry()`
 
 Configures OpenTelemetry for VapeCache metrics/traces and OTLP export.
+Also registers the EF Core cache meter/source (`VapeCache.EFCore.Cache`) so EF Core cache telemetry is auto-collected when the EF Core OTEL package is installed.
 Resolution order for OTLP endpoint:
 
 1. `options.OtlpEndpoint`

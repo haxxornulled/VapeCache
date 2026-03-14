@@ -53,6 +53,20 @@ Optional Redis pub/sub package. Adds explicit pub/sub registration for `IRedisPu
 dotnet add package VapeCache.Extensions.PubSub
 ```
 
+### VapeCache.Extensions.EntityFrameworkCore
+Optional EF Core adapter package for second-level cache interceptor contracts, deterministic query-key generation, and save-changes invalidation bridge wiring.
+
+```bash
+dotnet add package VapeCache.Extensions.EntityFrameworkCore
+```
+
+### VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry
+Optional OpenTelemetry package for EF Core cache interceptor events. Emits OTEL metrics/activity signals and auto-enables observer callbacks for telemetry flows.
+
+```bash
+dotnet add package VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry
+```
+
 ### VapeCache.Extensions.AspNetCore
 ASP.NET Core output-cache integration with VapeCache storage.
 

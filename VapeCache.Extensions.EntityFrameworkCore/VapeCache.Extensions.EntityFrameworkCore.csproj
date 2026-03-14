@@ -5,14 +5,14 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>true</IsPackable>
-    <PackageId>VapeCache.Extensions.PubSub</PackageId>
-    <Title>VapeCache Extensions for Redis Pub/Sub</Title>
+    <PackageId>VapeCache.Extensions.EntityFrameworkCore</PackageId>
+    <Title>VapeCache Extensions for EF Core</Title>
     <Version>1.2.12</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
-    <Product>VapeCache.Extensions.PubSub</Product>
-    <Description>Optional Redis pub/sub capability package for VapeCache. Adds bounded subscription queues, reconnect/resubscribe behavior, and DI/Autofac registration helpers.</Description>
-    <PackageTags>redis;pubsub;cache;distributed-cache;autofac;dotnet</PackageTags>
+    <Product>VapeCache.Extensions.EntityFrameworkCore</Product>
+    <Description>EF Core second-level cache interceptor contract package for VapeCache. Provides deterministic query key building, SaveChanges invalidation bridge interceptors, and DI/DbContextOptions wiring.</Description>
+    <PackageTags>efcore;entityframework;cache;second-level-cache;interceptor;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
@@ -21,25 +21,23 @@
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RepositoryBranch>main</RepositoryBranch>
-    <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.10 release: extracted Redis pub/sub into an opt-in package with explicit DI and Autofac wiring.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.12 release: introduced first-party EF Core interceptor contract package with deterministic query key builder and SaveChanges invalidation bridge wiring.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
   <ItemGroup>
-    <None Include="..\PACKAGE_README.md" Pack="true" PackagePath="\" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
     <None Include="..\LICENSE" Pack="true" PackagePath="\" />
     <Compile Include="..\shared\Guards\ParanoiaThrowGuard.cs" Link="Internal\ParanoiaThrowGuard.cs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Autofac" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
-    <ProjectReference Include="..\VapeCache.Extensions.DependencyInjection\VapeCache.Extensions.DependencyInjection.csproj" />
-    <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

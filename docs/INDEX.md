@@ -15,17 +15,22 @@ This index reflects the OSS runtime surface in this repository.
 ## 2. Core Concepts
 
 - [CACHE_INVALIDATION.md](CACHE_INVALIDATION.md)
+- [CACHE_KEY_SPEC.md](CACHE_KEY_SPEC.md)
 - [CACHE_TAGS_AND_ZONES.md](CACHE_TAGS_AND_ZONES.md)
 - [ASPNETCORE_PIPELINE_CACHING.md](ASPNETCORE_PIPELINE_CACHING.md)
 - [ASPNETCORE_POLICY_EXTENSION.md](ASPNETCORE_POLICY_EXTENSION.md)
+- [EFCORE_SECOND_LEVEL_CACHE.md](EFCORE_SECOND_LEVEL_CACHE.md)
 - [WRAPPER_PLUGIN_GUIDE.md](WRAPPER_PLUGIN_GUIDE.md)
 - [API_REFERENCE.md](API_REFERENCE.md)
 
 ## 3. Platform Integrations
 
 - [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md)
+- [EFCORE_SECOND_LEVEL_CACHE.md](EFCORE_SECOND_LEVEL_CACHE.md)
 - [BLAZOR_DASHBOARD_EXAMPLE.md](BLAZOR_DASHBOARD_EXAMPLE.md)
 - [.NET Aspire package README](../VapeCache.Extensions.Aspire/README.md)
+- [EF Core package README](../VapeCache.Extensions.EntityFrameworkCore/README.md)
+- [EF Core OTEL package README](../VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry/README.md)
 
 ## 4. Operations
 
@@ -41,7 +46,9 @@ This index reflects the OSS runtime surface in this repository.
 
 ## Supporting References
 
+- [ARCHITECTURE_OVERVIEW.md](ARCHITECTURE_OVERVIEW.md)
 - [CLEAN_ARCHITECTURE.md](CLEAN_ARCHITECTURE.md)
 - [ARCHITECTURE.md](architecture.md)
+- [OBSERVABILITY_SPEC.md](OBSERVABILITY_SPEC.md)
 - [FAQ.md](FAQ.md)
 - [DOCUMENTATION_STANDARDS.md](DOCUMENTATION_STANDARDS.md)

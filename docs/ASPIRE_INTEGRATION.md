@@ -131,6 +131,11 @@ When you run your Aspire app, the dashboard (`http://localhost:15888`) will show
 - `cache.stampede.key_rejected`: Invalid/suspicious stampede key rejections
 - `cache.stampede.lock_wait_timeout`: Stampede lock wait timeouts
 - `cache.stampede.failure_backoff_rejected`: Stampede backoff rejections
+- `efcore.cache.query.execution.completed`: EF Core query executions (when `VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry` is installed)
+- `efcore.cache.query.execution.failed`: EF Core query failures (when EF Core OTEL package is installed)
+- `efcore.cache.query.execution.ms`: EF Core query execution duration histogram
+- `efcore.cache.invalidation.zone.invalidated`: EF Core-derived zone invalidations
+- `efcore.cache.invalidation.zone.failed`: EF Core-derived zone invalidation failures
 
 ### Wrapper Endpoint Payload
 
@@ -148,6 +153,7 @@ When you run your Aspire app, the dashboard (`http://localhost:15888`) will show
 - HTTP request → Cache lookup → Redis command
 - Trace IDs link logs, metrics, and traces
 - Flamegraph visualization of request latency
+- EF Core second-level cache activities from source `VapeCache.EFCore.Cache` when EF Core OTEL package is installed
 
 ### Logs Tab (Structured Logs)
 - All VapeCache logs (via ILogger<T>)

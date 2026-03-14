@@ -61,6 +61,18 @@ If you need Redis pub/sub support:
 dotnet add package VapeCache.Extensions.PubSub
 ```
 
+If you need EF Core second-level cache interceptor contracts and invalidation bridge wiring:
+
+```bash
+dotnet add package VapeCache.Extensions.EntityFrameworkCore
+```
+
+If you need EF Core cache OpenTelemetry signals (Aspire/OTEL ready):
+
+```bash
+dotnet add package VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry
+```
+
 2. Run Redis
 
 ```bash
@@ -168,6 +180,8 @@ See:
 | `VapeCache.Extensions.DependencyInjection` | [VapeCache.Extensions.DependencyInjection](https://www.nuget.org/packages/VapeCache.Extensions.DependencyInjection) | One-call IServiceCollection wiring facade for runtime + config binding | [Quickstart](docs/QUICKSTART.md) |
 | `VapeCache.Extensions.Logging` | [VapeCache.Extensions.Logging](https://www.nuget.org/packages/VapeCache.Extensions.Logging) | Optional Serilog + OTEL logging wiring with file/Seq/console sinks and pluggable JSON formatting | [Logging + Telemetry](docs/LOGGING_TELEMETRY_CONFIGURATION.md) |
 | `VapeCache.Extensions.PubSub` | [VapeCache.Extensions.PubSub](https://www.nuget.org/packages/VapeCache.Extensions.PubSub) | Optional Redis pub/sub package (publish/subscribe, bounded queues, reconnect/resubscribe) | [API Reference](docs/API_REFERENCE.md) |
+| `VapeCache.Extensions.EntityFrameworkCore` | [VapeCache.Extensions.EntityFrameworkCore](https://www.nuget.org/packages/VapeCache.Extensions.EntityFrameworkCore) | EF Core second-level cache interceptor contracts, deterministic query-key builder, and SaveChanges invalidation bridge wiring | [EF Core Second-Level Cache](docs/EFCORE_SECOND_LEVEL_CACHE.md) |
+| `VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry` | [VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry](https://www.nuget.org/packages/VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry) | OpenTelemetry metrics/activity package for EF Core cache interceptor events and profiler correlation | [EF Core package README](VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry/README.md) |
 | `VapeCache.Extensions.AspNetCore` | [VapeCache.Extensions.AspNetCore](https://www.nuget.org/packages/VapeCache.Extensions.AspNetCore) | ASP.NET Core output-cache integration | [ASP.NET Core Pipeline](docs/ASPNETCORE_PIPELINE_CACHING.md) |
 | `VapeCache.Extensions.Aspire` | [VapeCache.Extensions.Aspire](https://www.nuget.org/packages/VapeCache.Extensions.Aspire) | Aspire wiring, health checks, endpoint helpers | [Aspire Integration](docs/ASPIRE_INTEGRATION.md) |
 
