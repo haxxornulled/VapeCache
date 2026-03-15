@@ -190,6 +190,21 @@ public sealed class RedisRegistrationValidationTests
     }
 
     [Fact]
+    public void AutofacCachingModule_EnterpriseFeatureGate_CanBeOverridden()
+    {
+        var builder = new ContainerBuilder();
+        builder.RegisterModule(new VapeCacheCachingModule());
+        builder.RegisterVapeCacheEnterpriseFeatureGate<TestEnterpriseFeatureGate>();
+
+        using var container = builder.Build();
+        var gate = container.Resolve<IEnterpriseFeatureGate>();
+
+        Assert.IsType<TestEnterpriseFeatureGate>(gate);
+        Assert.True(gate.IsAutoscalerLicensed);
+        Assert.True(gate.IsDurableSpillLicensed);
+    }
+
+    [Fact]
     public void RedisConnectionOptions_DisablePasswordOnlyAuthFallback_ByDefault()
     {
         var options = new RedisConnectionOptions();
@@ -251,4 +266,11 @@ public sealed class RedisRegistrationValidationTests
 
     private static IHostedService GetStartupValidator(IServiceProvider provider, string typeName)
         => provider.GetServices<IHostedService>().Single(service => service.GetType().Name == typeName);
+
+    private sealed class TestEnterpriseFeatureGate : IEnterpriseFeatureGate
+    {
+        public bool IsAutoscalerLicensed => true;
+        public bool IsDurableSpillLicensed => true;
+        public bool IsReconciliationLicensed => true;
+    }
 }

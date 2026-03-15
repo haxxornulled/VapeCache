@@ -70,4 +70,26 @@ public sealed class VapeCacheDependencyInjectionBuilder
 
         return this;
     }
+
+    /// <summary>
+    /// Replaces the default enterprise feature gate with a custom implementation.
+    /// Intended for enterprise licensing/control-plane integration packages.
+    /// </summary>
+    public VapeCacheDependencyInjectionBuilder UseEnterpriseFeatureGate<TFeatureGate>()
+        where TFeatureGate : class, IEnterpriseFeatureGate
+    {
+        Services.AddVapeCacheEnterpriseFeatureGate<TFeatureGate>();
+        return this;
+    }
+
+    /// <summary>
+    /// Replaces the default enterprise feature gate with a factory-backed implementation.
+    /// Intended for enterprise licensing/control-plane integration packages.
+    /// </summary>
+    public VapeCacheDependencyInjectionBuilder UseEnterpriseFeatureGate(
+        Func<IServiceProvider, IEnterpriseFeatureGate> factory)
+    {
+        Services.AddVapeCacheEnterpriseFeatureGate(factory);
+        return this;
+    }
 }

@@ -1,0 +1,59 @@
+@page "/vapecache/autoscaler"
+
+<PageTitle>VapeCache Autoscaler</PageTitle>
+
+<section class="vc-admin-shell">
+    <header class="vc-admin-header">
+        <div>
+            <h1>Autoscaler</h1>
+            <p>Redis lane scaling signal and lane distribution state.</p>
+        </div>
+        <button class="vc-button" @onclick="RefreshAsync">Refresh</button>
+    </header>
+
+    <VapeCacheAdminNav />
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <p class="vc-error">@_error</p>
+    }
+
+    @if (_snapshot.Autoscaler is null)
+    {
+        <article class="vc-card">
+            <h2>Autoscaler</h2>
+            <p class="vc-meta">No autoscaler snapshot available in the current runtime.</p>
+        </article>
+    }
+    else
+    {
+        var autoscaler = _snapshot.Autoscaler;
+        <section class="vc-admin-grid vc-admin-grid-4">
+            <article class="vc-card"><h2>Enabled</h2><p class="vc-kpi">@autoscaler.Enabled</p></article>
+            <article class="vc-card"><h2>Connections</h2><p class="vc-kpi">@autoscaler.CurrentConnections/@autoscaler.TargetConnections</p></article>
+            <article class="vc-card"><h2>Lanes</h2><p class="vc-kpi">@autoscaler.CurrentReadLanes/@autoscaler.CurrentWriteLanes</p></article>
+            <article class="vc-card"><h2>Scale Events</h2><p class="vc-kpi">@autoscaler.ScaleEventsInCurrentMinute</p></article>
+        </section>
+
+        <article class="vc-card">
+            <h2>Signal Detail</h2>
+            <dl class="vc-dl">
+                <dt>Avg Inflight Utilization</dt><dd>@autoscaler.AvgInflightUtilization.ToString("F4")</dd>
+                <dt>Avg Queue Depth</dt><dd>@autoscaler.AvgQueueDepth.ToString("F2")</dd>
+                <dt>Max Queue Depth</dt><dd>@autoscaler.MaxQueueDepth</dd>
+                <dt>Timeout Rate / sec</dt><dd>@autoscaler.TimeoutRatePerSec.ToString("F4")</dd>
+                <dt>P95 Latency (ms)</dt><dd>@autoscaler.RollingP95LatencyMs.ToString("F2")</dd>
+                <dt>P99 Latency (ms)</dt><dd>@autoscaler.RollingP99LatencyMs.ToString("F2")</dd>
+                <dt>Unhealthy Connections</dt><dd>@autoscaler.UnhealthyConnections</dd>
+                <dt>Reconnect Failure Rate / sec</dt><dd>@autoscaler.ReconnectFailureRatePerSec.ToString("F4")</dd>
+                <dt>Scale Cap / minute</dt><dd>@autoscaler.MaxScaleEventsPerMinute</dd>
+                <dt>Frozen</dt><dd>@autoscaler.Frozen</dd>
+                <dt>Frozen Until</dt><dd>@(autoscaler.FrozenUntilUtc?.ToString("O") ?? "n/a")</dd>
+                <dt>Freeze Reason</dt><dd>@(autoscaler.FreezeReason ?? "n/a")</dd>
+                <dt>Last Scale UTC</dt><dd>@(autoscaler.LastScaleEventUtc?.ToString("O") ?? "n/a")</dd>
+                <dt>Last Direction</dt><dd>@(autoscaler.LastScaleDirection ?? "n/a")</dd>
+                <dt>Last Reason</dt><dd>@(autoscaler.LastScaleReason ?? "n/a")</dd>
+            </dl>
+        </article>
+    }
+</section>

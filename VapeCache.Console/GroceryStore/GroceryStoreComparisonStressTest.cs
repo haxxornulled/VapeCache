@@ -312,6 +312,9 @@ public class GroceryStoreComparisonStressTest
             ("CartReadPhase", cartReadPhaseMs),
             ("SessionAndSalePhase", sessionAndSalePhaseMs),
             ("ClearCart", clearCartMs));
+        var serviceTelemetry = _service is IGroceryStoreComparisonTelemetrySource telemetrySource
+            ? telemetrySource.GetTelemetrySnapshot()
+            : default;
 
         var result = new StressTestResult(
             ProviderName: _providerName,
@@ -331,7 +334,11 @@ public class GroceryStoreComparisonStressTest
             AllocatedBytes: allocatedBytes,
             Gen0Collections: gen0Collections,
             Gen1Collections: gen1Collections,
-            Gen2Collections: gen2Collections);
+            Gen2Collections: gen2Collections,
+            ServiceReadOps: serviceTelemetry.ReadOps,
+            ServiceWriteOps: serviceTelemetry.WriteOps,
+            ServiceTotalOps: serviceTelemetry.TotalOps,
+            ServiceCartItemWriteOps: serviceTelemetry.CartItemWriteOps);
 
         // Log results
         _logger.LogInformation("");
@@ -353,6 +360,16 @@ public class GroceryStoreComparisonStressTest
             result.Gen0Collections,
             result.Gen1Collections,
             result.Gen2Collections);
+        if (result.SuccessCount > 0)
+        {
+            _logger.LogInformation(
+                "Workload Integrity - ServiceOps: {TotalOps:N0} total ({ReadOps:N0} read / {WriteOps:N0} write), CartItemWrites: {CartItemWrites:N0}, Ops/Shopper: {OpsPerShopper:N2}",
+                result.ServiceTotalOps,
+                result.ServiceReadOps,
+                result.ServiceWriteOps,
+                result.ServiceCartItemWriteOps,
+                result.ServiceTotalOps / (decimal)result.SuccessCount);
+        }
         if (stepBreakdown.Length > 0)
         {
             _logger.LogInformation("Step Latency Breakdown (ms, sorted by p99):");
@@ -519,4 +536,8 @@ public record StressTestResult(
     long AllocatedBytes,
     int Gen0Collections,
     int Gen1Collections,
-    int Gen2Collections);
+    int Gen2Collections,
+    long ServiceReadOps = 0,
+    long ServiceWriteOps = 0,
+    long ServiceTotalOps = 0,
+    long ServiceCartItemWriteOps = 0);

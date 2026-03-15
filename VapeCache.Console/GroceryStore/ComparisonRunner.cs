@@ -318,7 +318,11 @@ public static class ComparisonRunner
             AllocatedBytes: Median(results.Select(static r => r.AllocatedBytes).ToArray()),
             Gen0Collections: Median(results.Select(static r => r.Gen0Collections).ToArray()),
             Gen1Collections: Median(results.Select(static r => r.Gen1Collections).ToArray()),
-            Gen2Collections: Median(results.Select(static r => r.Gen2Collections).ToArray()));
+            Gen2Collections: Median(results.Select(static r => r.Gen2Collections).ToArray()),
+            ServiceReadOps: Median(results.Select(static r => r.ServiceReadOps).ToArray()),
+            ServiceWriteOps: Median(results.Select(static r => r.ServiceWriteOps).ToArray()),
+            ServiceTotalOps: Median(results.Select(static r => r.ServiceTotalOps).ToArray()),
+            ServiceCartItemWriteOps: Median(results.Select(static r => r.ServiceCartItemWriteOps).ToArray()));
     }
 
     private static async Task<StressTestResult> RunVapeCacheTestAsync(
@@ -702,7 +706,22 @@ public static class ComparisonRunner
             (stackExchange.SuccessCount / (decimal)stackExchange.ShopperCount) * 100m,
             higher: true);
 
+        var vapeOpsPerShopper = vapeCache.SuccessCount <= 0 ? 0m : vapeCache.ServiceTotalOps / (decimal)vapeCache.SuccessCount;
+        var serOpsPerShopper = stackExchange.SuccessCount <= 0 ? 0m : stackExchange.ServiceTotalOps / (decimal)stackExchange.SuccessCount;
+        var vapeCartItemWritesPerShopper = vapeCache.SuccessCount <= 0 ? 0m : vapeCache.ServiceCartItemWriteOps / (decimal)vapeCache.SuccessCount;
+        var serCartItemWritesPerShopper = stackExchange.SuccessCount <= 0 ? 0m : stackExchange.ServiceCartItemWriteOps / (decimal)stackExchange.SuccessCount;
+
         System.Console.WriteLine();
+        System.Console.WriteLine("Workload Integrity (provider call accounting):");
+        System.Console.WriteLine($"  Service Ops / Shopper: VapeCache={vapeOpsPerShopper:N2}, StackExchange.Redis={serOpsPerShopper:N2}");
+        System.Console.WriteLine($"  Cart Item Writes / Shopper: VapeCache={vapeCartItemWritesPerShopper:N2}, StackExchange.Redis={serCartItemWritesPerShopper:N2}");
+        if (Math.Abs(vapeOpsPerShopper - serOpsPerShopper) > 0.01m ||
+            Math.Abs(vapeCartItemWritesPerShopper - serCartItemWritesPerShopper) > 0.01m)
+        {
+            System.Console.WriteLine("⚠️ Workload parity mismatch detected. Treat throughput comparison as non-authoritative until resolved.");
+            System.Console.WriteLine();
+        }
+
         System.Console.WriteLine("═══════════════════════════════════════════════════════════════════════════");
         if (throughputRatio >= 1.0m)
         {
@@ -728,7 +747,7 @@ public static class ComparisonRunner
         var allocPerShopper = result.SuccessCount <= 0 ? 0m : result.AllocatedBytes / (decimal)result.SuccessCount;
         var provider = result.ProviderName.Replace("|", "/", StringComparison.Ordinal);
         System.Console.WriteLine(
-            $"RESULT|Provider={provider}|Throughput={result.ThroughputShoppersPerSec:F2}|P95Ms={result.P95LatencyMs:F4}|P99Ms={result.P99LatencyMs:F4}|P999Ms={result.P999LatencyMs:F4}|AllocBytes={result.AllocatedBytes}|AllocBytesPerShopper={allocPerShopper:F2}|Gen0={result.Gen0Collections}|Gen1={result.Gen1Collections}|Gen2={result.Gen2Collections}|Success={result.SuccessCount}|Errors={result.ErrorCount}");
+            $"RESULT|Provider={provider}|Throughput={result.ThroughputShoppersPerSec:F2}|P95Ms={result.P95LatencyMs:F4}|P99Ms={result.P99LatencyMs:F4}|P999Ms={result.P999LatencyMs:F4}|AllocBytes={result.AllocatedBytes}|AllocBytesPerShopper={allocPerShopper:F2}|Gen0={result.Gen0Collections}|Gen1={result.Gen1Collections}|Gen2={result.Gen2Collections}|Success={result.SuccessCount}|Errors={result.ErrorCount}|ServiceReadOps={result.ServiceReadOps}|ServiceWriteOps={result.ServiceWriteOps}|ServiceTotalOps={result.ServiceTotalOps}|ServiceCartItemWrites={result.ServiceCartItemWriteOps}");
     }
 
     private static void PrintMetric(string name, decimal vapeCacheValue, decimal stackExchangeValue, bool higher)

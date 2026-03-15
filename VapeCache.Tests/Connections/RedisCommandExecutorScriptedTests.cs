@@ -491,7 +491,8 @@ public sealed class RedisCommandExecutorScriptedTests
                 EnableCommandInstrumentation = false,
                 ResponseTimeout = TimeSpan.FromSeconds(2)
             }),
-            new TestOptionsMonitor<RedisConnectionOptions>(new RedisConnectionOptions()));
+            new TestOptionsMonitor<RedisConnectionOptions>(new RedisConnectionOptions()),
+            enterpriseFeatureGate: new TestEnterpriseFeatureGate());
 
     private static void InvokeEvaluateAutoscale(RedisCommandExecutor executor)
     {
@@ -607,5 +608,12 @@ public sealed class RedisCommandExecutorScriptedTests
 
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    private sealed class TestEnterpriseFeatureGate : IEnterpriseFeatureGate
+    {
+        public bool IsAutoscalerLicensed => true;
+        public bool IsDurableSpillLicensed => false;
+        public bool IsReconciliationLicensed => false;
     }
 }

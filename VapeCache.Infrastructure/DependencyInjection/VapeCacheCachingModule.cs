@@ -1,4 +1,3 @@
-﻿using System.Text.Json;
 using Autofac;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -46,12 +45,16 @@ public sealed class VapeCacheCachingModule : Module
         RegisterStaticOptions(builder, new CacheStampedeOptions());
         RegisterStaticOptions(builder, new RedisCircuitBreakerOptions());
         RegisterStaticOptions(builder, new RedisMultiplexerOptions());
+        builder.RegisterType<DefaultEnterpriseFeatureGate>()
+            .As<IEnterpriseFeatureGate>()
+            .SingleInstance()
+            .IfNotRegistered(typeof(IEnterpriseFeatureGate));
         builder.RegisterType<RedisMultiplexerOptionsValidator>().AsSelf().SingleInstance();
         builder.RegisterType<RedisMultiplexerOptionsStartupValidator>().As<IStartable>().SingleInstance();
         builder.RegisterType<MemoryCache>().As<IMemoryCache>().SingleInstance();
 
-        builder.RegisterType<RedisCommandExecutor>().AsSelf().SingleInstance();
-        builder.Register(ctx => (IRedisMultiplexerDiagnostics)ctx.Resolve<RedisCommandExecutor>())
+        builder.RegisterType<RedisCommandExecutor>()
+            .AsSelf()
             .As<IRedisMultiplexerDiagnostics>()
             .SingleInstance();
         builder.RegisterType<InMemoryCommandExecutor>()
@@ -67,34 +70,30 @@ public sealed class VapeCacheCachingModule : Module
             .OnActivated(e => CacheTelemetry.InitializeSpillDiagnostics(e.Instance))
             .IfNotRegistered(typeof(IInMemorySpillStore));
 
-        builder.Register(ctx => new RedisCacheService(
-                ctx.Resolve<RedisCommandExecutor>(),
-                ctx.Resolve<ICurrentCacheService>(),
-                ctx.Resolve<CacheStatsRegistry>(),
-                ctx.ResolveOptional<ICacheIntentRegistry>()))
+        builder.RegisterType<RedisCacheService>()
+            .UsingConstructor(
+                typeof(RedisCommandExecutor),
+                typeof(ICurrentCacheService),
+                typeof(CacheStatsRegistry),
+                typeof(ICacheIntentRegistry))
             .AsSelf()
             .SingleInstance();
         builder.RegisterType<InMemoryCacheService>().AsSelf().As<ICacheFallbackService>().SingleInstance();
         builder.RegisterType<HybridCacheService>()
             .AsSelf()
-            .SingleInstance();
-        builder.Register(ctx => (IRedisCircuitBreakerState)ctx.Resolve<HybridCacheService>())
             .As<IRedisCircuitBreakerState>()
-            .SingleInstance();
-        builder.Register(ctx => (IRedisFailoverController)ctx.Resolve<HybridCacheService>())
             .As<IRedisFailoverController>()
             .SingleInstance();
 
         builder.RegisterType<HybridCommandExecutor>()
             .AsSelf()
-            .SingleInstance();
-        builder.Register(ctx => (IRedisCommandExecutor)ctx.Resolve<HybridCommandExecutor>())
             .As<IRedisCommandExecutor>()
             .SingleInstance();
-        builder.Register(ctx => new StampedeProtectedCacheService(
-                ctx.Resolve<HybridCacheService>(),
-                ctx.Resolve<IOptionsMonitor<CacheStampedeOptions>>(),
-                ctx.Resolve<CacheStatsRegistry>().GetOrCreate(CacheStatsNames.Hybrid)))
+        builder.RegisterType<StampedeProtectedCacheService>()
+            .UsingConstructor(
+                typeof(HybridCacheService),
+                typeof(IOptionsMonitor<CacheStampedeOptions>),
+                typeof(CacheStatsRegistry))
             .AsSelf()
             .As<ICacheService>()
             .As<ICacheTagService>()
@@ -102,13 +101,13 @@ public sealed class VapeCacheCachingModule : Module
 
         builder.RegisterType<SystemTextJsonCodecProvider>()
             .As<ICacheCodecProvider>()
-            .SingleInstance()
-            .WithParameter("options", new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            .SingleInstance();
         builder.RegisterType<VapeCacheClient>().As<IVapeCache>().SingleInstance();
         builder.RegisterType<JsonCacheService>().As<IJsonCache>().SingleInstance();
         builder.RegisterType<ChunkedCacheStreamService>().As<ICacheChunkStreamService>().SingleInstance();
         builder.RegisterType<CacheCollectionFactory>().As<ICacheCollectionFactory>().SingleInstance();
-        builder.Register(ctx => new RedisModuleDetector(ctx.Resolve<RedisCommandExecutor>()))
+        builder.RegisterType<RedisModuleDetector>()
+            .UsingConstructor(typeof(RedisCommandExecutor))
             .As<IRedisModuleDetector>()
             .SingleInstance();
         builder.RegisterType<RedisSearchService>().As<IRedisSearchService>().SingleInstance();

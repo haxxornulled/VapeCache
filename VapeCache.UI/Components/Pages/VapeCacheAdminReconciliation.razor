@@ -1,0 +1,58 @@
+@page "/vapecache/reconciliation"
+
+<PageTitle>VapeCache Reconciliation</PageTitle>
+
+<section class="vc-admin-shell">
+    <header class="vc-admin-header">
+        <div>
+            <h1>Reconciliation</h1>
+            <p>Pending replay state and post-outage write-back controls.</p>
+        </div>
+        <button class="vc-button" @onclick="RefreshAsync">Refresh</button>
+    </header>
+
+    <VapeCacheAdminNav />
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <p class="vc-error">@_error</p>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_message))
+    {
+        <p class="vc-info">@_message</p>
+    }
+
+    <section class="vc-admin-grid vc-admin-grid-3">
+        <article class="vc-card">
+            <h2>Service Enabled</h2>
+            <p class="vc-kpi">@_snapshot.ReconciliationEnabled</p>
+        </article>
+        <article class="vc-card">
+            <h2>Pending Operations</h2>
+            <p class="vc-kpi">@_snapshot.ReconciliationPendingOperations</p>
+        </article>
+        <article class="vc-card">
+            <h2>Backend</h2>
+            <p class="vc-kpi">@_snapshot.Backend</p>
+            <p class="vc-meta">breaker @(_snapshot.BreakerOpen ? "open" : "closed")</p>
+        </article>
+    </section>
+
+    <article class="vc-card">
+        <h2>Replay Controls</h2>
+        <div class="vc-form-row">
+            <button class="vc-button" @onclick="ReconcileAsync" disabled="@(!_snapshot.ReconciliationEnabled)">Run Reconcile</button>
+            <button class="vc-button vc-button-secondary" @onclick="FlushAsync" disabled="@(!_snapshot.ReconciliationEnabled)">Flush Persisted State</button>
+        </div>
+        <p class="vc-meta">These controls call runtime services directly through adapter contracts.</p>
+    </article>
+
+    <article class="vc-card">
+        <h2>Event/Stream Views</h2>
+        <ul class="vc-list">
+            <li><a href="/vapecache/api/stream" target="_blank">Open live stream endpoint</a></li>
+            <li><a href="/vapecache/api/dashboard/shared-snapshot" target="_blank">Open shared snapshot endpoint</a></li>
+        </ul>
+    </article>
+</section>

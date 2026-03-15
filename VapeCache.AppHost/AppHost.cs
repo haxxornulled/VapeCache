@@ -63,41 +63,83 @@ static void ConfigureVapeCacheUiExperience(IResourceBuilder<ProjectResource> ui)
         })
         .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
         {
-            Url = "/vapecache/dashboard",
-            DisplayText = "VapeCache Dashboard",
+            Url = "/vapecache",
+            DisplayText = "VapeCache Admin",
             DisplayOrder = 290,
             DisplayLocation = UrlDisplayLocation.SummaryAndDetails
         })
         .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
         {
+            Url = "/vapecache/stats",
+            DisplayText = "Admin Stats",
+            DisplayOrder = 285,
+            DisplayLocation = UrlDisplayLocation.DetailsOnly
+        })
+        .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
+        {
+            Url = "/vapecache/health",
+            DisplayText = "Admin Health",
+            DisplayOrder = 284,
+            DisplayLocation = UrlDisplayLocation.DetailsOnly
+        })
+        .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
+        {
+            Url = "/vapecache/invalidation",
+            DisplayText = "Admin Invalidation",
+            DisplayOrder = 283,
+            DisplayLocation = UrlDisplayLocation.DetailsOnly
+        })
+        .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
+        {
+            Url = "/vapecache/autoscaler",
+            DisplayText = "Admin Autoscaler",
+            DisplayOrder = 282,
+            DisplayLocation = UrlDisplayLocation.DetailsOnly
+        })
+        .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
+        {
+            Url = "/vapecache/spill",
+            DisplayText = "Admin Spill",
+            DisplayOrder = 281,
+            DisplayLocation = UrlDisplayLocation.DetailsOnly
+        })
+        .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
+        {
+            Url = "/vapecache/reconciliation",
+            DisplayText = "Admin Reconciliation",
+            DisplayOrder = 280,
+            DisplayLocation = UrlDisplayLocation.DetailsOnly
+        })
+        .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
+        {
             Url = "/cache-workbench",
             DisplayText = "Cache Workbench",
-            DisplayOrder = 280,
+            DisplayOrder = 279,
             DisplayLocation = UrlDisplayLocation.SummaryAndDetails
         })
         .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
         {
-            Url = "/vapecache/status",
+            Url = "/vapecache/api/status",
             DisplayText = "Status API",
             DisplayOrder = 270,
             DisplayLocation = UrlDisplayLocation.DetailsOnly
         })
         .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
         {
-            Url = "/vapecache/stats",
+            Url = "/vapecache/api/stats",
             DisplayText = "Stats API",
             DisplayOrder = 260,
             DisplayLocation = UrlDisplayLocation.DetailsOnly
         })
         .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
         {
-            Url = "/vapecache/dashboard/shared-snapshot",
+            Url = "/vapecache/api/dashboard/shared-snapshot",
             DisplayText = "Shared Snapshot",
             DisplayOrder = 250,
             DisplayLocation = UrlDisplayLocation.DetailsOnly
         })
         .WithHttpCommand(
-            path: "/vapecache/breaker/force-open",
+            path: "/vapecache/api/breaker/force-open",
             displayName: "Force InMemory Fallback",
             commandName: "vapecache-breaker-force-open",
             commandOptions: new HttpCommandOptions
@@ -109,7 +151,7 @@ static void ConfigureVapeCacheUiExperience(IResourceBuilder<ProjectResource> ui)
                 IsHighlighted = true
             })
         .WithHttpCommand(
-            path: "/vapecache/breaker/clear",
+            path: "/vapecache/api/breaker/clear",
             displayName: "Restore Redis Backend",
             commandName: "vapecache-breaker-clear",
             commandOptions: new HttpCommandOptions
@@ -121,7 +163,7 @@ static void ConfigureVapeCacheUiExperience(IResourceBuilder<ProjectResource> ui)
                 IsHighlighted = true
             })
         .WithHttpCommand(
-            path: "/vapecache/status",
+            path: "/vapecache/api/status",
             displayName: "Fetch Runtime Status",
             commandName: "vapecache-fetch-status",
             commandOptions: new HttpCommandOptions
@@ -131,7 +173,7 @@ static void ConfigureVapeCacheUiExperience(IResourceBuilder<ProjectResource> ui)
                 IconVariant = IconVariant.Regular
             })
         .WithHttpCommand(
-            path: "/vapecache/stats",
+            path: "/vapecache/api/stats",
             displayName: "Fetch Cache Stats",
             commandName: "vapecache-fetch-stats",
             commandOptions: new HttpCommandOptions
@@ -141,7 +183,7 @@ static void ConfigureVapeCacheUiExperience(IResourceBuilder<ProjectResource> ui)
                 IconVariant = IconVariant.Regular
             })
         .WithHttpCommand(
-            path: "/vapecache/dashboard/shared-snapshot",
+            path: "/vapecache/api/dashboard/shared-snapshot",
             displayName: "Fetch Shared Snapshot",
             commandName: "vapecache-fetch-shared-snapshot",
             commandOptions: new HttpCommandOptions

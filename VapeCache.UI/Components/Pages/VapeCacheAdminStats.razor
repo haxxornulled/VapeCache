@@ -1,0 +1,54 @@
+@page "/vapecache/stats"
+
+<PageTitle>VapeCache Stats</PageTitle>
+
+<section class="vc-admin-shell">
+    <header class="vc-admin-header">
+        <div>
+            <h1>Cache Stats</h1>
+            <p>Read/write throughput and cache outcome counters.</p>
+        </div>
+        <button class="vc-button" @onclick="RefreshAsync">Refresh</button>
+    </header>
+
+    <VapeCacheAdminNav />
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <p class="vc-error">@_error</p>
+    }
+
+    <section class="vc-admin-grid vc-admin-grid-4">
+        <article class="vc-card">
+            <h2>Reads</h2>
+            <p class="vc-kpi">@_snapshot.Reads</p>
+        </article>
+        <article class="vc-card">
+            <h2>Writes</h2>
+            <p class="vc-kpi">@_snapshot.Writes</p>
+        </article>
+        <article class="vc-card">
+            <h2>Hit Rate</h2>
+            <p class="vc-kpi">@((_snapshot.HitRate * 100d).ToString("F2"))%</p>
+        </article>
+        <article class="vc-card">
+            <h2>Fallback Events</h2>
+            <p class="vc-kpi">@_snapshot.Stats.FallbackToMemory</p>
+        </article>
+    </section>
+
+    <article class="vc-card">
+        <h2>Counter Detail</h2>
+        <dl class="vc-dl">
+            <dt>Get Calls</dt><dd>@_snapshot.Stats.GetCalls</dd>
+            <dt>Set Calls</dt><dd>@_snapshot.Stats.SetCalls</dd>
+            <dt>Remove Calls</dt><dd>@_snapshot.Stats.RemoveCalls</dd>
+            <dt>Hits</dt><dd>@_snapshot.Stats.Hits</dd>
+            <dt>Misses</dt><dd>@_snapshot.Stats.Misses</dd>
+            <dt>Breaker Opened</dt><dd>@_snapshot.Stats.RedisBreakerOpened</dd>
+            <dt>Stampede Key Rejected</dt><dd>@_snapshot.Stats.StampedeKeyRejected</dd>
+            <dt>Lock Wait Timeout</dt><dd>@_snapshot.Stats.StampedeLockWaitTimeout</dd>
+            <dt>Failure Backoff Rejected</dt><dd>@_snapshot.Stats.StampedeFailureBackoffRejected</dd>
+        </dl>
+    </article>
+</section>

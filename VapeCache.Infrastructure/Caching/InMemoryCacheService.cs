@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Infrastructure.Caching;
@@ -18,9 +19,11 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
     private InMemorySpillOptions SpillOptions => _spillOptionsMonitor.CurrentValue;
     private readonly IInMemorySpillStore _spillStore;
     private readonly bool _spillStoreSupportsWrites;
+    private readonly bool _spillLicensed;
     private readonly ICacheIntentRegistry _intentRegistry;
     private readonly ILogger<InMemoryCacheService> _logger;
     private int _spillStoreWarningIssued;
+    private int _spillLicenseWarningIssued;
     private static readonly ICacheIntentRegistry NoopIntentRegistry = new NoopCacheIntentRegistry();
 
     public InMemoryCacheService(
@@ -30,18 +33,20 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
         IOptionsMonitor<InMemorySpillOptions> spillOptions,
         IInMemorySpillStore spillStore,
         ICacheIntentRegistry? intentRegistry = null,
-        ILogger<InMemoryCacheService>? logger = null)
+        ILogger<InMemoryCacheService>? logger = null,
+        IEnterpriseFeatureGate? enterpriseFeatureGate = null)
     {
         _cache = cache;
         _current = current;
         _stats = statsRegistry.GetOrCreate(CacheStatsNames.Memory);
         _spillOptionsMonitor = spillOptions;
         _spillStore = spillStore;
+        _spillLicensed = enterpriseFeatureGate?.IsDurableSpillLicensed ?? false;
         _intentRegistry = intentRegistry ?? NoopIntentRegistry;
         _logger = logger ?? NullLogger<InMemoryCacheService>.Instance;
         // Avoid writing spill references when the no-op store is active.
         // This prevents large entries from becoming unreadable in free-tier/default wiring.
-        _spillStoreSupportsWrites = spillStore is not NoopSpillStore;
+        _spillStoreSupportsWrites = spillStore is not NoopSpillStore && _spillLicensed;
         if (spillStore is ISpillStoreDiagnostics spillDiagnostics)
             CacheTelemetry.InitializeSpillDiagnostics(spillDiagnostics);
     }
@@ -211,6 +216,9 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
 
     private bool ShouldSpill(int length, InMemorySpillOptions spillOptions)
     {
+        if (spillOptions.EnableSpillToDisk && !_spillLicensed)
+            ReportSpillLicenseUnavailable();
+
         if (spillOptions.EnableSpillToDisk && !_spillStoreSupportsWrites)
             ReportSpillStoreUnavailable();
 
@@ -218,6 +226,15 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
                spillOptions.EnableSpillToDisk &&
                spillOptions.SpillThresholdBytes > 0 &&
                length > spillOptions.SpillThresholdBytes;
+    }
+
+    private void ReportSpillLicenseUnavailable()
+    {
+        if (Interlocked.Exchange(ref _spillLicenseWarningIssued, 1) != 0)
+            return;
+
+        CacheTelemetry.SpillStoreUnavailable.Add(1);
+        LogSpillLicenseUnavailable(_logger);
     }
 
     private void ReportSpillStoreUnavailable()
@@ -234,6 +251,12 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
         Level = LogLevel.Warning,
         Message = "InMemory spill-to-disk is enabled, but the active spill store is no-op. Register persistence spill services (AddVapeCachePersistence) to enable file-backed scatter spill.")]
     private static partial void LogSpillStoreUnavailable(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 7102,
+        Level = LogLevel.Warning,
+        Message = "InMemory spill-to-disk is enabled, but no enterprise spill license is available. Running with spill persistence disabled.")]
+    private static partial void LogSpillLicenseUnavailable(ILogger logger);
 
     private void StoreEntry(string key, CacheEntryOptions options, ReadOnlyMemory<byte> value)
     {

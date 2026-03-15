@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Connections;
 using VapeCache.Core.Policies;
 
 namespace VapeCache.Infrastructure.Caching;
@@ -24,7 +25,8 @@ internal sealed partial class HybridCacheService(
     CacheStatsRegistry statsRegistry,
     ILogger<HybridCacheService> logger,
     IOptionsMonitor<HybridFailoverOptions>? failoverOptions = null,
-    IRedisReconciliationService? reconciliation = null) : ICacheService
+    IRedisReconciliationService? reconciliation = null,
+    IEnterpriseFeatureGate? enterpriseFeatureGate = null) : ICacheService
     , ICacheTagService
     , IRedisCircuitBreakerState
     , IRedisFailoverController
@@ -44,6 +46,8 @@ internal sealed partial class HybridCacheService(
     private string? _forcedReason;
     private int _openAttempts;
     private int _reconcileInFlight;
+    private readonly IRedisReconciliationService? _reconciliation =
+        enterpriseFeatureGate?.IsReconciliationLicensed == true ? reconciliation : null;
     private static readonly JsonSerializerOptions TagJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly byte[] TagEnvelopePrefix = "VCTAG1:"u8.ToArray();
     private static readonly string[] ReadWarmTags = ["hybrid-failover", "read-warm"];
@@ -307,7 +311,7 @@ internal sealed partial class HybridCacheService(
                 await fallback.SetAsync(key, valueToStore, options, ct).ConfigureAwait(false);
 
                 // Track write for reconciliation when Redis recovers
-                reconciliation?.TrackWrite(key, valueToStore, options.Ttl);
+                _reconciliation?.TrackWrite(key, valueToStore, options.Ttl);
                 return;
             }
 
@@ -320,7 +324,7 @@ internal sealed partial class HybridCacheService(
                     _stats.IncFallbackToMemory();
                     CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
                     await fallback.SetAsync(key, valueToStore, options, ct).ConfigureAwait(false);
-                    reconciliation?.TrackWrite(key, valueToStore, options.Ttl);
+                    _reconciliation?.TrackWrite(key, valueToStore, options.Ttl);
                     return;
                 }
 
@@ -343,7 +347,7 @@ internal sealed partial class HybridCacheService(
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
                 LogRedisSetFallback(logger, ex, fallback.Name);
                 await fallback.SetAsync(key, valueToStore, options, ct).ConfigureAwait(false);
-                reconciliation?.TrackWrite(key, valueToStore, options.Ttl);
+                _reconciliation?.TrackWrite(key, valueToStore, options.Ttl);
             }
         }
         finally
@@ -372,7 +376,7 @@ internal sealed partial class HybridCacheService(
                 current.SetCurrent(fallback.Name);
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "breaker_open" } });
-                reconciliation?.TrackDelete(key);
+                _reconciliation?.TrackDelete(key);
                 return ok;
             }
 
@@ -384,7 +388,7 @@ internal sealed partial class HybridCacheService(
                     current.SetCurrent(fallback.Name);
                     _stats.IncFallbackToMemory();
                     CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
-                    reconciliation?.TrackDelete(key);
+                    _reconciliation?.TrackDelete(key);
                     return ok;
                 }
 
@@ -406,7 +410,7 @@ internal sealed partial class HybridCacheService(
                 _stats.IncFallbackToMemory();
                 CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "redis_error" } });
                 LogRedisDeleteFallback(logger, ex, fallback.Name);
-                reconciliation?.TrackDelete(key);
+                _reconciliation?.TrackDelete(key);
                 return ok;
             }
         }
@@ -671,7 +675,7 @@ internal sealed partial class HybridCacheService(
         var breaker = _breaker;
         if (breaker.Enabled && !IsRedisAllowedNow())
         {
-            reconciliation?.TrackWrite(tagVersionKey, payload, expiry: null);
+            _reconciliation?.TrackWrite(tagVersionKey, payload, expiry: null);
             return;
         }
 
@@ -680,7 +684,7 @@ internal sealed partial class HybridCacheService(
         {
             if (!TryEnterHalfOpenProbe(breaker, out probeTaken))
             {
-                reconciliation?.TrackWrite(tagVersionKey, payload, expiry: null);
+                _reconciliation?.TrackWrite(tagVersionKey, payload, expiry: null);
                 return;
             }
 
@@ -696,7 +700,7 @@ internal sealed partial class HybridCacheService(
         {
             MarkRedisFailure();
             LogRedisTagVersionWriteQueued(logger, normalizedTag, ex);
-            reconciliation?.TrackWrite(tagVersionKey, payload, expiry: null);
+            _reconciliation?.TrackWrite(tagVersionKey, payload, expiry: null);
         }
         finally
         {
@@ -745,7 +749,7 @@ internal sealed partial class HybridCacheService(
         var breaker = _breaker;
         if (breaker.Enabled && !IsRedisAllowedNow())
         {
-            reconciliation?.TrackDelete(key);
+            _reconciliation?.TrackDelete(key);
             return;
         }
 
@@ -754,7 +758,7 @@ internal sealed partial class HybridCacheService(
         {
             if (!TryEnterHalfOpenProbe(breaker, out probeTaken))
             {
-                reconciliation?.TrackDelete(key);
+                _reconciliation?.TrackDelete(key);
                 return;
             }
 
@@ -770,7 +774,7 @@ internal sealed partial class HybridCacheService(
         {
             MarkRedisFailure();
             LogRedisStaleTagCleanupQueued(logger, ex, key);
-            reconciliation?.TrackDelete(key);
+            _reconciliation?.TrackDelete(key);
         }
         finally
         {

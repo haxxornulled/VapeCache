@@ -98,4 +98,27 @@ public sealed class VapeCacheDependencyInjectionExtensionsTests
         Assert.NotEqual(75000, stampede.MaxKeys);
         Assert.Equal(0, spill.MemoryCacheSizeLimitBytes);
     }
+
+    [Fact]
+    public async Task UseEnterpriseFeatureGate_ReplacesDefaultGate()
+    {
+        var services = new ServiceCollection();
+        services.AddVapeCache()
+            .UseEnterpriseFeatureGate<TestEnterpriseFeatureGate>();
+
+        await using var provider = services.BuildServiceProvider();
+        var gate = provider.GetRequiredService<IEnterpriseFeatureGate>();
+
+        Assert.IsType<TestEnterpriseFeatureGate>(gate);
+        Assert.True(gate.IsAutoscalerLicensed);
+        Assert.True(gate.IsDurableSpillLicensed);
+        Assert.True(gate.IsReconciliationLicensed);
+    }
+
+    private sealed class TestEnterpriseFeatureGate : IEnterpriseFeatureGate
+    {
+        public bool IsAutoscalerLicensed => true;
+        public bool IsDurableSpillLicensed => true;
+        public bool IsReconciliationLicensed => true;
+    }
 }

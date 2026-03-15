@@ -1,0 +1,79 @@
+@page "/vapecache/spill"
+
+<PageTitle>VapeCache Spill Diagnostics</PageTitle>
+
+<section class="vc-admin-shell">
+    <header class="vc-admin-header">
+        <div>
+            <h1>Spill Diagnostics</h1>
+            <p>Spill mode, shard spread, and file distribution health.</p>
+        </div>
+        <button class="vc-button" @onclick="RefreshAsync">Refresh</button>
+    </header>
+
+    <VapeCacheAdminNav />
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <p class="vc-error">@_error</p>
+    }
+
+    @if (_snapshot.Spill is null)
+    {
+        <article class="vc-card">
+            <h2>Spill</h2>
+            <p class="vc-meta">No spill diagnostics are available for this runtime profile.</p>
+        </article>
+    }
+    else
+    {
+        var spill = _snapshot.Spill;
+        <section class="vc-admin-grid vc-admin-grid-4">
+            <article class="vc-card"><h2>Mode</h2><p class="vc-kpi">@spill.Mode</p></article>
+            <article class="vc-card"><h2>Disk Support</h2><p class="vc-kpi">@spill.SupportsDiskSpill</p></article>
+            <article class="vc-card"><h2>Configured</h2><p class="vc-kpi">@spill.SpillToDiskConfigured</p></article>
+            <article class="vc-card"><h2>Total Files</h2><p class="vc-kpi">@spill.TotalSpillFiles</p></article>
+        </section>
+
+        <article class="vc-card">
+            <h2>Shard Distribution</h2>
+            <dl class="vc-dl">
+                <dt>Active Shards</dt><dd>@spill.ActiveShards</dd>
+                <dt>Max Files In Shard</dt><dd>@spill.MaxFilesInShard</dd>
+                <dt>Avg Files / Active Shard</dt><dd>@spill.AvgFilesPerActiveShard.ToString("F2")</dd>
+                <dt>Imbalance Ratio</dt><dd>@spill.ImbalanceRatio.ToString("F2")</dd>
+                <dt>Sampled UTC</dt><dd>@spill.SampledAtUtc.ToString("O")</dd>
+            </dl>
+        </article>
+
+        <article class="vc-card">
+            <h2>Top Shards</h2>
+            @if (spill.TopShards.Length == 0)
+            {
+                <p class="vc-meta">No active spill shards.</p>
+            }
+            else
+            {
+                <div class="vc-table-wrap">
+                    <table class="vc-table">
+                        <thead>
+                            <tr>
+                                <th>Shard</th>
+                                <th>File Count</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var shard in spill.TopShards)
+                            {
+                                <tr>
+                                    <td>@shard.Shard</td>
+                                    <td>@shard.FileCount</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </article>
+    }
+</section>

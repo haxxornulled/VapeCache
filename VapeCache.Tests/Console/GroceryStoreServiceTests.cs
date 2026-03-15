@@ -120,6 +120,36 @@ public sealed class GroceryStoreServiceTests
             h.Service.CreateFlashSaleAsync("prod-does-not-exist", 1.0m, 5, TimeSpan.FromMinutes(1)));
     }
 
+    [Fact]
+    public async Task Cache_telemetry_tracks_product_and_flash_sale_hits_and_misses()
+    {
+        await using var h = GroceryHarness.Create();
+
+        _ = await h.Service.GetProductAsync("prod-001"); // miss + set
+        _ = await h.Service.GetProductAsync("prod-001"); // hit
+
+        var sale = await h.Service.CreateFlashSaleAsync("prod-002", 1.99m, 50, TimeSpan.FromMinutes(2)); // product miss + set, sale set
+        _ = await h.Service.GetFlashSaleAsync(sale.Id); // hit
+        _ = await h.Service.GetFlashSaleAsync("sale-does-not-exist"); // miss
+
+        var snapshot = h.Service.GetCacheTelemetrySnapshot();
+
+        Assert.Equal(3, snapshot.ProductGets);
+        Assert.Equal(1, snapshot.ProductHits);
+        Assert.Equal(2, snapshot.ProductMisses);
+        Assert.Equal(2, snapshot.ProductSets);
+
+        Assert.Equal(2, snapshot.FlashSaleGets);
+        Assert.Equal(1, snapshot.FlashSaleHits);
+        Assert.Equal(1, snapshot.FlashSaleMisses);
+        Assert.Equal(1, snapshot.FlashSaleSets);
+
+        Assert.Equal(5, snapshot.TotalGets);
+        Assert.Equal(2, snapshot.TotalHits);
+        Assert.Equal(3, snapshot.TotalMisses);
+        Assert.Equal(3, snapshot.TotalSets);
+    }
+
     private sealed class GroceryHarness : IAsyncDisposable
     {
         private readonly InMemoryCommandExecutor _executor;

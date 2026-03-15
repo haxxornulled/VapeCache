@@ -1,0 +1,79 @@
+@page "/vapecache/invalidation"
+
+<PageTitle>VapeCache Invalidation</PageTitle>
+
+<section class="vc-admin-shell">
+    <header class="vc-admin-header">
+        <div>
+            <h1>Invalidation</h1>
+            <p>Invalidate by key, tag, or zone from the runtime control plane.</p>
+        </div>
+        <button class="vc-button" @onclick="RefreshAsync">Refresh</button>
+    </header>
+
+    <VapeCacheAdminNav />
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <p class="vc-error">@_error</p>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_message))
+    {
+        <p class="vc-info">@_message</p>
+    }
+
+    <article class="vc-card">
+        <h2>Invalidate Tag</h2>
+        <div class="vc-form-row">
+            <input class="vc-input" placeholder="tag (example: products)" @bind="_tag" />
+            <button class="vc-button" @onclick="InvalidateTagAsync">Invalidate Tag</button>
+        </div>
+    </article>
+
+    <article class="vc-card">
+        <h2>Invalidate Zone</h2>
+        <div class="vc-form-row">
+            <input class="vc-input" placeholder="zone (example: catalog)" @bind="_zone" />
+            <button class="vc-button" @onclick="InvalidateZoneAsync">Invalidate Zone</button>
+        </div>
+    </article>
+
+    <article class="vc-card">
+        <h2>Invalidate Key</h2>
+        <div class="vc-form-row">
+            <input class="vc-input" placeholder="exact cache key" @bind="_key" />
+            <button class="vc-button" @onclick="InvalidateKeyAsync">Invalidate Key</button>
+        </div>
+    </article>
+
+    <article class="vc-card">
+        <h2>Policy Inspection</h2>
+        <p class="vc-meta">Recent cache intent/policy records from the runtime registry.</p>
+        <div class="vc-table-wrap">
+            <table class="vc-table">
+                <thead>
+                    <tr>
+                        <th>When</th>
+                        <th>Key</th>
+                        <th>Kind</th>
+                        <th>Owner</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in _recentPolicies)
+                    {
+                        <tr>
+                            <td>@entry.RecordedAtUtc.LocalDateTime.ToString("HH:mm:ss")</td>
+                            <td>@entry.Key</td>
+                            <td>@entry.Intent.Kind</td>
+                            <td>@(entry.Intent.Owner ?? "n/a")</td>
+                            <td>@(entry.Intent.Reason ?? "n/a")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </article>
+</section>

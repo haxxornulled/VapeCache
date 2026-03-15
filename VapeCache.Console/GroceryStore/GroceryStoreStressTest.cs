@@ -366,8 +366,9 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
             }
 
             var elapsed = sw.Elapsed.TotalSeconds;
-            var snapshot = _stats.Snapshot;
-            var hitRate = snapshot.GetCalls > 0 ? (snapshot.Hits * 100.0 / snapshot.GetCalls) : 0;
+            var runtimeSnapshot = _stats.Snapshot;
+            var grocerySnapshot = _store.GetCacheTelemetrySnapshot();
+            var hitRate = grocerySnapshot.TotalGets > 0 ? (grocerySnapshot.TotalHits * 100.0 / grocerySnapshot.TotalGets) : 0;
             var backend = _backendState.EffectiveBackend.ToWireName();
             var breakerOpen = _breakerState.IsOpen;
             var forcedOpen = _failoverController.IsForcedOpen;
@@ -382,11 +383,19 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
                 forcedOpen,
                 breakerFailures,
                 breakerReason,
-                snapshot.GetCalls,
-                snapshot.SetCalls,
-                snapshot.Hits,
+                grocerySnapshot.TotalGets,
+                grocerySnapshot.TotalSets,
+                grocerySnapshot.TotalHits,
                 hitRate,
-                snapshot.Misses);
+                grocerySnapshot.TotalMisses);
+
+            _logger.LogInformation(
+                "[{Elapsed:F0}s] Runtime Stats - Gets: {Gets} | Sets: {Sets} | Hits: {Hits} | Misses: {Misses}",
+                elapsed,
+                runtimeSnapshot.GetCalls,
+                runtimeSnapshot.SetCalls,
+                runtimeSnapshot.Hits,
+                runtimeSnapshot.Misses);
         }
     }
 
@@ -412,17 +421,36 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
         _logger.LogInformation("  Sample Cart (user-000042): {Count} items", cartCount);
 
         // Cache stats
-        var finalSnapshot = _stats.Snapshot;
+        var finalSnapshot = _store.GetCacheTelemetrySnapshot();
         _logger.LogInformation("");
-        _logger.LogInformation("Final Cache Statistics:");
-        _logger.LogInformation("  Total Gets: {Gets}", finalSnapshot.GetCalls);
-        _logger.LogInformation("  Total Sets: {Sets}", finalSnapshot.SetCalls);
-        _logger.LogInformation("  Total Hits: {Hits}", finalSnapshot.Hits);
-        _logger.LogInformation("  Total Misses: {Misses}", finalSnapshot.Misses);
-        _logger.LogInformation("  Hit Rate: {HitRate:F2}%", finalSnapshot.GetCalls > 0 ? (finalSnapshot.Hits * 100.0 / finalSnapshot.GetCalls) : 0);
-        _logger.LogInformation("  Total Removes: {Removes}", finalSnapshot.RemoveCalls);
-        _logger.LogInformation("  Fallback Events: {Fallback}", finalSnapshot.FallbackToMemory);
-        _logger.LogInformation("  Circuit Breaker Opens: {Opens}", finalSnapshot.RedisBreakerOpened);
+        _logger.LogInformation("Final Grocery Cache Statistics:");
+        _logger.LogInformation("  Product Gets: {Gets} | Hits: {Hits} | Misses: {Misses} | Sets: {Sets}",
+            finalSnapshot.ProductGets,
+            finalSnapshot.ProductHits,
+            finalSnapshot.ProductMisses,
+            finalSnapshot.ProductSets);
+        _logger.LogInformation("  Flash Sale Gets: {Gets} | Hits: {Hits} | Misses: {Misses} | Sets: {Sets}",
+            finalSnapshot.FlashSaleGets,
+            finalSnapshot.FlashSaleHits,
+            finalSnapshot.FlashSaleMisses,
+            finalSnapshot.FlashSaleSets);
+        _logger.LogInformation("  Total Gets: {Gets}", finalSnapshot.TotalGets);
+        _logger.LogInformation("  Total Sets: {Sets}", finalSnapshot.TotalSets);
+        _logger.LogInformation("  Total Hits: {Hits}", finalSnapshot.TotalHits);
+        _logger.LogInformation("  Total Misses: {Misses}", finalSnapshot.TotalMisses);
+        _logger.LogInformation("  Hit Rate: {HitRate:F4}%", finalSnapshot.TotalGets > 0 ? (finalSnapshot.TotalHits * 100.0 / finalSnapshot.TotalGets) : 0);
+
+        var runtimeSnapshot = _stats.Snapshot;
+        _logger.LogInformation("");
+        _logger.LogInformation("Runtime Cache Statistics (all hosted workloads):");
+        _logger.LogInformation("  Total Gets: {Gets}", runtimeSnapshot.GetCalls);
+        _logger.LogInformation("  Total Sets: {Sets}", runtimeSnapshot.SetCalls);
+        _logger.LogInformation("  Total Hits: {Hits}", runtimeSnapshot.Hits);
+        _logger.LogInformation("  Total Misses: {Misses}", runtimeSnapshot.Misses);
+        _logger.LogInformation("  Hit Rate: {HitRate:F4}%", runtimeSnapshot.GetCalls > 0 ? (runtimeSnapshot.Hits * 100.0 / runtimeSnapshot.GetCalls) : 0);
+        _logger.LogInformation("  Total Removes: {Removes}", runtimeSnapshot.RemoveCalls);
+        _logger.LogInformation("  Fallback Events: {Fallback}", runtimeSnapshot.FallbackToMemory);
+        _logger.LogInformation("  Circuit Breaker Opens: {Opens}", runtimeSnapshot.RedisBreakerOpened);
         _logger.LogInformation("  Current Backend: {Backend}", _backendState.EffectiveBackend.ToWireName());
         _logger.LogInformation("  Breaker Open: {Open}", _breakerState.IsOpen);
         _logger.LogInformation("  Breaker Consecutive Failures: {Failures}", _breakerState.ConsecutiveFailures);

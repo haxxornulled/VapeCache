@@ -14,6 +14,7 @@ namespace VapeCache.Console.GroceryStore;
 /// Uses IRedisCommandExecutor directly to minimize abstraction overhead.
 /// </summary>
 public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICartBatchWriter
+    , IGroceryStoreComparisonTelemetrySource
 {
     private readonly IRedisCommandExecutor _redis;
     private readonly string _keyPrefix;
@@ -26,6 +27,17 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     private static readonly GroceryStoreJsonContext JsonContext = new(new());
     private const uint OptimizedCartFormatMagicV1 = 0x56434331; // "VCC1"
     private const uint OptimizedCartFormatMagicV2 = 0x56434332; // "VCC2"
+    private long _productReadOps;
+    private long _productWriteOps;
+    private long _cartReadOps;
+    private long _cartCountReadOps;
+    private long _cartItemWriteOps;
+    private long _cartClearWriteOps;
+    private long _flashSaleJoinWriteOps;
+    private long _flashSaleMembershipReadOps;
+    private long _flashSaleParticipantCountReadOps;
+    private long _sessionReadOps;
+    private long _sessionWriteOps;
 
     public VapeCacheRawGroceryStoreService(
         IRedisCommandExecutor redis,
@@ -46,6 +58,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     /// </summary>
     public async ValueTask<Product?> GetProductAsync(string productId)
     {
+        Interlocked.Increment(ref _productReadOps);
         var key = Key($"product:{productId}");
         using var lease = await _redis.GetLeaseAsync(key, CancellationToken.None);
         if (!lease.IsNull)
@@ -68,6 +81,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     /// </summary>
     public async ValueTask CacheProductAsync(Product product, TimeSpan ttl)
     {
+        Interlocked.Increment(ref _productWriteOps);
         var key = Key($"product:{product.Id}");
         var serialized = Serialize(product);
         await _redis.SetAsync(key, serialized, ttl, CancellationToken.None);
@@ -78,6 +92,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     /// </summary>
     public async ValueTask AddToCartAsync(string userId, CartItem item)
     {
+        Interlocked.Increment(ref _cartItemWriteOps);
         var key = Key($"cart:{userId}");
         var serialized = Serialize(item);
         await _redis.RPushAsync(key, serialized, CancellationToken.None);
@@ -90,6 +105,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     {
         if (items.Count == 0)
             return;
+        Interlocked.Add(ref _cartItemWriteOps, items.Count);
 
         var optimizedCartKey = GetOptimizedCartKey(userId);
         var cartPayload = SerializeCartItems(items);
@@ -108,6 +124,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     /// </summary>
     public async ValueTask<CartItem[]> GetCartAsync(string userId)
     {
+        Interlocked.Increment(ref _cartReadOps);
         using var optimized = await _redis.GetLeaseAsync(GetOptimizedCartKey(userId), CancellationToken.None);
         if (!optimized.IsNull)
         {
@@ -134,6 +151,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     /// </summary>
     public async ValueTask<long> GetCartCountAsync(string userId)
     {
+        Interlocked.Increment(ref _cartCountReadOps);
         // Fast path for optimized carts: tiny fixed-size count key.
         using var optimizedCount = await _redis.GetLeaseAsync(GetOptimizedCartCountKey(userId), CancellationToken.None);
         if (!optimizedCount.IsNull && optimizedCount.Length == 4)
@@ -162,6 +180,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     /// </summary>
     public async ValueTask ClearCartAsync(string userId)
     {
+        Interlocked.Increment(ref _cartClearWriteOps);
         var optimizedKey = GetOptimizedCartKey(userId);
         var countKey = GetOptimizedCartCountKey(userId);
         var legacyListKey = Key($"cart:{userId}");
@@ -195,6 +214,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     /// </summary>
     public async ValueTask JoinFlashSaleAsync(string saleId, string userId)
     {
+        Interlocked.Increment(ref _flashSaleJoinWriteOps);
         var added = await ExecuteWithRentedUtf8Async(userId, payload =>
             _redis.SAddAsync(Key($"sale:{saleId}:participants"), payload, CancellationToken.None)).ConfigureAwait(false);
 
@@ -207,6 +227,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     /// </summary>
     public async ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId)
     {
+        Interlocked.Increment(ref _flashSaleMembershipReadOps);
         return await ExecuteWithRentedUtf8Async(userId, payload =>
             _redis.SIsMemberAsync(Key($"sale:{saleId}:participants"), payload, CancellationToken.None)).ConfigureAwait(false);
     }
@@ -216,6 +237,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     /// </summary>
     public async ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId)
     {
+        Interlocked.Increment(ref _flashSaleParticipantCountReadOps);
         if (_flashSaleCounts is not null && _flashSaleCounts.TryGetValue(saleId, out var cachedCount))
             return cachedCount;
 
@@ -231,6 +253,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     /// </summary>
     public async ValueTask SaveSessionAsync(string sessionId, UserSession session)
     {
+        Interlocked.Increment(ref _sessionWriteOps);
         var serialized = SessionBinaryCodec.Serialize(session);
         await _redis.SetAsync(Key($"session:{sessionId}"), serialized, TimeSpan.FromHours(1), CancellationToken.None);
     }
@@ -240,6 +263,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     /// </summary>
     public async ValueTask<UserSession?> GetSessionAsync(string sessionId)
     {
+        Interlocked.Increment(ref _sessionReadOps);
         using var lease = await _redis.GetLeaseAsync(Key($"session:{sessionId}"), CancellationToken.None);
         if (lease.IsNull)
             return null;
@@ -249,6 +273,22 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
 
         // Backward compatibility with legacy JSON session payloads.
         return Deserialize<UserSession>(lease.Span);
+    }
+
+    public GroceryStoreComparisonTelemetrySnapshot GetTelemetrySnapshot()
+    {
+        return new GroceryStoreComparisonTelemetrySnapshot(
+            ProductReadOps: Volatile.Read(ref _productReadOps),
+            ProductWriteOps: Volatile.Read(ref _productWriteOps),
+            CartReadOps: Volatile.Read(ref _cartReadOps),
+            CartCountReadOps: Volatile.Read(ref _cartCountReadOps),
+            CartItemWriteOps: Volatile.Read(ref _cartItemWriteOps),
+            CartClearWriteOps: Volatile.Read(ref _cartClearWriteOps),
+            FlashSaleJoinWriteOps: Volatile.Read(ref _flashSaleJoinWriteOps),
+            FlashSaleMembershipReadOps: Volatile.Read(ref _flashSaleMembershipReadOps),
+            FlashSaleParticipantCountReadOps: Volatile.Read(ref _flashSaleParticipantCountReadOps),
+            SessionReadOps: Volatile.Read(ref _sessionReadOps),
+            SessionWriteOps: Volatile.Read(ref _sessionWriteOps));
     }
 
     private static ReadOnlyMemory<byte> Serialize<T>(T value)

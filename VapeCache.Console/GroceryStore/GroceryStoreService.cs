@@ -23,6 +23,14 @@ public class GroceryStoreService : IGroceryStoreService, ICartBatchWriter
     private readonly ConcurrentDictionary<string, ICacheList<CartItem>> _cartLists = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ICacheSet<string>> _flashSaleParticipants = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ICacheList<InventoryUpdate>> _inventoryUpdates = new(StringComparer.Ordinal);
+    private long _productCacheGets;
+    private long _productCacheHits;
+    private long _productCacheMisses;
+    private long _productCacheSets;
+    private long _flashSaleCacheGets;
+    private long _flashSaleCacheHits;
+    private long _flashSaleCacheMisses;
+    private long _flashSaleCacheSets;
 
     // Pre-defined product catalog
     private static readonly Product[] Products = GenerateProducts();
@@ -249,9 +257,16 @@ public class GroceryStoreService : IGroceryStoreService, ICartBatchWriter
     /// </summary>
     public async ValueTask<Product?> GetProductAsync(string productId)
     {
+        Interlocked.Increment(ref _productCacheGets);
         var key = ResolveProductCacheKey(productId);
         var product = await _cache.GetAsync(key);
-        if (product != null) return product;
+        if (product != null)
+        {
+            Interlocked.Increment(ref _productCacheHits);
+            return product;
+        }
+
+        Interlocked.Increment(ref _productCacheMisses);
 
         // Cache miss - load from "database" (our static array)
         if (!ProductsById.TryGetValue(productId, out product))
@@ -260,6 +275,7 @@ public class GroceryStoreService : IGroceryStoreService, ICartBatchWriter
         if (product != null)
         {
             await _cache.SetAsync(key, product, new CacheEntryOptions { Ttl = TimeSpan.FromMinutes(10) });
+            Interlocked.Increment(ref _productCacheSets);
             if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug("Cached product {ProductId} from database", productId);
         }
@@ -336,6 +352,7 @@ public class GroceryStoreService : IGroceryStoreService, ICartBatchWriter
 
         var saleKey = new CacheKey<FlashSale>($"sale:{sale.Id}");
         await _cache.SetAsync(saleKey, sale, new CacheEntryOptions { Ttl = duration });
+        Interlocked.Increment(ref _flashSaleCacheSets);
         _logger.LogInformation("Created flash sale {SaleId} for {Product}: ${OriginalPrice} -> ${SalePrice} ({Quantity} available)",
             sale.Id, sale.ProductName, sale.OriginalPrice, sale.SalePrice, quantity);
 
@@ -347,8 +364,27 @@ public class GroceryStoreService : IGroceryStoreService, ICartBatchWriter
     /// </summary>
     public async Task<FlashSale?> GetFlashSaleAsync(string saleId)
     {
+        Interlocked.Increment(ref _flashSaleCacheGets);
         var saleKey = new CacheKey<FlashSale>($"sale:{saleId}");
-        return await _cache.GetAsync(saleKey);
+        var sale = await _cache.GetAsync(saleKey);
+        if (sale is null)
+            Interlocked.Increment(ref _flashSaleCacheMisses);
+        else
+            Interlocked.Increment(ref _flashSaleCacheHits);
+        return sale;
+    }
+
+    public GroceryStoreCacheTelemetrySnapshot GetCacheTelemetrySnapshot()
+    {
+        return new GroceryStoreCacheTelemetrySnapshot(
+            ProductGets: Volatile.Read(ref _productCacheGets),
+            ProductHits: Volatile.Read(ref _productCacheHits),
+            ProductMisses: Volatile.Read(ref _productCacheMisses),
+            ProductSets: Volatile.Read(ref _productCacheSets),
+            FlashSaleGets: Volatile.Read(ref _flashSaleCacheGets),
+            FlashSaleHits: Volatile.Read(ref _flashSaleCacheHits),
+            FlashSaleMisses: Volatile.Read(ref _flashSaleCacheMisses),
+            FlashSaleSets: Volatile.Read(ref _flashSaleCacheSets));
     }
 
     // ========== Helpers ==========
@@ -446,4 +482,20 @@ public class GroceryStoreService : IGroceryStoreService, ICartBatchWriter
     /// Gets value.
     /// </summary>
     public static Product[] GetAllProducts() => Products;
+}
+
+public readonly record struct GroceryStoreCacheTelemetrySnapshot(
+    long ProductGets,
+    long ProductHits,
+    long ProductMisses,
+    long ProductSets,
+    long FlashSaleGets,
+    long FlashSaleHits,
+    long FlashSaleMisses,
+    long FlashSaleSets)
+{
+    public long TotalGets => ProductGets + FlashSaleGets;
+    public long TotalHits => ProductHits + FlashSaleHits;
+    public long TotalMisses => ProductMisses + FlashSaleMisses;
+    public long TotalSets => ProductSets + FlashSaleSets;
 }

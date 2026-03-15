@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Core.Policies;
@@ -30,6 +31,18 @@ internal sealed class StampedeProtectedCacheService : ICacheService, ICacheTagSe
     private readonly ConcurrentDictionary<string, LockEntry> _locks = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, FailureEntry> _failures = new(StringComparer.Ordinal);
     private int _lockKeyCount;
+
+    [ActivatorUtilitiesConstructor]
+    public StampedeProtectedCacheService(
+        HybridCacheService inner,
+        IOptionsMonitor<CacheStampedeOptions> options,
+        CacheStatsRegistry statsRegistry)
+        : this(
+            (ICacheService)inner,
+            options,
+            statsRegistry.GetOrCreate(CacheStatsNames.Hybrid))
+    {
+    }
 
     public StampedeProtectedCacheService(ICacheService inner, IOptionsMonitor<CacheStampedeOptions> options, CacheStats? stats = null)
     {

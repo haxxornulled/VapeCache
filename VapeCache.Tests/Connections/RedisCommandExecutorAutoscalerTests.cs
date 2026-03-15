@@ -490,6 +490,30 @@ public sealed class RedisCommandExecutorAutoscalerTests
         Assert.Equal(0, GetConnectionArray(harness.Executor, "_bulkConns").Length);
     }
 
+    [Fact]
+    public void Autoscaling_IsDisabled_WhenEnterpriseLicenseIsMissing()
+    {
+        using var harness = CreateHarness(new RedisMultiplexerOptions
+        {
+            Connections = 1,
+            EnableAutoscaling = true,
+            MinConnections = 1,
+            MaxConnections = 3,
+            AutoscaleSampleInterval = TimeSpan.FromDays(1),
+            ScaleUpCooldown = TimeSpan.FromMilliseconds(1),
+            EmergencyScaleUpTimeoutRatePerSecThreshold = 0.5
+        }, autoscalerLicensed: false);
+
+        ForceTimeoutSpike(harness.Executor, 20);
+        InvokeEvaluateAutoscale(harness.Executor);
+
+        var snapshot = harness.Executor.GetAutoscalerSnapshot();
+        Assert.False(snapshot.Enabled);
+        Assert.Equal(1, snapshot.CurrentConnections);
+        Assert.Equal(1, snapshot.TargetConnections);
+        Assert.DoesNotContain(harness.Logger.Messages, m => m.Contains("Autoscaler decision: up", StringComparison.Ordinal));
+    }
+
     private static void InvokeEvaluateAutoscale(RedisCommandExecutor executor)
     {
         var method = typeof(RedisCommandExecutor).GetMethod("EvaluateAutoscale", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -575,14 +599,15 @@ public sealed class RedisCommandExecutorAutoscalerTests
         unhealthyField!.SetValue(lane, 1);
     }
 
-    private static Harness CreateHarness(RedisMultiplexerOptions options)
+    private static Harness CreateHarness(RedisMultiplexerOptions options, bool autoscalerLicensed = true)
     {
         var logger = new ListLogger<RedisCommandExecutor>();
         var executor = new RedisCommandExecutor(
             new NoopConnectionFactory(),
             new TestOptionsMonitor<RedisMultiplexerOptions>(options),
             new TestOptionsMonitor<RedisConnectionOptions>(new RedisConnectionOptions()),
-            logger);
+            logger,
+            new TestEnterpriseFeatureGate(autoscalerLicensed));
 
         return new Harness(executor, logger);
     }
@@ -602,6 +627,13 @@ public sealed class RedisCommandExecutorAutoscalerTests
             => ValueTask.FromResult(new Result<IRedisConnection>(new InvalidOperationException("No network I/O expected in autoscaler unit tests.")));
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class TestEnterpriseFeatureGate(bool autoscalerLicensed) : IEnterpriseFeatureGate
+    {
+        public bool IsAutoscalerLicensed { get; } = autoscalerLicensed;
+        public bool IsDurableSpillLicensed => false;
+        public bool IsReconciliationLicensed => false;
     }
 
     private sealed class ListLogger<T> : ILogger<T>

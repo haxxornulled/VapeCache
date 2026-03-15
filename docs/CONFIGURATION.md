@@ -429,6 +429,21 @@ Verifier override hardening:
 - To opt in (dev/test only), set:
   - `$env:VAPECACHE_LICENSE_ALLOW_VERIFIER_ENV_OVERRIDE = "true"`
 
+Enterprise gate integration hooks:
+
+```csharp
+// Microsoft DI
+builder.Services.AddVapeCache()
+    .UseEnterpriseFeatureGate<MyEnterpriseFeatureGate>();
+```
+
+```csharp
+// Autofac
+var containerBuilder = new ContainerBuilder();
+containerBuilder.RegisterModule(new VapeCacheCachingModule());
+containerBuilder.RegisterVapeCacheEnterpriseFeatureGate<MyEnterpriseFeatureGate>();
+```
+
 ## Environment Variables
 
 Every option can be overridden via environment variables using `__` as the separator:

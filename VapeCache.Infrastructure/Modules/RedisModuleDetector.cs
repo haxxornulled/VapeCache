@@ -1,5 +1,7 @@
 using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Modules;
+using Microsoft.Extensions.DependencyInjection;
+using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Infrastructure.Modules;
 
@@ -18,6 +20,12 @@ internal sealed class RedisModuleDetector : IRedisModuleDetector, IDisposable
     private string[]? _cachedModules;
     private bool _modulesCached;
     private long _retryAfterUtcTicks;
+
+    [ActivatorUtilitiesConstructor]
+    public RedisModuleDetector(RedisCommandExecutor executor)
+        : this((IRedisCommandExecutor)executor)
+    {
+    }
 
     public RedisModuleDetector(IRedisCommandExecutor executor)
         : this(executor, TimeProvider.System, FailureRetryBackoff)

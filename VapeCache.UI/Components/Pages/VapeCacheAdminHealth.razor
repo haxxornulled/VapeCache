@@ -1,0 +1,92 @@
+@page "/vapecache/health"
+
+<PageTitle>VapeCache Health</PageTitle>
+
+<section class="vc-admin-shell">
+    <header class="vc-admin-header">
+        <div>
+            <h1>Health</h1>
+            <p>Circuit breaker state, backend status, and Redis lane health.</p>
+        </div>
+        <button class="vc-button" @onclick="RefreshAsync">Refresh</button>
+    </header>
+
+    <VapeCacheAdminNav />
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <p class="vc-error">@_error</p>
+    }
+
+    <section class="vc-admin-grid vc-admin-grid-3">
+        <article class="vc-card">
+            <h2>Backend</h2>
+            <p class="vc-kpi">@_snapshot.Backend</p>
+            <p class="vc-meta">breaker @(_snapshot.BreakerOpen ? "open" : "closed")</p>
+        </article>
+        <article class="vc-card">
+            <h2>Circuit</h2>
+            <p class="vc-kpi">@(_snapshot.BreakerForcedOpen ? "FORCED" : "AUTO")</p>
+            <p class="vc-meta">@(_snapshot.BreakerReason ?? "n/a")</p>
+        </article>
+        <article class="vc-card">
+            <h2>Lanes</h2>
+            <p class="vc-kpi">@_snapshot.HealthyLaneCount / @_snapshot.Lanes.Count</p>
+            <p class="vc-meta">healthy</p>
+        </article>
+    </section>
+
+    <article class="vc-card">
+        <h2>Breaker Detail</h2>
+        <dl class="vc-dl">
+            <dt>Enabled</dt><dd>@_snapshot.BreakerEnabled</dd>
+            <dt>Open</dt><dd>@_snapshot.BreakerOpen</dd>
+            <dt>Forced Open</dt><dd>@_snapshot.BreakerForcedOpen</dd>
+            <dt>Consecutive Failures</dt><dd>@_snapshot.BreakerConsecutiveFailures</dd>
+            <dt>Open Remaining</dt><dd>@(_snapshot.BreakerOpenRemaining?.ToString() ?? "n/a")</dd>
+            <dt>Half Open Probe In Flight</dt><dd>@_snapshot.BreakerHalfOpenProbeInFlight</dd>
+        </dl>
+    </article>
+
+    <article class="vc-card">
+        <h2>Redis Lanes</h2>
+        @if (_snapshot.Lanes.Count == 0)
+        {
+            <p class="vc-meta">No lane snapshots available.</p>
+        }
+        else
+        {
+            <div class="vc-table-wrap">
+                <table class="vc-table">
+                    <thead>
+                        <tr>
+                            <th>Lane</th>
+                            <th>Role</th>
+                            <th>Conn</th>
+                            <th>Queue</th>
+                            <th>InFlight</th>
+                            <th>Ops</th>
+                            <th>Failures</th>
+                            <th>Healthy</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var lane in _snapshot.Lanes.OrderBy(static x => x.LaneIndex))
+                        {
+                            <tr>
+                                <td>@lane.LaneIndex</td>
+                                <td>@lane.Role</td>
+                                <td>@lane.ConnectionId</td>
+                                <td>@lane.WriteQueueDepth</td>
+                                <td>@lane.InFlight / @lane.MaxInFlight</td>
+                                <td>@lane.Operations</td>
+                                <td>@lane.Failures</td>
+                                <td>@(lane.Healthy ? "yes" : "no")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </article>
+</section>

@@ -96,6 +96,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private long _lastFailureSampleTicks;
     private long _lastFailureSampleCount;
     private readonly ILogger<RedisCommandExecutor> _logger;
+    private readonly bool _autoscalerLicensed;
+    private bool _autoscaleLicenseWarningLogged;
     private bool _autoscaleAdvisorMode;
     private double _emergencyScaleUpTimeoutRatePerSecThreshold;
     private TimeSpan _scaleDownDrainTimeout;
@@ -119,7 +121,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             factory,
             options.Value,
             new RedisConnectionOptions(),
-            NullLogger<RedisCommandExecutor>.Instance)
+            NullLogger<RedisCommandExecutor>.Instance,
+            enterpriseFeatureGate: null)
     {
     }
 
@@ -127,13 +130,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public RedisCommandExecutor(
         IRedisConnectionFactory factory,
         IOptionsMonitor<RedisMultiplexerOptions> options,
-        IOptionsMonitor<RedisConnectionOptions>? connectionOptions = null,
-        ILogger<RedisCommandExecutor>? logger = null)
+        IOptionsMonitor<RedisConnectionOptions> connectionOptions,
+        ILogger<RedisCommandExecutor>? logger = null,
+        IEnterpriseFeatureGate? enterpriseFeatureGate = null)
         : this(
             factory,
             options.CurrentValue,
-            connectionOptions?.CurrentValue ?? new RedisConnectionOptions(),
-            logger ?? NullLogger<RedisCommandExecutor>.Instance)
+            connectionOptions.CurrentValue,
+            logger ?? NullLogger<RedisCommandExecutor>.Instance,
+            enterpriseFeatureGate)
     {
         _muxOptionsChangeRegistration = options.OnChange((updated, _) =>
         {
@@ -149,9 +154,11 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         IRedisConnectionFactory factory,
         RedisMultiplexerOptions configuredMuxOptions,
         RedisConnectionOptions configuredConnectionOptions,
-        ILogger<RedisCommandExecutor> logger)
+        ILogger<RedisCommandExecutor> logger,
+        IEnterpriseFeatureGate? enterpriseFeatureGate)
     {
         _logger = logger;
+        _autoscalerLicensed = enterpriseFeatureGate?.IsAutoscalerLicensed ?? false;
 
         var o = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(configuredMuxOptions);
         var connOpts = RedisRuntimeOptionsNormalizer.NormalizeConnection(configuredConnectionOptions);
@@ -3120,7 +3127,13 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection[]? blockingConnsToDispose = null;
         lock (_connGate)
         {
-            _autoscaleEnabled = o.EnableAutoscaling;
+            var autoscalingRequested = o.EnableAutoscaling;
+            _autoscaleEnabled = autoscalingRequested && _autoscalerLicensed;
+            if (autoscalingRequested && !_autoscalerLicensed && !_autoscaleLicenseWarningLogged)
+            {
+                _autoscaleLicenseWarningLogged = true;
+                LogAutoscalingLicenseRequired(_logger);
+            }
             _minConnections = Math.Max(1, Math.Min(o.MinConnections, o.MaxConnections));
             _maxConnections = Math.Max(_minConnections, o.MaxConnections);
             _configuredBulkLaneConnections = Math.Max(0, o.BulkLaneConnections);
@@ -3155,7 +3168,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             _scaleUpTimeoutRatePerSecThreshold = Math.Max(0.01, o.ScaleUpTimeoutRatePerSecThreshold);
             _scaleUpP99LatencyMsThreshold = Math.Max(1.0, o.ScaleUpP99LatencyMsThreshold);
             _scaleDownP95LatencyMsThreshold = Math.Max(0.5, o.ScaleDownP95LatencyMsThreshold);
-            _autoscaleAdvisorMode = o.AutoscaleAdvisorMode;
+            _autoscaleAdvisorMode = _autoscaleEnabled && o.AutoscaleAdvisorMode;
             _emergencyScaleUpTimeoutRatePerSecThreshold = Math.Max(0.01, o.EmergencyScaleUpTimeoutRatePerSecThreshold);
             _scaleDownDrainTimeout = o.ScaleDownDrainTimeout <= TimeSpan.Zero ? TimeSpan.FromSeconds(5) : o.ScaleDownDrainTimeout;
             _maxScaleEventsPerMinute = Math.Max(1, o.MaxScaleEventsPerMinute);
@@ -3787,6 +3800,12 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         Level = LogLevel.Warning,
         Message = "{OptionsName} options were normalized at runtime to enforce safe performance guardrails. Review configured values for invalid or out-of-range settings.")]
     private static partial void LogOptionsNormalized(ILogger logger, string optionsName);
+
+    [LoggerMessage(
+        EventId = 11004,
+        Level = LogLevel.Warning,
+        Message = "Autoscaling was requested but no enterprise autoscaler license is available. Running with autoscaling disabled.")]
+    private static partial void LogAutoscalingLicenseRequired(ILogger logger);
 
     [LoggerMessage(
         EventId = 11001,

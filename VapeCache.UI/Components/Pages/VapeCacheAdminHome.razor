@@ -1,0 +1,67 @@
+@page "/vapecache"
+
+<PageTitle>VapeCache Admin</PageTitle>
+
+<section class="vc-admin-shell">
+    <header class="vc-admin-header">
+        <div>
+            <h1>VapeCache Control Plane</h1>
+            <p>Runtime operations surface for cache behavior, invalidation, autoscaling, spill, and reconciliation.</p>
+        </div>
+        <button class="vc-button" @onclick="RefreshAsync">Refresh</button>
+    </header>
+
+    <VapeCacheAdminNav />
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <p class="vc-error">@_error</p>
+    }
+
+    <section class="vc-admin-grid vc-admin-grid-4">
+        <article class="vc-card">
+            <h2>Backend</h2>
+            <p class="vc-kpi">@_snapshot.Backend</p>
+            <p class="vc-meta">Updated @FormatSampleTimestamp(_snapshot.TimestampUtc)</p>
+        </article>
+        <article class="vc-card">
+            <h2>Hit Rate</h2>
+            <p class="vc-kpi">@((_snapshot.HitRate * 100d).ToString("F2"))%</p>
+            <p class="vc-meta">@_snapshot.Stats.Hits hits / @_snapshot.Stats.Misses misses</p>
+        </article>
+        <article class="vc-card">
+            <h2>Breaker</h2>
+            <p class="vc-kpi">@(_snapshot.BreakerOpen ? "OPEN" : "CLOSED")</p>
+            <p class="vc-meta">@(_snapshot.BreakerForcedOpen ? "forced open" : "automatic mode")</p>
+        </article>
+        <article class="vc-card">
+            <h2>Lanes</h2>
+            <p class="vc-kpi">@_snapshot.HealthyLaneCount / @_snapshot.Lanes.Count</p>
+            <p class="vc-meta">healthy Redis lanes</p>
+        </article>
+    </section>
+
+    <section class="vc-admin-grid vc-admin-grid-2">
+        <article class="vc-card">
+            <h2>Operations</h2>
+            <ul class="vc-list">
+                <li><a href="/vapecache/stats">Cache statistics</a></li>
+                <li><a href="/vapecache/health">Circuit + lane health</a></li>
+                <li><a href="/vapecache/invalidation">Tag/key invalidation</a></li>
+                <li><a href="/vapecache/autoscaler">Autoscaler status</a></li>
+                <li><a href="/vapecache/spill">Spill diagnostics</a></li>
+                <li><a href="/vapecache/reconciliation">Reconciliation status</a></li>
+            </ul>
+        </article>
+        <article class="vc-card">
+            <h2>Observability Endpoints</h2>
+            <ul class="vc-list">
+                <li><a href="/vapecache/api/status" target="_blank">/vapecache/api/status</a></li>
+                <li><a href="/vapecache/api/stats" target="_blank">/vapecache/api/stats</a></li>
+                <li><a href="/vapecache/api/intent?take=100" target="_blank">/vapecache/api/intent</a></li>
+                <li><a href="/vapecache/api/stream" target="_blank">/vapecache/api/stream</a></li>
+                <li><a href="/vapecache/api/dashboard/shared-snapshot" target="_blank">shared snapshot</a></li>
+            </ul>
+        </article>
+    </section>
+</section>

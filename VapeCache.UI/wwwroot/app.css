@@ -36,3 +36,205 @@ h1:focus {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+
+.vc-admin-shell {
+    display: grid;
+    gap: 1rem;
+    padding: 1.1rem;
+    border-radius: 1rem;
+    border: 1px solid #1f3448;
+    color: #e7f4ff;
+    background:
+        radial-gradient(80% 120% at 0% -18%, rgba(55, 188, 223, 0.2), transparent 55%),
+        radial-gradient(65% 90% at 100% 0%, rgba(248, 161, 79, 0.14), transparent 52%),
+        linear-gradient(155deg, #0f2233 0%, #0b1722 46%, #07111a 100%);
+    box-shadow:
+        0 18px 42px rgba(2, 6, 12, 0.45),
+        inset 0 1px 0 rgba(235, 248, 255, 0.06);
+}
+
+.vc-admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.vc-admin-header h1 {
+    margin: 0;
+    letter-spacing: 0.02em;
+}
+
+.vc-admin-header p {
+    margin: 0.4rem 0 0;
+    color: #8db6d3;
+}
+
+.vc-admin-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.vc-admin-nav a {
+    border: 1px solid rgba(125, 201, 237, 0.4);
+    border-radius: 999px;
+    background: rgba(24, 55, 78, 0.65);
+    color: #d7f0ff;
+    padding: 0.2rem 0.65rem;
+    text-decoration: none;
+    font-size: 0.85rem;
+}
+
+.vc-admin-grid {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.vc-admin-grid-2 {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.vc-admin-grid-3 {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.vc-admin-grid-4 {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.vc-card {
+    border: 1px solid rgba(66, 116, 148, 0.58);
+    border-radius: 0.95rem;
+    background: linear-gradient(170deg, rgba(17, 35, 51, 0.88) 0%, rgba(9, 20, 31, 0.94) 100%);
+    padding: 0.85rem;
+}
+
+.vc-card h2 {
+    margin: 0 0 0.55rem;
+    font-size: 1rem;
+}
+
+.vc-kpi {
+    margin: 0;
+    font-size: 1.65rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.vc-meta {
+    color: #9cc2dc;
+    margin: 0.35rem 0 0;
+}
+
+.vc-dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) auto;
+    gap: 0.35rem 0.8rem;
+}
+
+.vc-dl dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.vc-table-wrap {
+    overflow-x: auto;
+}
+
+.vc-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 580px;
+}
+
+.vc-table th,
+.vc-table td {
+    border-bottom: 1px solid rgba(40, 81, 110, 0.62);
+    padding: 0.44rem 0.56rem;
+    text-align: left;
+    font-variant-numeric: tabular-nums;
+}
+
+.vc-table th {
+    color: #a9d7f2;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+}
+
+.vc-form-row {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+.vc-input {
+    min-width: 240px;
+    flex: 1 1 320px;
+    background: #091726;
+    color: #e7f4ff;
+    border: 1px solid rgba(125, 201, 237, 0.35);
+    border-radius: 0.6rem;
+    padding: 0.5rem 0.65rem;
+}
+
+.vc-button {
+    border: 1px solid rgba(73, 186, 229, 0.56);
+    border-radius: 0.65rem;
+    background: linear-gradient(160deg, #11324b, #0b2032);
+    color: #e8f6ff;
+    font-weight: 700;
+    padding: 0.5rem 0.95rem;
+    cursor: pointer;
+}
+
+.vc-button-secondary {
+    background: linear-gradient(160deg, #2b3a49, #1f2a36);
+    border-color: rgba(164, 186, 207, 0.52);
+}
+
+.vc-button:disabled {
+    opacity: 0.65;
+    cursor: default;
+}
+
+.vc-list {
+    margin: 0;
+    padding-left: 1.2rem;
+    display: grid;
+    gap: 0.3rem;
+}
+
+.vc-list a {
+    color: #9ed8ff;
+}
+
+.vc-error {
+    margin: 0;
+    border: 1px solid rgba(255, 99, 132, 0.5);
+    background: rgba(111, 25, 39, 0.42);
+    color: #ffd4dc;
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.65rem;
+}
+
+.vc-info {
+    margin: 0;
+    border: 1px solid rgba(78, 168, 209, 0.5);
+    background: rgba(17, 55, 78, 0.5);
+    color: #d6efff;
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.65rem;
+}
+
+@media (max-width: 820px) {
+    .vc-admin-header {
+        flex-direction: column;
+    }
+
+    .vc-button {
+        width: 100%;
+    }
+}

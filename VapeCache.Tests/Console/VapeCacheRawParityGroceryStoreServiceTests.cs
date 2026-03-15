@@ -1,6 +1,8 @@
 using VapeCache.Console.GroceryStore;
 using VapeCache.Infrastructure.Connections;
 using System.Text.Json;
+using Moq;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Tests.Console;
 
@@ -74,6 +76,29 @@ public sealed class VapeCacheRawParityGroceryStoreServiceTests
         Assert.Equal(items.Length, cart.Length);
         Assert.True(optimizedCartLease.IsNull);
         Assert.True(optimizedCountLease.IsNull);
+    }
+
+    [Fact]
+    public async Task AddToCartBatchAsync_apples_track_does_not_use_RPushMany_fast_path()
+    {
+        var executor = new Mock<IRedisCommandExecutor>(MockBehavior.Strict);
+        executor.Setup(x => x.RPushAsync("cart:batch-user", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+
+        var sut = new VapeCacheRawParityGroceryStoreService(executor.Object);
+        var now = DateTime.UnixEpoch;
+        var items = new[]
+        {
+            new CartItem("prod-001", "Organic Bananas", 2.99m, 1, now),
+            new CartItem("prod-006", "Organic Whole Milk", 4.29m, 2, now),
+            new CartItem("prod-003", "Romaine Lettuce", 3.49m, 1, now)
+        };
+
+        await sut.AddToCartBatchAsync("batch-user", items);
+
+        executor.Verify(x => x.RPushAsync("cart:batch-user", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Exactly(items.Length));
+        executor.Verify(x => x.RPushManyAsync(It.IsAny<string>(), It.IsAny<ReadOnlyMemory<byte>[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        executor.VerifyNoOtherCalls();
     }
 
     [Fact]

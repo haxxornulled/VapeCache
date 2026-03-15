@@ -4,19 +4,34 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>preview</LangVersion>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <UiFrontendDir>$(MSBuildProjectDirectory)\ui</UiFrontendDir>
     <UiFrontendStamp>$(MSBuildProjectDirectory)\obj\ui-vite.stamp</UiFrontendStamp>
+    <VapeCachePackageVersion>1.2.13</VapeCachePackageVersion>
+    <EnableVapeCacheEnterprisePackages>false</EnableVapeCacheEnterprisePackages>
+    <VapeCacheEnterprisePackageVersion>1.2.13</VapeCacheEnterprisePackageVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="10.0.0" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="VapeCache.Runtime" Version="$(VapeCachePackageVersion)" />
+    <PackageReference Include="VapeCache.Features.Invalidation" Version="$(VapeCachePackageVersion)" />
+    <PackageReference Include="VapeCache.Extensions.DependencyInjection" Version="$(VapeCachePackageVersion)" />
+    <PackageReference Include="VapeCache.Extensions.Logging" Version="$(VapeCachePackageVersion)" />
+    <PackageReference Include="VapeCache.Extensions.PubSub" Version="$(VapeCachePackageVersion)" />
+    <PackageReference Include="VapeCache.Extensions.Streams" Version="$(VapeCachePackageVersion)" />
+    <PackageReference Include="VapeCache.Extensions.AspNetCore" Version="$(VapeCachePackageVersion)" />
+    <PackageReference Include="VapeCache.Extensions.Aspire" Version="$(VapeCachePackageVersion)" />
+    <PackageReference Include="VapeCache.Extensions.EntityFrameworkCore" Version="$(VapeCachePackageVersion)" />
+    <PackageReference Include="VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry" Version="$(VapeCachePackageVersion)" />
+    <PackageReference Include="VapeCache.Persistence" Version="$(VapeCacheEnterprisePackageVersion)" Condition="'$(EnableVapeCacheEnterprisePackages)' == 'true'" />
+    <PackageReference Include="VapeCache.Reconciliation" Version="$(VapeCacheEnterprisePackageVersion)" Condition="'$(EnableVapeCacheEnterprisePackages)' == 'true'" />
+    <PackageReference Include="VapeCache.Licensing" Version="$(VapeCacheEnterprisePackageVersion)" Condition="'$(EnableVapeCacheEnterprisePackages)' == 'true'" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
-    <ProjectReference Include="..\VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj" />
     <ProjectReference Include="..\VapeCache.ServiceDefaults\VapeCache.ServiceDefaults.csproj" />
   </ItemGroup>
 

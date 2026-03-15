@@ -1,6 +1,7 @@
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using VapeCache.UI.Components;
+using VapeCache.UI.Features.Admin;
 using VapeCache.UI.Features.CacheWorkbench;
 using VapeCache.UI.Features.Dashboard;
 using VapeCache.Extensions.Aspire;
@@ -45,6 +46,7 @@ builder.AddVapeCacheClientBuilder(registerCoreServices: false)
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+builder.Services.AddScoped<VapeCacheAdminOrchestrator>();
 builder.Services.AddScoped<CacheWorkbenchOrchestrator>();
 builder.Services.AddScoped<VapeCacheDashboardOrchestrator>();
 
@@ -52,7 +54,7 @@ var app = builder.Build();
 
 app.MapDefaultEndpoints();
 app.MapVapeCacheEndpoints(
-    prefix: "/vapecache",
+    prefix: "/vapecache/api",
     includeBreakerControlEndpoints: enableBreakerControlEndpoints,
     includeLiveStreamEndpoint: true,
     includeIntentEndpoints: true,
