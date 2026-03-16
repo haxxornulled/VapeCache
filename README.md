@@ -13,6 +13,26 @@ It is designed for predictable behavior under load, Redis trouble, and high-thro
 - OpenTelemetry metrics + traces
 - ASP.NET Core and Aspire integrations
 
+## Latest Benchmark Snapshot (March 16, 2026)
+
+Head-to-head benchmarks against `StackExchange.Redis` (equal write/read operation counts) currently show VapeCache ahead across all core Redis data types.
+
+Primary publish run: `all soak --trials 3` (median)
+
+| Data Type | Ratio (Vape/SER) |
+|---|---:|
+| String | 1.159x |
+| Hash | 1.165x |
+| List | 1.180x |
+| Set | 1.131x |
+| SortedSet | 1.123x |
+
+Core geometric mean ratio: **1.151x**.
+
+Cross-check run: `all ci --trials 11` (median) also remains ahead across all core types, including `SortedSet` at `1.033x`.
+
+Full report and run details: [docs/BENCHMARK_RESULTS_2026-03-16.md](docs/BENCHMARK_RESULTS_2026-03-16.md)
+
 OSS scope in this repository: production-ready runtime packages for core caching, invalidation, ASP.NET Core integration, and Aspire integration.
 For OSS/Enterprise boundaries, see [docs/OSS_VS_ENTERPRISE.md](docs/OSS_VS_ENTERPRISE.md).
 
