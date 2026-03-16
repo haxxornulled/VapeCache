@@ -11,6 +11,7 @@ This OSS repository ships production-ready runtime packages for Redis-first cach
 | `VapeCache.Abstractions` | [NuGet](https://www.nuget.org/packages/VapeCache.Abstractions) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.abstractions) |
 | `VapeCache.Features.Invalidation` | [NuGet](https://www.nuget.org/packages/VapeCache.Features.Invalidation) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.invalidation) |
 | `VapeCache.Extensions.DependencyInjection` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.DependencyInjection) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.dependencyinjection) |
+| `VapeCache.Extensions.AdminAuth` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.AdminAuth) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.adminauth) |
 | `VapeCache.Extensions.Logging` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.Logging) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.logging) |
 | `VapeCache.Extensions.PubSub` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.PubSub) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.pubsub) |
 | `VapeCache.Extensions.Streams` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.Streams) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.streams) |
@@ -55,6 +56,15 @@ DI facade package for clean architecture wiring. Registers runtime services and 
 ```bash
 dotnet add package VapeCache.Extensions.DependencyInjection
 ```
+
+### VapeCache.Extensions.AdminAuth
+Recommended default package when exposing VapeCache admin/control endpoints. Provides JWT bearer wiring, admin policy registration, and startup validation that fails fast when admin authorization is required but no auth schemes are configured.
+
+```bash
+dotnet add package VapeCache.Extensions.AdminAuth
+```
+
+If you do not install this package, you must implement equivalent protections yourself (see [ADMIN_AUTH.md](ADMIN_AUTH.md)).
 
 ### VapeCache.Extensions.Logging
 Optional logging package for Serilog + OpenTelemetry host wiring. Includes production-safe defaults, optional rolling file sink support, and optional JSON formatter routing (`Serilog:Json:*`).

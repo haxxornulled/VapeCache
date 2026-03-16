@@ -437,6 +437,8 @@ app.MapVapeCacheAdminEndpoints(
     authorizationPolicy: "VapeCacheAdmin");
 ```
 
+Security contract: if `VapeCache.Extensions.AdminAuth` is not installed, you must implement equivalent protections yourself. See [ADMIN_AUTH.md](ADMIN_AUTH.md).
+
 Default wrapper routes:
 - `GET /vapecache/status`
 - `GET /vapecache/stats`
@@ -578,6 +580,7 @@ public interface ISpillStoreDiagnostics
 - Hybrid cache mode can fail over to in-memory behavior based on breaker state.
 - Stampede lock-wait timeout surfaces as `TimeoutException`.
 - Wrapper breaker control endpoints should be mapped on an internal admin prefix with authN/authZ when enabled.
+- Teams not using `VapeCache.Extensions.AdminAuth` must implement equivalent endpoint security and startup validation.
 
 Bottom line: autoscaling, wrapper endpoints, and extra diagnostics are operational layers. Core cache correctness does not depend on them.
 

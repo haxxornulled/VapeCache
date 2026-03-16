@@ -4,14 +4,30 @@ using VapeCache.UI.Components;
 using VapeCache.UI.Features.Admin;
 using VapeCache.UI.Features.CacheWorkbench;
 using VapeCache.UI.Features.Dashboard;
+using VapeCache.Extensions.AdminAuth;
 using VapeCache.Extensions.Aspire;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseServiceProviderFactory(new AutofacServiceProviderFactory());
 builder.Host.ConfigureContainer<ContainerBuilder>(static _ => { });
+var allowInsecureAdminInDevelopment = !builder.Configuration.GetValue<bool>(
+    "VapeCache:Endpoints:RequireAdminAuthorizationInDevelopment");
+var adminAuthorizationPolicy = VapeCacheAdminPageDefaults.AuthorizationPolicyName;
 var enableBreakerControlEndpoints =
+    builder.Configuration.GetValue<bool>("VapeCache:Endpoints:EnableBreakerControl");
+var includeIntentEndpoints =
     builder.Environment.IsDevelopment()
-    || builder.Configuration.GetValue<bool>("VapeCache:Endpoints:EnableBreakerControl");
+    || builder.Configuration.GetValue<bool>("VapeCache:Endpoints:EnableIntentEndpoints");
+var includeLiveStreamEndpoint =
+    builder.Environment.IsDevelopment()
+    || builder.Configuration.GetValue<bool>("VapeCache:Endpoints:EnableLiveStream");
+var requireAuthorizationOnAdminControlEndpoints =
+    !builder.Environment.IsDevelopment() || !allowInsecureAdminInDevelopment;
+builder.Services.AddVapeCacheAdminAuthentication(
+    configuration: builder.Configuration,
+    requireAdminAuthorization: requireAuthorizationOnAdminControlEndpoints,
+    authorizationPolicy: VapeCacheAdminPageDefaults.AuthorizationPolicyName,
+    allowAnonymousAdminPolicy: builder.Environment.IsDevelopment() && allowInsecureAdminInDevelopment);
 
 builder.AddServiceDefaults();
 
@@ -46,6 +62,7 @@ builder.AddVapeCacheClientBuilder(registerCoreServices: false)
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<VapeCacheAdminOrchestrator>();
 builder.Services.AddScoped<CacheWorkbenchOrchestrator>();
 builder.Services.AddScoped<VapeCacheDashboardOrchestrator>();
@@ -55,10 +72,17 @@ var app = builder.Build();
 app.MapDefaultEndpoints();
 app.MapVapeCacheEndpoints(
     prefix: "/vapecache/api",
-    includeBreakerControlEndpoints: enableBreakerControlEndpoints,
-    includeLiveStreamEndpoint: true,
-    includeIntentEndpoints: true,
+    includeBreakerControlEndpoints: false,
+    includeLiveStreamEndpoint: includeLiveStreamEndpoint,
+    includeIntentEndpoints: includeIntentEndpoints,
     includeDashboardEndpoint: false);
+if (enableBreakerControlEndpoints)
+{
+    app.MapVapeCacheAdminEndpoints(
+        prefix: "/vapecache/admin",
+        requireAuthorization: requireAuthorizationOnAdminControlEndpoints,
+        authorizationPolicy: adminAuthorizationPolicy);
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
@@ -71,6 +95,8 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 app.UseHttpsRedirection();
 
 app.UseAntiforgery();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

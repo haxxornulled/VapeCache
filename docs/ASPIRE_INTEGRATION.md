@@ -26,6 +26,11 @@ When you enable endpoint mapping (`WithAutoMappedEndpoints(...)` with `options.E
 
 Use `MapVapeCacheAdminEndpoints(...)` (or `WithAutoMappedEndpoints` with `IncludeBreakerControlEndpoints = true`) for breaker controls and keep that prefix internal-only.
 
+Security requirement:
+- If you use `VapeCache.Extensions.AdminAuth`, use its default policy wiring and startup validation.
+- If you do not use it, implement equivalent authN/authZ protections yourself.
+- Use the full checklist in [ADMIN_AUTH.md](ADMIN_AUTH.md).
+
 The built-in dashboard is implemented as a Vite + TypeScript frontend under `VapeCache.Extensions.Aspire/dashboard-ui` and served by Aspire endpoints from embedded assets.
 
 Autoscaler diagnostics and per-lane mux diagnostics are included in `status`, `stats`, and stream samples when diagnostics are registered.

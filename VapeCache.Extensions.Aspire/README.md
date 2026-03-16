@@ -156,6 +156,8 @@ builder.AddVapeCacheKitchenSink(options =>
 });
 ```
 
+If you expose wrapper/admin endpoints, apply the security contract from [`docs/ADMIN_AUTH.md`](../docs/ADMIN_AUTH.md). Install `VapeCache.Extensions.AdminAuth` for the default path, or implement equivalent auth protections in your own infrastructure layer.
+
 This composes:
 - `WithRedisFromAspire(...)`
 - `UseTransport(...)`

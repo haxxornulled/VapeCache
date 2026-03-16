@@ -24,6 +24,7 @@
     <PackageReference Include="VapeCache.Extensions.Streams" Version="$(VapeCachePackageVersion)" />
     <PackageReference Include="VapeCache.Extensions.AspNetCore" Version="$(VapeCachePackageVersion)" />
     <PackageReference Include="VapeCache.Extensions.Aspire" Version="$(VapeCachePackageVersion)" />
+    <PackageReference Include="VapeCache.Extensions.AdminAuth" Version="$(VapeCachePackageVersion)" />
     <PackageReference Include="VapeCache.Extensions.EntityFrameworkCore" Version="$(VapeCachePackageVersion)" />
     <PackageReference Include="VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry" Version="$(VapeCachePackageVersion)" />
     <PackageReference Include="VapeCache.Persistence" Version="$(VapeCacheEnterprisePackageVersion)" Condition="'$(EnableVapeCacheEnterprisePackages)' == 'true'" />

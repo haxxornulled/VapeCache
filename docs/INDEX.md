@@ -33,10 +33,12 @@ This index reflects the OSS runtime surface in this repository.
 - [EF Core package README](../VapeCache.Extensions.EntityFrameworkCore/README.md)
 - [EF Core OTEL package README](../VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry/README.md)
 - [Streams package README](../VapeCache.Extensions.Streams/README.md)
+- [Admin Auth package README](../VapeCache.Extensions.AdminAuth/README.md)
 
 ## 4. Operations
 
 - [LOGGING_TELEMETRY_CONFIGURATION.md](LOGGING_TELEMETRY_CONFIGURATION.md)
+- [ADMIN_AUTH.md](ADMIN_AUTH.md)
 - [PRODUCTION_GUARDRAILS.md](PRODUCTION_GUARDRAILS.md)
 - [PERFORMANCE.md](PERFORMANCE.md)
 - [BENCHMARK_CLAIMS_POLICY.md](BENCHMARK_CLAIMS_POLICY.md)

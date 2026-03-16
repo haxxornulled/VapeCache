@@ -326,6 +326,9 @@ if (-not $SkipSmoke)
     Invoke-Step -Name "Smoke test VapeCache.Runtime package" -Action {
         pwsh -File (Join-Path $PSScriptRoot "package-smoke.ps1") -PackageOutput $PackageOutput -PackageId "VapeCache.Runtime"
     }
+    Invoke-Step -Name "Smoke test VapeCache.Extensions.AdminAuth package" -Action {
+        pwsh -File (Join-Path $PSScriptRoot "package-smoke.ps1") -PackageOutput $PackageOutput -PackageId "VapeCache.Extensions.AdminAuth"
+    }
     Invoke-Step -Name "Smoke test VapeCache.Extensions.PubSub package" -Action {
         pwsh -File (Join-Path $PSScriptRoot "package-smoke.ps1") -PackageOutput $PackageOutput -PackageId "VapeCache.Extensions.PubSub"
     }

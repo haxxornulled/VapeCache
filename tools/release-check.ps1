@@ -107,6 +107,10 @@ if (-not $SkipPack) {
             pwsh -File $smokeScript -PackageOutput $packOutput -PackageId "VapeCache.Runtime"
         }
 
+        Invoke-Step -Name "Package smoke test (VapeCache.Extensions.AdminAuth)" -Action {
+            pwsh -File $smokeScript -PackageOutput $packOutput -PackageId "VapeCache.Extensions.AdminAuth"
+        }
+
         Invoke-Step -Name "Package smoke test (VapeCache.Extensions.PubSub)" -Action {
             pwsh -File $smokeScript -PackageOutput $packOutput -PackageId "VapeCache.Extensions.PubSub"
         }

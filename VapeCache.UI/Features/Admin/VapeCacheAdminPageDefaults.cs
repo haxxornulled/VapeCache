@@ -6,6 +6,8 @@ namespace VapeCache.UI.Features.Admin;
 
 internal static class VapeCacheAdminPageDefaults
 {
+    public const string AuthorizationPolicyName = "VapeCacheAdmin";
+
     public static VapeCacheAdminSnapshot EmptySnapshot { get; } = new(
         TimestampUtc: DateTimeOffset.MinValue,
         Backend: BackendType.Redis,

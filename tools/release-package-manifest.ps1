@@ -16,6 +16,7 @@ function Get-ReleasePackageProjects
         "VapeCache.Features.Invalidation/VapeCache.Features.Invalidation.csproj",
         "VapeCache.Infrastructure/VapeCache.Infrastructure.csproj",
         "VapeCache.Extensions.DependencyInjection/VapeCache.Extensions.DependencyInjection.csproj",
+        "VapeCache.Extensions.AdminAuth/VapeCache.Extensions.AdminAuth.csproj",
         "VapeCache.Extensions.Logging/VapeCache.Extensions.Logging.csproj",
         "VapeCache.Extensions.PubSub/VapeCache.Extensions.PubSub.csproj",
         "VapeCache.Extensions.Streams/VapeCache.Extensions.Streams.csproj",

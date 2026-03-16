@@ -1,0 +1,91 @@
+name: Publish Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      packageVersion:
+        description: "Optional package version override (for example 1.2.13 or 1.2.13-rc1)"
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    env:
+      PACKAGE_VERSION: ${{ github.event.inputs.packageVersion }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore Release Package Projects
+        shell: pwsh
+        run: |
+          . ./tools/release-package-manifest.ps1
+          $repoRoot = Get-ReleaseRepoRoot
+          foreach ($project in Get-ReleasePackageProjects) {
+            $projectPath = Join-Path $repoRoot $project
+            dotnet restore $projectPath --configfile (Join-Path $repoRoot "NuGet.config")
+            if ($LASTEXITCODE -ne 0) {
+              throw "dotnet restore failed for $project"
+            }
+          }
+
+      - name: Pack Release Packages
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PACKAGE_VERSION)) {
+            pwsh -File ./tools/pack-release-packages.ps1 -OutputDir artifacts/packages
+          }
+          else {
+            pwsh -File ./tools/pack-release-packages.ps1 -OutputDir artifacts/packages -PackageVersion $env:PACKAGE_VERSION
+          }
+
+      - name: Publish NuGet.org
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NUGET_API_KEY)) {
+            throw "NUGET_API_KEY secret is required."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:PACKAGE_VERSION)) {
+            pwsh -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -Source https://api.nuget.org/v3/index.json
+          }
+          else {
+            pwsh -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -PackageVersion $env:PACKAGE_VERSION -Source https://api.nuget.org/v3/index.json
+          }
+
+      - name: Publish GitHub Packages
+        shell: pwsh
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $apiKey = $env:GITHUB_PACKAGES_TOKEN
+          if ([string]::IsNullOrWhiteSpace($apiKey)) {
+            $apiKey = $env:GITHUB_TOKEN
+          }
+
+          if ([string]::IsNullOrWhiteSpace($apiKey)) {
+            throw "No GitHub Packages token available. Set GITHUB_PACKAGES_TOKEN secret."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:PACKAGE_VERSION)) {
+            pwsh -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $apiKey
+          }
+          else {
+            pwsh -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -PackageVersion $env:PACKAGE_VERSION -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $apiKey
+          }

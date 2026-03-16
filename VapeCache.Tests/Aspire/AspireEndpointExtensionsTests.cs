@@ -371,6 +371,44 @@ public sealed class AspireEndpointExtensionsTests
         }
     }
 
+    [Fact]
+    public async Task ProgramStyleMapping_ExposesBreakerControl_OnAdminPrefixOnly()
+    {
+        await using var app = await CreateProgramStyleAppAsync(
+            includeIntentEndpoints: false,
+            includeLiveStreamEndpoint: false,
+            enableBreakerControlEndpoints: true);
+        using var client = app.GetTestClient();
+
+        var publicOpen = await client.PostAsJsonAsync(
+            "/vapecache/api/breaker/force-open",
+            new VapeCacheForceOpenRequest("public"));
+        Assert.Equal(HttpStatusCode.NotFound, publicOpen.StatusCode);
+
+        var adminOpen = await client.PostAsJsonAsync(
+            "/vapecache/admin/breaker/force-open",
+            new VapeCacheForceOpenRequest("admin"));
+        Assert.Equal(HttpStatusCode.OK, adminOpen.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProgramStyleMapping_GatesIntentAndStream_WhenDisabled()
+    {
+        await using var app = await CreateProgramStyleAppAsync(
+            includeIntentEndpoints: false,
+            includeLiveStreamEndpoint: false,
+            enableBreakerControlEndpoints: false);
+        using var client = app.GetTestClient();
+
+        var intentByKey = await client.GetAsync("/vapecache/api/intent/some-key");
+        var intentRecent = await client.GetAsync("/vapecache/api/intent");
+        var liveStream = await client.GetAsync("/vapecache/api/stream");
+
+        Assert.Equal(HttpStatusCode.NotFound, intentByKey.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, intentRecent.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, liveStream.StatusCode);
+    }
+
     private static async Task<WebApplication> CreateAppAsync(
         bool includeBreakerControlEndpoints,
         string prefix = "/vapecache",
@@ -476,6 +514,40 @@ public sealed class AspireEndpointExtensionsTests
 
         var app = builder.Build();
         app.MapVapeCacheAdminEndpoints(prefix, requireAuthorization, authorizationPolicy);
+        await app.StartAsync();
+        return app;
+    }
+
+    private static async Task<WebApplication> CreateProgramStyleAppAsync(
+        bool includeIntentEndpoints,
+        bool includeLiveStreamEndpoint,
+        bool enableBreakerControlEndpoints)
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["RedisConnection:Host"] = "redis.internal"
+        });
+        builder.Services.AddVapecacheRedisConnections();
+        builder.Services.AddVapecacheCaching();
+        builder.Services.AddOptions<RedisConnectionOptions>()
+            .Bind(builder.Configuration.GetSection("RedisConnection"));
+
+        var app = builder.Build();
+        app.MapVapeCacheEndpoints(
+            prefix: "/vapecache/api",
+            includeBreakerControlEndpoints: false,
+            includeLiveStreamEndpoint: includeLiveStreamEndpoint,
+            includeIntentEndpoints: includeIntentEndpoints,
+            includeDashboardEndpoint: false);
+
+        if (enableBreakerControlEndpoints)
+            app.MapVapeCacheAdminEndpoints(prefix: "/vapecache/admin", requireAuthorization: false, authorizationPolicy: null);
+
         await app.StartAsync();
         return app;
     }

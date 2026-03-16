@@ -39,6 +39,12 @@ Optional, if you need Redis pub/sub:
 dotnet add package VapeCache.Extensions.PubSub
 ```
 
+Recommended default, if you enable wrapper/admin endpoints (`/vapecache`, `/vapecache/admin`):
+
+```bash
+dotnet add package VapeCache.Extensions.AdminAuth
+```
+
 ## 2. Run Redis
 
 ```bash
@@ -283,10 +289,12 @@ With hybrid cache enabled, this stream path automatically reads from in-memory f
 - Forgot to bind `RedisConnection` from configuration (or set `VAPECACHE_REDIS_CONNECTIONSTRING`).
 - Invalid `CacheStampede` values (out of allowed ranges).
 - Breaker control endpoints exposed publicly without auth.
+- Wrapper/admin endpoints enabled without applying the security contract in `ADMIN_AUTH.md`.
 
 ## Next Docs
 
 - [CONFIGURATION.md](CONFIGURATION.md)
+- [ADMIN_AUTH.md](ADMIN_AUTH.md)
 - [LOGGING_TELEMETRY_CONFIGURATION.md](LOGGING_TELEMETRY_CONFIGURATION.md)
 - [API_REFERENCE.md](API_REFERENCE.md)
 - [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md)

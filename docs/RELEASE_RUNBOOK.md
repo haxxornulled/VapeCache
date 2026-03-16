@@ -12,7 +12,8 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 ## Required Access
 
 - git push access for the public OSS repo
-- NuGet.org publish credentials
+- NuGet.org publish credentials (`NUGET_API_KEY`) with push access for all `VapeCache.*` package IDs
+- GitHub Packages token (`GITHUB_PACKAGES_TOKEN` or `GITHUB_TOKEN`) with `write:packages` and `read:packages` scopes (and repo access for private repos if needed)
 - local environment with `pwsh` and `.NET 10 SDK`
 
 ## Remote Expectations
@@ -29,6 +30,10 @@ Preferred one-command path:
 pwsh ./tools/release-orchestrator.ps1 -Configuration Release -PackageVersion 1.2.10
 ```
 
+CI option:
+- GitHub Actions workflow: `.github/workflows/publish-packages.yml`
+- Trigger via `workflow_dispatch` (optional `packageVersion`) or by pushing a `v*` tag.
+
 The orchestrator enforces preflight checks, release-check gates, package packing + smoke tests, feed publishing, remote sync, tag push, and GitHub release updates.
 
 1. Confirm local/remote sync.
@@ -42,18 +47,27 @@ The orchestrator enforces preflight checks, release-check gates, package packing
 4. Publish to NuGet.org:
    - set `NUGET_API_KEY` in the shell or pass `-ApiKey`
    - `pwsh ./tools/publish-release-packages.ps1 -PackageVersion 1.2.9`
-5. Verify NuGet push logs include all OSS package IDs:
+   - if you receive HTTP 403, verify the key is valid and has owner/package permissions for every `VapeCache.*` package
+5. Publish to GitHub Packages:
+   - set `GITHUB_PACKAGES_TOKEN` (or `GITHUB_TOKEN`) in the shell
+   - `pwsh ./tools/publish-release-packages.ps1 -PackageVersion 1.2.9 -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $env:GITHUB_PACKAGES_TOKEN`
+   - if you receive HTTP 403, verify token scopes include `write:packages`
+6. Verify push logs (both feeds) include all OSS package IDs:
    - `VapeCache.Core`
    - `VapeCache.Abstractions`
    - `VapeCache.Features.Invalidation`
    - `VapeCache.Runtime`
    - `VapeCache.Extensions.DependencyInjection`
+   - `VapeCache.Extensions.AdminAuth`
    - `VapeCache.Extensions.Logging`
    - `VapeCache.Extensions.PubSub`
+   - `VapeCache.Extensions.Streams`
+   - `VapeCache.Extensions.EntityFrameworkCore`
+   - `VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry`
    - `VapeCache.Extensions.AspNetCore`
    - `VapeCache.Extensions.Aspire`
-6. Push the release commit/tag to the public OSS repo.
-7. Verify consumer install from nuget.org.
+7. Push the release commit/tag to the public OSS repo.
+8. Verify consumer install from nuget.org and GitHub Packages.
 
 ## Post-Release Verification
 
