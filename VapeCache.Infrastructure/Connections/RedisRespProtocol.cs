@@ -1580,10 +1580,38 @@ internal static class RedisRespProtocol
     }
 
     /// <summary>
+    /// Gets value.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetZAddCommandLength(string key, int scoreByteLen, int memberLen)
+    {
+        return GetHeaderLen(4)
+               + GetBulkStringLen("ZADD") + 2
+               + GetBulkStringLen(key) + 2
+               + GetBulkLen(scoreByteLen) + scoreByteLen + 2
+               + GetBulkLen(memberLen) + memberLen + 2;
+    }
+
+    /// <summary>
     /// Executes value.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int WriteZAddCommand(Span<byte> destination, string key, string score, ReadOnlySpan<byte> member)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 4);
+        idx += WriteBulkString(destination.Slice(idx), "ZADD");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        idx += WriteBulkString(destination.Slice(idx), score);
+        idx += WriteBulkBytes(destination.Slice(idx), member);
+        return idx;
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int WriteZAddCommand(Span<byte> destination, string key, ReadOnlySpan<byte> score, ReadOnlySpan<byte> member)
     {
         var idx = 0;
         idx += WriteArrayHeader(destination.Slice(idx), 4);
