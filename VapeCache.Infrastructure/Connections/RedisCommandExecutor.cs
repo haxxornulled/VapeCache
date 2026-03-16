@@ -375,6 +375,33 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return value.ToString("G17", CultureInfo.InvariantCulture);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int FormatRedisDoubleUtf8(double value, Span<byte> destination)
+    {
+        if (double.IsNaN(value))
+        {
+            "nan"u8.CopyTo(destination);
+            return 3;
+        }
+
+        if (double.IsPositiveInfinity(value))
+        {
+            "+inf"u8.CopyTo(destination);
+            return 4;
+        }
+
+        if (double.IsNegativeInfinity(value))
+        {
+            "-inf"u8.CopyTo(destination);
+            return 4;
+        }
+
+        if (Utf8Formatter.TryFormat(value, destination, out var written, new StandardFormat('G', 17)))
+            return written;
+
+        throw new InvalidOperationException("Failed to format double.");
+    }
+
     private static int GetBulkLength(RedisRespReader.RespValue value)
     {
         if (value.Bulk is null)
@@ -1546,6 +1573,20 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             return resp.IntegerValue;
 
         return await ThrowUnexpectedResponseAndResetAsync<long>(conn, operation, resp).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<double?> ReadOptionalDoubleResponseAsync(
+        RedisMultiplexedConnection conn,
+        string operation,
+        RedisRespReader.RespValue resp)
+    {
+        if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
+            return null;
+
+        if (resp.Kind is RedisRespReader.RespKind.BulkString or RedisRespReader.RespKind.SimpleString)
+            return ParseDouble(resp);
+
+        return await ThrowUnexpectedResponseAndResetAsync<double?>(conn, operation, resp).ConfigureAwait(false);
     }
 
     private static async ValueTask<string> ReadSimpleStringResponseAsync(
@@ -4709,6 +4750,38 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
     }
 
+    private ValueTask<double?> MapOptionalDoubleResponseAsync(
+        RedisMultiplexedConnection conn,
+        ValueTask<RedisRespReader.RespValue> respTask,
+        string op)
+    {
+        if (respTask.IsCompletedSuccessfully)
+        {
+            var resp = respTask.Result;
+            if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
+                return new ValueTask<double?>((double?)null);
+            if (resp.Kind is RedisRespReader.RespKind.BulkString or RedisRespReader.RespKind.SimpleString)
+                return new ValueTask<double?>(ParseDouble(resp));
+            return ThrowUnexpectedResponseAndResetAsync<double?>(conn, op, resp);
+        }
+
+        return AwaitMapOptionalDoubleResponseAsync(this, conn, respTask, op);
+
+        static async ValueTask<double?> AwaitMapOptionalDoubleResponseAsync(
+            RedisCommandExecutor executor,
+            RedisMultiplexedConnection conn,
+            ValueTask<RedisRespReader.RespValue> task,
+            string op)
+        {
+            var resp = await task.ConfigureAwait(false);
+            if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
+                return null;
+            if (resp.Kind is RedisRespReader.RespKind.BulkString or RedisRespReader.RespKind.SimpleString)
+                return ParseDouble(resp);
+            return await ThrowUnexpectedResponseAndResetAsync<double?>(conn, op, resp).ConfigureAwait(false);
+        }
+    }
+
     private ValueTask<bool> MapDeleteResponseAsync(
         RedisMultiplexedConnection conn,
         ValueTask<RedisRespReader.RespValue> respTask)
@@ -5676,7 +5749,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     /// <summary>
     /// Executes value.
     /// </summary>
-    public async ValueTask<long> ZAddAsync(string key, double score, ReadOnlyMemory<byte> member, CancellationToken ct)
+    public ValueTask<long> ZAddAsync(string key, double score, ReadOnlyMemory<byte> member, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryZAddAsync(key, score, member, ct, out var fastTask))
+            return fastTask;
+
+        return ZAddAsyncSlow(key, score, member, ct);
+    }
+
+    private async ValueTask<long> ZAddAsyncSlow(string key, double score, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         using var activity = StartCommandActivity("ZADD");
         activity?.SetTag("db.redis.key", key);
@@ -5803,7 +5884,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     /// <summary>
     /// Executes value.
     /// </summary>
-    public async ValueTask<double?> ZScoreAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
+    public ValueTask<double?> ZScoreAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryZScoreAsync(key, member, ct, out var fastTask))
+            return fastTask;
+
+        return ZScoreAsyncSlow(key, member, ct);
+    }
+
+    private async ValueTask<double?> ZScoreAsyncSlow(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         using var activity = StartCommandActivity("ZSCORE");
         activity?.SetTag("db.redis.key", key);
@@ -5827,12 +5916,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 headerBuffer: rented).ConfigureAwait(false);
             rented = null;
 
-            return resp.Kind switch
-            {
-                RedisRespReader.RespKind.NullBulkString => null,
-                RedisRespReader.RespKind.BulkString or RedisRespReader.RespKind.SimpleString => ParseDouble(resp),
-                _ => throw new InvalidOperationException($"Unexpected ZSCORE response: {resp.Kind}")
-            };
+            return await ReadOptionalDoubleResponseAsync(conn, "ZSCORE", resp).ConfigureAwait(false);
         }
         catch
         {
@@ -6870,6 +6954,90 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         {
             sw.Stop();
             RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryZScoreAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct, out ValueTask<double?> task)
+    {
+        RecordCommandCall();
+        var len = RedisRespProtocol.GetZScoreCommandLength(key, member.Length);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteZScoreCommand(rented.AsSpan(0, len), key, member.Span);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapOptionalDoubleResponseAsync(conn, respTask, "ZSCORE");
+            return true;
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryZAddAsync(string key, double score, ReadOnlyMemory<byte> member, CancellationToken ct, out ValueTask<long> task)
+    {
+        RecordCommandCall();
+        Span<byte> scoreBuffer = stackalloc byte[64];
+        var scoreLength = FormatRedisDoubleUtf8(score, scoreBuffer);
+        var len = RedisRespProtocol.GetZAddCommandLength(key, scoreLength, member.Length);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteZAddCommand(
+                rented.AsSpan(0, len),
+                key,
+                scoreBuffer[..scoreLength],
+                member.Span);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapIntegerResponseAsync(conn, respTask, "ZADD");
+            return true;
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
