@@ -12,7 +12,7 @@ namespace VapeCache.Infrastructure.Caching;
 /// <summary>
 /// Log-structured spill store that uses preallocated append-only segments and positional async I/O.
 /// </summary>
-internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics, IAsyncDisposable
+internal sealed partial class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics, IAsyncDisposable
 {
     private const string SegmentFilePrefix = "segment-";
     private const string SegmentFileExtension = ".vsl";
@@ -227,7 +227,7 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Spill maintenance cycle failed.");
+                Log.SpillMaintenanceCycleFailed(_logger, ex);
             }
 
             var delay = _settings.MaintenanceInterval;
@@ -417,7 +417,7 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "Failed deleting retired spill segment {SegmentPath}", removed.Path);
+                    Log.FailedDeletingRetiredSpillSegment(_logger, removed.Path, ex);
                 }
             }
         }
@@ -454,7 +454,7 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed deleting orphan spill file {Path}", path);
+                Log.FailedDeletingOrphanSpillFile(_logger, path, ex);
             }
         }
 
@@ -763,5 +763,17 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
             if (!Handle.IsClosed)
                 Handle.Dispose();
         }
+    }
+
+    private static partial class Log
+    {
+        [LoggerMessage(EventId = 11001, Level = LogLevel.Debug, Message = "Spill maintenance cycle failed.")]
+        public static partial void SpillMaintenanceCycleFailed(ILogger logger, Exception exception);
+
+        [LoggerMessage(EventId = 11002, Level = LogLevel.Debug, Message = "Failed deleting retired spill segment {SegmentPath}")]
+        public static partial void FailedDeletingRetiredSpillSegment(ILogger logger, string segmentPath, Exception exception);
+
+        [LoggerMessage(EventId = 11003, Level = LogLevel.Debug, Message = "Failed deleting orphan spill file {Path}")]
+        public static partial void FailedDeletingOrphanSpillFile(ILogger logger, string path, Exception exception);
     }
 }
