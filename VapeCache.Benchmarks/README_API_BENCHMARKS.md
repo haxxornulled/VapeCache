@@ -11,6 +11,7 @@ Benchmark suite for the VapeCache public API using BenchmarkDotNet.
 - `RedisThroughputHeadToHeadBenchmarks`
 - `RedisEndToEndHeadToHeadBenchmarks`
 - `RedisModuleHeadToHeadBenchmarks`
+- `SpillStoreBenchmarks`
 
 ## Run Commands
 
@@ -26,9 +27,24 @@ dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner
 ```powershell
 dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- list-suites
 dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- featuresets cache --job Short
+dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- featuresets spill --job Short
 dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare hotpath --job Short
 dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare all --job Short
 ```
+
+### Spill engine suite (recommended for disk-path tuning)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-spill-benchmarks.ps1 -Job Short
+powershell -ExecutionPolicy Bypass -File tools/run-spill-benchmarks.ps1 -Quick -Payloads "4096,65536" -WorkingSet "256" -SegmentMegabytes "64"
+powershell -ExecutionPolicy Bypass -File tools/run-spill-benchmarks.ps1 -Job Medium -Payloads "4096,65536,262144" -WorkingSet "512,2048" -SegmentMegabytes "64,128"
+```
+
+Spill-specific env overrides:
+
+- `VAPECACHE_BENCH_SPILL_PAYLOADS`
+- `VAPECACHE_BENCH_SPILL_WORKING_SET`
+- `VAPECACHE_BENCH_SPILL_SEGMENT_MB`
 
 ### All head-to-head suites (recommended)
 

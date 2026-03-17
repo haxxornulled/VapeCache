@@ -41,6 +41,16 @@ public static class BenchmarkSuiteCatalog
             ["*RedisConnectionStringParserBenchmarks*", "*RedisConnectionPoolBenchmarks*", "*RedisMultiplexedConnectionBenchmarks*"],
             []),
         new(
+            "spill",
+            BenchmarkSuiteAudience.FeatureSet,
+            "Disk spill engine benchmarks (segmented append-log vs scatter baseline)",
+            ["*SpillStoreBenchmarks*"],
+            [
+                new("VAPECACHE_BENCH_SPILL_PAYLOADS", "4096,65536,262144"),
+                new("VAPECACHE_BENCH_SPILL_WORKING_SET", "512,2048"),
+                new("VAPECACHE_BENCH_SPILL_SEGMENT_MB", "64,128")
+            ]),
+        new(
             "sanity",
             BenchmarkSuiteAudience.FeatureSet,
             "GC and allocator sanity baselines",
