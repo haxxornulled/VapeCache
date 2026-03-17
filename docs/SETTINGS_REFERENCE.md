@@ -223,6 +223,7 @@ Options for emitting sticky-session affinity hints while Redis failover is activ
 
 - Namespace: VapeCache.Extensions.AspNetCore
 - Source: VapeCache.Extensions.AspNetCore/VapeCacheFailoverAffinityOptions.cs
+- Guide: docs/FAILOVER_AFFINITY.md
 
 | Setting | Type | Default | Description |
 |---|---|---|---|

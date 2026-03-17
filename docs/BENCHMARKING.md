@@ -153,6 +153,11 @@ The repo uses:
   - `VAPECACHE_BENCH_LAUNCH_COUNT`
   - `VAPECACHE_BENCH_WARMUP_COUNT`
   - `VAPECACHE_BENCH_ITERATION_COUNT`
+  - `VAPECACHE_BENCH_RUNTIME_MODE` (`both`, `wks`, or `svr`)
+
+Runtime labels in benchmark outputs:
+- `net10-wks` / `wks`: .NET 10 Workstation GC job (`Server=false`)
+- `net10-svr` / `svr`: .NET 10 Server GC job (`Server=true`)
 
 ## Official BenchmarkDotNet References
 

@@ -50,6 +50,12 @@ Spill-specific env overrides:
 - `VAPECACHE_BENCH_SPILL_VALIDATE_CRC` (`false` default for apples-to-apples I/O; set `true` for integrity-validation mode)
 - `VAPECACHE_BENCH_RUNTIME_MODE` (`both` default, or `wks` / `svr` for single-runtime passes)
 
+Runtime label glossary:
+
+- `wks`: Workstation GC (`Server=false`) job
+- `svr`: Server GC (`Server=true`) job
+- `both`: run both `wks` and `svr` jobs
+
 ### All head-to-head suites (recommended)
 
 ```powershell

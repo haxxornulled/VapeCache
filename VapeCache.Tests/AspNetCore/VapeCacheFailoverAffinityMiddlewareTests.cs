@@ -75,6 +75,131 @@ public sealed class VapeCacheFailoverAffinityMiddlewareTests
         await app.StopAsync();
     }
 
+    [Fact]
+    public async Task UseVapeCacheFailoverAffinityHints_DoesNotEmitHints_WhenDisabled()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton<IRedisCircuitBreakerState>(new StubBreakerState { EnabledValue = true, IsOpenValue = true });
+        builder.Services.AddVapeCacheFailoverAffinityHints(options =>
+        {
+            options.Enabled = false;
+            options.CookieName = "vc-affinity";
+        });
+
+        var app = builder.Build();
+        app.UseVapeCacheFailoverAffinityHints();
+        app.MapGet("/ok", () => "ok");
+        await app.StartAsync();
+
+        using var client = app.GetTestClient();
+        var response = await client.GetAsync("/ok");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(response.Headers.Contains("X-VapeCache-Node"));
+        Assert.False(response.Headers.Contains("X-VapeCache-Failover-State"));
+        Assert.DoesNotContain(response.Headers, static h => h.Key.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase));
+
+        await app.StopAsync();
+    }
+
+    [Fact]
+    public async Task UseVapeCacheFailoverAffinityHints_DoesNotSetCookie_WhenHealthyAndCookieOnlyDuringFailover()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton<IRedisCircuitBreakerState>(new StubBreakerState { EnabledValue = true, IsOpenValue = false });
+        builder.Services.AddVapeCacheFailoverAffinityHints(options =>
+        {
+            options.NodeId = "node-c";
+            options.CookieName = "vc-affinity";
+            options.SetCookieOnlyWhenFailingOver = true;
+        });
+
+        var app = builder.Build();
+        app.UseVapeCacheFailoverAffinityHints();
+        app.MapGet("/ok", () => "ok");
+        await app.StartAsync();
+
+        using var client = app.GetTestClient();
+        var response = await client.GetAsync("/ok");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.TryGetValues("X-VapeCache-Failover-State", out var stateValues));
+        Assert.Contains("redis-healthy", stateValues!);
+        Assert.DoesNotContain(response.Headers, static h => h.Key.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase));
+
+        await app.StopAsync();
+    }
+
+    [Fact]
+    public async Task UseVapeCacheFailoverAffinityHints_SetsCookie_WhenHealthyAndAlwaysCookieMode()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton<IRedisCircuitBreakerState>(new StubBreakerState { EnabledValue = true, IsOpenValue = false });
+        builder.Services.AddVapeCacheFailoverAffinityHints(options =>
+        {
+            options.NodeId = "node-d";
+            options.CookieName = "vc-affinity";
+            options.SetCookieOnlyWhenFailingOver = false;
+        });
+
+        var app = builder.Build();
+        app.UseVapeCacheFailoverAffinityHints();
+        app.MapGet("/ok", () => "ok");
+        await app.StartAsync();
+
+        using var client = app.GetTestClient();
+        var response = await client.GetAsync("/ok");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(response.Headers, static h => h.Key.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase));
+
+        await app.StopAsync();
+    }
+
+    [Fact]
+    public async Task UseVapeCacheFailoverAffinityHints_DoesNotEmitMismatchHeader_WhenDisabled()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton<IRedisCircuitBreakerState>(new StubBreakerState { EnabledValue = true, IsOpenValue = true });
+        builder.Services.AddVapeCacheFailoverAffinityHints(options =>
+        {
+            options.NodeId = "node-b";
+            options.CookieName = "vc-affinity";
+            options.EmitMismatchHeader = false;
+        });
+
+        var app = builder.Build();
+        app.UseVapeCacheFailoverAffinityHints();
+        app.MapGet("/ok", () => "ok");
+        await app.StartAsync();
+
+        using var client = app.GetTestClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/ok");
+        request.Headers.Add("Cookie", "vc-affinity=node-a");
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(response.Headers.Contains("X-VapeCache-Affinity-Mismatch"));
+
+        await app.StopAsync();
+    }
+
     private sealed class StubBreakerState : IRedisCircuitBreakerState
     {
         public bool EnabledValue { get; set; }
