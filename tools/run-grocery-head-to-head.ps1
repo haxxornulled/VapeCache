@@ -86,6 +86,8 @@ if ($PauseBetweenTrialsMs -lt 0) {
 }
 
 $hasMaxDegreeOverride = $PSBoundParameters.ContainsKey("MaxDegree")
+$hasMuxConnectionsOverride = $PSBoundParameters.ContainsKey("MuxConnections")
+$hasMuxAdaptiveCoalescingOverride = $PSBoundParameters.ContainsKey("MuxAdaptiveCoalescing")
 
 if ($ServerGc -eq "true") {
     $env:DOTNET_GCServer = "1"
@@ -173,12 +175,12 @@ function Get-EffectiveMuxSettings([string]$RunTrack) {
     $effectiveResponseTimeoutMs = "$MuxResponseTimeoutMs"
 
     if (-not $DisableTrackDefaults -and $RunTrack -eq "apples") {
-        if (-not $PSBoundParameters.ContainsKey("MuxConnections")) {
+        if (-not $hasMuxConnectionsOverride) {
             # Apples-to-apples workload favors fewer connections to reduce fan-out overhead.
             $effectiveConnections = 1
         }
 
-        if (-not $PSBoundParameters.ContainsKey("MuxAdaptiveCoalescing")) {
+        if (-not $hasMuxAdaptiveCoalescingOverride) {
             # Adaptive coalescing can add burst jitter on parity workloads.
             $effectiveAdaptive = "false"
         }
@@ -207,7 +209,7 @@ function Get-EffectiveMaxDegree([string]$RunTrack) {
 
     if (-not $DisableTrackDefaults -and $RunTrack -eq "apples") {
         # Keep apples runs in the fairness window where both clients stay CPU/network balanced.
-        return 8
+        return 6
     }
 
     if ($MaxDegree -gt 0) {
