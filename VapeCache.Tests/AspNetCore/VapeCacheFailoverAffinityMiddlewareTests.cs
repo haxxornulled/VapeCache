@@ -38,7 +38,7 @@ public sealed class VapeCacheFailoverAffinityMiddlewareTests
         Assert.Contains("node-a", nodeValues!);
         Assert.True(response.Headers.TryGetValues("X-VapeCache-Failover-State", out var stateValues));
         Assert.Contains("fallback-open", stateValues!);
-        Assert.Contains(response.Headers, static h => h.Key.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase));
+        Assert.True(ContainsSetCookie(response, "vc-affinity=node-a"));
 
         await app.StopAsync();
     }
@@ -163,7 +163,7 @@ public sealed class VapeCacheFailoverAffinityMiddlewareTests
         var response = await client.GetAsync("/ok");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains(response.Headers, static h => h.Key.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase));
+        Assert.True(ContainsSetCookie(response, "vc-affinity=node-d"));
 
         await app.StopAsync();
     }
@@ -210,5 +210,13 @@ public sealed class VapeCacheFailoverAffinityMiddlewareTests
         public int ConsecutiveFailures => 0;
         public TimeSpan? OpenRemaining => null;
         public bool HalfOpenProbeInFlight => false;
+    }
+
+    private static bool ContainsSetCookie(HttpResponseMessage response, string expectedCookieToken)
+    {
+        if (!response.Headers.TryGetValues("Set-Cookie", out var values))
+            return false;
+
+        return values.Any(v => v.Contains(expectedCookieToken, StringComparison.Ordinal));
     }
 }

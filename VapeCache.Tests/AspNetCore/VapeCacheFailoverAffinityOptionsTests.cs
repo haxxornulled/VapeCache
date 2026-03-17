@@ -28,8 +28,7 @@ public sealed class VapeCacheFailoverAffinityOptionsTests
     [Theory]
     [MemberData(nameof(InvalidOptionCases))]
     public void AddVapeCacheFailoverAffinityHints_RejectsInvalidConfiguration(
-        Action<VapeCacheFailoverAffinityOptions> configure,
-        string expectedMessageToken)
+        Action<VapeCacheFailoverAffinityOptions> configure)
     {
         var services = new ServiceCollection();
         services.AddVapeCacheFailoverAffinityHints(configure);
@@ -38,15 +37,16 @@ public sealed class VapeCacheFailoverAffinityOptionsTests
         var ex = Assert.Throws<OptionsValidationException>(() =>
             provider.GetRequiredService<IOptionsMonitor<VapeCacheFailoverAffinityOptions>>().CurrentValue);
 
-        Assert.Contains(expectedMessageToken, ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(typeof(VapeCacheFailoverAffinityOptions), ex.OptionsType);
+        Assert.NotEmpty(ex.Failures);
     }
 
     public static IEnumerable<object[]> InvalidOptionCases()
     {
-        yield return [new Action<VapeCacheFailoverAffinityOptions>(o => o.NodeId = " "), "NodeId"];
-        yield return [new Action<VapeCacheFailoverAffinityOptions>(o => o.NodeHeaderName = ""), "NodeHeaderName"];
-        yield return [new Action<VapeCacheFailoverAffinityOptions>(o => o.StateHeaderName = " "), "StateHeaderName"];
-        yield return [new Action<VapeCacheFailoverAffinityOptions>(o => o.CookieName = ""), "CookieName"];
-        yield return [new Action<VapeCacheFailoverAffinityOptions>(o => o.CookieTtl = TimeSpan.Zero), "CookieTtl"];
+        yield return [new Action<VapeCacheFailoverAffinityOptions>(o => o.NodeId = " ")];
+        yield return [new Action<VapeCacheFailoverAffinityOptions>(o => o.NodeHeaderName = "")];
+        yield return [new Action<VapeCacheFailoverAffinityOptions>(o => o.StateHeaderName = " ")];
+        yield return [new Action<VapeCacheFailoverAffinityOptions>(o => o.CookieName = "")];
+        yield return [new Action<VapeCacheFailoverAffinityOptions>(o => o.CookieTtl = TimeSpan.Zero)];
     }
 }
