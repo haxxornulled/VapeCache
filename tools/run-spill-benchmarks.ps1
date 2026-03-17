@@ -5,6 +5,7 @@ param(
     [string]$Payloads = "",
     [string]$WorkingSet = "",
     [string]$SegmentMegabytes = "",
+    [string]$ValidateCrc = "",
     [string]$ArtifactsRoot = ""
 )
 
@@ -32,6 +33,9 @@ if (-not [string]::IsNullOrWhiteSpace($WorkingSet)) {
 if (-not [string]::IsNullOrWhiteSpace($SegmentMegabytes)) {
     $env:VAPECACHE_BENCH_SPILL_SEGMENT_MB = $SegmentMegabytes
 }
+if (-not [string]::IsNullOrWhiteSpace($ValidateCrc)) {
+    $env:VAPECACHE_BENCH_SPILL_VALIDATE_CRC = $ValidateCrc
+}
 
 function Get-PositiveIntList([string]$csv, [int[]]$defaults) {
     if ([string]::IsNullOrWhiteSpace($csv)) {
@@ -56,20 +60,44 @@ function Get-PositiveIntList([string]$csv, [int[]]$defaults) {
     return $values | Select-Object -Unique
 }
 
+function Get-BoolList([string]$csv, [bool[]]$defaults) {
+    if ([string]::IsNullOrWhiteSpace($csv)) {
+        return $defaults
+    }
+
+    $values = @()
+    foreach ($part in $csv.Split(",", [System.StringSplitOptions]::RemoveEmptyEntries)) {
+        $trimmed = $part.Trim().ToLowerInvariant()
+        if ($trimmed -eq "true") {
+            $values += $true
+        }
+        elseif ($trimmed -eq "false") {
+            $values += $false
+        }
+    }
+
+    if ($values.Count -eq 0) {
+        return $defaults
+    }
+
+    return $values | Select-Object -Unique
+}
+
 $effectivePayloads = Get-PositiveIntList $env:VAPECACHE_BENCH_SPILL_PAYLOADS @(4096, 65536, 262144)
 $effectiveWorkingSet = Get-PositiveIntList $env:VAPECACHE_BENCH_SPILL_WORKING_SET @(256, 1024)
 $effectiveSegments = Get-PositiveIntList $env:VAPECACHE_BENCH_SPILL_SEGMENT_MB @(64, 128)
+$effectiveValidateCrc = Get-BoolList $env:VAPECACHE_BENCH_SPILL_VALIDATE_CRC @($false)
 
 $methodCount = 7
 $jobCount = 2
-$caseCount = $effectivePayloads.Count * $effectiveWorkingSet.Count * $effectiveSegments.Count * $methodCount * $jobCount
+$caseCount = $effectivePayloads.Count * $effectiveWorkingSet.Count * $effectiveSegments.Count * $effectiveValidateCrc.Count * $methodCount * $jobCount
 
 $estimatedSetupBytes = 0L
 foreach ($payload in $effectivePayloads) {
     foreach ($workingSetSize in $effectiveWorkingSet) {
         # Setup currently seeds read refs for both stores: 2 * workingSet writes.
         $setupBytesPerCase = 2L * $workingSetSize * $payload
-        $estimatedSetupBytes += $setupBytesPerCase * $effectiveSegments.Count * $jobCount
+        $estimatedSetupBytes += $setupBytesPerCase * $effectiveSegments.Count * $effectiveValidateCrc.Count * $jobCount
     }
 }
 
@@ -87,6 +115,7 @@ Write-Host "Quick mode: $($Quick.IsPresent)"
 Write-Host "Payloads: $env:VAPECACHE_BENCH_SPILL_PAYLOADS"
 Write-Host "Working set: $env:VAPECACHE_BENCH_SPILL_WORKING_SET"
 Write-Host "Segment MB: $env:VAPECACHE_BENCH_SPILL_SEGMENT_MB"
+Write-Host "Validate CRC: $env:VAPECACHE_BENCH_SPILL_VALIDATE_CRC"
 Write-Host ("Estimated benchmark cases: {0}" -f $caseCount)
 Write-Host ("Estimated setup disk writes: {0:N2} GB" -f ($estimatedSetupBytes / 1GB))
 if ($caseCount -ge 120 -or $estimatedSetupBytes -ge 8GB) {

@@ -38,6 +38,7 @@ dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner
 powershell -ExecutionPolicy Bypass -File tools/run-spill-benchmarks.ps1 -Job Short
 powershell -ExecutionPolicy Bypass -File tools/run-spill-benchmarks.ps1 -Quick -Payloads "4096,65536" -WorkingSet "256" -SegmentMegabytes "64"
 powershell -ExecutionPolicy Bypass -File tools/run-spill-benchmarks.ps1 -Job Medium -Payloads "4096,65536,262144" -WorkingSet "256,1024" -SegmentMegabytes "64,128"
+powershell -ExecutionPolicy Bypass -File tools/run-spill-benchmarks.ps1 -Job Short -Payloads "262144" -WorkingSet "1024" -SegmentMegabytes "128" -ValidateCrc "true"
 ```
 
 Spill-specific env overrides:
@@ -45,6 +46,7 @@ Spill-specific env overrides:
 - `VAPECACHE_BENCH_SPILL_PAYLOADS`
 - `VAPECACHE_BENCH_SPILL_WORKING_SET`
 - `VAPECACHE_BENCH_SPILL_SEGMENT_MB`
+- `VAPECACHE_BENCH_SPILL_VALIDATE_CRC` (`false` default for apples-to-apples I/O; set `true` for integrity-validation mode)
 
 ### All head-to-head suites (recommended)
 

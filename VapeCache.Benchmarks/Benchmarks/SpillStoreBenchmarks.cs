@@ -16,6 +16,7 @@ public class SpillStoreBenchmarks
     private static readonly int[] QuickWorkingSetSizes = [128];
     private static readonly int[] FullSegmentMegabytes = [64, 128];
     private static readonly int[] QuickSegmentMegabytes = [64];
+    private static readonly bool[] ValidateCrcModes = [false];
 
     public IEnumerable<int> PayloadBytesValues =>
         BenchmarkRedisConfig.ResolveIntParams("VAPECACHE_BENCH_SPILL_PAYLOADS", FullPayloadBytes, QuickPayloadBytes);
@@ -26,6 +27,9 @@ public class SpillStoreBenchmarks
     public IEnumerable<int> SegmentSizeMegabytesValues =>
         BenchmarkRedisConfig.ResolveIntParams("VAPECACHE_BENCH_SPILL_SEGMENT_MB", FullSegmentMegabytes, QuickSegmentMegabytes);
 
+    public IEnumerable<bool> ValidateCrcValues =>
+        BenchmarkRedisConfig.ResolveBoolParams("VAPECACHE_BENCH_SPILL_VALIDATE_CRC", ValidateCrcModes, ValidateCrcModes);
+
     [ParamsSource(nameof(PayloadBytesValues))]
     public int PayloadBytes { get; set; }
 
@@ -34,6 +38,9 @@ public class SpillStoreBenchmarks
 
     [ParamsSource(nameof(SegmentSizeMegabytesValues))]
     public int SegmentSizeMegabytes { get; set; }
+
+    [ParamsSource(nameof(ValidateCrcValues))]
+    public bool ValidateCrc { get; set; }
 
     private SegmentedLogSpillStore _segmented = null!;
     private ScatterFileSpillStore _scatter = null!;
@@ -81,7 +88,9 @@ public class SpillStoreBenchmarks
                 MaintenanceInterval: TimeSpan.FromMinutes(5),
                 CompactWhenDeadRatioAtLeast: 0.30d,
                 DeleteRetiredSegmentAfter: TimeSpan.FromSeconds(10),
-                MaxCompactionMovesPerCycle: 8192));
+                MaxCompactionMovesPerCycle: 8192,
+                ValidatePayloadCrcOnRead: ValidateCrc,
+                ValidatePayloadCrcOnCompactionRead: ValidateCrc));
 
         _scatter = new ScatterFileSpillStore(scatterDirectory);
 

@@ -94,7 +94,7 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
             Flags: flags,
             Crc32: crc,
             RecordLength: write.RecordLength);
-        _index.AddOrUpdate(spillRef, location, (_, _) => location);
+        _index[spillRef] = location;
         CacheTelemetry.SpillWriteCount.Add(1);
         CacheTelemetry.SpillWriteBytes.Add(payload.Length);
     }
@@ -113,9 +113,20 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
         try
         {
             var payload = GC.AllocateUninitializedArray<byte>(location.PayloadLength);
-            await ReadExactlyAsync(segment.Handle, payload, location.Offset + HeaderSize, ct).ConfigureAwait(false);
-            if (ComputeCrc32(payload) != location.Crc32)
-                return null;
+            if (_settings.ValidatePayloadCrcOnRead)
+            {
+                var crc = await ReadExactlyAndComputeCrc32Async(
+                    segment.Handle,
+                    payload,
+                    location.Offset + HeaderSize,
+                    ct).ConfigureAwait(false);
+                if (crc != location.Crc32)
+                    return null;
+            }
+            else
+            {
+                await ReadExactlyAsync(segment.Handle, payload, location.Offset + HeaderSize, ct).ConfigureAwait(false);
+            }
 
             CacheTelemetry.SpillReadCount.Add(1);
             CacheTelemetry.SpillReadBytes.Add(payload.Length);
@@ -290,24 +301,42 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
         if (indexSnapshot.Length == 0)
             return;
 
-        var bySegment = indexSnapshot
-            .GroupBy(static x => x.Value.SegmentId)
-            .ToDictionary(static g => g.Key, static g => g.ToArray());
-        var closedSegments = _segments.Values
-            .Where(s => s.Id != activeId)
-            .OrderBy(s => s.Id)
-            .ToArray();
+        var bySegment = new Dictionary<int, List<KeyValuePair<Guid, SpillLocation>>>();
+        var liveBytesBySegment = new Dictionary<int, long>();
+        var liveSegmentIds = new HashSet<int>();
+        foreach (var entry in indexSnapshot)
+        {
+            if (!bySegment.TryGetValue(entry.Value.SegmentId, out var list))
+            {
+                list = [];
+                bySegment[entry.Value.SegmentId] = list;
+                liveBytesBySegment[entry.Value.SegmentId] = 0L;
+            }
+
+            list.Add(entry);
+            liveBytesBySegment[entry.Value.SegmentId] += entry.Value.RecordLength;
+            liveSegmentIds.Add(entry.Value.SegmentId);
+        }
+
+        var closedSegments = new List<SegmentState>();
+        foreach (var segment in _segments.Values)
+        {
+            if (segment.Id != activeId)
+                closedSegments.Add(segment);
+        }
+
+        closedSegments.Sort(static (a, b) => a.Id.CompareTo(b.Id));
 
         foreach (var segment in closedSegments)
         {
             ct.ThrowIfCancellationRequested();
-            if (!bySegment.TryGetValue(segment.Id, out var liveEntries) || liveEntries.Length == 0)
+            if (!bySegment.TryGetValue(segment.Id, out var liveEntries) || liveEntries.Count == 0)
             {
                 segment.MarkRetired(_timeProvider.GetUtcNow());
                 continue;
             }
 
-            var liveBytes = liveEntries.Sum(static e => (long)e.Value.RecordLength);
+            var liveBytes = liveBytesBySegment[segment.Id];
             var deadBytes = Math.Max(0L, segment.BytesWritten - liveBytes);
             if (segment.BytesWritten <= 0)
             {
@@ -339,20 +368,34 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
                     RecordLength = append.RecordLength,
                     PayloadLength = payload.Length
                 };
-                _index.TryUpdate(entry.Key, relocated, entry.Value);
-                moved++;
+                if (_index.TryUpdate(entry.Key, relocated, entry.Value))
+                {
+                    liveSegmentIds.Remove(segment.Id);
+                    liveSegmentIds.Add(relocated.SegmentId);
+                    moved++;
+                }
             }
 
-            if (!_index.Values.Any(v => v.SegmentId == segment.Id))
+            if (!liveSegmentIds.Contains(segment.Id))
                 segment.MarkRetired(_timeProvider.GetUtcNow());
         }
     }
 
-    private async ValueTask CleanupRetiredSegmentsAsync(CancellationToken ct)
+    private ValueTask CleanupRetiredSegmentsAsync(CancellationToken ct)
     {
         var now = _timeProvider.GetUtcNow();
         var activeId = _activeSegment.Id;
-        var segments = _segments.Values.Where(s => s.Id != activeId).ToArray();
+        var liveSegmentIds = new HashSet<int>();
+        foreach (var location in _index.Values)
+            liveSegmentIds.Add(location.SegmentId);
+
+        var segments = new List<SegmentState>();
+        foreach (var segment in _segments.Values)
+        {
+            if (segment.Id != activeId)
+                segments.Add(segment);
+        }
+
         foreach (var segment in segments)
         {
             ct.ThrowIfCancellationRequested();
@@ -360,7 +403,7 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
                 continue;
             if (now - retiredAtUtc < _settings.DeleteRetiredSegmentAfter)
                 continue;
-            if (_index.Values.Any(v => v.SegmentId == segment.Id))
+            if (liveSegmentIds.Contains(segment.Id))
                 continue;
             if (segment.ActiveReaders > 0)
                 continue;
@@ -378,20 +421,22 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
                 }
             }
         }
+
+        return ValueTask.CompletedTask;
     }
 
-    private async ValueTask CleanupOrphanSegmentFilesAsync(CancellationToken ct)
+    private ValueTask CleanupOrphanSegmentFilesAsync(CancellationToken ct)
     {
         var options = _spillOptionsMonitor.CurrentValue;
         if (!options.EnableOrphanCleanup || options.OrphanMaxAge <= TimeSpan.Zero)
-            return;
+            return ValueTask.CompletedTask;
 
         var cutoff = _timeProvider.GetUtcNow().Subtract(options.OrphanMaxAge);
         var livePaths = _segments.Values
             .Select(static s => s.Path)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (!Directory.Exists(_segmentDirectory))
-            return;
+            return ValueTask.CompletedTask;
 
         foreach (var path in Directory.EnumerateFiles(_segmentDirectory, SegmentFilePattern, SearchOption.TopDirectoryOnly))
         {
@@ -413,7 +458,7 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
             }
         }
 
-        await ValueTask.CompletedTask.ConfigureAwait(false);
+        return ValueTask.CompletedTask;
     }
 
     private async ValueTask<byte[]?> TryReadPayloadRawAsync(SpillLocation location, CancellationToken ct)
@@ -425,9 +470,21 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
         try
         {
             var payload = GC.AllocateUninitializedArray<byte>(location.PayloadLength);
-            await ReadExactlyAsync(segment.Handle, payload, location.Offset + HeaderSize, ct).ConfigureAwait(false);
-            if (ComputeCrc32(payload) != location.Crc32)
-                return null;
+            if (_settings.ValidatePayloadCrcOnCompactionRead)
+            {
+                var crc = await ReadExactlyAndComputeCrc32Async(
+                    segment.Handle,
+                    payload,
+                    location.Offset + HeaderSize,
+                    ct).ConfigureAwait(false);
+                if (crc != location.Crc32)
+                    return null;
+            }
+            else
+            {
+                await ReadExactlyAsync(segment.Handle, payload, location.Offset + HeaderSize, ct).ConfigureAwait(false);
+            }
+
             return payload;
         }
         catch
@@ -438,6 +495,31 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
         {
             segment.ReleaseReader();
         }
+    }
+
+    private static async ValueTask<uint> ReadExactlyAndComputeCrc32Async(
+        SafeFileHandle handle,
+        Memory<byte> destination,
+        long fileOffset,
+        CancellationToken ct)
+    {
+        var totalRead = 0;
+        var crc = 0xFFFFFFFFu;
+        while (totalRead < destination.Length)
+        {
+            var read = await RandomAccess.ReadAsync(
+                handle,
+                destination.Slice(totalRead),
+                fileOffset + totalRead,
+                ct).ConfigureAwait(false);
+            if (read == 0)
+                throw new EndOfStreamException("Unexpected end of segment while reading spill payload.");
+
+            crc = UpdateCrc32(crc, destination.Span.Slice(totalRead, read));
+            totalRead += read;
+        }
+
+        return ~crc;
     }
 
     private static async ValueTask ReadExactlyAsync(
@@ -544,14 +626,20 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static uint ComputeCrc32(ReadOnlySpan<byte> data)
     {
-        var crc = 0xFFFFFFFFu;
+        return ~UpdateCrc32(0xFFFFFFFFu, data);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static uint UpdateCrc32(uint state, ReadOnlySpan<byte> data)
+    {
+        var crc = state;
         for (var i = 0; i < data.Length; i++)
         {
             var idx = (crc ^ data[i]) & 0xFF;
             crc = (crc >> 8) ^ Crc32Table[idx];
         }
 
-        return ~crc;
+        return crc;
     }
 
     private static uint[] CreateCrc32Table()
@@ -597,14 +685,18 @@ internal sealed class SegmentedLogSpillStore : IInMemorySpillStore, ISpillStoreD
         TimeSpan MaintenanceInterval,
         double CompactWhenDeadRatioAtLeast,
         TimeSpan DeleteRetiredSegmentAfter,
-        int MaxCompactionMovesPerCycle)
+        int MaxCompactionMovesPerCycle,
+        bool ValidatePayloadCrcOnRead = true,
+        bool ValidatePayloadCrcOnCompactionRead = true)
     {
         public static readonly Settings Default = new(
             DefaultSegmentSizeBytes: 128L * 1024L * 1024L,
             MaintenanceInterval: TimeSpan.FromMinutes(1),
             CompactWhenDeadRatioAtLeast: 0.35d,
             DeleteRetiredSegmentAfter: TimeSpan.FromSeconds(30),
-            MaxCompactionMovesPerCycle: 4096);
+            MaxCompactionMovesPerCycle: 4096,
+            ValidatePayloadCrcOnRead: true,
+            ValidatePayloadCrcOnCompactionRead: true);
     }
 
     private sealed class SegmentState : IDisposable
