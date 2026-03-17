@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using System.Buffers;
 using System.Collections.Concurrent;
 using VapeCache.Abstractions.Caching;
@@ -361,7 +362,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         for (var i = 0; i < items.Length; i++)
         {
             var item = items[i];
-            if (!ProductIndexById.TryGetValue(item.ProductId, out var productIndex))
+            if (!TryResolveProductIndex(item.ProductId, out var productIndex))
                 productIndex = 0;
             BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(offset, 2), (ushort)productIndex);
             offset += 2;
@@ -408,6 +409,34 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         }
 
         return items;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryResolveProductIndex(string productId, out int productIndex)
+    {
+        // Fast path for built-in catalog ids: "prod-001" .. "prod-999".
+        if (productId.Length == 8 &&
+            productId[0] == 'p' &&
+            productId[1] == 'r' &&
+            productId[2] == 'o' &&
+            productId[3] == 'd' &&
+            productId[4] == '-')
+        {
+            var c5 = productId[5];
+            var c6 = productId[6];
+            var c7 = productId[7];
+
+            if ((uint)(c5 - '0') <= 9 &&
+                (uint)(c6 - '0') <= 9 &&
+                (uint)(c7 - '0') <= 9)
+            {
+                productIndex = ((c5 - '0') * 100) + ((c6 - '0') * 10) + (c7 - '0') - 1;
+                if ((uint)productIndex < (uint)Products.Length)
+                    return true;
+            }
+        }
+
+        return ProductIndexById.TryGetValue(productId, out productIndex);
     }
 
     private static CartItem[] DeserializeCartItemsCompactV1(ReadOnlySpan<byte> payload)
