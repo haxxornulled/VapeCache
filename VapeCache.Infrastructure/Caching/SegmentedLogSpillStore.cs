@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -21,7 +22,6 @@ internal sealed partial class SegmentedLogSpillStore : IInMemorySpillStore, ISpi
     private const byte RecordVersion = 1;
     private const byte FlagEncrypted = 0x01;
     private const uint RecordMagic = 0x5653504Cu; // "VSPL"
-    private static readonly uint[] Crc32Table = CreateCrc32Table();
     private readonly IOptionsMonitor<InMemorySpillOptions> _spillOptionsMonitor;
     private readonly ISpillEncryptionProvider? _encryptionProvider;
     private readonly ILogger<SegmentedLogSpillStore> _logger;
@@ -504,7 +504,6 @@ internal sealed partial class SegmentedLogSpillStore : IInMemorySpillStore, ISpi
         CancellationToken ct)
     {
         var totalRead = 0;
-        var crc = 0xFFFFFFFFu;
         while (totalRead < destination.Length)
         {
             var read = await RandomAccess.ReadAsync(
@@ -514,12 +513,10 @@ internal sealed partial class SegmentedLogSpillStore : IInMemorySpillStore, ISpi
                 ct).ConfigureAwait(false);
             if (read == 0)
                 throw new EndOfStreamException("Unexpected end of segment while reading spill payload.");
-
-            crc = UpdateCrc32(crc, destination.Span.Slice(totalRead, read));
             totalRead += read;
         }
 
-        return ~crc;
+        return ComputeCrc32(destination.Span);
     }
 
     private static async ValueTask ReadExactlyAsync(
@@ -626,41 +623,7 @@ internal sealed partial class SegmentedLogSpillStore : IInMemorySpillStore, ISpi
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static uint ComputeCrc32(ReadOnlySpan<byte> data)
     {
-        return ~UpdateCrc32(0xFFFFFFFFu, data);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static uint UpdateCrc32(uint state, ReadOnlySpan<byte> data)
-    {
-        var crc = state;
-        for (var i = 0; i < data.Length; i++)
-        {
-            var idx = (crc ^ data[i]) & 0xFF;
-            crc = (crc >> 8) ^ Crc32Table[idx];
-        }
-
-        return crc;
-    }
-
-    private static uint[] CreateCrc32Table()
-    {
-        const uint polynomial = 0xEDB88320u;
-        var table = new uint[256];
-        for (uint i = 0; i < table.Length; i++)
-        {
-            var value = i;
-            for (var j = 0; j < 8; j++)
-            {
-                if ((value & 1) != 0)
-                    value = (value >> 1) ^ polynomial;
-                else
-                    value >>= 1;
-            }
-
-            table[i] = value;
-        }
-
-        return table;
+        return Crc32.HashToUInt32(data);
     }
 
     private readonly record struct AppendResult(
