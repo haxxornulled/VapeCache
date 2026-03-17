@@ -93,25 +93,39 @@ public sealed class VapeCacheRawParityGroceryStoreService : IGroceryStoreService
                 payloads[i] = JsonSerializer.SerializeToUtf8Bytes(items[i], JsonContext.CartItem);
             }
 
-            var pending = ArrayPool<Task<long>>.Shared.Rent(items.Count);
             try
             {
-                for (var i = 0; i < items.Count; i++)
-                {
-                    var operation = _redis.RPushAsync(key, payloads[i], CancellationToken.None);
-                    pending[i] = operation.IsCompletedSuccessfully
-                        ? Task.FromResult(operation.Result)
-                        : operation.AsTask();
-                }
-
-                for (var i = 0; i < items.Count; i++)
-                {
-                    await pending[i].ConfigureAwait(false);
-                }
+                // Keep list/payload parity, but collapse cart writes into one multi-value RPUSH.
+                await _redis.RPushManyAsync(key, payloads, items.Count, CancellationToken.None).ConfigureAwait(false);
             }
-            finally
+            catch (NotSupportedException)
             {
-                ArrayPool<Task<long>>.Shared.Return(pending, clearArray: true);
+                // Fallback for executors without RPUSH-many support.
+                var pending = ArrayPool<ValueTask<long>>.Shared.Rent(items.Count);
+                try
+                {
+                    for (var i = 0; i < items.Count; i++)
+                    {
+                        pending[i] = _redis.RPushAsync(key, payloads[i], CancellationToken.None);
+                    }
+
+                    for (var i = 0; i < items.Count; i++)
+                    {
+                        var operation = pending[i];
+                        if (operation.IsCompletedSuccessfully)
+                        {
+                            _ = operation.Result;
+                        }
+                        else
+                        {
+                            await operation.ConfigureAwait(false);
+                        }
+                    }
+                }
+                finally
+                {
+                    ArrayPool<ValueTask<long>>.Shared.Return(pending, clearArray: true);
+                }
             }
         }
         finally

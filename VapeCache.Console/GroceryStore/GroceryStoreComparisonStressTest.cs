@@ -189,6 +189,7 @@ public class GroceryStoreComparisonStressTest
                     Array.Empty<string>(),
                     null);
                 var saveSessionTask = _service.SaveSessionAsync(userId, session);
+                var participantCountTask = _service.GetFlashSaleParticipantCountAsync(saleId);
                 if (saveSessionTask.IsCompletedSuccessfully)
                 {
                     saveSessionTask.GetAwaiter().GetResult();
@@ -198,9 +199,9 @@ public class GroceryStoreComparisonStressTest
                     await saveSessionTask.ConfigureAwait(false);
                 }
 
-                // 7/8. After save is durable, issue independent reads together.
+                // 7/8. Keep get-session after durable save, while participant count
+                // runs in parallel because it is independent of session state.
                 var getSessionTask = _service.GetSessionAsync(userId);
-                var participantCountTask = _service.GetFlashSaleParticipantCountAsync(saleId);
 
                 if (getSessionTask.IsCompletedSuccessfully)
                 {

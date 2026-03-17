@@ -85,6 +85,8 @@ if ($PauseBetweenTrialsMs -lt 0) {
     throw "PauseBetweenTrialsMs cannot be negative."
 }
 
+$hasMaxDegreeOverride = $PSBoundParameters.ContainsKey("MaxDegree")
+
 if ($ServerGc -eq "true") {
     $env:DOTNET_GCServer = "1"
 }
@@ -194,6 +196,27 @@ function Get-EffectiveMuxSettings([string]$RunTrack) {
     }
 }
 
+function Get-EffectiveMaxDegree([string]$RunTrack) {
+    if ($hasMaxDegreeOverride) {
+        if ($MaxDegree -gt 0) {
+            return $MaxDegree
+        }
+
+        return $null
+    }
+
+    if (-not $DisableTrackDefaults -and $RunTrack -eq "apples") {
+        # Keep apples runs in the fairness window where both clients stay CPU/network balanced.
+        return 8
+    }
+
+    if ($MaxDegree -gt 0) {
+        return $MaxDegree
+    }
+
+    return $null
+}
+
 function Set-MuxEnvironment([pscustomobject]$Settings) {
     $env:VAPECACHE_BENCH_MUX_PROFILE = "$($Settings.Profile)"
     $env:VAPECACHE_BENCH_MUX_CONNECTIONS = "$($Settings.Connections)"
@@ -213,12 +236,6 @@ $env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE = $VapeExecutorMode
 $env:VAPECACHE_BENCH_CLEANUP_RUN_KEYS = $CleanupRunKeys.ToLowerInvariant()
 $env:VAPECACHE_BENCH_LOG_LEVEL = $BenchLogLevel
 $env:VAPECACHE_GROCERYSTORE_VERBOSE = $GroceryVerbose.ToLowerInvariant()
-if ($MaxDegree -gt 0) {
-    $env:VAPECACHE_BENCH_MAX_DEGREE = "$MaxDegree"
-}
-else {
-    Remove-Item Env:VAPECACHE_BENCH_MAX_DEGREE -ErrorAction SilentlyContinue
-}
 if ($useConnectionString) {
     $env:RedisConnection__ConnectionString = $RedisConnectionString
     $env:RedisConnection__Host = ""
@@ -238,7 +255,6 @@ Write-Host "Grocery head-to-head benchmark"
 Write-Host "Trials: $Trials"
 Write-Host "Shoppers: $ShopperCount"
 Write-Host "Max cart size: $MaxCartSize"
-Write-Host "Max degree: $(if ($MaxDegree -gt 0) { "$MaxDegree (override)" } else { "auto" })"
 Write-Host "Track: $Track"
 Write-Host "Vape executor mode: $VapeExecutorMode"
 if ($Track -eq "both") {
@@ -246,14 +262,35 @@ if ($Track -eq "both") {
 }
 Write-Host "Track defaults: $(if ($DisableTrackDefaults) { "disabled" } else { "enabled" })"
 if ($Track -eq "both") {
+    $applesMaxDegree = Get-EffectiveMaxDegree -RunTrack "apples"
+    $optimizedMaxDegree = Get-EffectiveMaxDegree -RunTrack "optimized"
+    Write-Host "Max degree (apples): $(if ($null -ne $applesMaxDegree) { "$applesMaxDegree" } else { "auto" })"
+    Write-Host "Max degree (optimized): $(if ($null -ne $optimizedMaxDegree) { "$optimizedMaxDegree" } else { "auto" })"
     $applesMux = Get-EffectiveMuxSettings -RunTrack "apples"
     $optimizedMux = Get-EffectiveMuxSettings -RunTrack "optimized"
     Write-Host "Mux (apples): Profile=$($applesMux.Profile) Connections=$($applesMux.Connections) InFlight=$($applesMux.InFlight) Coalesce=$($applesMux.Coalesce) Adaptive=$($applesMux.Adaptive) SocketReader=$($applesMux.SocketReader) DedicatedWorkers=$($applesMux.DedicatedWorkers) TimeoutMs=$($applesMux.ResponseTimeoutMs)"
     Write-Host "Mux (optimized): Profile=$($optimizedMux.Profile) Connections=$($optimizedMux.Connections) InFlight=$($optimizedMux.InFlight) Coalesce=$($optimizedMux.Coalesce) Adaptive=$($optimizedMux.Adaptive) SocketReader=$($optimizedMux.SocketReader) DedicatedWorkers=$($optimizedMux.DedicatedWorkers) TimeoutMs=$($optimizedMux.ResponseTimeoutMs)"
 }
 else {
+    $selectedMaxDegree = Get-EffectiveMaxDegree -RunTrack $Track
+    $maxDegreeSuffix = ""
+    if ($null -ne $selectedMaxDegree) {
+        if ($hasMaxDegreeOverride) {
+            $maxDegreeSuffix = " (override)"
+        }
+        elseif (-not $DisableTrackDefaults -and $Track -eq "apples") {
+            $maxDegreeSuffix = " (apples default)"
+        }
+    }
+    Write-Host "Max degree: $(if ($null -ne $selectedMaxDegree) { "$selectedMaxDegree$maxDegreeSuffix" } else { "auto" })"
     $selectedMux = Get-EffectiveMuxSettings -RunTrack $Track
     Set-MuxEnvironment -Settings $selectedMux
+    if ($null -ne $selectedMaxDegree) {
+        $env:VAPECACHE_BENCH_MAX_DEGREE = "$selectedMaxDegree"
+    }
+    else {
+        Remove-Item Env:VAPECACHE_BENCH_MAX_DEGREE -ErrorAction SilentlyContinue
+    }
     Write-Host "Mux: Profile=$($selectedMux.Profile) Connections=$($selectedMux.Connections) InFlight=$($selectedMux.InFlight) Coalesce=$($selectedMux.Coalesce) Adaptive=$($selectedMux.Adaptive) SocketReader=$($selectedMux.SocketReader) DedicatedWorkers=$($selectedMux.DedicatedWorkers) TimeoutMs=$($selectedMux.ResponseTimeoutMs)"
 }
 Write-Host "Cleanup: RunKeys=$($env:VAPECACHE_BENCH_CLEANUP_RUN_KEYS)"
@@ -378,6 +415,8 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
     $previousTrack = $env:VAPECACHE_BENCH_TRACK
     $hadExecutorMode = Test-Path Env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE
     $previousExecutorMode = $env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE
+    $hadMaxDegree = Test-Path Env:VAPECACHE_BENCH_MAX_DEGREE
+    $previousMaxDegree = $env:VAPECACHE_BENCH_MAX_DEGREE
     $muxEnvNames = @(
         "VAPECACHE_BENCH_MUX_PROFILE",
         "VAPECACHE_BENCH_MUX_CONNECTIONS",
@@ -394,11 +433,18 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
     }
     $env:VAPECACHE_BENCH_TRACK = $RunTrack
     $env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE = $VapeExecutorMode
+    $maxDegree = Get-EffectiveMaxDegree -RunTrack $RunTrack
+    if ($null -ne $maxDegree) {
+        $env:VAPECACHE_BENCH_MAX_DEGREE = "$maxDegree"
+    }
+    else {
+        Remove-Item Env:VAPECACHE_BENCH_MAX_DEGREE -ErrorAction SilentlyContinue
+    }
     $settings = Get-EffectiveMuxSettings -RunTrack $RunTrack
     Set-MuxEnvironment -Settings $settings
     $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
     try {
-        Write-Host ("  [TrackConfig] {0}: Profile={1} Connections={2} InFlight={3} Coalesce={4} Adaptive={5} SocketReader={6} DedicatedWorkers={7} TimeoutMs={8}" -f $RunTrack, $settings.Profile, $settings.Connections, $settings.InFlight, $settings.Coalesce, $settings.Adaptive, $settings.SocketReader, $settings.DedicatedWorkers, $settings.ResponseTimeoutMs)
+        Write-Host ("  [TrackConfig] {0}: MaxDegree={1} Profile={2} Connections={3} InFlight={4} Coalesce={5} Adaptive={6} SocketReader={7} DedicatedWorkers={8} TimeoutMs={9}" -f $RunTrack, $(if ($null -ne $maxDegree) { $maxDegree } else { "auto" }), $settings.Profile, $settings.Connections, $settings.InFlight, $settings.Coalesce, $settings.Adaptive, $settings.SocketReader, $settings.DedicatedWorkers, $settings.ResponseTimeoutMs)
         $PSNativeCommandUseErrorActionPreference = $false
         $runOutput = @(dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1)
         $parsed = Parse-BenchmarkOutput -OutputLines $runOutput
@@ -420,6 +466,12 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
         }
         else {
             Remove-Item Env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE -ErrorAction SilentlyContinue
+        }
+        if ($hadMaxDegree) {
+            $env:VAPECACHE_BENCH_MAX_DEGREE = $previousMaxDegree
+        }
+        else {
+            Remove-Item Env:VAPECACHE_BENCH_MAX_DEGREE -ErrorAction SilentlyContinue
         }
 
         $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
