@@ -501,7 +501,8 @@ public static class ComparisonRunner
                     sp.GetRequiredService<IRedisCommandExecutor>(),
                     keyPrefix,
                     optimizedCleanupOnly: true,
-                    useLocalFlashSaleCountCache: true));
+                    useLocalFlashSaleCountCache: true,
+                    useLocalCartReadCache: true));
 
         var provider = services.BuildServiceProvider();
         try

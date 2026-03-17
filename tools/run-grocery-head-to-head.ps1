@@ -185,6 +185,12 @@ function Get-EffectiveMuxSettings([string]$RunTrack) {
             $effectiveAdaptive = "false"
         }
     }
+    elseif (-not $DisableTrackDefaults -and $RunTrack -eq "optimized") {
+        if (-not $hasMuxConnectionsOverride) {
+            # Optimized path sustains higher throughput with fewer lane fan-outs on this workload.
+            $effectiveConnections = 2
+        }
+    }
 
     return [pscustomobject]@{
         Profile = $effectiveProfile
@@ -210,6 +216,10 @@ function Get-EffectiveMaxDegree([string]$RunTrack) {
     if (-not $DisableTrackDefaults -and $RunTrack -eq "apples") {
         # Keep apples runs in the fairness window where both clients stay CPU/network balanced.
         return 6
+    }
+    if (-not $DisableTrackDefaults -and $RunTrack -eq "optimized") {
+        # Optimized path remains stable and competitive at moderate worker pressure.
+        return 12
     }
 
     if ($MaxDegree -gt 0) {

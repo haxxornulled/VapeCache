@@ -20,6 +20,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     private readonly string _keyPrefix;
     private readonly bool _optimizedCleanupOnly;
     private readonly ConcurrentDictionary<string, long>? _flashSaleCounts;
+    private readonly ConcurrentDictionary<string, CachedCart>? _cartCache;
     private static readonly Product[] Products = GroceryStoreService.GetAllProducts();
     private static readonly IReadOnlyDictionary<string, Product> ProductsById = BuildProductMap(Products);
     private static readonly IReadOnlyDictionary<string, int> ProductIndexById = BuildProductIndexMap(Products);
@@ -43,13 +44,17 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         IRedisCommandExecutor redis,
         string? keyPrefix = null,
         bool optimizedCleanupOnly = false,
-        bool useLocalFlashSaleCountCache = false)
+        bool useLocalFlashSaleCountCache = false,
+        bool useLocalCartReadCache = false)
     {
         _redis = redis;
         _keyPrefix = NormalizeKeyPrefix(keyPrefix);
         _optimizedCleanupOnly = optimizedCleanupOnly;
         _flashSaleCounts = useLocalFlashSaleCountCache
             ? new ConcurrentDictionary<string, long>(StringComparer.Ordinal)
+            : null;
+        _cartCache = useLocalCartReadCache
+            ? new ConcurrentDictionary<string, CachedCart>(StringComparer.Ordinal)
             : null;
     }
 
@@ -108,15 +113,14 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         Interlocked.Add(ref _cartItemWriteOps, items.Count);
 
         var optimizedCartKey = GetOptimizedCartKey(userId);
-        var cartPayload = SerializeCartItems(items);
-        var countPayload = new byte[4];
-        BinaryPrimitives.WriteInt32LittleEndian(countPayload, items.Count);
+        var cartItems = items as CartItem[] ?? items.ToArray();
+        var cartPayload = SerializeCartItemsCompact(cartItems);
 
         var setCart = _redis.SetAsync(optimizedCartKey, cartPayload, TimeSpan.FromMinutes(15), CancellationToken.None);
-        var setCount = _redis.SetAsync(GetOptimizedCartCountKey(userId), countPayload, TimeSpan.FromMinutes(15), CancellationToken.None);
 
         _ = await AwaitValueTask(setCart).ConfigureAwait(false);
-        _ = await AwaitValueTask(setCount).ConfigureAwait(false);
+        if (_cartCache is not null)
+            _cartCache[userId] = new CachedCart(cartItems);
     }
 
     /// <summary>
@@ -125,10 +129,16 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     public async ValueTask<CartItem[]> GetCartAsync(string userId)
     {
         Interlocked.Increment(ref _cartReadOps);
+        if (_cartCache is not null && _cartCache.TryGetValue(userId, out var cachedCart))
+            return cachedCart.Items;
+
         using var optimized = await _redis.GetLeaseAsync(GetOptimizedCartKey(userId), CancellationToken.None);
         if (!optimized.IsNull)
         {
-            return DeserializeCartItemsOptimized(optimized.Span);
+            var optimizedCartItems = DeserializeCartItemsOptimized(optimized.Span);
+            if (_cartCache is not null)
+                _cartCache[userId] = new CachedCart(optimizedCartItems);
+            return optimizedCartItems;
         }
 
         var values = await _redis.LRangeAsync(Key($"cart:{userId}"), 0, -1, CancellationToken.None);
@@ -143,6 +153,8 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
             cart[i] = values[i] is null ? default! : Deserialize<CartItem>(values[i]!);
         }
 
+        if (_cartCache is not null)
+            _cartCache[userId] = new CachedCart(cart);
         return cart;
     }
 
@@ -152,25 +164,23 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     public async ValueTask<long> GetCartCountAsync(string userId)
     {
         Interlocked.Increment(ref _cartCountReadOps);
-        // Fast path for optimized carts: tiny fixed-size count key.
+        if (_cartCache is not null && _cartCache.TryGetValue(userId, out var cachedCart))
+            return cachedCart.Items.Length;
+
+        using var optimizedCart = await _redis.GetLeaseAsync(GetOptimizedCartKey(userId), CancellationToken.None);
+        if (!optimizedCart.IsNull && TryReadOptimizedCartCount(optimizedCart.Span, out var optimizedCartCount))
+            return optimizedCartCount;
+
+        // Backward compatibility with older optimized count key shape.
         using var optimizedCount = await _redis.GetLeaseAsync(GetOptimizedCartCountKey(userId), CancellationToken.None);
         if (!optimizedCount.IsNull && optimizedCount.Length == 4)
-        {
             return BinaryPrimitives.ReadInt32LittleEndian(optimizedCount.Span);
-        }
         if (!optimizedCount.IsNull && long.TryParse(
                 optimizedCount.Span,
                 NumberStyles.Integer,
                 CultureInfo.InvariantCulture,
                 out var count))
-        {
             return count;
-        }
-
-        // Backward compatibility with optimized payload-only carts.
-        using var optimizedCart = await _redis.GetLeaseAsync(GetOptimizedCartKey(userId), CancellationToken.None);
-        if (!optimizedCart.IsNull && TryReadOptimizedCartCount(optimizedCart.Span, out var optimizedCartCount))
-            return optimizedCartCount;
 
         return await _redis.LLenAsync(Key($"cart:{userId}"), CancellationToken.None);
     }
@@ -181,17 +191,14 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     public async ValueTask ClearCartAsync(string userId)
     {
         Interlocked.Increment(ref _cartClearWriteOps);
+        _ = _cartCache?.TryRemove(userId, out _);
+
         var optimizedKey = GetOptimizedCartKey(userId);
-        var countKey = GetOptimizedCartCountKey(userId);
         var legacyListKey = Key($"cart:{userId}");
 
         if (_optimizedCleanupOnly)
         {
-            var unlinkOptimized = _redis.UnlinkAsync(optimizedKey, CancellationToken.None);
-            var unlinkCount = _redis.UnlinkAsync(countKey, CancellationToken.None);
-
-            var optimizedRemoved = await AwaitValueTask(unlinkOptimized).ConfigureAwait(false);
-            _ = await AwaitValueTask(unlinkCount).ConfigureAwait(false);
+            var optimizedRemoved = await _redis.UnlinkAsync(optimizedKey, CancellationToken.None).ConfigureAwait(false);
 
             if (optimizedRemoved > 0)
                 return;
@@ -201,11 +208,9 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         }
 
         var cleanupOptimized = _redis.UnlinkAsync(optimizedKey, CancellationToken.None);
-        var cleanupCount = _redis.UnlinkAsync(countKey, CancellationToken.None);
         var cleanupLegacyList = _redis.UnlinkAsync(legacyListKey, CancellationToken.None);
 
         _ = await AwaitValueTask(cleanupOptimized).ConfigureAwait(false);
-        _ = await AwaitValueTask(cleanupCount).ConfigureAwait(false);
         _ = await AwaitValueTask(cleanupLegacyList).ConfigureAwait(false);
     }
 
@@ -521,6 +526,8 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
 
         return await task.ConfigureAwait(false);
     }
+
+    private readonly record struct CachedCart(CartItem[] Items);
 
     private string GetOptimizedCartKey(string userId) => Key($"cart:optimized:{userId}");
 
