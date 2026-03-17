@@ -47,7 +47,7 @@ public static class BenchmarkSuiteCatalog
             ["*SpillStoreBenchmarks*"],
             [
                 new("VAPECACHE_BENCH_SPILL_PAYLOADS", "4096,65536,262144"),
-                new("VAPECACHE_BENCH_SPILL_WORKING_SET", "512,2048"),
+                new("VAPECACHE_BENCH_SPILL_WORKING_SET", "256,1024"),
                 new("VAPECACHE_BENCH_SPILL_SEGMENT_MB", "64,128")
             ]),
         new(

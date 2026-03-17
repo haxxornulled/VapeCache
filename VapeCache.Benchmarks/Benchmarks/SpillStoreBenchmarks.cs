@@ -12,8 +12,8 @@ public class SpillStoreBenchmarks
 {
     private static readonly int[] FullPayloadBytes = [4 * 1024, 64 * 1024, 256 * 1024];
     private static readonly int[] QuickPayloadBytes = [4 * 1024, 64 * 1024];
-    private static readonly int[] FullWorkingSetSizes = [512, 2048];
-    private static readonly int[] QuickWorkingSetSizes = [256];
+    private static readonly int[] FullWorkingSetSizes = [256, 1024];
+    private static readonly int[] QuickWorkingSetSizes = [128];
     private static readonly int[] FullSegmentMegabytes = [64, 128];
     private static readonly int[] QuickSegmentMegabytes = [64];
 
@@ -85,9 +85,7 @@ public class SpillStoreBenchmarks
 
         _scatter = new ScatterFileSpillStore(scatterDirectory);
 
-        await SeedStoreAsync(_segmented, _writeRefs).ConfigureAwait(false);
         await SeedStoreAsync(_segmented, _readRefs).ConfigureAwait(false);
-        await SeedStoreAsync(_scatter, _writeRefs).ConfigureAwait(false);
         await SeedStoreAsync(_scatter, _readRefs).ConfigureAwait(false);
     }
 

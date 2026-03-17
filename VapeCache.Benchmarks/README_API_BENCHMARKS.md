@@ -37,7 +37,7 @@ dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run-spill-benchmarks.ps1 -Job Short
 powershell -ExecutionPolicy Bypass -File tools/run-spill-benchmarks.ps1 -Quick -Payloads "4096,65536" -WorkingSet "256" -SegmentMegabytes "64"
-powershell -ExecutionPolicy Bypass -File tools/run-spill-benchmarks.ps1 -Job Medium -Payloads "4096,65536,262144" -WorkingSet "512,2048" -SegmentMegabytes "64,128"
+powershell -ExecutionPolicy Bypass -File tools/run-spill-benchmarks.ps1 -Job Medium -Payloads "4096,65536,262144" -WorkingSet "256,1024" -SegmentMegabytes "64,128"
 ```
 
 Spill-specific env overrides:
