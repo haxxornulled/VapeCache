@@ -33,19 +33,27 @@ public sealed class EnterpriseBenchmarkConfig : ManualConfig
         else
             AddLogger(ConsoleLogger.Default);
 
+        var runtimeMode = ResolveRuntimeMode();
+
         // Do not hard-code a runtime version here.
         // The benchmarks are compiled for the current TargetFramework (net10.0),
         // and forcing an older runtime would break execution.
-        AddJob(ConfigureJob(
-            Job.Default
-                .WithId("net10-wks")
-                .WithToolchain(NearestProjectToolchain.Net10)));
+        if (runtimeMode is RuntimeMode.Both or RuntimeMode.WorkstationOnly)
+        {
+            AddJob(ConfigureJob(
+                Job.Default
+                    .WithId("net10-wks")
+                    .WithToolchain(NearestProjectToolchain.Net10)));
+        }
 
-        AddJob(ConfigureJob(
-            Job.Default
-                .WithId("net10-svr")
-                .WithToolchain(NearestProjectToolchain.Net10)
-                .WithGcServer(true)));
+        if (runtimeMode is RuntimeMode.Both or RuntimeMode.ServerOnly)
+        {
+            AddJob(ConfigureJob(
+                Job.Default
+                    .WithId("net10-svr")
+                    .WithToolchain(NearestProjectToolchain.Net10)
+                    .WithGcServer(true)));
+        }
 
         AddDiagnoser(MemoryDiagnoser.Default);
 
@@ -81,6 +89,31 @@ public sealed class EnterpriseBenchmarkConfig : ManualConfig
     {
         var value = Environment.GetEnvironmentVariable(name);
         return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : null;
+    }
+
+    private static RuntimeMode ResolveRuntimeMode()
+    {
+        var raw = Environment.GetEnvironmentVariable("VAPECACHE_BENCH_RUNTIME_MODE");
+        if (string.Equals(raw, "wks", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(raw, "workstation", StringComparison.OrdinalIgnoreCase))
+        {
+            return RuntimeMode.WorkstationOnly;
+        }
+
+        if (string.Equals(raw, "svr", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(raw, "server", StringComparison.OrdinalIgnoreCase))
+        {
+            return RuntimeMode.ServerOnly;
+        }
+
+        return RuntimeMode.Both;
+    }
+
+    private enum RuntimeMode
+    {
+        Both = 0,
+        WorkstationOnly = 1,
+        ServerOnly = 2
     }
 
 

@@ -6,6 +6,8 @@ param(
     [string]$WorkingSet = "",
     [string]$SegmentMegabytes = "",
     [string]$ValidateCrc = "",
+    [ValidateSet("", "both", "wks", "svr")]
+    [string]$RuntimeMode = "",
     [string]$ArtifactsRoot = ""
 )
 
@@ -35,6 +37,9 @@ if (-not [string]::IsNullOrWhiteSpace($SegmentMegabytes)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($ValidateCrc)) {
     $env:VAPECACHE_BENCH_SPILL_VALIDATE_CRC = $ValidateCrc
+}
+if (-not [string]::IsNullOrWhiteSpace($RuntimeMode)) {
+    $env:VAPECACHE_BENCH_RUNTIME_MODE = $RuntimeMode
 }
 
 function Get-PositiveIntList([string]$csv, [int[]]$defaults) {
@@ -89,7 +94,8 @@ $effectiveSegments = Get-PositiveIntList $env:VAPECACHE_BENCH_SPILL_SEGMENT_MB @
 $effectiveValidateCrc = Get-BoolList $env:VAPECACHE_BENCH_SPILL_VALIDATE_CRC @($false)
 
 $methodCount = 7
-$jobCount = 2
+$runtimeModeEffective = ($env:VAPECACHE_BENCH_RUNTIME_MODE ?? "").Trim().ToLowerInvariant()
+$jobCount = if ($runtimeModeEffective -eq "wks" -or $runtimeModeEffective -eq "svr") { 1 } else { 2 }
 $caseCount = $effectivePayloads.Count * $effectiveWorkingSet.Count * $effectiveSegments.Count * $effectiveValidateCrc.Count * $methodCount * $jobCount
 
 $estimatedSetupBytes = 0L
@@ -116,6 +122,7 @@ Write-Host "Payloads: $env:VAPECACHE_BENCH_SPILL_PAYLOADS"
 Write-Host "Working set: $env:VAPECACHE_BENCH_SPILL_WORKING_SET"
 Write-Host "Segment MB: $env:VAPECACHE_BENCH_SPILL_SEGMENT_MB"
 Write-Host "Validate CRC: $env:VAPECACHE_BENCH_SPILL_VALIDATE_CRC"
+Write-Host "Runtime mode: $env:VAPECACHE_BENCH_RUNTIME_MODE"
 Write-Host ("Estimated benchmark cases: {0}" -f $caseCount)
 Write-Host ("Estimated setup disk writes: {0:N2} GB" -f ($estimatedSetupBytes / 1GB))
 if ($caseCount -ge 120 -or $estimatedSetupBytes -ge 8GB) {
