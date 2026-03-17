@@ -79,11 +79,15 @@ public sealed class VapeCacheRawParityGroceryStoreServiceTests
     }
 
     [Fact]
-    public async Task AddToCartBatchAsync_apples_track_does_not_use_RPushMany_fast_path()
+    public async Task AddToCartBatchAsync_prefers_RPushMany_fast_path_when_available()
     {
         var executor = new Mock<IRedisCommandExecutor>(MockBehavior.Strict);
-        executor.Setup(x => x.RPushAsync("cart:batch-user", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(1);
+        executor.Setup(x => x.RPushManyAsync(
+                "cart:batch-user",
+                It.IsAny<ReadOnlyMemory<byte>[]>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(3);
 
         var sut = new VapeCacheRawParityGroceryStoreService(executor.Object);
         var now = DateTime.UnixEpoch;
@@ -96,8 +100,12 @@ public sealed class VapeCacheRawParityGroceryStoreServiceTests
 
         await sut.AddToCartBatchAsync("batch-user", items);
 
-        executor.Verify(x => x.RPushAsync("cart:batch-user", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Exactly(items.Length));
-        executor.Verify(x => x.RPushManyAsync(It.IsAny<string>(), It.IsAny<ReadOnlyMemory<byte>[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        executor.Verify(x => x.RPushManyAsync(
+            "cart:batch-user",
+            It.IsAny<ReadOnlyMemory<byte>[]>(),
+            items.Length,
+            It.IsAny<CancellationToken>()), Times.Once);
+        executor.Verify(x => x.RPushAsync(It.IsAny<string>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never);
         executor.VerifyNoOtherCalls();
     }
 

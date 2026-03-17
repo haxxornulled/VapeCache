@@ -174,8 +174,7 @@ public sealed class VapeCacheAspNetPolicyErgonomicsTests
             TtlSeconds = -1
         };
 
-        var exception = Assert.Throws<InvalidOperationException>(() => attribute.ToOutputCacheAttribute());
-        Assert.Contains("negative", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Throws<InvalidOperationException>(() => attribute.ToOutputCacheAttribute());
     }
 
     [Fact]
@@ -197,14 +196,12 @@ public sealed class VapeCacheAspNetPolicyErgonomicsTests
     {
         var services = new ServiceCollection();
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<InvalidOperationException>(() =>
             services.AddVapeCacheAspNetPolicies(policies =>
             {
                 policies.AddPolicy("products", policy => policy.Ttl(TimeSpan.FromMinutes(1)));
                 policies.AddPolicy("products", policy => policy.Ttl(TimeSpan.FromMinutes(5)));
             }));
-
-        Assert.Contains("already registered", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

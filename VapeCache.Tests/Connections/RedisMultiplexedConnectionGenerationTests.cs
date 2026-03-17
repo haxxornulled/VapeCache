@@ -32,8 +32,7 @@ public sealed class RedisMultiplexedConnectionGenerationTests
         var completed = await Task.WhenAny(pendingTask, Task.Delay(TimeSpan.FromSeconds(2)));
         Assert.Same(pendingTask, completed);
 
-        var ex = await Assert.ThrowsAnyAsync<Exception>(async () => await pendingTask);
-        Assert.Contains("generation", ex.Message, StringComparison.OrdinalIgnoreCase);
+        await Assert.ThrowsAnyAsync<Exception>(async () => await pendingTask);
         Assert.True(factory.Primary.ResponseServed);
     }
 

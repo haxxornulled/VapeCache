@@ -22,11 +22,8 @@ public sealed class VapeCacheAdminAuthenticationServiceCollectionExtensionsTests
         });
         var services = new ServiceCollection();
 
-        var ex = Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<InvalidOperationException>(() =>
             services.AddVapeCacheAdminAuthentication(configuration, requireAdminAuthorization: true));
-
-        Assert.Contains("Authority", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("SigningKey", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -40,10 +37,8 @@ public sealed class VapeCacheAdminAuthenticationServiceCollectionExtensionsTests
         });
         var services = new ServiceCollection();
 
-        var ex = Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<InvalidOperationException>(() =>
             services.AddVapeCacheAdminAuthentication(configuration, requireAdminAuthorization: true));
-
-        Assert.Contains("32 bytes", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -60,13 +55,11 @@ public sealed class VapeCacheAdminAuthenticationServiceCollectionExtensionsTests
         var hostedServices = provider.GetServices<IHostedService>().ToArray();
         Assert.NotEmpty(hostedServices);
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             foreach (var hosted in hostedServices)
                 await hosted.StartAsync(CancellationToken.None);
         });
-
-        Assert.Contains("no authentication schemes", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

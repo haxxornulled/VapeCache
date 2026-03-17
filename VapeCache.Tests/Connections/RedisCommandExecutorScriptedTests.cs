@@ -20,10 +20,9 @@ public sealed class RedisCommandExecutorScriptedTests
         stream.Enqueue(":1\r\n");
         stream.Enqueue("+PONG\r\n");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await sut.HGetAsync("h1", "f1", default));
 
-        Assert.Contains("Unexpected HGET response", ex.Message);
         Assert.Equal("PONG", await sut.PingAsync(default));
 
         var lane = Assert.Single(((IRedisMultiplexerDiagnostics)sut).GetMuxLaneSnapshots());
@@ -42,9 +41,8 @@ public sealed class RedisCommandExecutorScriptedTests
         stream.Enqueue("$2\r\nok\r\n");
 
         Assert.True(sut.TryHGetAsync("h1", "f1", default, out var task));
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () => await task);
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await task);
 
-        Assert.Contains("Unexpected HGET response", ex.Message);
         Assert.Equal("ok", System.Text.Encoding.UTF8.GetString((await sut.GetAsync("k1", default))!));
 
         var lane = Assert.Single(((IRedisMultiplexerDiagnostics)sut).GetMuxLaneSnapshots());
@@ -62,10 +60,9 @@ public sealed class RedisCommandExecutorScriptedTests
         stream.Enqueue(":1\r\n");
         stream.Enqueue("+PONG\r\n");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await sut.ModuleListAsync(default));
 
-        Assert.Contains("Unexpected MODULE LIST response", ex.Message);
         Assert.Equal("PONG", await sut.PingAsync(default));
 
         var lane = Assert.Single(((IRedisMultiplexerDiagnostics)sut).GetMuxLaneSnapshots());

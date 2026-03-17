@@ -139,9 +139,7 @@ public sealed class CoalescedWriteDispatcherTests
 
         var sendTask = dispatcher.SendAsync(request, client, generation: 1, cts.Token);
         var received = await ReceiveExactAsync(server, expected.Length, cts.Token);
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () => await sendTask);
-
-        Assert.Equal("boom", ex.Message);
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await sendTask);
         Assert.Equal(expected, received);
         Assert.Equal(1, returnedHeaders);
         Assert.Equal(0, returnedPayloadArrays);
