@@ -1,6 +1,7 @@
-# In-Memory Persistence and Scatter Spill Design
+# In-Memory Persistence and Spill Design
 
-This document describes the spill layer for `InMemoryCache` using a scatter spill pattern: large values live on disk while a compact in-memory entry holds the key metadata and a pointer (Guid) to the on-disk blob.
+This document describes the spill layer for `InMemoryCache`: large values live on disk while a compact in-memory entry holds key metadata and a pointer (`Guid`) to on-disk bytes.  
+For the current high-throughput segmented-log engine, see [SPILL_SEGMENTED_LOG.md](SPILL_SEGMENTED_LOG.md).
 
 ## Goals
 - Keep the in-memory fallback fast for small values.
@@ -96,7 +97,7 @@ Add counters and gauges:
 - Spill reads and writes are fully async.
 - Encryption at rest is supported via `ISpillEncryptionProvider`.
 - Default thresholds: `SpillThresholdBytes = 262144`, `InlinePrefixBytes = 4096`, `EnableSpillToDisk = false`.
-- OSS/default wiring uses a no-op spill store; register `VapeCache.Persistence` (`AddVapeCachePersistence(...)`) to enable file-backed scatter spill.
+- OSS/default wiring uses a no-op spill store; call `AddVapeCachePersistence(...)` to enable file-backed segmented spill.
 - Orphan cleanup is opt-in (`EnableOrphanCleanup = false`, `OrphanMaxAge = 7 days`).
 
 ## Tests to Add
