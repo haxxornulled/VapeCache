@@ -108,6 +108,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private double _bulkLaneTargetRatio;
     private int _bulkLaneConnections;
     private TimeSpan _bulkLaneResponseTimeout;
+    private int _lanePrimeScheduled;
     private (string Key, int ValueLen)[]? _msetLengthsCache;
     private JsonSetHeaderCacheEntry? _jsonSetHeaderCache;
     private HGetHeaderCacheEntry? _hgetHeaderCache;
@@ -197,6 +198,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         for (var i = 0; i < _blockingConns.Length; i++)
             _blockingConns[i] = CreateBlockingConnection();
         RebuildLanesUnsafe();
+        PrimeLanesInBackground();
         LogNormalizationIfChanged("RedisMultiplexer", configuredMuxOptions, o);
         LogNormalizationIfChanged("RedisConnection", configuredConnectionOptions, connOpts);
         ApplyAutoscaleOptions(runtime.Multiplexer);
@@ -1357,9 +1359,50 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public ValueTask<bool> SetAsync(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct)
     {
         if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TrySetAsync(key, value, ttl, ct, out var fastTask))
-            return fastTask;
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitSetFastWithTransientFallbackAsync(this, key, value, ttl, ct, fastTask);
+        }
 
         return SetAsyncSlow(key, value, ttl, ct);
+    }
+
+    private static async ValueTask<bool> AwaitSetFastWithTransientFallbackAsync(
+        RedisCommandExecutor executor,
+        string key,
+        ReadOnlyMemory<byte> value,
+        TimeSpan? ttl,
+        CancellationToken ct,
+        ValueTask<bool> fastTask)
+    {
+        try
+        {
+            return await fastTask.ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsStaleGenerationException(ex))
+        {
+            // Rare lane reset race: fall back to the slow path once to preserve behavior.
+            return await executor.SetAsyncSlow(key, value, ttl, ct).ConfigureAwait(false);
+        }
+    }
+
+    private static bool IsStaleGenerationException(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException!)
+        {
+            if (current is IOException io &&
+                io.Message.Contains("Stale transport generation response ignored.", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (current.InnerException is null)
+                break;
+        }
+
+        return false;
     }
 
     private async ValueTask<bool> SetAsyncSlow(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct)
@@ -2785,6 +2828,48 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         _blockingWriteConns = _blockingConns;
     }
 
+    private void PrimeLanesInBackground()
+    {
+        if (Interlocked.Exchange(ref _lanePrimeScheduled, 1) != 0)
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                RedisMultiplexedConnection[] lanes;
+                lock (_connGate)
+                {
+                    lanes =
+                    [
+                        .. _conns,
+                        .. _bulkConns,
+                        .. _pubSubConns,
+                        .. _blockingConns
+                    ];
+                }
+
+                if (lanes.Length == 0)
+                    return;
+
+                using var primeCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                var primeTasks = new Task[lanes.Length];
+                for (var i = 0; i < lanes.Length; i++)
+                    primeTasks[i] = lanes[i].PrimeAsync(primeCts.Token).AsTask();
+
+                await Task.WhenAll(primeTasks).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Best-effort lane priming only; command execution remains primary.
+            }
+            finally
+            {
+                Volatile.Write(ref _lanePrimeScheduled, 0);
+            }
+        });
+    }
+
     private async Task AutoscaleLoopAsync()
     {
         while (!_autoscaleCts.IsCancellationRequested)
@@ -3248,6 +3333,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
         if (blockingConnsToDispose is { Length: > 0 })
             _ = DisposeConnectionsAsync(blockingConnsToDispose);
+
+        PrimeLanesInBackground();
     }
 
     private RedisMultiplexedConnection[]? ReconcileFastConnectionsUnsafe(int desiredFastConnections)
@@ -3552,6 +3639,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
         if (blockingConnsToDispose is { Length: > 0 })
             _ = DisposeConnectionsAsync(blockingConnsToDispose);
+
+        PrimeLanesInBackground();
     }
 
     private async Task ScaleDownAsync(string reason)
@@ -3611,6 +3700,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             for (var i = 0; i < blockingConnsToDispose.Length; i++)
                 await blockingConnsToDispose[i].DisposeAsync().ConfigureAwait(false);
         }
+
+        PrimeLanesInBackground();
     }
 
     private static async ValueTask WaitForDrainAsync(RedisMultiplexedConnection conn, TimeSpan timeout, CancellationToken ct)
@@ -4066,7 +4157,12 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             return conns[0];
 
         var idx = Interlocked.Increment(ref _rr) & int.MaxValue;
-        return conns[SelectLaneIndex(idx, conns.Length)];
+        var laneCount = conns.Length;
+        var aIndex = SelectLaneIndex(idx, laneCount);
+        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
+        var a = conns[aIndex];
+        var b = conns[bIndex];
+        return ChooseLowerScoreLane(a, b);
     }
 
     private RedisMultiplexedConnection NextRead()
@@ -4083,9 +4179,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         var a = readConns[aIndex];
         var b = readConns[bIndex];
 
-        var aScore = a.GetLaneSelectionScore();
-        var bScore = b.GetLaneSelectionScore();
-        return aScore <= bScore ? a : b;
+        return ChooseLowerScoreLane(a, b);
     }
 
     private RedisMultiplexedConnection NextWrite()
@@ -4102,9 +4196,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         var a = writeConns[aIndex];
         var b = writeConns[bIndex];
 
-        var aScore = a.GetLaneSelectionScore();
-        var bScore = b.GetLaneSelectionScore();
-        return aScore <= bScore ? a : b;
+        return ChooseLowerScoreLane(a, b);
     }
 
     private RedisMultiplexedConnection NextBulk()
@@ -4116,7 +4208,12 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             return conns[0];
 
         var idx = Interlocked.Increment(ref _bulkRr) & int.MaxValue;
-        return conns[SelectLaneIndex(idx, conns.Length)];
+        var laneCount = conns.Length;
+        var aIndex = SelectLaneIndex(idx, laneCount);
+        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
+        var a = conns[aIndex];
+        var b = conns[bIndex];
+        return ChooseLowerScoreLane(a, b);
     }
 
     private RedisMultiplexedConnection NextBulkRead()
@@ -4134,9 +4231,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         var a = readConns[aIndex];
         var b = readConns[bIndex];
 
-        var aScore = a.GetLaneSelectionScore();
-        var bScore = b.GetLaneSelectionScore();
-        return aScore <= bScore ? a : b;
+        return ChooseLowerScoreLane(a, b);
     }
 
     private RedisMultiplexedConnection NextBulkWrite()
@@ -4153,6 +4248,17 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
         var a = writeConns[aIndex];
         var b = writeConns[bIndex];
+
+        return ChooseLowerScoreLane(a, b);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static RedisMultiplexedConnection ChooseLowerScoreLane(RedisMultiplexedConnection a, RedisMultiplexedConnection b)
+    {
+        if (!a.IsHealthy && b.IsHealthy)
+            return b;
+        if (!b.IsHealthy && a.IsHealthy)
+            return a;
 
         var aScore = a.GetLaneSelectionScore();
         var bScore = b.GetLaneSelectionScore();

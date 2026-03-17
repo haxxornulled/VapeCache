@@ -1120,6 +1120,14 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         return _writes.Count + (inFlight >> 4);
     }
 
+    internal async ValueTask PrimeAsync(CancellationToken ct)
+    {
+        if (_cts.IsCancellationRequested)
+            return;
+
+        await EnsureConnectedAsync(ct).ConfigureAwait(false);
+    }
+
     internal int WriteQueueDepth => _writes.Count;
     internal int InFlightCount => _maxInFlight - _inFlight.CurrentCount;
     internal int MaxInFlight => _maxInFlight;

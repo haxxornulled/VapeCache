@@ -190,6 +190,11 @@ function Get-EffectiveMuxSettings([string]$RunTrack) {
             # Optimized path sustains higher throughput with fewer lane fan-outs on this workload.
             $effectiveConnections = 2
         }
+
+        if (-not $hasMuxAdaptiveCoalescingOverride) {
+            # Keep optimized tail latency tight by avoiding adaptive burst jitter.
+            $effectiveAdaptive = "false"
+        }
     }
 
     return [pscustomobject]@{
