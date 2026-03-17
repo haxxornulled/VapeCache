@@ -187,8 +187,8 @@ function Get-EffectiveMuxSettings([string]$RunTrack) {
     }
     elseif (-not $DisableTrackDefaults -and $RunTrack -eq "optimized") {
         if (-not $hasMuxConnectionsOverride) {
-            # Optimized path sustains higher throughput with fewer lane fan-outs on this workload.
-            $effectiveConnections = 2
+            # Optimized path sustains the best Vape/SER ratio with a single fast lane in this workload.
+            $effectiveConnections = 1
         }
 
         if (-not $hasMuxAdaptiveCoalescingOverride) {
@@ -223,8 +223,8 @@ function Get-EffectiveMaxDegree([string]$RunTrack) {
         return 6
     }
     if (-not $DisableTrackDefaults -and $RunTrack -eq "optimized") {
-        # Optimized path remains stable and competitive at moderate worker pressure.
-        return 12
+        # Optimized path holds a stronger relative lead at this worker pressure.
+        return 10
     }
 
     if ($MaxDegree -gt 0) {
