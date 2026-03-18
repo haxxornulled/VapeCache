@@ -1,4 +1,5 @@
 using VapeCache.UI.Features.Admin;
+using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.UI.Components.Pages;
 
@@ -38,4 +39,45 @@ public partial class VapeCacheAdminAutoscaler
             _error = ex.Message;
         }
     }
+
+    private static int GetOptionalInt(RedisAutoscalerSnapshot snapshot, string propertyName, int fallback = 0)
+    {
+        var value = ReadOptionalProperty(snapshot, propertyName);
+        if (value is int typed)
+            return typed;
+        if (value is long longTyped)
+            return checked((int)longTyped);
+        return fallback;
+    }
+
+    private static long GetOptionalLong(RedisAutoscalerSnapshot snapshot, string propertyName, long fallback = 0)
+    {
+        var value = ReadOptionalProperty(snapshot, propertyName);
+        if (value is long typed)
+            return typed;
+        if (value is int intTyped)
+            return intTyped;
+        return fallback;
+    }
+
+    private static double GetOptionalDouble(RedisAutoscalerSnapshot snapshot, string propertyName, double fallback = 0d)
+    {
+        var value = ReadOptionalProperty(snapshot, propertyName);
+        if (value is double typed)
+            return typed;
+        if (value is float floatTyped)
+            return floatTyped;
+        if (value is decimal decimalTyped)
+            return (double)decimalTyped;
+        return fallback;
+    }
+
+    private static string GetOptionalString(RedisAutoscalerSnapshot snapshot, string propertyName, string fallback = "n/a")
+    {
+        var value = ReadOptionalProperty(snapshot, propertyName);
+        return value as string ?? fallback;
+    }
+
+    private static object? ReadOptionalProperty(RedisAutoscalerSnapshot snapshot, string propertyName)
+        => snapshot.GetType().GetProperty(propertyName)?.GetValue(snapshot);
 }

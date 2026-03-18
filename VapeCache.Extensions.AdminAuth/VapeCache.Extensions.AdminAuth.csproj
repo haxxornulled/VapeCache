@@ -6,7 +6,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.AdminAuth</PackageId>
     <Title>VapeCache Extensions for Admin Authentication</Title>
-    <Version>1.2.13</Version>
+    <Version>1.2.14</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.AdminAuth</Product>
@@ -22,7 +22,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.13 release: extracted reusable admin authentication package with JWT bearer wiring and startup readiness validation.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.14 release: extracted reusable admin authentication package with JWT bearer wiring and startup readiness validation.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
@@ -39,3 +39,4 @@
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.1" />
   </ItemGroup>
 </Project>
+

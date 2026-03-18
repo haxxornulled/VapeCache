@@ -38,6 +38,15 @@ internal static class RedisRuntimeOptionsNormalizer
     private const int MaxCoalescingSpinBudget = 256;
     private const int MinAutoscaleConnections = 1;
     private const int MaxAutoscaleConnections = 256;
+    private const int MinSpillPressureTotalFilesThreshold = 1;
+    private const int MaxSpillPressureTotalFilesThreshold = 10_000_000;
+    private const int DefaultSpillPressureTotalFilesThreshold = 4_000;
+    private const int MinSpillPressureActiveShardsThreshold = 1;
+    private const int MaxSpillPressureActiveShardsThreshold = 8192;
+    private const int DefaultSpillPressureActiveShardsThreshold = 48;
+    private const double MinSpillPressureImbalanceRatioThreshold = 1.0d;
+    private const double MaxSpillPressureImbalanceRatioThreshold = 100.0d;
+    private const double DefaultSpillPressureImbalanceRatioThreshold = 1.75d;
     private const int MinBulkLaneConnections = 0;
     private const int MaxBulkLaneConnections = MaxMultiplexerConnections - 1;
     private const int MinReservedRoleLaneConnections = 0;
@@ -57,6 +66,7 @@ internal static class RedisRuntimeOptionsNormalizer
     private static readonly TimeSpan DefaultScaleDownCooldown = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan DefaultScaleDownDrainTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan DefaultAutoscaleFreezeDuration = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan DefaultSpillPressureSustainedWindow = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan DefaultBulkLaneResponseTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
@@ -218,6 +228,19 @@ internal static class RedisRuntimeOptionsNormalizer
         var flapToggleThreshold = Math.Max(2, profiled.FlapToggleThreshold);
         var autoscaleFreezeDuration = NormalizePositive(profiled.AutoscaleFreezeDuration, DefaultAutoscaleFreezeDuration);
         var reconnectStormFailureRatePerSecThreshold = Math.Max(MinPositiveThreshold, profiled.ReconnectStormFailureRatePerSecThreshold);
+        var enableSpillPressureSignals = profiled.EnableSpillPressureSignals;
+        var spillPressureTotalFilesThreshold = NormalizeInt(
+            profiled.SpillPressureTotalFilesThreshold,
+            MinSpillPressureTotalFilesThreshold,
+            MaxSpillPressureTotalFilesThreshold,
+            fallbackWhenInvalid: DefaultSpillPressureTotalFilesThreshold);
+        var spillPressureActiveShardsThreshold = NormalizeInt(
+            profiled.SpillPressureActiveShardsThreshold,
+            MinSpillPressureActiveShardsThreshold,
+            MaxSpillPressureActiveShardsThreshold,
+            fallbackWhenInvalid: DefaultSpillPressureActiveShardsThreshold);
+        var spillPressureImbalanceRatioThreshold = NormalizeSpillPressureImbalanceRatioThreshold(profiled.SpillPressureImbalanceRatioThreshold);
+        var spillPressureSustainedWindow = NormalizePositive(profiled.SpillPressureSustainedWindow, DefaultSpillPressureSustainedWindow);
         if (scaleDownWindow < scaleUpWindow)
             scaleDownWindow = scaleUpWindow;
         if (scaleDownCooldown < scaleUpCooldown)
@@ -264,7 +287,12 @@ internal static class RedisRuntimeOptionsNormalizer
             MaxScaleEventsPerMinute = maxScaleEventsPerMinute,
             FlapToggleThreshold = flapToggleThreshold,
             AutoscaleFreezeDuration = autoscaleFreezeDuration,
-            ReconnectStormFailureRatePerSecThreshold = reconnectStormFailureRatePerSecThreshold
+            ReconnectStormFailureRatePerSecThreshold = reconnectStormFailureRatePerSecThreshold,
+            EnableSpillPressureSignals = enableSpillPressureSignals,
+            SpillPressureTotalFilesThreshold = spillPressureTotalFilesThreshold,
+            SpillPressureActiveShardsThreshold = spillPressureActiveShardsThreshold,
+            SpillPressureImbalanceRatioThreshold = spillPressureImbalanceRatioThreshold,
+            SpillPressureSustainedWindow = spillPressureSustainedWindow
         };
     }
 
@@ -374,5 +402,13 @@ internal static class RedisRuntimeOptionsNormalizer
     {
         var normalizedScaleDownP95 = Math.Max(0.5, configuredScaleDownP95);
         return Math.Min(normalizedScaleDownP95, normalizedScaleUpP99);
+    }
+
+    private static double NormalizeSpillPressureImbalanceRatioThreshold(double value)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+            return DefaultSpillPressureImbalanceRatioThreshold;
+
+        return Math.Clamp(value, MinSpillPressureImbalanceRatioThreshold, MaxSpillPressureImbalanceRatioThreshold);
     }
 }

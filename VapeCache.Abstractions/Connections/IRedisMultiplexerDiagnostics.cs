@@ -42,7 +42,13 @@ public sealed record RedisAutoscalerSnapshot(
     string? FreezeReason,
     DateTimeOffset? LastScaleEventUtc,
     string? LastScaleDirection,
-    string? LastScaleReason);
+    string? LastScaleReason,
+    int SpillSignalCount = 0,
+    long SpillTotalFiles = 0,
+    int SpillActiveShards = 0,
+    double SpillImbalanceRatio = 0d,
+    double PressureScore = 0d,
+    string PressureTier = "normal");
 
 /// <summary>
 /// Represents the redis mux lane snapshot.

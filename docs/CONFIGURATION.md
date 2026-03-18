@@ -218,7 +218,12 @@ If normalization occurs, `RedisCommandExecutor` logs a warning so teams can corr
     "MaxScaleEventsPerMinute": 2,
     "FlapToggleThreshold": 4,
     "AutoscaleFreezeDuration": "00:02:00",
-    "ReconnectStormFailureRatePerSecThreshold": 2.0
+    "ReconnectStormFailureRatePerSecThreshold": 2.0,
+    "EnableSpillPressureSignals": true,
+    "SpillPressureTotalFilesThreshold": 4000,
+    "SpillPressureActiveShardsThreshold": 48,
+    "SpillPressureImbalanceRatioThreshold": 1.75,
+    "SpillPressureSustainedWindow": "00:00:20"
   }
 }
 ```

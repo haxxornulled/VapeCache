@@ -3,6 +3,7 @@ using System.Diagnostics;
 using LanguageExt;
 using LanguageExt.Common;
 using Microsoft.Extensions.Logging;
+using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Connections;
 using VapeCache.Tests.Infrastructure;
@@ -332,11 +333,18 @@ public sealed class RedisCommandExecutorAutoscalerTests
             AutoscaleFreezeDuration = TimeSpan.FromMinutes(1)
         });
 
+        // Seed one deterministic scale event so the test validates only rate-limit behavior.
+        InvokeScaleUp(harness.Executor, "seed-up");
+        var registerScaleEvent = GetMethod("RegisterScaleEvent");
+        registerScaleEvent.Invoke(harness.Executor, [ "up", Stopwatch.GetTimestamp() ]);
+        Assert.Equal(2, harness.Executor.GetAutoscalerSnapshot().CurrentConnections);
+        MarkAllLanesHealthy(harness.Executor);
+
         ForceTimeoutSpike(harness.Executor, 20);
         InvokeEvaluateAutoscale(harness.Executor);
-        Assert.Equal(2, harness.Executor.GetAutoscalerSnapshot().CurrentConnections);
 
         SetField(harness.Executor, "_lastScaleUpTicks", 0L);
+        MarkAllLanesHealthy(harness.Executor);
         ForceTimeoutSpike(harness.Executor, 20);
         InvokeEvaluateAutoscale(harness.Executor);
 
@@ -347,6 +355,86 @@ public sealed class RedisCommandExecutorAutoscalerTests
             string.Equals(snapshot.FreezeReason, "scale-rate-limit", StringComparison.Ordinal) ||
             string.Equals(snapshot.FreezeReason, "reconnect-storm", StringComparison.Ordinal),
             $"Unexpected freeze reason: {snapshot.FreezeReason}");
+    }
+
+    [Fact]
+    public void SpillPressure_RequiresSustainedWindow_BeforeContributingToScaleUp()
+    {
+        var spill = new FakeSpillDiagnostics();
+        spill.Update(new SpillStoreDiagnosticsSnapshot(
+            SupportsDiskSpill: true,
+            SpillToDiskConfigured: true,
+            Mode: "file",
+            TotalSpillFiles: 250,
+            ActiveShards: 8,
+            MaxFilesInShard: 60,
+            AvgFilesPerActiveShard: 31.25,
+            ImbalanceRatio: 2.1,
+            TopShards: [],
+            SampledAtUtc: DateTimeOffset.UtcNow));
+
+        using var harness = CreateHarness(new RedisMultiplexerOptions
+        {
+            Connections = 2,
+            EnableAutoscaling = true,
+            MinConnections = 2,
+            MaxConnections = 4,
+            AutoscaleSampleInterval = TimeSpan.FromSeconds(1),
+            ScaleUpWindow = TimeSpan.FromMilliseconds(1),
+            ScaleUpCooldown = TimeSpan.FromMilliseconds(1),
+            EmergencyScaleUpTimeoutRatePerSecThreshold = 1000,
+            SpillPressureTotalFilesThreshold = 1,
+            SpillPressureSustainedWindow = TimeSpan.FromSeconds(5)
+        }, spillDiagnostics: spill);
+
+        InvokeEvaluateAutoscale(harness.Executor);
+
+        var snapshot = harness.Executor.GetAutoscalerSnapshot();
+        Assert.Equal(2, snapshot.CurrentConnections);
+        Assert.Equal(2, snapshot.SpillSignalCount);
+        Assert.Equal("spill-warm", snapshot.PressureTier);
+        Assert.Equal(0, snapshot.HighSignalCount);
+    }
+
+    [Fact]
+    public void SpillPressure_CanContributeToScaleUp_WhenSustainedWindowIsSatisfied()
+    {
+        var spill = new FakeSpillDiagnostics();
+        spill.Update(new SpillStoreDiagnosticsSnapshot(
+            SupportsDiskSpill: true,
+            SpillToDiskConfigured: true,
+            Mode: "file",
+            TotalSpillFiles: 250,
+            ActiveShards: 8,
+            MaxFilesInShard: 60,
+            AvgFilesPerActiveShard: 31.25,
+            ImbalanceRatio: 2.1,
+            TopShards: [],
+            SampledAtUtc: DateTimeOffset.UtcNow));
+
+        using var harness = CreateHarness(new RedisMultiplexerOptions
+        {
+            Connections = 1,
+            EnableAutoscaling = true,
+            MinConnections = 1,
+            MaxConnections = 2,
+            AutoscaleSampleInterval = TimeSpan.FromSeconds(1),
+            ScaleUpWindow = TimeSpan.FromMilliseconds(1),
+            ScaleUpCooldown = TimeSpan.FromMilliseconds(1),
+            ScaleUpTimeoutRatePerSecThreshold = 0.5,
+            EmergencyScaleUpTimeoutRatePerSecThreshold = 1000,
+            SpillPressureTotalFilesThreshold = 1,
+            SpillPressureSustainedWindow = TimeSpan.FromMilliseconds(1)
+        }, spillDiagnostics: spill);
+
+        ForceTimeoutSpike(harness.Executor, 10);
+        InvokeEvaluateAutoscale(harness.Executor);
+
+        var snapshot = harness.Executor.GetAutoscalerSnapshot();
+        Assert.Equal(2, snapshot.CurrentConnections);
+        Assert.Equal(2, snapshot.SpillSignalCount);
+        Assert.Contains("spill-files", snapshot.LastScaleReason ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal("spill-sustained", snapshot.PressureTier);
     }
 
     [Fact]
@@ -603,7 +691,27 @@ public sealed class RedisCommandExecutorAutoscalerTests
         unhealthyField!.SetValue(lane, 1);
     }
 
-    private static Harness CreateHarness(RedisMultiplexerOptions options, bool autoscalerLicensed = true)
+    private static void MarkAllLanesHealthy(RedisCommandExecutor executor)
+    {
+        var connsField = typeof(RedisCommandExecutor).GetField("_conns", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(connsField);
+        var conns = (Array?)connsField!.GetValue(executor);
+        Assert.NotNull(conns);
+
+        for (var i = 0; i < conns!.Length; i++)
+        {
+            var lane = conns.GetValue(i);
+            Assert.NotNull(lane);
+            var failuresField = lane!.GetType().GetField("_consecutiveFailures", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(failuresField);
+            failuresField!.SetValue(lane, 0);
+        }
+    }
+
+    private static Harness CreateHarness(
+        RedisMultiplexerOptions options,
+        bool autoscalerLicensed = true,
+        ISpillStoreDiagnostics? spillDiagnostics = null)
     {
         var logger = new ListLogger<RedisCommandExecutor>();
         var executor = new RedisCommandExecutor(
@@ -611,7 +719,8 @@ public sealed class RedisCommandExecutorAutoscalerTests
             new TestOptionsMonitor<RedisMultiplexerOptions>(options),
             new TestOptionsMonitor<RedisConnectionOptions>(new RedisConnectionOptions()),
             logger,
-            new TestEnterpriseFeatureGate(autoscalerLicensed));
+            new TestEnterpriseFeatureGate(autoscalerLicensed),
+            spillDiagnostics);
 
         return new Harness(executor, logger);
     }
@@ -638,6 +747,25 @@ public sealed class RedisCommandExecutorAutoscalerTests
         public bool IsAutoscalerLicensed { get; } = autoscalerLicensed;
         public bool IsDurableSpillLicensed => false;
         public bool IsReconciliationLicensed => false;
+    }
+
+    private sealed class FakeSpillDiagnostics : ISpillStoreDiagnostics
+    {
+        private SpillStoreDiagnosticsSnapshot _snapshot = new(
+            SupportsDiskSpill: false,
+            SpillToDiskConfigured: false,
+            Mode: "noop",
+            TotalSpillFiles: 0,
+            ActiveShards: 0,
+            MaxFilesInShard: 0,
+            AvgFilesPerActiveShard: 0d,
+            ImbalanceRatio: 0d,
+            TopShards: [],
+            SampledAtUtc: DateTimeOffset.UtcNow);
+
+        public SpillStoreDiagnosticsSnapshot GetSnapshot() => _snapshot;
+
+        public void Update(SpillStoreDiagnosticsSnapshot snapshot) => _snapshot = snapshot;
     }
 
     private sealed class ListLogger<T> : ILogger<T>

@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Security.Authentication;
 using System.Text;
+using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -95,6 +96,19 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private double _reconnectStormFailureRatePerSecThreshold;
     private long _lastFailureSampleTicks;
     private long _lastFailureSampleCount;
+    private readonly ISpillStoreDiagnostics? _spillStoreDiagnostics;
+    private bool _enableSpillPressureSignals;
+    private int _spillPressureTotalFilesThreshold;
+    private int _spillPressureActiveShardsThreshold;
+    private double _spillPressureImbalanceRatioThreshold;
+    private TimeSpan _spillPressureSustainedWindow;
+    private long _spillPressureStreakTicks;
+    private int _lastSpillSignalCount;
+    private long _lastSpillTotalFiles;
+    private int _lastSpillActiveShards;
+    private double _lastSpillImbalanceRatio;
+    private double _lastPressureScore;
+    private string _lastPressureTier = "normal";
     private readonly ILogger<RedisCommandExecutor> _logger;
     private readonly bool _autoscalerLicensed;
     private bool _autoscaleLicenseWarningLogged;
@@ -123,7 +137,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             options.Value,
             new RedisConnectionOptions(),
             NullLogger<RedisCommandExecutor>.Instance,
-            enterpriseFeatureGate: null)
+            enterpriseFeatureGate: null,
+            spillStoreDiagnostics: null)
     {
     }
 
@@ -133,13 +148,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         IOptionsMonitor<RedisMultiplexerOptions> options,
         IOptionsMonitor<RedisConnectionOptions> connectionOptions,
         ILogger<RedisCommandExecutor>? logger = null,
-        IEnterpriseFeatureGate? enterpriseFeatureGate = null)
+        IEnterpriseFeatureGate? enterpriseFeatureGate = null,
+        ISpillStoreDiagnostics? spillStoreDiagnostics = null)
         : this(
             factory,
             options.CurrentValue,
             connectionOptions.CurrentValue,
             logger ?? NullLogger<RedisCommandExecutor>.Instance,
-            enterpriseFeatureGate)
+            enterpriseFeatureGate,
+            spillStoreDiagnostics)
     {
         _muxOptionsChangeRegistration = options.OnChange((updated, _) =>
         {
@@ -156,10 +173,12 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexerOptions configuredMuxOptions,
         RedisConnectionOptions configuredConnectionOptions,
         ILogger<RedisCommandExecutor> logger,
-        IEnterpriseFeatureGate? enterpriseFeatureGate)
+        IEnterpriseFeatureGate? enterpriseFeatureGate,
+        ISpillStoreDiagnostics? spillStoreDiagnostics)
     {
         _logger = logger;
         _autoscalerLicensed = enterpriseFeatureGate?.IsAutoscalerLicensed ?? false;
+        _spillStoreDiagnostics = spillStoreDiagnostics;
 
         var o = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(configuredMuxOptions);
         var connOpts = RedisRuntimeOptionsNormalizer.NormalizeConnection(configuredConnectionOptions);
@@ -2897,6 +2916,13 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             var disabledConnections = GetTotalConnectionCountUnsafe();
             Interlocked.Exchange(ref _highPressureStreakTicks, 0);
             Interlocked.Exchange(ref _lowPressureStreakTicks, 0);
+            Interlocked.Exchange(ref _spillPressureStreakTicks, 0);
+            Volatile.Write(ref _lastSpillSignalCount, 0);
+            Interlocked.Exchange(ref _lastSpillTotalFiles, 0);
+            Volatile.Write(ref _lastSpillActiveShards, 0);
+            Volatile.Write(ref _lastSpillImbalanceRatio, 0d);
+            Volatile.Write(ref _lastPressureScore, 0d);
+            _lastPressureTier = "disabled";
             Volatile.Write(ref _lastTargetConnections, disabledConnections);
             LogTickTrace(
                 action: "disabled",
@@ -2985,6 +3011,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         Interlocked.Exchange(ref _lastFailureSampleCount, failureTotal);
         Interlocked.Exchange(ref _lastFailureSampleTicks, now);
 
+        var sampleTicks = ToStopwatchTicks(_autoscaleSampleInterval);
         var (p95Ms, p99Ms) = GetRollingLatencyPercentiles();
         var highSignals = 0;
         if (avgInflightUtil >= _scaleUpInflightUtilization) highSignals++;
@@ -2992,7 +3019,9 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         if (avgQueueDepth >= Math.Max(1, _scaleUpQueueDepthThreshold / 2.0)) highSignals++;
         if (timeoutRatePerSec >= _scaleUpTimeoutRatePerSecThreshold) highSignals++;
         if (p99Ms >= _scaleUpP99LatencyMsThreshold) highSignals++;
-        Volatile.Write(ref _lastHighSignalCount, highSignals);
+        var spillPressure = SampleSpillPressure(sampleTicks);
+        var effectiveHighSignals = highSignals + (spillPressure.WindowSatisfied ? spillPressure.SignalCount : 0);
+        Volatile.Write(ref _lastHighSignalCount, effectiveHighSignals);
         Volatile.Write(ref _lastAvgInflightUtilization, avgInflightUtil);
         Volatile.Write(ref _lastAvgQueueDepth, avgQueueDepth);
         Volatile.Write(ref _lastMaxQueueDepth, maxQueueDepth);
@@ -3001,15 +3030,22 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         Volatile.Write(ref _lastRollingP99Ms, p99Ms);
         Volatile.Write(ref _lastReconnectFailureRatePerSec, reconnectFailureRatePerSec);
         Volatile.Write(ref _lastUnhealthyConnections, unhealthyConnections);
+        Volatile.Write(ref _lastSpillSignalCount, spillPressure.SignalCount);
+        Interlocked.Exchange(ref _lastSpillTotalFiles, spillPressure.TotalSpillFiles);
+        Volatile.Write(ref _lastSpillActiveShards, spillPressure.ActiveShards);
+        Volatile.Write(ref _lastSpillImbalanceRatio, spillPressure.ImbalanceRatio);
+        var pressureScore = ComputePressureScore(highSignals, spillPressure.SignalCount);
+        Volatile.Write(ref _lastPressureScore, pressureScore);
 
-        var highPressure = highSignals >= 2;
+        var highPressure = effectiveHighSignals >= 2;
         var lowPressure =
             avgInflightUtil <= _scaleDownInflightUtilization &&
             avgQueueDepth < 0.5 &&
             maxQueueDepth <= 1 &&
             timeoutRatePerSec <= 0.0 &&
             unhealthyConnections == 0 &&
-            p95Ms <= _scaleDownP95LatencyMsThreshold;
+            p95Ms <= _scaleDownP95LatencyMsThreshold &&
+            spillPressure.SignalCount == 0;
 
         var reconnectStorm = reconnectFailureRatePerSec >= _reconnectStormFailureRatePerSecThreshold;
         if (reconnectStorm)
@@ -3017,8 +3053,9 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             FreezeAutoscaler("reconnect-storm", now);
         }
 
+        _lastPressureTier = DeterminePressureTier(highSignals, spillPressure, reconnectStorm, highPressure);
+
         var isFrozen = TryGetFreezeState(now, out var frozenReason, out var frozenUntilUtc);
-        var sampleTicks = ToStopwatchTicks(_autoscaleSampleInterval);
         var highStreakTicks = Interlocked.Read(ref _highPressureStreakTicks);
         var lowStreakTicks = Interlocked.Read(ref _lowPressureStreakTicks);
         var upCooldownActive = now - Interlocked.Read(ref _lastScaleUpTicks) < ToStopwatchTicks(_scaleUpCooldown);
@@ -3060,7 +3097,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 reason,
                 currentConnections,
                 targetConnections,
-                highSignals,
+                effectiveHighSignals,
                 avgInflightUtil,
                 maxInflightUtil,
                 avgQueueDepth,
@@ -3094,7 +3131,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 action = "up(advisor)";
                 reason = emergencyReason;
                 targetConnections = currentConnections + 1;
-                LogDecision(action, reason, currentConnections, targetConnections, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                LogDecision(action, reason, currentConnections, targetConnections, effectiveHighSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
             }
             else if (!CanScaleEventNow(now, out var blockReason))
             {
@@ -3107,7 +3144,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 targetConnections = Math.Min(_maxConnections, currentConnections + 1);
                 ScaleUp(reason);
                 RegisterScaleEvent(direction: "up", now);
-                LogDecision(action, reason, currentConnections, targetConnections, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                LogDecision(action, reason, currentConnections, targetConnections, effectiveHighSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
                 Interlocked.Exchange(ref _lastScaleUpTicks, now);
             }
 
@@ -3117,7 +3154,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 reason,
                 currentConnections,
                 targetConnections,
-                highSignals,
+                effectiveHighSignals,
                 avgInflightUtil,
                 maxInflightUtil,
                 avgQueueDepth,
@@ -3147,10 +3184,13 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 avgInflightUtil >= _scaleUpInflightUtilization,
                 maxQueueDepth >= _scaleUpQueueDepthThreshold || avgQueueDepth >= Math.Max(1, _scaleUpQueueDepthThreshold / 2.0),
                 timeoutRatePerSec >= _scaleUpTimeoutRatePerSecThreshold,
-                p99Ms >= _scaleUpP99LatencyMsThreshold);
+                p99Ms >= _scaleUpP99LatencyMsThreshold,
+                spillPressure.HighFiles,
+                spillPressure.HighActiveShards,
+                spillPressure.HighImbalance);
             if (_autoscaleAdvisorMode)
             {
-                LogDecision("up(advisor)", scaleReason, currentConnections, currentConnections + 1, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                LogDecision("up(advisor)", scaleReason, currentConnections, currentConnections + 1, effectiveHighSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
                 action = "up(advisor)";
                 reason = scaleReason;
                 targetConnections = currentConnections + 1;
@@ -3163,7 +3203,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             {
                 ScaleUp(scaleReason);
                 RegisterScaleEvent(direction: "up", now);
-                LogDecision("up", scaleReason, currentConnections, Math.Min(_maxConnections, currentConnections + 1), highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                LogDecision("up", scaleReason, currentConnections, Math.Min(_maxConnections, currentConnections + 1), effectiveHighSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
                 action = "up";
                 reason = scaleReason;
                 targetConnections = Math.Min(_maxConnections, currentConnections + 1);
@@ -3171,7 +3211,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             }
             Interlocked.Exchange(ref _highPressureStreakTicks, 0);
             Volatile.Write(ref _lastTargetConnections, targetConnections);
-            LogTickTrace(action, reason, currentConnections, targetConnections, highSignals, avgInflightUtil, maxInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms, unhealthyConnections, reconnectFailureRatePerSec, Volatile.Read(ref _scaleEventsInCurrentMinute), _maxScaleEventsPerMinute, upCooldownActive, downCooldownActive, upWindowSatisfied, downWindowSatisfied, false, null);
+            LogTickTrace(action, reason, currentConnections, targetConnections, effectiveHighSignals, avgInflightUtil, maxInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms, unhealthyConnections, reconnectFailureRatePerSec, Volatile.Read(ref _scaleEventsInCurrentMinute), _maxScaleEventsPerMinute, upCooldownActive, downCooldownActive, upWindowSatisfied, downWindowSatisfied, false, null);
             return;
         }
 
@@ -3182,7 +3222,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         {
             if (_autoscaleAdvisorMode)
             {
-                LogDecision("down(advisor)", "low-pressure", currentConnections, currentConnections - 1, highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                LogDecision("down(advisor)", "low-pressure", currentConnections, currentConnections - 1, effectiveHighSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
                 action = "down(advisor)";
                 reason = "low-pressure";
                 targetConnections = currentConnections - 1;
@@ -3195,7 +3235,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             {
                 _ = ScaleDownAsync("low-pressure");
                 RegisterScaleEvent(direction: "down", now);
-                LogDecision("down", "low-pressure", currentConnections, Math.Max(_minConnections, currentConnections - 1), highSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
+                LogDecision("down", "low-pressure", currentConnections, Math.Max(_minConnections, currentConnections - 1), effectiveHighSignals, avgInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms);
                 action = "down";
                 reason = "low-pressure";
                 targetConnections = Math.Max(_minConnections, currentConnections - 1);
@@ -3203,7 +3243,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             }
             Interlocked.Exchange(ref _lowPressureStreakTicks, 0);
             Volatile.Write(ref _lastTargetConnections, targetConnections);
-            LogTickTrace(action, reason, currentConnections, targetConnections, highSignals, avgInflightUtil, maxInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms, unhealthyConnections, reconnectFailureRatePerSec, Volatile.Read(ref _scaleEventsInCurrentMinute), _maxScaleEventsPerMinute, upCooldownActive, downCooldownActive, upWindowSatisfied, downWindowSatisfied, false, null);
+            LogTickTrace(action, reason, currentConnections, targetConnections, effectiveHighSignals, avgInflightUtil, maxInflightUtil, avgQueueDepth, maxQueueDepth, timeoutRatePerSec, p95Ms, p99Ms, unhealthyConnections, reconnectFailureRatePerSec, Volatile.Read(ref _scaleEventsInCurrentMinute), _maxScaleEventsPerMinute, upCooldownActive, downCooldownActive, upWindowSatisfied, downWindowSatisfied, false, null);
             return;
         }
 
@@ -3213,6 +3253,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             lowPressure,
             unhealthyConnections,
             reconnectStorm,
+            spillPressure.SignalCount,
+            spillPressure.WindowSatisfied,
             upWindowSatisfied,
             downWindowSatisfied,
             upCooldownActive,
@@ -3223,7 +3265,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             reason,
             currentConnections,
             targetConnections,
-            highSignals,
+            effectiveHighSignals,
             avgInflightUtil,
             maxInflightUtil,
             avgQueueDepth,
@@ -3301,6 +3343,13 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             _flapToggleThreshold = Math.Max(2, o.FlapToggleThreshold);
             _autoscaleFreezeDuration = o.AutoscaleFreezeDuration <= TimeSpan.Zero ? TimeSpan.FromMinutes(2) : o.AutoscaleFreezeDuration;
             _reconnectStormFailureRatePerSecThreshold = Math.Max(0.01, o.ReconnectStormFailureRatePerSecThreshold);
+            _enableSpillPressureSignals = o.EnableSpillPressureSignals;
+            _spillPressureTotalFilesThreshold = Math.Max(1, o.SpillPressureTotalFilesThreshold);
+            _spillPressureActiveShardsThreshold = Math.Max(1, o.SpillPressureActiveShardsThreshold);
+            _spillPressureImbalanceRatioThreshold = Math.Max(1.0, o.SpillPressureImbalanceRatioThreshold);
+            _spillPressureSustainedWindow = o.SpillPressureSustainedWindow <= TimeSpan.Zero
+                ? TimeSpan.FromSeconds(20)
+                : o.SpillPressureSustainedWindow;
 
             fastConnsToDispose = ReconcileFastConnectionsUnsafe(laneBudget.FastConnections);
             bulkConnsToDispose = ReconcileBulkConnectionsUnsafe(laneBudget.BulkConnections, bulkTimeoutChanged);
@@ -3319,6 +3368,13 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 Volatile.Write(ref _flapToggleCount, 0);
                 _lastScaleDirectionForFlap = null;
                 Interlocked.Exchange(ref _lastScaleDirectionTicks, 0);
+                Interlocked.Exchange(ref _spillPressureStreakTicks, 0);
+                Volatile.Write(ref _lastSpillSignalCount, 0);
+                Interlocked.Exchange(ref _lastSpillTotalFiles, 0);
+                Volatile.Write(ref _lastSpillActiveShards, 0);
+                Volatile.Write(ref _lastSpillImbalanceRatio, 0d);
+                Volatile.Write(ref _lastPressureScore, 0d);
+                _lastPressureTier = "disabled";
             }
         }
 
@@ -3587,13 +3643,108 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
     }
 
-    private static string BuildScaleReason(bool inflight, bool queue, bool timeout, bool tail)
+    private SpillPressureSample SampleSpillPressure(long sampleTicks)
     {
-        var reasons = new List<string>(4);
+        if (!_enableSpillPressureSignals || _spillStoreDiagnostics is null)
+        {
+            Interlocked.Exchange(ref _spillPressureStreakTicks, 0);
+            return SpillPressureSample.None;
+        }
+
+        SpillStoreDiagnosticsSnapshot snapshot;
+        try
+        {
+            snapshot = _spillStoreDiagnostics.GetSnapshot();
+        }
+        catch
+        {
+            Interlocked.Exchange(ref _spillPressureStreakTicks, 0);
+            return SpillPressureSample.None;
+        }
+
+        if (!snapshot.SupportsDiskSpill || !snapshot.SpillToDiskConfigured)
+        {
+            Interlocked.Exchange(ref _spillPressureStreakTicks, 0);
+            return SpillPressureSample.None;
+        }
+
+        var highFiles = snapshot.TotalSpillFiles >= _spillPressureTotalFilesThreshold;
+        var highActiveShards = snapshot.ActiveShards >= _spillPressureActiveShardsThreshold;
+        var highImbalance = snapshot.ImbalanceRatio >= _spillPressureImbalanceRatioThreshold;
+        var signalCount = 0;
+        if (highFiles) signalCount++;
+        if (highActiveShards) signalCount++;
+        if (highImbalance) signalCount++;
+
+        if (signalCount > 0)
+            Interlocked.Add(ref _spillPressureStreakTicks, sampleTicks);
+        else
+            Interlocked.Exchange(ref _spillPressureStreakTicks, 0);
+
+        var windowSatisfied = Interlocked.Read(ref _spillPressureStreakTicks) >= ToStopwatchTicks(_spillPressureSustainedWindow);
+        return new SpillPressureSample(
+            signalCount,
+            snapshot.TotalSpillFiles,
+            snapshot.ActiveShards,
+            snapshot.ImbalanceRatio,
+            highFiles,
+            highActiveShards,
+            highImbalance,
+            windowSatisfied);
+    }
+
+    private static double ComputePressureScore(int muxHighSignalCount, int spillSignalCount)
+    {
+        var normalized = (muxHighSignalCount + spillSignalCount) / 8d;
+        return Math.Clamp(normalized, 0d, 1d);
+    }
+
+    private static string DeterminePressureTier(int muxHighSignalCount, SpillPressureSample spill, bool reconnectStorm, bool highPressure)
+    {
+        if (reconnectStorm)
+            return "frozen-reconnect-storm";
+        if (spill.WindowSatisfied && spill.SignalCount >= 2)
+            return "spill-sustained";
+        if (spill.SignalCount > 0)
+            return "spill-warm";
+        if (highPressure)
+            return "memory-high";
+        if (muxHighSignalCount == 1)
+            return "memory-warm";
+        return "normal";
+    }
+
+    private readonly record struct SpillPressureSample(
+        int SignalCount,
+        long TotalSpillFiles,
+        int ActiveShards,
+        double ImbalanceRatio,
+        bool HighFiles,
+        bool HighActiveShards,
+        bool HighImbalance,
+        bool WindowSatisfied)
+    {
+        public static SpillPressureSample None { get; } = new(
+            SignalCount: 0,
+            TotalSpillFiles: 0,
+            ActiveShards: 0,
+            ImbalanceRatio: 0d,
+            HighFiles: false,
+            HighActiveShards: false,
+            HighImbalance: false,
+            WindowSatisfied: false);
+    }
+
+    private static string BuildScaleReason(bool inflight, bool queue, bool timeout, bool tail, bool spillFiles, bool spillShards, bool spillImbalance)
+    {
+        var reasons = new List<string>(7);
         if (inflight) reasons.Add("inflight");
         if (queue) reasons.Add("queue");
         if (timeout) reasons.Add("timeout");
         if (tail) reasons.Add("tail-latency");
+        if (spillFiles) reasons.Add("spill-files");
+        if (spillShards) reasons.Add("spill-shards");
+        if (spillImbalance) reasons.Add("spill-imbalance");
         return reasons.Count == 0 ? "unknown" : string.Join("+", reasons);
     }
 
@@ -3752,6 +3903,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         bool lowPressure,
         int unhealthyConnections,
         bool reconnectStorm,
+        int spillSignalCount,
+        bool spillWindowSatisfied,
         bool upWindowSatisfied,
         bool downWindowSatisfied,
         bool upCooldownActive,
@@ -3762,6 +3915,9 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
         if (unhealthyConnections > 0)
             return "blocked:unhealthy-lanes";
+
+        if (spillSignalCount > 0 && !spillWindowSatisfied)
+            return "blocked:spill-window";
 
         if (highPressure)
         {
@@ -3776,6 +3932,9 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             if (!downWindowSatisfied) return "blocked:scaledown-window";
             if (downCooldownActive) return "blocked:scaledown-cooldown";
         }
+
+        if (spillSignalCount > 0)
+            return "blocked:spill-pressure";
 
         return "blocked:pressure-insufficient";
     }
@@ -4027,7 +4186,13 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             FreezeReason: frozen ? _freezeReason : null,
             LastScaleEventUtc: eventTicks == 0 ? null : ToUtcTimestamp(eventTicks),
             LastScaleDirection: _lastScaleDirection,
-            LastScaleReason: _lastScaleReason);
+            LastScaleReason: _lastScaleReason,
+            SpillSignalCount: Volatile.Read(ref _lastSpillSignalCount),
+            SpillTotalFiles: Interlocked.Read(ref _lastSpillTotalFiles),
+            SpillActiveShards: Volatile.Read(ref _lastSpillActiveShards),
+            SpillImbalanceRatio: Volatile.Read(ref _lastSpillImbalanceRatio),
+            PressureScore: Volatile.Read(ref _lastPressureScore),
+            PressureTier: _lastPressureTier);
     }
 
     /// <summary>

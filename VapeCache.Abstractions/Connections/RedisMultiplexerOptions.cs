@@ -270,4 +270,29 @@ public sealed record RedisMultiplexerOptions
     /// Failure-rate threshold (failures/sec across mux lanes) that triggers reconnect-storm freeze.
     /// </summary>
     public double ReconnectStormFailureRatePerSecThreshold { get; init; } = 2.0;
+
+    /// <summary>
+    /// Enables spill pressure signals as first-class autoscaler inputs when spill diagnostics are available.
+    /// </summary>
+    public bool EnableSpillPressureSignals { get; init; } = true;
+
+    /// <summary>
+    /// Total spill-file threshold that contributes a high-pressure signal.
+    /// </summary>
+    public int SpillPressureTotalFilesThreshold { get; init; } = 4_000;
+
+    /// <summary>
+    /// Active-shard threshold that contributes a high-pressure signal.
+    /// </summary>
+    public int SpillPressureActiveShardsThreshold { get; init; } = 48;
+
+    /// <summary>
+    /// Spill-shard imbalance ratio threshold (max/avg) that contributes a high-pressure signal.
+    /// </summary>
+    public double SpillPressureImbalanceRatioThreshold { get; init; } = 1.75;
+
+    /// <summary>
+    /// Sustained spill-pressure window required before spill signals influence scale-out decisions.
+    /// </summary>
+    public TimeSpan SpillPressureSustainedWindow { get; init; } = TimeSpan.FromSeconds(20);
 }

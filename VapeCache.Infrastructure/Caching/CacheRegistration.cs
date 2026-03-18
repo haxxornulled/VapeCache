@@ -69,7 +69,8 @@ public static class CacheRegistration
                 sp.GetRequiredService<IOptionsMonitor<RedisMultiplexerOptions>>(),
                 sp.GetRequiredService<IOptionsMonitor<RedisConnectionOptions>>(),
                 sp.GetService<ILogger<RedisCommandExecutor>>(),
-                sp.GetService<IEnterpriseFeatureGate>()));
+                sp.GetService<IEnterpriseFeatureGate>(),
+                sp.GetService<ISpillStoreDiagnostics>()));
         services.AddSingleton<InMemoryCommandExecutor>();
         services.TryAddSingleton<IRedisFallbackCommandExecutor, InMemoryCommandExecutor>();
 

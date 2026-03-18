@@ -187,6 +187,20 @@ internal sealed class RedisMultiplexerOptionsValidator : IValidateOptions<RedisM
         if (options.ReconnectStormFailureRatePerSecThreshold <= 0)
             AddFailure(ref failures, "RedisMultiplexer:ReconnectStormFailureRatePerSecThreshold must be > 0.");
 
+        if (options.SpillPressureTotalFilesThreshold <= 0)
+            AddFailure(ref failures, "RedisMultiplexer:SpillPressureTotalFilesThreshold must be > 0.");
+
+        if (options.SpillPressureActiveShardsThreshold <= 0)
+            AddFailure(ref failures, "RedisMultiplexer:SpillPressureActiveShardsThreshold must be > 0.");
+
+        if (double.IsNaN(options.SpillPressureImbalanceRatioThreshold) || double.IsInfinity(options.SpillPressureImbalanceRatioThreshold))
+            AddFailure(ref failures, "RedisMultiplexer:SpillPressureImbalanceRatioThreshold must be finite.");
+        else if (options.SpillPressureImbalanceRatioThreshold <= 0)
+            AddFailure(ref failures, "RedisMultiplexer:SpillPressureImbalanceRatioThreshold must be > 0.");
+
+        if (options.SpillPressureSustainedWindow <= TimeSpan.Zero)
+            AddFailure(ref failures, "RedisMultiplexer:SpillPressureSustainedWindow must be > 0.");
+
         return failures is null
             ? ValidateOptionsResult.Success
             : ValidateOptionsResult.Fail(failures);

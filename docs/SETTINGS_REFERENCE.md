@@ -483,6 +483,11 @@ Configuration options for Redis reconciliation (syncing in-memory writes back to
 | FlapToggleThreshold | int | 4 | Alternating up/down scale toggles required to trigger flap protection. |
 | AutoscaleFreezeDuration | TimeSpan | TimeSpan.FromMinutes(2) | Freeze duration applied by guardrails (flap detection, reconnect storm, scale-rate limit). |
 | ReconnectStormFailureRatePerSecThreshold | double | 2.0 | Failure-rate threshold (failures/sec across mux lanes) that triggers reconnect-storm freeze. |
+| EnableSpillPressureSignals | bool | true | Enables spill pressure signals as first-class autoscaler inputs when spill diagnostics are available. |
+| SpillPressureTotalFilesThreshold | int | 4_000 | Total spill-file threshold that contributes a high-pressure signal. |
+| SpillPressureActiveShardsThreshold | int | 48 | Active-shard threshold that contributes a high-pressure signal. |
+| SpillPressureImbalanceRatioThreshold | double | 1.75 | Spill-shard imbalance ratio threshold (max/avg) that contributes a high-pressure signal. |
+| SpillPressureSustainedWindow | TimeSpan | TimeSpan.FromSeconds(20) | Sustained spill-pressure window required before spill signals influence scale-out decisions. |
 
 ## GroceryStoreStressOptions
 

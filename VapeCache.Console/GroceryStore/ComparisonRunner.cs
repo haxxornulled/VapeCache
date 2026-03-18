@@ -368,6 +368,26 @@ public static class ComparisonRunner
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_DEDICATED_LANE_WORKERS"),
             configuration["GroceryStoreComparison:MuxDedicatedLaneWorkers"],
             true);
+        var muxEnableSpillPressureSignals = GetBoolFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_ENABLE_SPILL_PRESSURE_SIGNALS"),
+            configuration["GroceryStoreComparison:MuxEnableSpillPressureSignals"],
+            true);
+        var muxSpillPressureTotalFilesThreshold = GetIntFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SPILL_FILES_THRESHOLD"),
+            configuration["GroceryStoreComparison:MuxSpillPressureTotalFilesThreshold"],
+            4000);
+        var muxSpillPressureActiveShardsThreshold = GetIntFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SPILL_ACTIVE_SHARDS_THRESHOLD"),
+            configuration["GroceryStoreComparison:MuxSpillPressureActiveShardsThreshold"],
+            48);
+        var muxSpillPressureImbalanceRatioThreshold = GetDoubleFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SPILL_IMBALANCE_RATIO_THRESHOLD"),
+            configuration["GroceryStoreComparison:MuxSpillPressureImbalanceRatioThreshold"],
+            1.75d);
+        var muxSpillPressureSustainedWindow = GetTimeSpanFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SPILL_SUSTAINED_WINDOW_SECONDS"),
+            configuration["GroceryStoreComparison:MuxSpillPressureSustainedWindowSeconds"],
+            TimeSpan.FromSeconds(20));
         var muxProfile = GetTransportProfileFromSources(
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_MUX_PROFILE"),
             configuration["GroceryStoreComparison:MuxProfile"],
@@ -379,9 +399,56 @@ public static class ComparisonRunner
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_VAPE_EXECUTOR_MODE"),
             configuration["GroceryStoreComparison:VapeExecutorMode"],
             VapeExecutorMode.Raw);
+        var enableDiskSpill = GetBoolFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_ENABLE_DISK_SPILL"),
+            configuration["GroceryStoreComparison:EnableDiskSpill"],
+            false);
+        var spillThresholdBytes = GetIntFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SPILL_THRESHOLD_BYTES"),
+            configuration["GroceryStoreComparison:SpillThresholdBytes"],
+            256 * 1024);
+        var spillPrimeRecords = GetIntFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SPILL_PRIME_RECORDS"),
+            configuration["GroceryStoreComparison:SpillPrimeRecords"],
+            0,
+            allowZero: true);
+        var spillPrimePayloadBytes = GetIntFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SPILL_PRIME_PAYLOAD_BYTES"),
+            configuration["GroceryStoreComparison:SpillPrimePayloadBytes"],
+            64 * 1024);
+        var spillDirectory = Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SPILL_DIRECTORY");
+        if (string.IsNullOrWhiteSpace(spillDirectory))
+            spillDirectory = configuration["GroceryStoreComparison:SpillDirectory"];
+        var hybridFastPath = GetBoolFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_HYBRID_FAST_PATH"),
+            configuration["GroceryStoreComparison:HybridFastPath"],
+            true);
+        var hybridAdmissionGate = GetBoolFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_HYBRID_ADMISSION_GATE"),
+            configuration["GroceryStoreComparison:HybridAdmissionGate"],
+            true);
+        var hybridAdmissionLimit = GetIntFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT"),
+            configuration["GroceryStoreComparison:HybridAdmissionLimit"],
+            0,
+            allowZero: true);
+        var hybridAdmissionWaitMs = GetIntFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_HYBRID_ADMISSION_WAIT_MS"),
+            configuration["GroceryStoreComparison:HybridAdmissionWaitMs"],
+            2,
+            allowZero: true);
+
+        Environment.SetEnvironmentVariable("VAPECACHE_HYBRID_FAST_HEALTHY_PATH", hybridFastPath ? "1" : "0");
+        Environment.SetEnvironmentVariable("VAPECACHE_HYBRID_ADMISSION_GATE", hybridAdmissionGate ? "1" : "0");
+        Environment.SetEnvironmentVariable("VAPECACHE_HYBRID_PRIMARY_ADMISSION_LIMIT", hybridAdmissionLimit.ToString(CultureInfo.InvariantCulture));
+        Environment.SetEnvironmentVariable("VAPECACHE_HYBRID_PRIMARY_ADMISSION_WAIT_MS", hybridAdmissionWaitMs.ToString(CultureInfo.InvariantCulture));
 
         System.Console.WriteLine(
-            $"[VapeConfig] ExecutorMode={executorMode}, Mux.Profile={muxProfile}, Mux.Connections={muxConnections}, Mux.BulkLanes={muxBulkLaneConnections}, Mux.MaxInFlight={muxInFlight}, Mux.Coalesce={muxCoalesce}, Mux.AdaptiveCoalesce={muxAdaptiveCoalescing}, Mux.SocketReader={muxSocketRespReader}, Mux.DedicatedWorkers={muxDedicatedLaneWorkers}, Mux.ResponseTimeoutMs={muxResponseTimeoutMs}");
+            $"[VapeConfig] ExecutorMode={executorMode}, Mux.Profile={muxProfile}, Mux.Connections={muxConnections}, Mux.BulkLanes={muxBulkLaneConnections}, Mux.MaxInFlight={muxInFlight}, Mux.Coalesce={muxCoalesce}, Mux.AdaptiveCoalesce={muxAdaptiveCoalescing}, Mux.SocketReader={muxSocketRespReader}, Mux.DedicatedWorkers={muxDedicatedLaneWorkers}, Mux.ResponseTimeoutMs={muxResponseTimeoutMs}, SpillSignals={muxEnableSpillPressureSignals}, SpillFilesThreshold={muxSpillPressureTotalFilesThreshold}, SpillActiveShardsThreshold={muxSpillPressureActiveShardsThreshold}, SpillImbalanceThreshold={muxSpillPressureImbalanceRatioThreshold:F2}, SpillSustainedWindow={muxSpillPressureSustainedWindow.TotalSeconds:N0}s");
+        System.Console.WriteLine(
+            $"[HybridConfig] FastPath={hybridFastPath}, AdmissionGate={hybridAdmissionGate}, AdmissionLimit={hybridAdmissionLimit}, AdmissionWaitMs={hybridAdmissionWaitMs}");
+        System.Console.WriteLine(
+            $"[SpillConfig] DiskSpill={enableDiskSpill}, ThresholdBytes={spillThresholdBytes}, SpillDir={spillDirectory ?? "<default>"}, PrimeRecords={spillPrimeRecords}, PrimePayloadBytes={spillPrimePayloadBytes}");
         System.Console.WriteLine($"[VapeConfig] KeyPrefix={keyPrefix}");
 
         // Logging
@@ -458,6 +525,21 @@ public static class ComparisonRunner
             typeof(RedisMultiplexerOptions)
                 .GetProperty(nameof(RedisMultiplexerOptions.BulkLaneResponseTimeout))!
                 .SetValue(options, muxResponseTimeoutMs <= 0 ? TimeSpan.FromSeconds(5) : TimeSpan.FromMilliseconds(muxResponseTimeoutMs));
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.EnableSpillPressureSignals))!
+                .SetValue(options, muxEnableSpillPressureSignals);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.SpillPressureTotalFilesThreshold))!
+                .SetValue(options, muxSpillPressureTotalFilesThreshold);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.SpillPressureActiveShardsThreshold))!
+                .SetValue(options, muxSpillPressureActiveShardsThreshold);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.SpillPressureImbalanceRatioThreshold))!
+                .SetValue(options, muxSpillPressureImbalanceRatioThreshold);
+            typeof(RedisMultiplexerOptions)
+                .GetProperty(nameof(RedisMultiplexerOptions.SpillPressureSustainedWindow))!
+                .SetValue(options, muxSpillPressureSustainedWindow);
         });
         services.AddOptions<CacheStampedeOptions>().Configure(options =>
         {
@@ -488,6 +570,18 @@ public static class ComparisonRunner
         else
         {
             services.AddVapecacheCaching();
+            if (enableDiskSpill)
+            {
+                services.AddVapeCachePersistence();
+            }
+
+            services.AddOptions<InMemorySpillOptions>().Configure(options =>
+            {
+                options.EnableSpillToDisk = enableDiskSpill;
+                options.SpillThresholdBytes = Math.Max(1, spillThresholdBytes);
+                if (!string.IsNullOrWhiteSpace(spillDirectory))
+                    options.SpillDirectory = spillDirectory;
+            });
         }
 
         if (track == GroceryComparisonTrack.ApplesToApples)
@@ -507,6 +601,14 @@ public static class ComparisonRunner
         var provider = services.BuildServiceProvider();
         try
         {
+            if (executorMode == VapeExecutorMode.HybridFailover &&
+                enableDiskSpill &&
+                spillPrimeRecords > 0 &&
+                spillPrimePayloadBytes > 0)
+            {
+                await PrimeSpillStoreAsync(provider, spillPrimeRecords, spillPrimePayloadBytes, CancellationToken.None).ConfigureAwait(false);
+            }
+
             var service = provider.GetRequiredService<IGroceryStoreService>();
             var logger = provider.GetRequiredService<ILogger<GroceryStoreComparisonStressTest>>();
 
@@ -529,6 +631,31 @@ public static class ComparisonRunner
         {
             await provider.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    private static async Task PrimeSpillStoreAsync(
+        IServiceProvider provider,
+        int records,
+        int payloadBytes,
+        CancellationToken ct)
+    {
+        var spillStore = provider.GetService<IInMemorySpillStore>();
+        if (spillStore is null)
+            return;
+
+        var count = Math.Max(0, records);
+        var size = Math.Max(1, payloadBytes);
+        var payload = GC.AllocateUninitializedArray<byte>(size);
+        for (var i = 0; i < payload.Length; i++)
+            payload[i] = unchecked((byte)(i * 31 + 17));
+
+        for (var i = 0; i < count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            await spillStore.WriteAsync(Guid.NewGuid(), payload, ct).ConfigureAwait(false);
+        }
+
+        System.Console.WriteLine($"[SpillPrime] Wrote {count:N0} records of {size:N0} bytes to spill store.");
     }
 
     private static void PrintBenchmarkHeader(
@@ -906,6 +1033,24 @@ public static class ComparisonRunner
         return fallback;
     }
 
+    private static double GetDoubleFromSources(string? envValue, string? configValue, double fallback)
+    {
+        if (TryParseDoubleInvariant(envValue, out var parsed))
+            return parsed;
+        if (TryParseDoubleInvariant(configValue, out parsed))
+            return parsed;
+        return fallback;
+    }
+
+    private static TimeSpan GetTimeSpanFromSources(string? envValue, string? configValue, TimeSpan fallback)
+    {
+        if (TryParseTimeSpanOrSeconds(envValue, out var parsed))
+            return parsed;
+        if (TryParseTimeSpanOrSeconds(configValue, out parsed))
+            return parsed;
+        return fallback;
+    }
+
     private static bool TryParseInt(string? value, bool allowZero, out int parsed)
     {
         parsed = 0;
@@ -916,6 +1061,27 @@ public static class ComparisonRunner
         if (!allowZero && parsed == 0)
             return false;
         return true;
+    }
+
+    private static bool TryParseDoubleInvariant(string? value, out double parsed)
+        => double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out parsed);
+
+    private static bool TryParseTimeSpanOrSeconds(string? value, out TimeSpan parsed)
+    {
+        parsed = default;
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        if (TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out parsed) && parsed > TimeSpan.Zero)
+            return true;
+
+        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds) && seconds > 0d)
+        {
+            parsed = TimeSpan.FromSeconds(seconds);
+            return true;
+        }
+
+        return false;
     }
 
     private static bool GetBoolFromSources(string? envValue, string? configValue, bool fallback)

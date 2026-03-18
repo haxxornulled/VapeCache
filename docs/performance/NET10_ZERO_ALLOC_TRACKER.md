@@ -2,6 +2,8 @@
 
 This tracker maps .NET 10 performance guidance to concrete VapeCache work items.
 
+Companion standards: [NET10_ENGINEERING_CONSTANTS.md](NET10_ENGINEERING_CONSTANTS.md)
+
 ## Completed in this pass
 
 - `VapeCache.UI`: migrated active components to code-behind partial classes.

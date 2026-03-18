@@ -8,9 +8,9 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <UiFrontendDir>$(MSBuildProjectDirectory)\ui</UiFrontendDir>
     <UiFrontendStamp>$(MSBuildProjectDirectory)\obj\ui-vite.stamp</UiFrontendStamp>
-    <VapeCachePackageVersion>1.2.13</VapeCachePackageVersion>
+    <VapeCachePackageVersion>1.2.14</VapeCachePackageVersion>
     <EnableVapeCacheEnterprisePackages>false</EnableVapeCacheEnterprisePackages>
-    <VapeCacheEnterprisePackageVersion>1.2.13</VapeCacheEnterprisePackageVersion>
+    <VapeCacheEnterprisePackageVersion>1.2.14</VapeCacheEnterprisePackageVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -57,3 +57,4 @@
   </Target>
 
 </Project>
+

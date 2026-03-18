@@ -557,7 +557,7 @@ public interface IRedisMultiplexerDiagnostics
 }
 ```
 
-`RedisAutoscalerSnapshot` includes current/target connection counts, queue and inflight pressure, rolling p95/p99, freeze state, and last scale decision metadata.
+`RedisAutoscalerSnapshot` includes current/target connection counts, queue and inflight pressure, rolling p95/p99, freeze state, last scale decision metadata, plus spill-pressure telemetry (`spillSignalCount`, `spillTotalFiles`, `spillActiveShards`, `spillImbalanceRatio`, `pressureScore`, `pressureTier`).
 
 `RedisMuxLaneSnapshot` exposes per-lane transport counters and queue pressure for Aspire/dashboard graphing (`laneIndex`, `connectionId`, `role`, `writeQueueDepth`, `inFlight`, `inFlightUtilization`, `bytesSent`, `bytesReceived`, `operations`, `failures`, `responses`, `orphanedResponses`, `responseSequenceMismatches`, `transportResets`, `healthy`).
 

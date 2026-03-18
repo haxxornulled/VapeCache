@@ -58,6 +58,7 @@ flowchart TD
     S --> S2[Avg/Max queue depth]
     S --> S3[Timeout rate per sec]
     S --> S4[Rolling p95/p99 latency]
+    S --> S5[Spill pressure signals]
     S1 --> D{High pressure?}
     S2 --> D
     S3 --> D
@@ -70,6 +71,8 @@ flowchart TD
     C2 --> T
     D -->|No action| T
 ```
+
+Spill pressure contributes to scale-up only after `SpillPressureSustainedWindow` is satisfied. This keeps short spill bursts from causing lane churn.
 
 ## Hysteresis Model
 
@@ -118,6 +121,11 @@ stateDiagram-v2
 | `FlapToggleThreshold` | int | Alternating up/down events before freeze | 3-5 |
 | `AutoscaleFreezeDuration` | timespan | Freeze period after guardrail trigger | 1-5 min |
 | `ReconnectStormFailureRatePerSecThreshold` | double | Failure-rate trigger for reconnect-storm freeze | 1-5/s |
+| `EnableSpillPressureSignals` | bool | Enables spill diagnostics as autoscaler signals | Keep `true` when spill is enabled |
+| `SpillPressureTotalFilesThreshold` | int | Spill-file count pressure trigger | Tune to expected steady-state |
+| `SpillPressureActiveShardsThreshold` | int | Active spill-shard pressure trigger | Higher for large shard fanout |
+| `SpillPressureImbalanceRatioThreshold` | double | Shard skew trigger (max/avg) | 1.5-3.0 typical |
+| `SpillPressureSustainedWindow` | timespan | Required spill-pressure duration before scale-out contribution | 30-120s typical |
 
 ### Startup Guardrail Invariants
 
@@ -157,7 +165,12 @@ These autoscaler relationships are validated at startup and normalized at runtim
     "MaxScaleEventsPerMinute": 2,
     "FlapToggleThreshold": 4,
     "AutoscaleFreezeDuration": "00:02:00",
-    "ReconnectStormFailureRatePerSecThreshold": 2.0
+    "ReconnectStormFailureRatePerSecThreshold": 2.0,
+    "EnableSpillPressureSignals": true,
+    "SpillPressureTotalFilesThreshold": 4000,
+    "SpillPressureActiveShardsThreshold": 48,
+    "SpillPressureImbalanceRatioThreshold": 1.75,
+    "SpillPressureSustainedWindow": "00:00:20"
   }
 }
 ```
@@ -198,6 +211,12 @@ Autoscaler diagnostics payload fields:
 - `autoscaler.lastScaleEventUtc`
 - `autoscaler.lastScaleDirection`
 - `autoscaler.lastScaleReason`
+- `autoscaler.spillSignalCount`
+- `autoscaler.spillTotalFiles`
+- `autoscaler.spillActiveShards`
+- `autoscaler.spillImbalanceRatio`
+- `autoscaler.pressureScore`
+- `autoscaler.pressureTier`
 
 ## Operator Checklist
 
@@ -221,6 +240,7 @@ Scale-up can occur only when all are true:
      - queue pressure high
      - timeout rate high
      - p99 above threshold
+     - sustained spill pressure (`SpillPressureSustainedWindow`)
 
 Scale-down can occur only when all are true:
 
@@ -243,7 +263,9 @@ A scale event is blocked when any guardrail triggers:
 8. `blocked:scaledown-window`
 9. `blocked:scaleup-cooldown`
 10. `blocked:scaledown-cooldown`
-11. `blocked:pressure-insufficient`
+11. `blocked:spill-window`
+12. `blocked:spill-pressure`
+13. `blocked:pressure-insufficient`
 
 ## Enterprise Autoscaler Quick Tuning Playbook
 

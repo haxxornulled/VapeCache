@@ -42,6 +42,11 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.Equal(4, o.FlapToggleThreshold);
         Assert.Equal(TimeSpan.FromMinutes(2), o.AutoscaleFreezeDuration);
         Assert.Equal(2.0, o.ReconnectStormFailureRatePerSecThreshold);
+        Assert.True(o.EnableSpillPressureSignals);
+        Assert.Equal(4_000, o.SpillPressureTotalFilesThreshold);
+        Assert.Equal(48, o.SpillPressureActiveShardsThreshold);
+        Assert.Equal(1.75, o.SpillPressureImbalanceRatioThreshold);
+        Assert.Equal(TimeSpan.FromSeconds(20), o.SpillPressureSustainedWindow);
     }
 
     [Fact]
@@ -80,7 +85,12 @@ public sealed class RedisMultiplexerOptionsBindingTests
             "MaxScaleEventsPerMinute": 3,
             "FlapToggleThreshold": 5,
             "AutoscaleFreezeDuration": "00:03:00",
-            "ReconnectStormFailureRatePerSecThreshold": 3.5
+            "ReconnectStormFailureRatePerSecThreshold": 3.5,
+            "EnableSpillPressureSignals": false,
+            "SpillPressureTotalFilesThreshold": 25000,
+            "SpillPressureActiveShardsThreshold": 256,
+            "SpillPressureImbalanceRatioThreshold": 2.8,
+            "SpillPressureSustainedWindow": "00:01:00"
           }
         }
         """;
@@ -128,5 +138,10 @@ public sealed class RedisMultiplexerOptionsBindingTests
         Assert.Equal(5, o.FlapToggleThreshold);
         Assert.Equal(TimeSpan.FromMinutes(3), o.AutoscaleFreezeDuration);
         Assert.Equal(3.5, o.ReconnectStormFailureRatePerSecThreshold);
+        Assert.False(o.EnableSpillPressureSignals);
+        Assert.Equal(25_000, o.SpillPressureTotalFilesThreshold);
+        Assert.Equal(256, o.SpillPressureActiveShardsThreshold);
+        Assert.Equal(2.8, o.SpillPressureImbalanceRatioThreshold);
+        Assert.Equal(TimeSpan.FromMinutes(1), o.SpillPressureSustainedWindow);
     }
 }

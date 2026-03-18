@@ -54,6 +54,12 @@
                 <dt>Last Scale UTC</dt><dd>@(autoscaler.LastScaleEventUtc?.ToString("O") ?? "n/a")</dd>
                 <dt>Last Direction</dt><dd>@(autoscaler.LastScaleDirection ?? "n/a")</dd>
                 <dt>Last Reason</dt><dd>@(autoscaler.LastScaleReason ?? "n/a")</dd>
+                <dt>Spill Signals</dt><dd>@GetOptionalInt(autoscaler, "SpillSignalCount")</dd>
+                <dt>Spill Total Files</dt><dd>@GetOptionalLong(autoscaler, "SpillTotalFiles")</dd>
+                <dt>Spill Active Shards</dt><dd>@GetOptionalInt(autoscaler, "SpillActiveShards")</dd>
+                <dt>Spill Imbalance</dt><dd>@GetOptionalDouble(autoscaler, "SpillImbalanceRatio").ToString("F2")</dd>
+                <dt>Pressure Score</dt><dd>@GetOptionalDouble(autoscaler, "PressureScore").ToString("F3")</dd>
+                <dt>Pressure Tier</dt><dd>@GetOptionalString(autoscaler, "PressureTier", "normal")</dd>
             </dl>
         </article>
     }

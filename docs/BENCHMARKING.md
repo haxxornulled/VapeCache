@@ -57,6 +57,28 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -FailBelowRatio 1.0
 ```
 
+Spill-aware autoscaler tuning knobs for grocery runs (`tools/run-grocery-head-to-head.ps1`):
+- `-MuxEnableSpillPressureSignals true|false`
+- `-MuxSpillFilesThreshold <int>`
+- `-MuxSpillActiveShardsThreshold <int>`
+- `-MuxSpillImbalanceRatioThreshold <double>`
+- `-MuxSpillSustainedWindowSeconds <int>`
+- `-EnableDiskSpill true|false`
+- `-SpillThresholdBytes <int>`
+- `-SpillDirectory <path>`
+- `-SpillPrimeRecords <int>`
+- `-SpillPrimePayloadBytes <int>`
+
+Hybrid hot-path guardrail knobs:
+- `-HybridFastPath true|false`
+- `-HybridAdmissionGate true|false`
+- `-HybridAdmissionLimit <int>`
+- `-HybridAdmissionWaitMs <int>`
+
+Track defaults (when `-DisableTrackDefaults` is not used):
+- `apples`: conservative spill pressure thresholds to preserve parity behavior.
+- `optimized`: faster spill pressure response (`files=4000`, `shards=48`, `imbalance=1.75`, `window=20s`).
+
 ## Modes
 
 - `fair`: instrumentation off, minimal observer noise.

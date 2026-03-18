@@ -45,6 +45,12 @@ interface AutoscalerSnapshot {
   frozen: boolean;
   lastScaleDirection: string;
   lastScaleReason: string;
+  spillSignalCount: number;
+  spillTotalFiles: number;
+  spillActiveShards: number;
+  spillImbalanceRatio: number;
+  pressureScore: number;
+  pressureTier: string;
 }
 
 interface LiveSample {
@@ -389,7 +395,13 @@ function normalizeAutoscaler(raw: unknown): AutoscalerSnapshot | null {
     rollingP99LatencyMs: asNumber(getValue(raw, "RollingP99LatencyMs", "rollingP99LatencyMs")),
     frozen: asBoolean(getValue(raw, "Frozen", "frozen")),
     lastScaleDirection: asString(getValue(raw, "LastScaleDirection", "lastScaleDirection"), "n/a"),
-    lastScaleReason: asString(getValue(raw, "LastScaleReason", "lastScaleReason"), "n/a")
+    lastScaleReason: asString(getValue(raw, "LastScaleReason", "lastScaleReason"), "n/a"),
+    spillSignalCount: asNumber(getValue(raw, "SpillSignalCount", "spillSignalCount")),
+    spillTotalFiles: asNumber(getValue(raw, "SpillTotalFiles", "spillTotalFiles")),
+    spillActiveShards: asNumber(getValue(raw, "SpillActiveShards", "spillActiveShards")),
+    spillImbalanceRatio: asNumber(getValue(raw, "SpillImbalanceRatio", "spillImbalanceRatio")),
+    pressureScore: asNumber(getValue(raw, "PressureScore", "pressureScore")),
+    pressureTier: asString(getValue(raw, "PressureTier", "pressureTier"), "normal")
   };
 }
 
@@ -449,6 +461,9 @@ function renderAutoscaler(sample: LiveSample): void {
     <div class="meta-row"><span>Queue (avg/max)</span><span>${autoscaler.avgQueueDepth.toFixed(2)} / ${formatInt(autoscaler.maxQueueDepth)}</span></div>
     <div class="meta-row"><span>Timeout rate</span><span>${autoscaler.timeoutRatePerSec.toFixed(2)} /s</span></div>
     <div class="meta-row"><span>Rolling latency</span><span>p95 ${autoscaler.rollingP95LatencyMs.toFixed(2)} ms | p99 ${autoscaler.rollingP99LatencyMs.toFixed(2)} ms</span></div>
+    <div class="meta-row"><span>Pressure</span><span>${escapeHtml(autoscaler.pressureTier)} (${autoscaler.pressureScore.toFixed(3)})</span></div>
+    <div class="meta-row"><span>Spill signals</span><span>${formatInt(autoscaler.spillSignalCount)} | files ${formatInt(autoscaler.spillTotalFiles)} | shards ${formatInt(autoscaler.spillActiveShards)}</span></div>
+    <div class="meta-row"><span>Spill imbalance</span><span>${autoscaler.spillImbalanceRatio.toFixed(2)}</span></div>
     <div class="meta-row"><span>Frozen</span><span class="${autoscaler.frozen ? "warn" : "ok"}">${autoscaler.frozen ? "yes" : "no"}</span></div>
     <div class="meta-row"><span>Last scale</span><span>${escapeHtml(autoscaler.lastScaleDirection)}</span></div>
     <div class="meta-row"><span>Reason</span><span>${escapeHtml(autoscaler.lastScaleReason)}</span></div>`;

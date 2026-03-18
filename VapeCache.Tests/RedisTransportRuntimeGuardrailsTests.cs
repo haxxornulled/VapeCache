@@ -120,7 +120,11 @@ public sealed class RedisTransportRuntimeGuardrailsTests
             MaxScaleEventsPerMinute = 0,
             FlapToggleThreshold = 0,
             AutoscaleFreezeDuration = TimeSpan.Zero,
-            ReconnectStormFailureRatePerSecThreshold = 0
+            ReconnectStormFailureRatePerSecThreshold = 0,
+            SpillPressureTotalFilesThreshold = -1,
+            SpillPressureActiveShardsThreshold = 0,
+            SpillPressureImbalanceRatioThreshold = double.NaN,
+            SpillPressureSustainedWindow = TimeSpan.Zero
         };
 
         var effective = RedisRuntimeOptionsNormalizer.NormalizeMultiplexer(options);
@@ -166,6 +170,10 @@ public sealed class RedisTransportRuntimeGuardrailsTests
         Assert.Equal(2, effective.FlapToggleThreshold);
         Assert.Equal(TimeSpan.FromMinutes(2), effective.AutoscaleFreezeDuration);
         Assert.Equal(0.01, effective.ReconnectStormFailureRatePerSecThreshold);
+        Assert.Equal(4_000, effective.SpillPressureTotalFilesThreshold);
+        Assert.Equal(48, effective.SpillPressureActiveShardsThreshold);
+        Assert.Equal(1.75, effective.SpillPressureImbalanceRatioThreshold);
+        Assert.Equal(TimeSpan.FromSeconds(20), effective.SpillPressureSustainedWindow);
     }
 
     [Fact]

@@ -21,6 +21,24 @@ param(
     [string]$MuxDedicatedWorkers = "true",
     [int]$MuxResponseTimeoutMs = 0,
     [ValidateSet("true", "false")]
+    [string]$MuxEnableSpillPressureSignals = "true",
+    [int]$MuxSpillFilesThreshold = 4000,
+    [int]$MuxSpillActiveShardsThreshold = 48,
+    [double]$MuxSpillImbalanceRatioThreshold = 1.75,
+    [int]$MuxSpillSustainedWindowSeconds = 20,
+    [ValidateSet("true", "false")]
+    [string]$EnableDiskSpill = "false",
+    [int]$SpillThresholdBytes = 262144,
+    [string]$SpillDirectory = "",
+    [int]$SpillPrimeRecords = 0,
+    [int]$SpillPrimePayloadBytes = 65536,
+    [ValidateSet("true", "false")]
+    [string]$HybridFastPath = "true",
+    [ValidateSet("true", "false")]
+    [string]$HybridAdmissionGate = "true",
+    [int]$HybridAdmissionLimit = 10,
+    [int]$HybridAdmissionWaitMs = 2,
+    [ValidateSet("true", "false")]
     [string]$CleanupRunKeys = "true",
     [ValidateSet("auto", "true", "false")]
     [string]$ServerGc = "true",
@@ -69,6 +87,42 @@ if ($MuxInFlight -le 0) {
     throw "MuxInFlight must be greater than zero."
 }
 
+if ($MuxSpillFilesThreshold -le 0) {
+    throw "MuxSpillFilesThreshold must be greater than zero."
+}
+
+if ($MuxSpillActiveShardsThreshold -le 0) {
+    throw "MuxSpillActiveShardsThreshold must be greater than zero."
+}
+
+if ($MuxSpillImbalanceRatioThreshold -le 0) {
+    throw "MuxSpillImbalanceRatioThreshold must be greater than zero."
+}
+
+if ($MuxSpillSustainedWindowSeconds -le 0) {
+    throw "MuxSpillSustainedWindowSeconds must be greater than zero."
+}
+
+if ($SpillThresholdBytes -le 0) {
+    throw "SpillThresholdBytes must be greater than zero."
+}
+
+if ($SpillPrimeRecords -lt 0) {
+    throw "SpillPrimeRecords cannot be negative."
+}
+
+if ($SpillPrimePayloadBytes -le 0) {
+    throw "SpillPrimePayloadBytes must be greater than zero."
+}
+
+if ($HybridAdmissionLimit -lt 0) {
+    throw "HybridAdmissionLimit cannot be negative."
+}
+
+if ($HybridAdmissionWaitMs -lt 0) {
+    throw "HybridAdmissionWaitMs cannot be negative."
+}
+
 if ($MaxHostCpuPercent -le 0) {
     throw "MaxHostCpuPercent must be greater than zero."
 }
@@ -88,6 +142,11 @@ if ($PauseBetweenTrialsMs -lt 0) {
 $hasMaxDegreeOverride = $PSBoundParameters.ContainsKey("MaxDegree")
 $hasMuxConnectionsOverride = $PSBoundParameters.ContainsKey("MuxConnections")
 $hasMuxAdaptiveCoalescingOverride = $PSBoundParameters.ContainsKey("MuxAdaptiveCoalescing")
+$hasMuxSpillFilesThresholdOverride = $PSBoundParameters.ContainsKey("MuxSpillFilesThreshold")
+$hasMuxSpillActiveShardsThresholdOverride = $PSBoundParameters.ContainsKey("MuxSpillActiveShardsThreshold")
+$hasMuxSpillImbalanceRatioThresholdOverride = $PSBoundParameters.ContainsKey("MuxSpillImbalanceRatioThreshold")
+$hasMuxSpillSustainedWindowSecondsOverride = $PSBoundParameters.ContainsKey("MuxSpillSustainedWindowSeconds")
+$hasHybridAdmissionLimitOverride = $PSBoundParameters.ContainsKey("HybridAdmissionLimit")
 
 if ($ServerGc -eq "true") {
     $env:DOTNET_GCServer = "1"
@@ -173,6 +232,11 @@ function Get-EffectiveMuxSettings([string]$RunTrack) {
     $effectiveSocketReader = $MuxSocketReader.ToLowerInvariant()
     $effectiveDedicatedWorkers = $MuxDedicatedWorkers.ToLowerInvariant()
     $effectiveResponseTimeoutMs = "$MuxResponseTimeoutMs"
+    $effectiveEnableSpillPressureSignals = $MuxEnableSpillPressureSignals.ToLowerInvariant()
+    $effectiveSpillFilesThreshold = $MuxSpillFilesThreshold
+    $effectiveSpillActiveShardsThreshold = $MuxSpillActiveShardsThreshold
+    $effectiveSpillImbalanceRatioThreshold = $MuxSpillImbalanceRatioThreshold
+    $effectiveSpillSustainedWindowSeconds = $MuxSpillSustainedWindowSeconds
 
     if (-not $DisableTrackDefaults -and $RunTrack -eq "apples") {
         if (-not $hasMuxConnectionsOverride) {
@@ -183,6 +247,20 @@ function Get-EffectiveMuxSettings([string]$RunTrack) {
         if (-not $hasMuxAdaptiveCoalescingOverride) {
             # Adaptive coalescing can add burst jitter on parity workloads.
             $effectiveAdaptive = "false"
+        }
+
+        if (-not $hasMuxSpillFilesThresholdOverride) {
+            # Parity path should scale mostly from mux pressure, not transient spill churn.
+            $effectiveSpillFilesThreshold = 10000
+        }
+        if (-not $hasMuxSpillActiveShardsThresholdOverride) {
+            $effectiveSpillActiveShardsThreshold = 128
+        }
+        if (-not $hasMuxSpillImbalanceRatioThresholdOverride) {
+            $effectiveSpillImbalanceRatioThreshold = 2.20
+        }
+        if (-not $hasMuxSpillSustainedWindowSecondsOverride) {
+            $effectiveSpillSustainedWindowSeconds = 45
         }
     }
     elseif (-not $DisableTrackDefaults -and $RunTrack -eq "optimized") {
@@ -195,6 +273,20 @@ function Get-EffectiveMuxSettings([string]$RunTrack) {
             # Keep optimized tail latency tight by avoiding adaptive burst jitter.
             $effectiveAdaptive = "false"
         }
+
+        if (-not $hasMuxSpillFilesThresholdOverride) {
+            # Optimized path gets faster reaction to sustained spill growth.
+            $effectiveSpillFilesThreshold = 4000
+        }
+        if (-not $hasMuxSpillActiveShardsThresholdOverride) {
+            $effectiveSpillActiveShardsThreshold = 48
+        }
+        if (-not $hasMuxSpillImbalanceRatioThresholdOverride) {
+            $effectiveSpillImbalanceRatioThreshold = 1.75
+        }
+        if (-not $hasMuxSpillSustainedWindowSecondsOverride) {
+            $effectiveSpillSustainedWindowSeconds = 20
+        }
     }
 
     return [pscustomobject]@{
@@ -206,6 +298,11 @@ function Get-EffectiveMuxSettings([string]$RunTrack) {
         SocketReader = $effectiveSocketReader
         DedicatedWorkers = $effectiveDedicatedWorkers
         ResponseTimeoutMs = $effectiveResponseTimeoutMs
+        EnableSpillPressureSignals = $effectiveEnableSpillPressureSignals
+        SpillFilesThreshold = $effectiveSpillFilesThreshold
+        SpillActiveShardsThreshold = $effectiveSpillActiveShardsThreshold
+        SpillImbalanceRatioThreshold = $effectiveSpillImbalanceRatioThreshold
+        SpillSustainedWindowSeconds = $effectiveSpillSustainedWindowSeconds
     }
 }
 
@@ -243,6 +340,39 @@ function Set-MuxEnvironment([pscustomobject]$Settings) {
     $env:VAPECACHE_BENCH_SOCKET_RESP_READER = "$($Settings.SocketReader)"
     $env:VAPECACHE_BENCH_DEDICATED_LANE_WORKERS = "$($Settings.DedicatedWorkers)"
     $env:VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS = "$($Settings.ResponseTimeoutMs)"
+    $env:VAPECACHE_BENCH_ENABLE_SPILL_PRESSURE_SIGNALS = "$($Settings.EnableSpillPressureSignals)"
+    $env:VAPECACHE_BENCH_SPILL_FILES_THRESHOLD = "$($Settings.SpillFilesThreshold)"
+    $env:VAPECACHE_BENCH_SPILL_ACTIVE_SHARDS_THRESHOLD = "$($Settings.SpillActiveShardsThreshold)"
+    $env:VAPECACHE_BENCH_SPILL_IMBALANCE_RATIO_THRESHOLD = "$($Settings.SpillImbalanceRatioThreshold)"
+    $env:VAPECACHE_BENCH_SPILL_SUSTAINED_WINDOW_SECONDS = "$($Settings.SpillSustainedWindowSeconds)"
+}
+
+function Get-EffectiveHybridAdmissionLimit([string]$RunTrack) {
+    if ($hasHybridAdmissionLimitOverride) {
+        return [Math]::Max(0, $HybridAdmissionLimit)
+    }
+
+    if (-not $DisableTrackDefaults -and $VapeExecutorMode -eq "hybrid") {
+        if ($RunTrack -eq "apples") {
+            # Apples maintains parity best with slightly higher admission headroom.
+            return 12
+        }
+        if ($RunTrack -eq "optimized") {
+            # Optimized track keeps top-end while protecting against degree-12 collapse.
+            return 10
+        }
+    }
+
+    return [Math]::Max(0, $HybridAdmissionLimit)
+}
+
+function Set-HybridEnvironment([string]$RunTrack) {
+    $env:VAPECACHE_BENCH_HYBRID_FAST_PATH = $HybridFastPath.ToLowerInvariant()
+    $env:VAPECACHE_BENCH_HYBRID_ADMISSION_GATE = $HybridAdmissionGate.ToLowerInvariant()
+    $effectiveLimit = Get-EffectiveHybridAdmissionLimit -RunTrack $RunTrack
+    $env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT = "$effectiveLimit"
+    $env:VAPECACHE_BENCH_HYBRID_ADMISSION_WAIT_MS = "$HybridAdmissionWaitMs"
+    return $effectiveLimit
 }
 
 $env:VAPECACHE_RUN_COMPARISON = "true"
@@ -253,6 +383,17 @@ $env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE = $VapeExecutorMode
 $env:VAPECACHE_BENCH_CLEANUP_RUN_KEYS = $CleanupRunKeys.ToLowerInvariant()
 $env:VAPECACHE_BENCH_LOG_LEVEL = $BenchLogLevel
 $env:VAPECACHE_GROCERYSTORE_VERBOSE = $GroceryVerbose.ToLowerInvariant()
+$env:VAPECACHE_BENCH_ENABLE_DISK_SPILL = $EnableDiskSpill.ToLowerInvariant()
+$env:VAPECACHE_BENCH_SPILL_THRESHOLD_BYTES = "$SpillThresholdBytes"
+$env:VAPECACHE_BENCH_SPILL_PRIME_RECORDS = "$SpillPrimeRecords"
+$env:VAPECACHE_BENCH_SPILL_PRIME_PAYLOAD_BYTES = "$SpillPrimePayloadBytes"
+$env:VAPECACHE_BENCH_SPILL_DIRECTORY = $SpillDirectory
+if ($Track -eq "both") {
+    Set-HybridEnvironment -RunTrack "optimized" | Out-Null
+}
+else {
+    Set-HybridEnvironment -RunTrack $Track | Out-Null
+}
 if ($useConnectionString) {
     $env:RedisConnection__ConnectionString = $RedisConnectionString
     $env:RedisConnection__Host = ""
@@ -285,8 +426,12 @@ if ($Track -eq "both") {
     Write-Host "Max degree (optimized): $(if ($null -ne $optimizedMaxDegree) { "$optimizedMaxDegree" } else { "auto" })"
     $applesMux = Get-EffectiveMuxSettings -RunTrack "apples"
     $optimizedMux = Get-EffectiveMuxSettings -RunTrack "optimized"
-    Write-Host "Mux (apples): Profile=$($applesMux.Profile) Connections=$($applesMux.Connections) InFlight=$($applesMux.InFlight) Coalesce=$($applesMux.Coalesce) Adaptive=$($applesMux.Adaptive) SocketReader=$($applesMux.SocketReader) DedicatedWorkers=$($applesMux.DedicatedWorkers) TimeoutMs=$($applesMux.ResponseTimeoutMs)"
-    Write-Host "Mux (optimized): Profile=$($optimizedMux.Profile) Connections=$($optimizedMux.Connections) InFlight=$($optimizedMux.InFlight) Coalesce=$($optimizedMux.Coalesce) Adaptive=$($optimizedMux.Adaptive) SocketReader=$($optimizedMux.SocketReader) DedicatedWorkers=$($optimizedMux.DedicatedWorkers) TimeoutMs=$($optimizedMux.ResponseTimeoutMs)"
+    $applesHybridLimit = Get-EffectiveHybridAdmissionLimit -RunTrack "apples"
+    $optimizedHybridLimit = Get-EffectiveHybridAdmissionLimit -RunTrack "optimized"
+    Write-Host "Mux (apples): Profile=$($applesMux.Profile) Connections=$($applesMux.Connections) InFlight=$($applesMux.InFlight) Coalesce=$($applesMux.Coalesce) Adaptive=$($applesMux.Adaptive) SocketReader=$($applesMux.SocketReader) DedicatedWorkers=$($applesMux.DedicatedWorkers) TimeoutMs=$($applesMux.ResponseTimeoutMs) SpillSignals=$($applesMux.EnableSpillPressureSignals) SpillFiles=$($applesMux.SpillFilesThreshold) SpillShards=$($applesMux.SpillActiveShardsThreshold) SpillImbalance=$([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.##}', $applesMux.SpillImbalanceRatioThreshold)) SpillWindowSec=$($applesMux.SpillSustainedWindowSeconds)"
+    Write-Host "Mux (optimized): Profile=$($optimizedMux.Profile) Connections=$($optimizedMux.Connections) InFlight=$($optimizedMux.InFlight) Coalesce=$($optimizedMux.Coalesce) Adaptive=$($optimizedMux.Adaptive) SocketReader=$($optimizedMux.SocketReader) DedicatedWorkers=$($optimizedMux.DedicatedWorkers) TimeoutMs=$($optimizedMux.ResponseTimeoutMs) SpillSignals=$($optimizedMux.EnableSpillPressureSignals) SpillFiles=$($optimizedMux.SpillFilesThreshold) SpillShards=$($optimizedMux.SpillActiveShardsThreshold) SpillImbalance=$([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.##}', $optimizedMux.SpillImbalanceRatioThreshold)) SpillWindowSec=$($optimizedMux.SpillSustainedWindowSeconds)"
+    Write-Host "Hybrid admission limit (apples): $applesHybridLimit"
+    Write-Host "Hybrid admission limit (optimized): $optimizedHybridLimit"
 }
 else {
     $selectedMaxDegree = Get-EffectiveMaxDegree -RunTrack $Track
@@ -301,6 +446,7 @@ else {
     }
     Write-Host "Max degree: $(if ($null -ne $selectedMaxDegree) { "$selectedMaxDegree$maxDegreeSuffix" } else { "auto" })"
     $selectedMux = Get-EffectiveMuxSettings -RunTrack $Track
+    $selectedHybridLimit = Set-HybridEnvironment -RunTrack $Track
     Set-MuxEnvironment -Settings $selectedMux
     if ($null -ne $selectedMaxDegree) {
         $env:VAPECACHE_BENCH_MAX_DEGREE = "$selectedMaxDegree"
@@ -308,9 +454,12 @@ else {
     else {
         Remove-Item Env:VAPECACHE_BENCH_MAX_DEGREE -ErrorAction SilentlyContinue
     }
-    Write-Host "Mux: Profile=$($selectedMux.Profile) Connections=$($selectedMux.Connections) InFlight=$($selectedMux.InFlight) Coalesce=$($selectedMux.Coalesce) Adaptive=$($selectedMux.Adaptive) SocketReader=$($selectedMux.SocketReader) DedicatedWorkers=$($selectedMux.DedicatedWorkers) TimeoutMs=$($selectedMux.ResponseTimeoutMs)"
+    Write-Host "Mux: Profile=$($selectedMux.Profile) Connections=$($selectedMux.Connections) InFlight=$($selectedMux.InFlight) Coalesce=$($selectedMux.Coalesce) Adaptive=$($selectedMux.Adaptive) SocketReader=$($selectedMux.SocketReader) DedicatedWorkers=$($selectedMux.DedicatedWorkers) TimeoutMs=$($selectedMux.ResponseTimeoutMs) SpillSignals=$($selectedMux.EnableSpillPressureSignals) SpillFiles=$($selectedMux.SpillFilesThreshold) SpillShards=$($selectedMux.SpillActiveShardsThreshold) SpillImbalance=$([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.##}', $selectedMux.SpillImbalanceRatioThreshold)) SpillWindowSec=$($selectedMux.SpillSustainedWindowSeconds)"
+    Write-Host "Hybrid admission limit: $selectedHybridLimit"
 }
 Write-Host "Cleanup: RunKeys=$($env:VAPECACHE_BENCH_CLEANUP_RUN_KEYS)"
+Write-Host "Hybrid: FastPath=$($env:VAPECACHE_BENCH_HYBRID_FAST_PATH) AdmissionGate=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_GATE) AdmissionLimit=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT) AdmissionWaitMs=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_WAIT_MS)"
+Write-Host "Spill: EnableDiskSpill=$($env:VAPECACHE_BENCH_ENABLE_DISK_SPILL) ThresholdBytes=$($env:VAPECACHE_BENCH_SPILL_THRESHOLD_BYTES) PrimeRecords=$($env:VAPECACHE_BENCH_SPILL_PRIME_RECORDS) PrimePayloadBytes=$($env:VAPECACHE_BENCH_SPILL_PRIME_PAYLOAD_BYTES) Directory=$(if ([string]::IsNullOrWhiteSpace($env:VAPECACHE_BENCH_SPILL_DIRECTORY)) { "<default>" } else { $env:VAPECACHE_BENCH_SPILL_DIRECTORY })"
 Write-Host "Logging: BenchLogLevel=$($env:VAPECACHE_BENCH_LOG_LEVEL) GroceryVerbose=$($env:VAPECACHE_GROCERYSTORE_VERBOSE)"
 Write-Host "DOTNET_GCServer: $(if ([string]::IsNullOrWhiteSpace($env:DOTNET_GCServer)) { "default" } else { $env:DOTNET_GCServer })"
 if ($useConnectionString) {
@@ -434,6 +583,8 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
     $previousExecutorMode = $env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE
     $hadMaxDegree = Test-Path Env:VAPECACHE_BENCH_MAX_DEGREE
     $previousMaxDegree = $env:VAPECACHE_BENCH_MAX_DEGREE
+    $hadHybridLimit = Test-Path Env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT
+    $previousHybridLimit = $env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT
     $muxEnvNames = @(
         "VAPECACHE_BENCH_MUX_PROFILE",
         "VAPECACHE_BENCH_MUX_CONNECTIONS",
@@ -442,7 +593,12 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
         "VAPECACHE_BENCH_MUX_ADAPTIVE_COALESCING",
         "VAPECACHE_BENCH_SOCKET_RESP_READER",
         "VAPECACHE_BENCH_DEDICATED_LANE_WORKERS",
-        "VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS"
+        "VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS",
+        "VAPECACHE_BENCH_ENABLE_SPILL_PRESSURE_SIGNALS",
+        "VAPECACHE_BENCH_SPILL_FILES_THRESHOLD",
+        "VAPECACHE_BENCH_SPILL_ACTIVE_SHARDS_THRESHOLD",
+        "VAPECACHE_BENCH_SPILL_IMBALANCE_RATIO_THRESHOLD",
+        "VAPECACHE_BENCH_SPILL_SUSTAINED_WINDOW_SECONDS"
     )
     $previousMuxEnv = @{}
     foreach ($name in $muxEnvNames) {
@@ -450,6 +606,7 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
     }
     $env:VAPECACHE_BENCH_TRACK = $RunTrack
     $env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE = $VapeExecutorMode
+    $effectiveHybridLimit = Set-HybridEnvironment -RunTrack $RunTrack
     $maxDegree = Get-EffectiveMaxDegree -RunTrack $RunTrack
     if ($null -ne $maxDegree) {
         $env:VAPECACHE_BENCH_MAX_DEGREE = "$maxDegree"
@@ -461,7 +618,7 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
     Set-MuxEnvironment -Settings $settings
     $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
     try {
-        Write-Host ("  [TrackConfig] {0}: MaxDegree={1} Profile={2} Connections={3} InFlight={4} Coalesce={5} Adaptive={6} SocketReader={7} DedicatedWorkers={8} TimeoutMs={9}" -f $RunTrack, $(if ($null -ne $maxDegree) { $maxDegree } else { "auto" }), $settings.Profile, $settings.Connections, $settings.InFlight, $settings.Coalesce, $settings.Adaptive, $settings.SocketReader, $settings.DedicatedWorkers, $settings.ResponseTimeoutMs)
+        Write-Host ("  [TrackConfig] {0}: MaxDegree={1} Profile={2} Connections={3} InFlight={4} Coalesce={5} Adaptive={6} SocketReader={7} DedicatedWorkers={8} TimeoutMs={9} SpillSignals={10} SpillFiles={11} SpillShards={12} SpillImbalance={13} SpillWindowSec={14} HybridAdmissionLimit={15}" -f $RunTrack, $(if ($null -ne $maxDegree) { $maxDegree } else { "auto" }), $settings.Profile, $settings.Connections, $settings.InFlight, $settings.Coalesce, $settings.Adaptive, $settings.SocketReader, $settings.DedicatedWorkers, $settings.ResponseTimeoutMs, $settings.EnableSpillPressureSignals, $settings.SpillFilesThreshold, $settings.SpillActiveShardsThreshold, $settings.SpillImbalanceRatioThreshold, $settings.SpillSustainedWindowSeconds, $effectiveHybridLimit)
         $PSNativeCommandUseErrorActionPreference = $false
         $runOutput = @(dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1)
         $parsed = Parse-BenchmarkOutput -OutputLines $runOutput
@@ -489,6 +646,12 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
         }
         else {
             Remove-Item Env:VAPECACHE_BENCH_MAX_DEGREE -ErrorAction SilentlyContinue
+        }
+        if ($hadHybridLimit) {
+            $env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT = $previousHybridLimit
+        }
+        else {
+            Remove-Item Env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT -ErrorAction SilentlyContinue
         }
 
         $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference

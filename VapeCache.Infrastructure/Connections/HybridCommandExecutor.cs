@@ -12,6 +12,10 @@ namespace VapeCache.Infrastructure.Connections;
 /// </summary>
 internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRedisMultiplexerDiagnostics
 {
+    private const string FastPathEnvVar = "VAPECACHE_HYBRID_FAST_HEALTHY_PATH";
+    private const string AdmissionGateEnabledEnvVar = "VAPECACHE_HYBRID_ADMISSION_GATE";
+    private const string AdmissionLimitEnvVar = "VAPECACHE_HYBRID_PRIMARY_ADMISSION_LIMIT";
+    private const string AdmissionWaitMsEnvVar = "VAPECACHE_HYBRID_PRIMARY_ADMISSION_WAIT_MS";
     private readonly RedisCommandExecutor _redis;
     private readonly IRedisFallbackCommandExecutor _fallback;
     private readonly IRedisCircuitBreakerState _breakerState;
@@ -20,6 +24,9 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
     private readonly ICurrentCacheService _current;
     private readonly ILogger<HybridCommandExecutor> _logger;
     private readonly IOptionsMonitor<RedisCircuitBreakerOptions> _breakerOptions;
+    private readonly bool _enableHealthyFastPath;
+    private readonly SemaphoreSlim? _primaryAdmissionGate;
+    private readonly TimeSpan _primaryAdmissionWaitTimeout;
     private RedisCircuitBreakerOptions _breaker => _breakerOptions.CurrentValue;
     private int _halfOpenProbes;
 
@@ -41,6 +48,15 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
         _current = current;
         _logger = logger;
         _breakerOptions = breakerOptions;
+        _enableHealthyFastPath = GetEnvironmentBool(FastPathEnvVar, fallback: true);
+        var enableAdmissionGate = GetEnvironmentBool(AdmissionGateEnabledEnvVar, fallback: true);
+        var configuredAdmissionLimit = GetEnvironmentInt(AdmissionLimitEnvVar, fallback: 0);
+        var configuredAdmissionWaitMs = GetEnvironmentInt(AdmissionWaitMsEnvVar, fallback: 2);
+        _primaryAdmissionWaitTimeout = configuredAdmissionWaitMs <= 0
+            ? TimeSpan.Zero
+            : TimeSpan.FromMilliseconds(configuredAdmissionWaitMs);
+        if (enableAdmissionGate && configuredAdmissionLimit > 0)
+            _primaryAdmissionGate = new SemaphoreSlim(configuredAdmissionLimit, configuredAdmissionLimit);
     }
 
     /// <summary>
@@ -89,6 +105,97 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
             _cts?.Dispose();
             if (_tookSlot)
                 Interlocked.Decrement(ref _owner._halfOpenProbes);
+        }
+    }
+
+    private readonly struct AdmissionScope : IDisposable
+    {
+        private readonly SemaphoreSlim? _gate;
+        private readonly bool _ownsSlot;
+
+        public bool Allowed { get; }
+        public CancellationToken Token { get; }
+
+        private AdmissionScope(bool allowed, bool ownsSlot, SemaphoreSlim? gate, CancellationToken token)
+        {
+            Allowed = allowed;
+            _ownsSlot = ownsSlot;
+            _gate = gate;
+            Token = token;
+        }
+
+        public static AdmissionScope NotRequired(CancellationToken token)
+            => new(allowed: true, ownsSlot: false, gate: null, token: token);
+
+        public static AdmissionScope Acquired(SemaphoreSlim gate, CancellationToken token)
+            => new(allowed: true, ownsSlot: true, gate: gate, token: token);
+
+        public static AdmissionScope Rejected(CancellationToken token)
+            => new(allowed: false, ownsSlot: false, gate: null, token: token);
+
+        public void Dispose()
+        {
+            if (_ownsSlot)
+                _gate!.Release();
+        }
+    }
+
+    private static bool GetEnvironmentBool(string variable, bool fallback)
+    {
+        var raw = Environment.GetEnvironmentVariable(variable);
+        if (string.IsNullOrWhiteSpace(raw))
+            return fallback;
+
+        return raw.Equals("1", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("yes", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("on", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int GetEnvironmentInt(string variable, int fallback)
+    {
+        var raw = Environment.GetEnvironmentVariable(variable);
+        if (string.IsNullOrWhiteSpace(raw))
+            return fallback;
+
+        return int.TryParse(raw, out var parsed) ? parsed : fallback;
+    }
+
+    private bool CanUseHealthyFastPath()
+    {
+        if (!_enableHealthyFastPath)
+            return false;
+
+        var breaker = _breaker;
+        if (!breaker.Enabled)
+            return true;
+
+        if (_breakerState.IsOpen || _breakerState.HalfOpenProbeInFlight)
+            return false;
+
+        return _breakerState.ConsecutiveFailures < breaker.ConsecutiveFailuresToOpen;
+    }
+
+    private ValueTask<AdmissionScope> TryEnterPrimaryAdmissionAsync(CancellationToken ct)
+    {
+        var gate = _primaryAdmissionGate;
+        if (gate is null)
+            return ValueTask.FromResult(AdmissionScope.NotRequired(ct));
+
+        if (gate.Wait(0, CancellationToken.None))
+            return ValueTask.FromResult(AdmissionScope.Acquired(gate, ct));
+
+        if (_primaryAdmissionWaitTimeout <= TimeSpan.Zero)
+            return ValueTask.FromResult(AdmissionScope.Rejected(ct));
+
+        return AwaitGateAsync(gate, ct);
+
+        async ValueTask<AdmissionScope> AwaitGateAsync(SemaphoreSlim admissionGate, CancellationToken token)
+        {
+            var acquired = await admissionGate.WaitAsync(_primaryAdmissionWaitTimeout, token).ConfigureAwait(false);
+            return acquired
+                ? AdmissionScope.Acquired(admissionGate, token)
+                : AdmissionScope.Rejected(token);
         }
     }
 
@@ -400,6 +507,37 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
             return await _fallback.SetAsync(key, value, ttl, ct).ConfigureAwait(false);
         }
 
+        if (CanUseHealthyFastPath())
+        {
+            using var admission = await TryEnterPrimaryAdmissionAsync(ct).ConfigureAwait(false);
+            if (!admission.Allowed)
+            {
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                return await _fallback.SetAsync(key, value, ttl, ct).ConfigureAwait(false);
+            }
+
+            try
+            {
+                var result = await _redis.SetAsync(key, value, ttl, admission.Token).ConfigureAwait(false);
+                _breakerController.MarkRedisSuccess();
+                _current.SetCurrent("redis");
+                return result;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _breakerController.MarkRedisFailure();
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                LogRedisKeyFallback(_logger, ex, "SET", key);
+                return await _fallback.SetAsync(key, value, ttl, ct).ConfigureAwait(false);
+            }
+        }
+
         using var probe = StartProbe(ct);
         if (probe.Throttled)
         {
@@ -589,6 +727,37 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
             return await _fallback.UnlinkAsync(key, ct).ConfigureAwait(false);
         }
 
+        if (CanUseHealthyFastPath())
+        {
+            using var admission = await TryEnterPrimaryAdmissionAsync(ct).ConfigureAwait(false);
+            if (!admission.Allowed)
+            {
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                return await _fallback.UnlinkAsync(key, ct).ConfigureAwait(false);
+            }
+
+            try
+            {
+                var result = await _redis.UnlinkAsync(key, admission.Token).ConfigureAwait(false);
+                _breakerController.MarkRedisSuccess();
+                _current.SetCurrent("redis");
+                return result;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _breakerController.MarkRedisFailure();
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                LogRedisKeyFallback(_logger, ex, "UNLINK", key);
+                return await _fallback.UnlinkAsync(key, ct).ConfigureAwait(false);
+            }
+        }
+
         try
         {
             var result = await _redis.UnlinkAsync(key, ct).ConfigureAwait(false);
@@ -618,6 +787,37 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
             return await _fallback.GetLeaseAsync(key, ct).ConfigureAwait(false);
+        }
+
+        if (CanUseHealthyFastPath())
+        {
+            using var admission = await TryEnterPrimaryAdmissionAsync(ct).ConfigureAwait(false);
+            if (!admission.Allowed)
+            {
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                return await _fallback.GetLeaseAsync(key, ct).ConfigureAwait(false);
+            }
+
+            try
+            {
+                var result = await _redis.GetLeaseAsync(key, admission.Token).ConfigureAwait(false);
+                _breakerController.MarkRedisSuccess();
+                _current.SetCurrent("redis");
+                return result;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _breakerController.MarkRedisFailure();
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                LogRedisKeyFallback(_logger, ex, "GET (lease)", key);
+                return await _fallback.GetLeaseAsync(key, ct).ConfigureAwait(false);
+            }
         }
 
         try
@@ -851,6 +1051,37 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
             return await _fallback.RPushAsync(key, value, ct).ConfigureAwait(false);
+        }
+
+        if (CanUseHealthyFastPath())
+        {
+            using var admission = await TryEnterPrimaryAdmissionAsync(ct).ConfigureAwait(false);
+            if (!admission.Allowed)
+            {
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                return await _fallback.RPushAsync(key, value, ct).ConfigureAwait(false);
+            }
+
+            try
+            {
+                var result = await _redis.RPushAsync(key, value, admission.Token).ConfigureAwait(false);
+                _breakerController.MarkRedisSuccess();
+                _current.SetCurrent("redis");
+                return result;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _breakerController.MarkRedisFailure();
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                LogRedisKeyFallback(_logger, ex, "RPUSH", key);
+                return await _fallback.RPushAsync(key, value, ct).ConfigureAwait(false);
+            }
         }
 
         try
@@ -1144,6 +1375,37 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
             return await _fallback.LRangeAsync(key, start, stop, ct).ConfigureAwait(false);
         }
 
+        if (CanUseHealthyFastPath())
+        {
+            using var admission = await TryEnterPrimaryAdmissionAsync(ct).ConfigureAwait(false);
+            if (!admission.Allowed)
+            {
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                return await _fallback.LRangeAsync(key, start, stop, ct).ConfigureAwait(false);
+            }
+
+            try
+            {
+                var result = await _redis.LRangeAsync(key, start, stop, admission.Token).ConfigureAwait(false);
+                _breakerController.MarkRedisSuccess();
+                _current.SetCurrent("redis");
+                return result;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _breakerController.MarkRedisFailure();
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                LogRedisKeyFallback(_logger, ex, "LRANGE", key);
+                return await _fallback.LRangeAsync(key, start, stop, ct).ConfigureAwait(false);
+            }
+        }
+
         try
         {
             var result = await _redis.LRangeAsync(key, start, stop, ct).ConfigureAwait(false);
@@ -1171,6 +1433,37 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
             return await _fallback.LLenAsync(key, ct).ConfigureAwait(false);
+        }
+
+        if (CanUseHealthyFastPath())
+        {
+            using var admission = await TryEnterPrimaryAdmissionAsync(ct).ConfigureAwait(false);
+            if (!admission.Allowed)
+            {
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                return await _fallback.LLenAsync(key, ct).ConfigureAwait(false);
+            }
+
+            try
+            {
+                var result = await _redis.LLenAsync(key, admission.Token).ConfigureAwait(false);
+                _breakerController.MarkRedisSuccess();
+                _current.SetCurrent("redis");
+                return result;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _breakerController.MarkRedisFailure();
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                LogRedisKeyFallback(_logger, ex, "LLEN", key);
+                return await _fallback.LLenAsync(key, ct).ConfigureAwait(false);
+            }
         }
 
         try
@@ -1312,6 +1605,37 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
             return await _fallback.SAddAsync(key, member, ct).ConfigureAwait(false);
         }
 
+        if (CanUseHealthyFastPath())
+        {
+            using var admission = await TryEnterPrimaryAdmissionAsync(ct).ConfigureAwait(false);
+            if (!admission.Allowed)
+            {
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                return await _fallback.SAddAsync(key, member, ct).ConfigureAwait(false);
+            }
+
+            try
+            {
+                var result = await _redis.SAddAsync(key, member, admission.Token).ConfigureAwait(false);
+                _breakerController.MarkRedisSuccess();
+                _current.SetCurrent("redis");
+                return result;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _breakerController.MarkRedisFailure();
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                LogRedisKeyFallback(_logger, ex, "SADD", key);
+                return await _fallback.SAddAsync(key, member, ct).ConfigureAwait(false);
+            }
+        }
+
         try
         {
             var result = await _redis.SAddAsync(key, member, ct).ConfigureAwait(false);
@@ -1368,6 +1692,37 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
             return await _fallback.SIsMemberAsync(key, member, ct).ConfigureAwait(false);
+        }
+
+        if (CanUseHealthyFastPath())
+        {
+            using var admission = await TryEnterPrimaryAdmissionAsync(ct).ConfigureAwait(false);
+            if (!admission.Allowed)
+            {
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                return await _fallback.SIsMemberAsync(key, member, ct).ConfigureAwait(false);
+            }
+
+            try
+            {
+                var result = await _redis.SIsMemberAsync(key, member, admission.Token).ConfigureAwait(false);
+                _breakerController.MarkRedisSuccess();
+                _current.SetCurrent("redis");
+                return result;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _breakerController.MarkRedisFailure();
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                LogRedisKeyFallback(_logger, ex, "SISMEMBER", key);
+                return await _fallback.SIsMemberAsync(key, member, ct).ConfigureAwait(false);
+            }
         }
 
         try
@@ -1451,6 +1806,37 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
             _stats.IncFallbackToMemory();
             _current.SetCurrent(_fallback.Name);
             return await _fallback.SCardAsync(key, ct).ConfigureAwait(false);
+        }
+
+        if (CanUseHealthyFastPath())
+        {
+            using var admission = await TryEnterPrimaryAdmissionAsync(ct).ConfigureAwait(false);
+            if (!admission.Allowed)
+            {
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                return await _fallback.SCardAsync(key, ct).ConfigureAwait(false);
+            }
+
+            try
+            {
+                var result = await _redis.SCardAsync(key, admission.Token).ConfigureAwait(false);
+                _breakerController.MarkRedisSuccess();
+                _current.SetCurrent("redis");
+                return result;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _breakerController.MarkRedisFailure();
+                _stats.IncFallbackToMemory();
+                _current.SetCurrent(_fallback.Name);
+                LogRedisKeyFallback(_logger, ex, "SCARD", key);
+                return await _fallback.SCardAsync(key, ct).ConfigureAwait(false);
+            }
         }
 
         try
