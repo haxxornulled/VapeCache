@@ -30,9 +30,10 @@ Preferred one-command path:
 ./tools/release-orchestrator.ps1 -Configuration Release -PackageVersion 1.2.10
 ```
 
-CI option:
-- GitHub Actions workflow: `.github/workflows/publish-packages.yml`
-- Trigger via `workflow_dispatch` (optional `packageVersion`) or by pushing a `v*` tag.
+GitHub Actions options:
+- `.github/workflows/ci.yml`: pull request and `main` branch validation (`release-check` with `-SkipPack -UsePublicSourcesOnly`)
+- `.github/workflows/publish-packages.yml`: release publish workflow (tag-triggered or manual `workflow_dispatch`)
+- Trigger publish via `workflow_dispatch` (optional `packageVersion`) or by pushing a `v*` tag.
 
 The orchestrator enforces preflight checks, release-check gates, package packing + smoke tests, feed publishing, remote sync, tag push, and GitHub release updates.
 

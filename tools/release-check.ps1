@@ -4,7 +4,8 @@ param(
     [switch]$SkipBaseline,
     [switch]$SkipPerfGates,
     [switch]$SkipPack,
-    [switch]$IncludeVulnerabilityAudit
+    [switch]$IncludeVulnerabilityAudit,
+    [switch]$UsePublicSourcesOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,7 +43,10 @@ Invoke-ReleaseStep -Name "Release package branding metadata" -Action {
 }
 
 Invoke-ReleaseStep -Name "Restore" -Action {
-    if ($hasNuGetConfig) {
+    if ($UsePublicSourcesOnly) {
+        dotnet restore $solutionPath --source "https://api.nuget.org/v3/index.json"
+    }
+    elseif ($hasNuGetConfig) {
         dotnet restore $solutionPath --configfile $nugetConfigPath
     }
     else {
