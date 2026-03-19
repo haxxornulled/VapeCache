@@ -59,6 +59,7 @@ nul
 tmp/
 .tmp/
 artifacts/
+/.dotnet/
 /Codex/
 **/TestResults/
 tools/VapeCache.DocCommenter/

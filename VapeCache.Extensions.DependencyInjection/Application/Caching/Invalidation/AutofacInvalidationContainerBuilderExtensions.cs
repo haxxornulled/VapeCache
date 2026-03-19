@@ -1,4 +1,4 @@
-﻿using Autofac;
+using Autofac;
 using VapeCache.Application.Abstractions;
 using VapeCache.Application.Caching.Invalidation.Commands;
 using VapeCache.Application.Caching.Invalidation.Events;

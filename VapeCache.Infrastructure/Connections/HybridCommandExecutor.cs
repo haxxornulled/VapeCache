@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Runtime.ExceptionServices;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;
@@ -328,6 +329,7 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
         }
 
         Exception? error = null;
+        var emittedAny = false;
         await using (var enumerator = primary().GetAsyncEnumerator(ct))
         {
             while (true)
@@ -350,6 +352,7 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
                 if (!moved)
                     break;
 
+                emittedAny = true;
                 yield return enumerator.Current;
             }
         }
@@ -365,6 +368,9 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
         _stats.IncFallbackToMemory();
         _current.SetCurrent(_fallback.Name);
         LogRedisOperationFallback(_logger, error, op);
+
+        if (emittedAny)
+            ExceptionDispatchInfo.Capture(error).Throw();
 
         await foreach (var item in fallback().WithCancellation(ct).ConfigureAwait(false))
             yield return item;

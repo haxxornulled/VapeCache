@@ -230,6 +230,8 @@ If normalization occurs, `RedisCommandExecutor` logs a warning so teams can corr
 
 Detailed behavior, diagrams, and tuning guidance:
 - [ENTERPRISE_MULTIPLEXER_AUTOSCALER.md](ENTERPRISE_MULTIPLEXER_AUTOSCALER.md)
+- [MUX_MAINTAINER_GUIDE.md](MUX_MAINTAINER_GUIDE.md)
+- [MUX_PR_REVIEW_CHECKLIST.md](MUX_PR_REVIEW_CHECKLIST.md)
 - Complete options inventory: [SETTINGS_REFERENCE.md](SETTINGS_REFERENCE.md)
 
 ## RedisCircuitBreaker (RedisCircuitBreakerOptions)

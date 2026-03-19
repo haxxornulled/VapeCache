@@ -12,6 +12,7 @@ function Get-ReleasePackageProjects
 {
     @(
         "VapeCache.Core/VapeCache.Core.csproj",
+        "VapeCache.Application/VapeCache.Application.csproj",
         "VapeCache.Abstractions/VapeCache.Abstractions.csproj",
         "VapeCache.Features.Invalidation/VapeCache.Features.Invalidation.csproj",
         "VapeCache.Infrastructure/VapeCache.Infrastructure.csproj",
@@ -27,99 +28,135 @@ function Get-ReleasePackageProjects
     )
 }
 
+function Get-ReleaseSmokePackageIds
+{
+    @(
+        "VapeCache.Runtime",
+        "VapeCache.Application",
+        "VapeCache.Extensions.DependencyInjection",
+        "VapeCache.Extensions.AdminAuth",
+        "VapeCache.Extensions.PubSub",
+        "VapeCache.Extensions.Logging"
+    )
+}
+
+function Get-ReleaseProjectPropertyValue
+{
+    param(
+        [Parameter(Mandatory = $true)][xml]$ProjectXml,
+        [Parameter(Mandatory = $true)][string]$PropertyName
+    )
+
+    $node = $ProjectXml.SelectNodes("/Project/PropertyGroup/$PropertyName") | Select-Object -First 1
+    if ($null -eq $node)
+    {
+        return ""
+    }
+
+    return $node.InnerText.Trim()
+}
+
+function Get-ReleasePackageMetadata
+{
+    $repoRoot = Get-ReleaseRepoRoot
+    $expectedRepositoryUrl = Get-ReleaseRepositoryUrl
+
+    foreach ($project in Get-ReleasePackageProjects)
+    {
+        $projectPath = Join-Path $repoRoot $project
+        if (-not (Test-Path -LiteralPath $projectPath))
+        {
+            throw "Release package project not found: $project"
+        }
+
+        [xml]$projectXml = Get-Content -LiteralPath $projectPath
+        $packageId = Get-ReleaseProjectPropertyValue -ProjectXml $projectXml -PropertyName "PackageId"
+        $version = Get-ReleaseProjectPropertyValue -ProjectXml $projectXml -PropertyName "Version"
+        $repositoryUrl = Get-ReleaseProjectPropertyValue -ProjectXml $projectXml -PropertyName "RepositoryUrl"
+        $packageProjectUrl = Get-ReleaseProjectPropertyValue -ProjectXml $projectXml -PropertyName "PackageProjectUrl"
+        $authors = Get-ReleaseProjectPropertyValue -ProjectXml $projectXml -PropertyName "Authors"
+        $company = Get-ReleaseProjectPropertyValue -ProjectXml $projectXml -PropertyName "Company"
+        $copyright = Get-ReleaseProjectPropertyValue -ProjectXml $projectXml -PropertyName "Copyright"
+
+        if ([string]::IsNullOrWhiteSpace($packageId))
+        {
+            throw "PackageId not found in $project"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($version))
+        {
+            throw "Version not found in $project"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($repositoryUrl))
+        {
+            throw "RepositoryUrl not found in $project"
+        }
+
+        if ($repositoryUrl -ne $expectedRepositoryUrl)
+        {
+            throw "RepositoryUrl mismatch in $project. Expected '$expectedRepositoryUrl' but found '$repositoryUrl'."
+        }
+
+        if ([string]::IsNullOrWhiteSpace($packageProjectUrl))
+        {
+            throw "PackageProjectUrl not found in $project"
+        }
+
+        if ($packageProjectUrl -ne $expectedRepositoryUrl)
+        {
+            throw "PackageProjectUrl mismatch in $project. Expected '$expectedRepositoryUrl' but found '$packageProjectUrl'."
+        }
+
+        [pscustomobject]@{
+            Project           = $project
+            ProjectPath       = $projectPath
+            PackageId         = $packageId
+            Version           = $version
+            RepositoryUrl     = $repositoryUrl
+            PackageProjectUrl = $packageProjectUrl
+            Authors           = $authors
+            Company           = $company
+            Copyright         = $copyright
+        }
+    }
+}
+
 function Assert-ReleasePackageBranding
 {
     $expectedAuthors = "DFWFORSALE INC"
     $expectedCompany = "DFWFORSALE INC"
     $requiredCopyrightToken = "DFWFORSALE INC"
 
-    foreach ($project in Get-ReleasePackageProjects)
+    foreach ($package in Get-ReleasePackageMetadata)
     {
-        $projectPath = Join-Path (Get-ReleaseRepoRoot) $project
-        if (-not (Test-Path -LiteralPath $projectPath))
+        if ($package.Authors -ne $expectedAuthors)
         {
-            throw "Release package project not found: $project"
+            throw "Authors branding mismatch in $($package.Project). Expected '$expectedAuthors' but found '$($package.Authors)'."
         }
 
-        [xml]$projectXml = Get-Content -LiteralPath $projectPath
-        $authorsNode = $projectXml.SelectSingleNode("/Project/PropertyGroup/Authors")
-        $companyNode = $projectXml.SelectSingleNode("/Project/PropertyGroup/Company")
-        $copyrightNode = $projectXml.SelectSingleNode("/Project/PropertyGroup/Copyright")
-
-        $authors = if ($null -eq $authorsNode) { "" } else { $authorsNode.InnerText.Trim() }
-        $company = if ($null -eq $companyNode) { "" } else { $companyNode.InnerText.Trim() }
-        $copyright = if ($null -eq $copyrightNode) { "" } else { $copyrightNode.InnerText.Trim() }
-
-        if ($authors -ne $expectedAuthors)
+        if ($package.Company -ne $expectedCompany)
         {
-            throw "Authors branding mismatch in $project. Expected '$expectedAuthors' but found '$authors'."
+            throw "Company branding mismatch in $($package.Project). Expected '$expectedCompany' but found '$($package.Company)'."
         }
 
-        if ($company -ne $expectedCompany)
+        if ([string]::IsNullOrWhiteSpace($package.Copyright) -or $package.Copyright -notlike "*$requiredCopyrightToken*")
         {
-            throw "Company branding mismatch in $project. Expected '$expectedCompany' but found '$company'."
-        }
-
-        if ([string]::IsNullOrWhiteSpace($copyright) -or $copyright -notlike "*$requiredCopyrightToken*")
-        {
-            throw "Copyright branding mismatch in $project. Expected to contain '$requiredCopyrightToken' but found '$copyright'."
+            throw "Copyright branding mismatch in $($package.Project). Expected to contain '$requiredCopyrightToken' but found '$($package.Copyright)'."
         }
     }
 }
 
 function Get-ReleasePackageVersionInfo
 {
-    $infos = foreach ($project in Get-ReleasePackageProjects)
+    $infos = foreach ($package in Get-ReleasePackageMetadata)
     {
-        $projectPath = Join-Path (Get-ReleaseRepoRoot) $project
-        if (-not (Test-Path -LiteralPath $projectPath))
-        {
-            throw "Release package project not found: $project"
-        }
-
-        [xml]$projectXml = Get-Content -LiteralPath $projectPath
-        $packageId = $projectXml.SelectNodes("/Project/PropertyGroup/PackageId") | Select-Object -First 1
-        $version = $projectXml.SelectNodes("/Project/PropertyGroup/Version") | Select-Object -First 1
-        $repositoryUrl = $projectXml.SelectNodes("/Project/PropertyGroup/RepositoryUrl") | Select-Object -First 1
-        $packageProjectUrl = $projectXml.SelectNodes("/Project/PropertyGroup/PackageProjectUrl") | Select-Object -First 1
-        $expectedRepositoryUrl = Get-ReleaseRepositoryUrl
-
-        if ($null -eq $packageId -or [string]::IsNullOrWhiteSpace($packageId.InnerText))
-        {
-            throw "PackageId not found in $project"
-        }
-
-        if ($null -eq $version -or [string]::IsNullOrWhiteSpace($version.InnerText))
-        {
-            throw "Version not found in $project"
-        }
-
-        if ($null -eq $repositoryUrl -or [string]::IsNullOrWhiteSpace($repositoryUrl.InnerText))
-        {
-            throw "RepositoryUrl not found in $project"
-        }
-
-        if ($repositoryUrl.InnerText.Trim() -ne $expectedRepositoryUrl)
-        {
-            throw "RepositoryUrl mismatch in $project. Expected '$expectedRepositoryUrl' but found '$($repositoryUrl.InnerText.Trim())'."
-        }
-
-        if ($null -eq $packageProjectUrl -or [string]::IsNullOrWhiteSpace($packageProjectUrl.InnerText))
-        {
-            throw "PackageProjectUrl not found in $project"
-        }
-
-        if ($packageProjectUrl.InnerText.Trim() -ne $expectedRepositoryUrl)
-        {
-            throw "PackageProjectUrl mismatch in $project. Expected '$expectedRepositoryUrl' but found '$($packageProjectUrl.InnerText.Trim())'."
-        }
-
         [pscustomobject]@{
-            Project          = $project
-            PackageId        = $packageId.InnerText.Trim()
-            Version          = $version.InnerText.Trim()
-            RepositoryUrl    = $repositoryUrl.InnerText.Trim()
-            PackageProjectUrl = $packageProjectUrl.InnerText.Trim()
+            Project           = $package.Project
+            PackageId         = $package.PackageId
+            Version           = $package.Version
+            RepositoryUrl     = $package.RepositoryUrl
+            PackageProjectUrl = $package.PackageProjectUrl
         }
     }
 

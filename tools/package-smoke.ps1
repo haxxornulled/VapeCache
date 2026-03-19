@@ -1,4 +1,6 @@
 param(
+    [ValidateSet("Debug", "Release")]
+    [string]$Configuration = "Release",
     [string]$PackageOutput = "artifacts/packages",
     [string]$PackageId = "VapeCache.Runtime",
     [string[]]$AdditionalPackageSources = @()
@@ -6,7 +8,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$resolvedPackageOutput = (Resolve-Path -LiteralPath $PackageOutput).Path
+. (Join-Path $PSScriptRoot "release-package-manifest.ps1")
+. (Join-Path $PSScriptRoot "release-common.ps1")
+
+$resolvedPackageOutput = (Resolve-Path -LiteralPath (Resolve-ReleaseAbsolutePath -Path $PackageOutput)).Path
 
 $packagePattern = "^" + [regex]::Escape($PackageId) + "\.(?<version>.+)$"
 
@@ -98,7 +103,7 @@ if ($LASTEXITCODE -ne 0)
 }
 
 Write-Host "Building smoke consumer"
-dotnet build $projectPath -c Release --no-restore
+dotnet build $projectPath -c $Configuration --no-restore
 if ($LASTEXITCODE -ne 0)
 {
     throw "dotnet build failed for the smoke consumer project."

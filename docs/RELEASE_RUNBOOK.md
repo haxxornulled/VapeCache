@@ -14,7 +14,7 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 - git push access for the public OSS repo
 - NuGet.org publish credentials (`NUGET_API_KEY`) with push access for all `VapeCache.*` package IDs
 - GitHub Packages token (`GITHUB_PACKAGES_TOKEN` or `GITHUB_TOKEN`) with `write:packages` and `read:packages` scopes (and repo access for private repos if needed)
-- local environment with `pwsh` and `.NET 10 SDK`
+- local environment with PowerShell (`pwsh` preferred, `powershell.exe` supported) and `.NET 10 SDK`
 
 ## Remote Expectations
 
@@ -27,7 +27,7 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 Preferred one-command path:
 
 ```powershell
-pwsh ./tools/release-orchestrator.ps1 -Configuration Release -PackageVersion 1.2.10
+./tools/release-orchestrator.ps1 -Configuration Release -PackageVersion 1.2.10
 ```
 
 CI option:
@@ -36,24 +36,44 @@ CI option:
 
 The orchestrator enforces preflight checks, release-check gates, package packing + smoke tests, feed publishing, remote sync, tag push, and GitHub release updates.
 
+## Script Roles
+
+Use `tools/release-orchestrator.ps1` as the primary entry point.
+The other scripts support a narrower part of the same release flow:
+
+- `tools/release-orchestrator.ps1`: full OSS release flow, including remote sync, pack, smoke, publish, tags, and GitHub releases
+- `tools/release-check.ps1`: restore, build, tests, optional audits, and package smoke validation
+- `tools/pack-release-packages.ps1`: produce release `.nupkg` artifacts
+- `tools/publish-release-packages.ps1`: publish an already-packed artifact set to a package feed
+- `tools/package-smoke.ps1`: verify a consumer can restore and build against one packed package
+- `tools/release-package-manifest.ps1`: single source of truth for release package list, smoke package list, versions, and branding checks
+- `tools/release-common.ps1`: shared release helper functions used by the executable scripts
+
+This split is intentional:
+
+- manifest data lives in one place
+- shared release mechanics live in one place
+- runnable scripts stay focused on one operator-facing job
+
 1. Confirm local/remote sync.
    - `git fetch origin --tags`
    - `git fetch oss --tags`
    - `git status`
 2. Run release verification:
-   - `pwsh ./tools/release-check.ps1 -Configuration Release`
+   - `./tools/release-check.ps1 -Configuration Release`
 3. Pack release artifacts:
-   - `pwsh ./tools/pack-release-packages.ps1 -PackageVersion 1.2.9`
+   - `./tools/pack-release-packages.ps1 -Configuration Release -PackageVersion 1.2.9`
 4. Publish to NuGet.org:
    - set `NUGET_API_KEY` in the shell or pass `-ApiKey`
-   - `pwsh ./tools/publish-release-packages.ps1 -PackageVersion 1.2.9`
+   - `./tools/publish-release-packages.ps1 -PackageVersion 1.2.9`
    - if you receive HTTP 403, verify the key is valid and has owner/package permissions for every `VapeCache.*` package
 5. Publish to GitHub Packages:
    - set `GITHUB_PACKAGES_TOKEN` (or `GITHUB_TOKEN`) in the shell
-   - `pwsh ./tools/publish-release-packages.ps1 -PackageVersion 1.2.9 -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $env:GITHUB_PACKAGES_TOKEN`
+   - `./tools/publish-release-packages.ps1 -PackageVersion 1.2.9 -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $env:GITHUB_PACKAGES_TOKEN`
    - if you receive HTTP 403, verify token scopes include `write:packages`
 6. Verify push logs (both feeds) include all OSS package IDs:
    - `VapeCache.Core`
+   - `VapeCache.Application`
    - `VapeCache.Abstractions`
    - `VapeCache.Features.Invalidation`
    - `VapeCache.Runtime`

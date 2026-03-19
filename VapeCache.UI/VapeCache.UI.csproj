@@ -8,7 +8,6 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <UiFrontendDir>$(MSBuildProjectDirectory)\ui</UiFrontendDir>
     <UiFrontendStamp>$(MSBuildProjectDirectory)\obj\ui-vite.stamp</UiFrontendStamp>
-    <VapeCachePackageVersion>1.2.14</VapeCachePackageVersion>
     <EnableVapeCacheEnterprisePackages>false</EnableVapeCacheEnterprisePackages>
     <VapeCacheEnterprisePackageVersion>1.2.14</VapeCacheEnterprisePackageVersion>
   </PropertyGroup>
@@ -16,23 +15,24 @@
   <ItemGroup>
     <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="10.0.0" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
-    <PackageReference Include="VapeCache.Runtime" Version="$(VapeCachePackageVersion)" />
-    <PackageReference Include="VapeCache.Features.Invalidation" Version="$(VapeCachePackageVersion)" />
-    <PackageReference Include="VapeCache.Extensions.DependencyInjection" Version="$(VapeCachePackageVersion)" />
-    <PackageReference Include="VapeCache.Extensions.Logging" Version="$(VapeCachePackageVersion)" />
-    <PackageReference Include="VapeCache.Extensions.PubSub" Version="$(VapeCachePackageVersion)" />
-    <PackageReference Include="VapeCache.Extensions.Streams" Version="$(VapeCachePackageVersion)" />
-    <PackageReference Include="VapeCache.Extensions.AspNetCore" Version="$(VapeCachePackageVersion)" />
-    <PackageReference Include="VapeCache.Extensions.Aspire" Version="$(VapeCachePackageVersion)" />
-    <PackageReference Include="VapeCache.Extensions.AdminAuth" Version="$(VapeCachePackageVersion)" />
-    <PackageReference Include="VapeCache.Extensions.EntityFrameworkCore" Version="$(VapeCachePackageVersion)" />
-    <PackageReference Include="VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry" Version="$(VapeCachePackageVersion)" />
     <PackageReference Include="VapeCache.Persistence" Version="$(VapeCacheEnterprisePackageVersion)" Condition="'$(EnableVapeCacheEnterprisePackages)' == 'true'" />
     <PackageReference Include="VapeCache.Reconciliation" Version="$(VapeCacheEnterprisePackageVersion)" Condition="'$(EnableVapeCacheEnterprisePackages)' == 'true'" />
     <PackageReference Include="VapeCache.Licensing" Version="$(VapeCacheEnterprisePackageVersion)" Condition="'$(EnableVapeCacheEnterprisePackages)' == 'true'" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\VapeCache.Application\VapeCache.Application.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.AdminAuth\VapeCache.Extensions.AdminAuth.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.AspNetCore\VapeCache.Extensions.AspNetCore.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.DependencyInjection\VapeCache.Extensions.DependencyInjection.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.EntityFrameworkCore\VapeCache.Extensions.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry\VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.Logging\VapeCache.Extensions.Logging.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.PubSub\VapeCache.Extensions.PubSub.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.Streams\VapeCache.Extensions.Streams.csproj" />
+    <ProjectReference Include="..\VapeCache.Features.Invalidation\VapeCache.Features.Invalidation.csproj" />
+    <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
     <ProjectReference Include="..\VapeCache.ServiceDefaults\VapeCache.ServiceDefaults.csproj" />
   </ItemGroup>
 

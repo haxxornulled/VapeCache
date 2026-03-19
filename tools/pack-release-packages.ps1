@@ -1,4 +1,6 @@
 param(
+    [ValidateSet("Debug", "Release")]
+    [string]$Configuration = "Release",
     [string]$OutputDir = "artifacts/packages",
     [string]$PackageVersion = ""
 )
@@ -6,12 +8,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "release-package-manifest.ps1")
+. (Join-Path $PSScriptRoot "release-common.ps1")
 
 $repoRoot = Get-ReleaseRepoRoot
-if (-not [System.IO.Path]::IsPathRooted($OutputDir))
-{
-    $OutputDir = Join-Path $repoRoot $OutputDir
-}
+$OutputDir = Resolve-ReleaseAbsolutePath -Path $OutputDir -BasePath $repoRoot
 
 $projects = Get-ReleasePackageProjects
 $resolvedPackageVersion = Resolve-ReleasePackageVersion -PackageVersion $PackageVersion
@@ -35,7 +35,7 @@ foreach ($project in $projects)
     $packArgs = @(
         $projectPath
         "-c"
-        "Release"
+        $Configuration
         "--no-restore"
         "-p:Version=$resolvedPackageVersion"
         "-o"

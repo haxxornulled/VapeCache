@@ -10,12 +10,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "release-package-manifest.ps1")
+. (Join-Path $PSScriptRoot "release-common.ps1")
 
 $repoRoot = Get-ReleaseRepoRoot
-if (-not [System.IO.Path]::IsPathRooted($PackageOutput))
-{
-    $PackageOutput = Join-Path $repoRoot $PackageOutput
-}
+$PackageOutput = Resolve-ReleaseAbsolutePath -Path $PackageOutput -BasePath $repoRoot
 
 $resolvedPackageVersion = Resolve-ReleasePackageVersion -PackageVersion $PackageVersion
 $packages = Get-ReleasePackageVersionInfo
@@ -29,26 +27,21 @@ if ([string]::IsNullOrWhiteSpace($ApiKey))
 
 Write-Host "Publishing release packages in dependency-safe order for version $resolvedPackageVersion"
 
-foreach ($package in $packages)
+$artifacts = Get-ReleasePackageArtifacts -Packages $packages -PackageOutput $PackageOutput -PackageVersion $resolvedPackageVersion
+foreach ($artifact in $artifacts)
 {
-    if ($SkipPackageIds -contains $package.PackageId)
+    if ($SkipPackageIds -contains $artifact.PackageId)
     {
-        Write-Host "Skipping package publish for $($package.PackageId) (configured skip list)."
+        Write-Host "Skipping package publish for $($artifact.PackageId) (configured skip list)."
         continue
     }
 
-    $packageFile = Join-Path $PackageOutput "$($package.PackageId).$resolvedPackageVersion.nupkg"
-    if (-not (Test-Path -LiteralPath $packageFile))
+    if ($PSCmdlet.ShouldProcess($artifact.PackageFile, "Push to $Source"))
     {
-        throw "Package artifact not found: $packageFile"
-    }
-
-    if ($PSCmdlet.ShouldProcess($packageFile, "Push to $Source"))
-    {
-        dotnet nuget push $packageFile --source $Source --api-key $ApiKey --skip-duplicate
+        dotnet nuget push $artifact.PackageFile --source $Source --api-key $ApiKey --skip-duplicate
         if ($LASTEXITCODE -ne 0)
         {
-            throw "dotnet nuget push failed for $packageFile"
+            throw "dotnet nuget push failed for $($artifact.PackageFile)"
         }
     }
 }

@@ -4,16 +4,40 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>true</IsPackable>
+    <PackageId>VapeCache.Application</PackageId>
+    <Title>VapeCache Application Layer</Title>
+    <Version>1.2.13</Version>
+    <Authors>DFWFORSALE INC</Authors>
+    <Company>DFWFORSALE INC</Company>
+    <Product>VapeCache.Application</Product>
+    <Description>Application-layer command abstractions and cache invalidation orchestration for clean architecture use cases built on VapeCache.</Description>
+    <PackageTags>redis;cache;clean-architecture;application-layer;invalidation;dotnet</PackageTags>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageIcon>vapecache-icon.png</PackageIcon>
+    <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <RepositoryBranch>main</RepositoryBranch>
+    <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
+    <PackageReleaseNotes>1.2.13 release: packaged the application invalidation command/handler layer so DI and pub/sub integrations restore cleanly for consumers.</PackageReleaseNotes>
+    <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\PACKAGE_README.md" Pack="true" PackagePath="\" />
+    <None Include="..\assets\vapecache-icon.png" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.Core\VapeCache.Core.csproj" />
     <ProjectReference Include="..\VapeCache.Features.Invalidation\VapeCache.Features.Invalidation.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Autofac" Version="9.0.0" />
   </ItemGroup>
 
 </Project>
