@@ -22,7 +22,6 @@ dotnet add package VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry
 dotnet add package VapeCache.Extensions.AspNetCore
 dotnet add package VapeCache.Extensions.Aspire
 dotnet add package VapeCache.Features.Invalidation
-dotnet add package VapeCache.Application
 ```
 
 ## Published Packages
@@ -31,7 +30,6 @@ dotnet add package VapeCache.Application
 |---|---|---|
 | `VapeCache.Runtime` | [NuGet](https://www.nuget.org/packages/VapeCache.Runtime) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.runtime) |
 | `VapeCache.Core` | [NuGet](https://www.nuget.org/packages/VapeCache.Core) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.core) |
-| `VapeCache.Application` | [NuGet](https://www.nuget.org/packages/VapeCache.Application) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.application) |
 | `VapeCache.Abstractions` | [NuGet](https://www.nuget.org/packages/VapeCache.Abstractions) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.abstractions) |
 | `VapeCache.Features.Invalidation` | [NuGet](https://www.nuget.org/packages/VapeCache.Features.Invalidation) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.invalidation) |
 | `VapeCache.Extensions.DependencyInjection` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.DependencyInjection) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.dependencyinjection) |
@@ -47,7 +45,6 @@ dotnet add package VapeCache.Application
 
 - `VapeCache.Runtime`: Redis transport, caching runtime, fallback behavior, telemetry
 - `VapeCache.Core`: shared primitives used by other VapeCache packages
-- `VapeCache.Application`: application-layer command abstractions and invalidation orchestration for clean architecture hosts
 - `VapeCache.Abstractions`: public contracts, options, and shared value types
 - `VapeCache.Extensions.DependencyInjection`: one-call DI facade for runtime registration
 - `VapeCache.Extensions.Logging`: optional Serilog + OTEL logging package with file sink support and optional JSON formatting (`Serilog:Json:*`)

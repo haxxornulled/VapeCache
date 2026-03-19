@@ -73,7 +73,6 @@ This split is intentional:
    - if you receive HTTP 403, verify token scopes include `write:packages`
 6. Verify push logs (both feeds) include all OSS package IDs:
    - `VapeCache.Core`
-   - `VapeCache.Application`
    - `VapeCache.Abstractions`
    - `VapeCache.Features.Invalidation`
    - `VapeCache.Runtime`

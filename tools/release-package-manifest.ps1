@@ -12,7 +12,6 @@ function Get-ReleasePackageProjects
 {
     @(
         "VapeCache.Core/VapeCache.Core.csproj",
-        "VapeCache.Application/VapeCache.Application.csproj",
         "VapeCache.Abstractions/VapeCache.Abstractions.csproj",
         "VapeCache.Features.Invalidation/VapeCache.Features.Invalidation.csproj",
         "VapeCache.Infrastructure/VapeCache.Infrastructure.csproj",
@@ -32,7 +31,6 @@ function Get-ReleaseSmokePackageIds
 {
     @(
         "VapeCache.Runtime",
-        "VapeCache.Application",
         "VapeCache.Extensions.DependencyInjection",
         "VapeCache.Extensions.AdminAuth",
         "VapeCache.Extensions.PubSub",
@@ -143,6 +141,45 @@ function Assert-ReleasePackageBranding
         if ([string]::IsNullOrWhiteSpace($package.Copyright) -or $package.Copyright -notlike "*$requiredCopyrightToken*")
         {
             throw "Copyright branding mismatch in $($package.Project). Expected to contain '$requiredCopyrightToken' but found '$($package.Copyright)'."
+        }
+    }
+
+    Assert-ApplicationLayerPackagingBoundary
+}
+
+function Assert-ApplicationLayerPackagingBoundary
+{
+    $repoRoot = Get-ReleaseRepoRoot
+    $applicationProjectPath = Join-Path $repoRoot "VapeCache.Application/VapeCache.Application.csproj"
+    if (-not (Test-Path -LiteralPath $applicationProjectPath))
+    {
+        throw "Application project not found at expected path: $applicationProjectPath"
+    }
+
+    [xml]$applicationProjectXml = Get-Content -LiteralPath $applicationProjectPath
+    $applicationIsPackable = Get-ReleaseProjectPropertyValue -ProjectXml $applicationProjectXml -PropertyName "IsPackable"
+    if ($applicationIsPackable -eq "true")
+    {
+        throw "Clean architecture boundary violation: VapeCache.Application must remain non-packable."
+    }
+
+    foreach ($project in Get-ReleasePackageProjects)
+    {
+        $projectPath = Join-Path $repoRoot $project
+        [xml]$projectXml = Get-Content -LiteralPath $projectPath
+        $projectReferences = $projectXml.SelectNodes("/Project/ItemGroup/ProjectReference")
+        foreach ($projectReference in $projectReferences)
+        {
+            $include = [string]$projectReference.Include
+            if ([string]::IsNullOrWhiteSpace($include))
+            {
+                continue
+            }
+
+            if ($include -match "(^|[\\/])VapeCache\.Application([\\/])VapeCache\.Application\.csproj$")
+            {
+                throw "Clean architecture boundary violation: release package project '$project' references VapeCache.Application."
+            }
         }
     }
 }
