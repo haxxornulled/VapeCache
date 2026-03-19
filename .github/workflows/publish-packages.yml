@@ -106,19 +106,21 @@ jobs:
             "- $($_.PackageId): published"
           }) -join [Environment]::NewLine
 
-          @"
-## VapeCache $version
+          $notesContent = @(
+            "## VapeCache $version",
+            "",
+            "### NuGet Publish Status",
+            $packageLines,
+            "",
+            "### GitHub Packages Publish Status",
+            $packageLines,
+            "",
+            "### Validation",
+            "- release-check: passed",
+            "- package publish workflow: passed"
+          ) -join [Environment]::NewLine
 
-### NuGet Publish Status
-$packageLines
-
-### GitHub Packages Publish Status
-$packageLines
-
-### Validation
-- release-check: passed
-- package publish workflow: passed
-"@ | Set-Content -LiteralPath $notesPath -Encoding UTF8
+          $notesContent | Set-Content -LiteralPath $notesPath -Encoding UTF8
 
           "path=$notesPath" >> $env:GITHUB_OUTPUT
 
