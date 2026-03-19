@@ -12,7 +12,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -34,9 +34,20 @@ jobs:
         run: |
           . ./tools/release-package-manifest.ps1
           $repoRoot = Get-ReleaseRepoRoot
+          $restoreSources = @("https://api.nuget.org/v3/index.json")
+          $localPackages = Join-Path $repoRoot "nupkg"
+          if (Test-Path $localPackages) {
+            $restoreSources += $localPackages
+          }
+
           foreach ($project in Get-ReleasePackageProjects) {
             $projectPath = Join-Path $repoRoot $project
-            dotnet restore $projectPath --configfile (Join-Path $repoRoot "NuGet.config")
+            $restoreArgs = @("restore", $projectPath)
+            foreach ($source in $restoreSources) {
+              $restoreArgs += @("--source", $source)
+            }
+
+            dotnet @restoreArgs
             if ($LASTEXITCODE -ne 0) {
               throw "dotnet restore failed for $project"
             }
@@ -88,4 +99,55 @@ jobs:
           }
           else {
             pwsh -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -PackageVersion $env:PACKAGE_VERSION -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $apiKey
+          }
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          . ./tools/release-package-manifest.ps1
+
+          $repoRoot = Get-ReleaseRepoRoot
+          $version = $env:RELEASE_TAG
+          if ($version.StartsWith("v")) {
+            $version = $version.Substring(1)
+          }
+
+          $packageLines = (Get-ReleasePackageVersionInfo | ForEach-Object {
+            "* $($_.PackageId): published"
+          }) -join [Environment]::NewLine
+
+          $notesPath = Join-Path $repoRoot "artifacts/release-notes-$($env:RELEASE_TAG).md"
+          $notesDir = Split-Path $notesPath -Parent
+          New-Item -ItemType Directory -Path $notesDir -Force | Out-Null
+
+          @"
+          # VapeCache $version
+
+          ### NuGet Publish Status
+          $packageLines
+
+          ### GitHub Packages Publish Status
+          $packageLines
+
+          ### Validation
+          * publish-packages workflow: passed
+          * tag: $($env:RELEASE_TAG)
+          "@ | Set-Content -LiteralPath $notesPath -Encoding UTF8
+
+          & gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          $exists = ($LASTEXITCODE -eq 0)
+
+          if ($exists) {
+            & gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --title $env:RELEASE_TAG --notes-file $notesPath --latest
+          }
+          else {
+            & gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --title $env:RELEASE_TAG --notes-file $notesPath --latest
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub release publish failed for $($env:RELEASE_TAG)."
           }
