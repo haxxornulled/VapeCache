@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Application</PackageId>
     <Title>VapeCache Application Layer</Title>
-    <Version>1.2.13</Version>
+    <Version>1.2.14</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Application</Product>
@@ -24,7 +24,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.13 release: packaged the application invalidation command/handler layer so DI and pub/sub integrations restore cleanly for consumers.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.14 release: packaged the application invalidation command/handler layer so DI and pub/sub integrations restore cleanly for consumers.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
