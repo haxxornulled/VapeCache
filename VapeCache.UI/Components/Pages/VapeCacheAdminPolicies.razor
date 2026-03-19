@@ -1,0 +1,85 @@
+@page "/vapecache/policies"
+@attribute [Authorize(Policy = VapeCacheAdminPageDefaults.AuthorizationPolicyName)]
+
+<PageTitle>VapeCache Policies</PageTitle>
+
+<section class="vc-admin-shell">
+    <header class="vc-admin-header">
+        <div>
+            <h1>Cache Policies</h1>
+            <p>Intent and policy metadata captured for cache entries.</p>
+        </div>
+        <button class="vc-button" @onclick="RefreshAsync">Refresh</button>
+    </header>
+
+    <VapeCacheAdminNav />
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <p class="vc-error">@_error</p>
+    }
+
+    <section class="vc-admin-grid vc-admin-grid-3">
+        <article class="vc-card">
+            <h2>Recent Entries</h2>
+            <p class="vc-kpi">@_policies.Count</p>
+            <p class="vc-meta">max 200</p>
+        </article>
+        <article class="vc-card">
+            <h2>Tagged Entries</h2>
+            <p class="vc-kpi">@_policies.Count(static x => x.Intent.Tags is { Length: > 0 })</p>
+            <p class="vc-meta">entries with intent tags</p>
+        </article>
+        <article class="vc-card">
+            <h2>Named Owner</h2>
+            <p class="vc-kpi">@_policies.Count(static x => !string.IsNullOrWhiteSpace(x.Intent.Owner))</p>
+            <p class="vc-meta">entries with policy owner metadata</p>
+        </article>
+    </section>
+
+    <article class="vc-card">
+        <h2>Policy Feed</h2>
+        @if (_policies.Count == 0)
+        {
+            <p class="vc-meta">No policy records are currently available.</p>
+        }
+        else
+        {
+            <div class="vc-table-wrap">
+                <table class="vc-table">
+                    <thead>
+                        <tr>
+                            <th>When</th>
+                            <th>Key</th>
+                            <th>Backend</th>
+                            <th>Kind</th>
+                            <th>Owner</th>
+                            <th>Reason</th>
+                            <th>Tags</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in _policies)
+                        {
+                            <tr>
+                                <td>@entry.RecordedAtUtc.LocalDateTime.ToString("HH:mm:ss")</td>
+                                <td>@entry.Key</td>
+                                <td>@entry.Backend</td>
+                                <td>@entry.Intent.Kind</td>
+                                <td>@(entry.Intent.Owner ?? "n/a")</td>
+                                <td>@(entry.Intent.Reason ?? "n/a")</td>
+                                <td>@FormatTags(entry.Intent.Tags)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </article>
+</section>
+
+@code {
+    private static string FormatTags(string[]? tags)
+        => tags is { Length: > 0 } ? string.Join(", ", tags) : "n/a";
+}
+

@@ -175,6 +175,32 @@ public sealed class AspireEndpointExtensionsTests
     }
 
     [Fact]
+    public async Task MapVapeCacheAdminEndpoints_MapsReconciliationControl_OnDedicatedPrefix()
+    {
+        await using var app = await CreateAdminOnlyAppAsync(prefix: "/internal/vapecache-admin");
+        using var client = app.GetTestClient();
+
+        var statusResponse = await client.GetAsync("/internal/vapecache-admin/reconciliation/status");
+        var runResponse = await client.PostAsync("/internal/vapecache-admin/reconciliation/run", content: null);
+        var flushResponse = await client.PostAsync("/internal/vapecache-admin/reconciliation/flush", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, flushResponse.StatusCode);
+
+        var status = await statusResponse.Content.ReadFromJsonAsync<VapeCacheReconciliationControlResponse>();
+        var run = await runResponse.Content.ReadFromJsonAsync<VapeCacheReconciliationControlResponse>();
+        var flush = await flushResponse.Content.ReadFromJsonAsync<VapeCacheReconciliationControlResponse>();
+
+        Assert.NotNull(status);
+        Assert.NotNull(run);
+        Assert.NotNull(flush);
+        Assert.Equal("status", status!.Operation);
+        Assert.Equal("reconcile", run!.Operation);
+        Assert.Equal("flush", flush!.Operation);
+    }
+
+    [Fact]
     public async Task MapVapeCacheEndpoints_MapsDashboardAssets_WhenEnabled()
     {
         await using var app = await CreateAppAsync(includeBreakerControlEndpoints: false, includeDashboardEndpoint: true);

@@ -336,10 +336,13 @@ app.MapVapeCacheAdminEndpoints("/internal/vapecache-admin");
 
 ### `MapVapeCacheAdminEndpoints(prefix = "/vapecache/admin", requireAuthorization = false, authorizationPolicy = null)`
 
-Maps admin-only breaker control endpoints:
+Maps admin-only control endpoints:
 
 - `POST {prefix}/breaker/force-open`
 - `POST {prefix}/breaker/clear`
+- `GET {prefix}/reconciliation/status`
+- `POST {prefix}/reconciliation/run`
+- `POST {prefix}/reconciliation/flush`
 
 Set `requireAuthorization: true` to apply `RequireAuthorization()` in one line, or pass `authorizationPolicy` for `RequireAuthorization(policy)`.
 Keep this prefix internal-only.

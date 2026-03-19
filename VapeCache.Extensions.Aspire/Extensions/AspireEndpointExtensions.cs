@@ -315,6 +315,7 @@ public static class AspireEndpointExtensions
         }
 
         MapBreakerControlEndpoints(group);
+        MapReconciliationControlEndpoints(group);
         return group;
     }
 
@@ -423,6 +424,67 @@ npm run build</code></pre>
         .WithMetadata(new IgnoreAntiforgeryTokenAttribute())
         .DisableAntiforgery();
     }
+
+    private static void MapReconciliationControlEndpoints(RouteGroupBuilder group)
+    {
+        group.MapGet("/reconciliation/status", static ([FromServices] IRedisReconciliationService? reconciliation) =>
+        {
+            return Results.Ok(new VapeCacheReconciliationControlResponse(
+                Enabled: reconciliation is not null,
+                Invoked: false,
+                PendingOperations: reconciliation?.PendingOperations ?? 0,
+                Operation: "status"));
+        })
+        .WithName("VapeCacheReconciliationStatus");
+
+        group.MapPost("/reconciliation/run", static async (
+            [FromServices] IRedisReconciliationService? reconciliation,
+            CancellationToken ct) =>
+        {
+            if (reconciliation is null)
+            {
+                return Results.Ok(new VapeCacheReconciliationControlResponse(
+                    Enabled: false,
+                    Invoked: false,
+                    PendingOperations: 0,
+                    Operation: "reconcile"));
+            }
+
+            await reconciliation.ReconcileAsync(ct).ConfigureAwait(false);
+            return Results.Ok(new VapeCacheReconciliationControlResponse(
+                Enabled: true,
+                Invoked: true,
+                PendingOperations: reconciliation.PendingOperations,
+                Operation: "reconcile"));
+        })
+        .WithName("VapeCacheReconciliationRun")
+        .WithMetadata(new IgnoreAntiforgeryTokenAttribute())
+        .DisableAntiforgery();
+
+        group.MapPost("/reconciliation/flush", static async (
+            [FromServices] IRedisReconciliationService? reconciliation,
+            CancellationToken ct) =>
+        {
+            if (reconciliation is null)
+            {
+                return Results.Ok(new VapeCacheReconciliationControlResponse(
+                    Enabled: false,
+                    Invoked: false,
+                    PendingOperations: 0,
+                    Operation: "flush"));
+            }
+
+            await reconciliation.FlushAsync(ct).ConfigureAwait(false);
+            return Results.Ok(new VapeCacheReconciliationControlResponse(
+                Enabled: true,
+                Invoked: true,
+                PendingOperations: reconciliation.PendingOperations,
+                Operation: "flush"));
+        })
+        .WithName("VapeCacheReconciliationFlush")
+        .WithMetadata(new IgnoreAntiforgeryTokenAttribute())
+        .DisableAntiforgery();
+    }
 }
 
 /// <summary>
@@ -479,6 +541,15 @@ public sealed record VapeCacheForceOpenRequest(string? Reason);
 public sealed record VapeCacheBreakerControlResponse(
     bool IsForcedOpen,
     string? Reason);
+
+/// <summary>
+/// Response payload for reconciliation control operations.
+/// </summary>
+public sealed record VapeCacheReconciliationControlResponse(
+    bool Enabled,
+    bool Invoked,
+    int PendingOperations,
+    string Operation);
 
 /// <summary>
 /// Shared dashboard snapshot payload envelope for cross-process telemetry validation.

@@ -112,9 +112,23 @@ static void ConfigureVapeCacheUiExperience(IResourceBuilder<ProjectResource> ui)
         })
         .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
         {
+            Url = "/vapecache/policies",
+            DisplayText = "Admin Policies",
+            DisplayOrder = 279,
+            DisplayLocation = UrlDisplayLocation.DetailsOnly
+        })
+        .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
+        {
+            Url = "/vapecache/streams",
+            DisplayText = "Admin Streams",
+            DisplayOrder = 278,
+            DisplayLocation = UrlDisplayLocation.DetailsOnly
+        })
+        .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
+        {
             Url = "/cache-workbench",
             DisplayText = "Cache Workbench",
-            DisplayOrder = 279,
+            DisplayOrder = 277,
             DisplayLocation = UrlDisplayLocation.SummaryAndDetails
         })
         .WithUrlForEndpoint("https", _ => new ResourceUrlAnnotation
@@ -139,7 +153,7 @@ static void ConfigureVapeCacheUiExperience(IResourceBuilder<ProjectResource> ui)
             DisplayLocation = UrlDisplayLocation.DetailsOnly
         })
         .WithHttpCommand(
-            path: "/vapecache/api/breaker/force-open",
+            path: "/vapecache/admin/breaker/force-open",
             displayName: "Force InMemory Fallback",
             commandName: "vapecache-breaker-force-open",
             commandOptions: new HttpCommandOptions
@@ -151,7 +165,7 @@ static void ConfigureVapeCacheUiExperience(IResourceBuilder<ProjectResource> ui)
                 IsHighlighted = true
             })
         .WithHttpCommand(
-            path: "/vapecache/api/breaker/clear",
+            path: "/vapecache/admin/breaker/clear",
             displayName: "Restore Redis Backend",
             commandName: "vapecache-breaker-clear",
             commandOptions: new HttpCommandOptions
@@ -161,6 +175,39 @@ static void ConfigureVapeCacheUiExperience(IResourceBuilder<ProjectResource> ui)
                 IconName = "ArrowCounterclockwise",
                 IconVariant = IconVariant.Filled,
                 IsHighlighted = true
+            })
+        .WithHttpCommand(
+            path: "/vapecache/admin/reconciliation/status",
+            displayName: "Reconciliation Status",
+            commandName: "vapecache-reconciliation-status",
+            commandOptions: new HttpCommandOptions
+            {
+                Method = HttpMethod.Get,
+                IconName = "DataTrending",
+                IconVariant = IconVariant.Regular
+            })
+        .WithHttpCommand(
+            path: "/vapecache/admin/reconciliation/run",
+            displayName: "Run Reconciliation Pass",
+            commandName: "vapecache-reconciliation-run",
+            commandOptions: new HttpCommandOptions
+            {
+                Method = HttpMethod.Post,
+                ConfirmationMessage = "Trigger a reconciliation pass now?",
+                IconName = "ArrowSyncCircle",
+                IconVariant = IconVariant.Filled,
+                IsHighlighted = true
+            })
+        .WithHttpCommand(
+            path: "/vapecache/admin/reconciliation/flush",
+            displayName: "Flush Reconciliation State",
+            commandName: "vapecache-reconciliation-flush",
+            commandOptions: new HttpCommandOptions
+            {
+                Method = HttpMethod.Post,
+                ConfirmationMessage = "Flush persisted reconciliation state?",
+                IconName = "DeleteDismiss",
+                IconVariant = IconVariant.Filled
             })
         .WithHttpCommand(
             path: "/vapecache/api/status",

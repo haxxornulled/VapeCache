@@ -10,39 +10,36 @@ namespace VapeCache.UI.Features.Admin;
 /// </summary>
 public sealed class VapeCacheAdminOrchestrator
 {
-    private readonly IVapeCache _cache;
-    private readonly ICacheBackendState _backendState;
-    private readonly ICacheStats _stats;
-    private readonly IRedisCircuitBreakerState _breaker;
-    private readonly IRedisFailoverController _failover;
-    private readonly ICacheIntentRegistry _intentRegistry;
-    private readonly IRedisReconciliationService? _reconciliation;
-    private readonly ISpillStoreDiagnostics? _spillDiagnostics;
-    private readonly IRedisMultiplexerDiagnostics? _redisDiagnostics;
+    private readonly IVapeCacheAdminStatsSnapshotProvider _statsSnapshotProvider;
+    private readonly IVapeCacheAdminInvalidationOperationsFacade _invalidationOperations;
+    private readonly IVapeCacheAdminAutoscalerStatusProvider _autoscalerStatusProvider;
+    private readonly IVapeCacheAdminSpillDiagnosticsProvider _spillDiagnosticsProvider;
+    private readonly IVapeCacheAdminReconciliationStatusProvider _reconciliationStatusProvider;
+    private readonly IVapeCacheAdminBreakerStatusProvider _breakerStatusProvider;
+    private readonly IVapeCacheAdminPolicyInspectionProvider _policyInspectionProvider;
+    private readonly IVapeCacheAdminEventStreamFeedProvider _eventStreamFeedProvider;
 
     /// <summary>
     /// Creates a new admin orchestrator.
     /// </summary>
     public VapeCacheAdminOrchestrator(
-        IVapeCache cache,
-        ICacheBackendState backendState,
-        ICacheStats stats,
-        IRedisCircuitBreakerState breaker,
-        IRedisFailoverController failover,
-        ICacheIntentRegistry intentRegistry,
-        IEnumerable<IRedisMultiplexerDiagnostics> redisDiagnostics,
-        IRedisReconciliationService? reconciliation = null,
-        ISpillStoreDiagnostics? spillDiagnostics = null)
+        IVapeCacheAdminStatsSnapshotProvider statsSnapshotProvider,
+        IVapeCacheAdminInvalidationOperationsFacade invalidationOperations,
+        IVapeCacheAdminAutoscalerStatusProvider autoscalerStatusProvider,
+        IVapeCacheAdminSpillDiagnosticsProvider spillDiagnosticsProvider,
+        IVapeCacheAdminReconciliationStatusProvider reconciliationStatusProvider,
+        IVapeCacheAdminBreakerStatusProvider breakerStatusProvider,
+        IVapeCacheAdminPolicyInspectionProvider policyInspectionProvider,
+        IVapeCacheAdminEventStreamFeedProvider eventStreamFeedProvider)
     {
-        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _backendState = backendState ?? throw new ArgumentNullException(nameof(backendState));
-        _stats = stats ?? throw new ArgumentNullException(nameof(stats));
-        _breaker = breaker ?? throw new ArgumentNullException(nameof(breaker));
-        _failover = failover ?? throw new ArgumentNullException(nameof(failover));
-        _intentRegistry = intentRegistry ?? throw new ArgumentNullException(nameof(intentRegistry));
-        _reconciliation = reconciliation;
-        _spillDiagnostics = spillDiagnostics;
-        _redisDiagnostics = redisDiagnostics?.FirstOrDefault();
+        _statsSnapshotProvider = statsSnapshotProvider ?? throw new ArgumentNullException(nameof(statsSnapshotProvider));
+        _invalidationOperations = invalidationOperations ?? throw new ArgumentNullException(nameof(invalidationOperations));
+        _autoscalerStatusProvider = autoscalerStatusProvider ?? throw new ArgumentNullException(nameof(autoscalerStatusProvider));
+        _spillDiagnosticsProvider = spillDiagnosticsProvider ?? throw new ArgumentNullException(nameof(spillDiagnosticsProvider));
+        _reconciliationStatusProvider = reconciliationStatusProvider ?? throw new ArgumentNullException(nameof(reconciliationStatusProvider));
+        _breakerStatusProvider = breakerStatusProvider ?? throw new ArgumentNullException(nameof(breakerStatusProvider));
+        _policyInspectionProvider = policyInspectionProvider ?? throw new ArgumentNullException(nameof(policyInspectionProvider));
+        _eventStreamFeedProvider = eventStreamFeedProvider ?? throw new ArgumentNullException(nameof(eventStreamFeedProvider));
     }
 
     /// <summary>
@@ -52,39 +49,30 @@ public sealed class VapeCacheAdminOrchestrator
     {
         _ = ct;
 
-        var stats = _stats.Snapshot;
-        var reads = stats.Hits + stats.Misses;
-        var writes = stats.SetCalls + stats.RemoveCalls;
-        var hitRate = reads <= 0 ? 0d : (double)stats.Hits / reads;
-
-        var lanes = _redisDiagnostics?.GetMuxLaneSnapshots() ?? Array.Empty<RedisMuxLaneSnapshot>();
-        var healthyLaneCount = 0;
-        for (var i = 0; i < lanes.Count; i++)
-        {
-            if (lanes[i].Healthy)
-                healthyLaneCount++;
-        }
+        var statsSnapshot = _statsSnapshotProvider.GetSnapshot();
+        var breaker = _breakerStatusProvider.GetStatus();
+        var reconciliation = _reconciliationStatusProvider.GetStatus();
 
         var sample = new VapeCacheAdminSnapshot(
-            TimestampUtc: DateTimeOffset.UtcNow,
-            Backend: _backendState.EffectiveBackend,
-            Reads: reads,
-            Writes: writes,
-            HitRate: hitRate,
-            Stats: stats,
-            BreakerEnabled: _breaker.Enabled,
-            BreakerOpen: _breaker.IsOpen,
-            BreakerConsecutiveFailures: _breaker.ConsecutiveFailures,
-            BreakerOpenRemaining: _breaker.OpenRemaining,
-            BreakerHalfOpenProbeInFlight: _breaker.HalfOpenProbeInFlight,
-            BreakerForcedOpen: _failover.IsForcedOpen,
-            BreakerReason: _failover.Reason,
-            Autoscaler: _redisDiagnostics?.GetAutoscalerSnapshot(),
-            Lanes: lanes,
-            HealthyLaneCount: healthyLaneCount,
-            Spill: _spillDiagnostics?.GetSnapshot(),
-            ReconciliationPendingOperations: _reconciliation?.PendingOperations ?? 0,
-            ReconciliationEnabled: _reconciliation is not null);
+            TimestampUtc: statsSnapshot.TimestampUtc,
+            Backend: statsSnapshot.Backend,
+            Reads: statsSnapshot.Reads,
+            Writes: statsSnapshot.Writes,
+            HitRate: statsSnapshot.HitRate,
+            Stats: statsSnapshot.Stats,
+            BreakerEnabled: breaker.Enabled,
+            BreakerOpen: breaker.IsOpen,
+            BreakerConsecutiveFailures: breaker.ConsecutiveFailures,
+            BreakerOpenRemaining: breaker.OpenRemaining,
+            BreakerHalfOpenProbeInFlight: breaker.HalfOpenProbeInFlight,
+            BreakerForcedOpen: breaker.IsForcedOpen,
+            BreakerReason: breaker.Reason,
+            Autoscaler: _autoscalerStatusProvider.GetStatus(),
+            Lanes: statsSnapshot.Lanes,
+            HealthyLaneCount: statsSnapshot.HealthyLaneCount,
+            Spill: _spillDiagnosticsProvider.GetStatus(),
+            ReconciliationPendingOperations: reconciliation.PendingOperations,
+            ReconciliationEnabled: reconciliation.Enabled);
 
         return ValueTask.FromResult(sample);
     }
@@ -93,49 +81,43 @@ public sealed class VapeCacheAdminOrchestrator
     /// Invalidates a cache tag and returns the new version.
     /// </summary>
     public ValueTask<long> InvalidateTagAsync(string tag, CancellationToken ct = default)
-        => _cache.InvalidateTagAsync(NormalizeRequired(tag, nameof(tag)), ct);
+        => _invalidationOperations.InvalidateTagAsync(NormalizeRequired(tag, nameof(tag)), ct);
 
     /// <summary>
     /// Invalidates a cache zone and returns the new version.
     /// </summary>
     public ValueTask<long> InvalidateZoneAsync(string zone, CancellationToken ct = default)
-        => _cache.InvalidateZoneAsync(NormalizeRequired(zone, nameof(zone)), ct);
+        => _invalidationOperations.InvalidateZoneAsync(NormalizeRequired(zone, nameof(zone)), ct);
 
     /// <summary>
     /// Invalidates a specific key.
     /// </summary>
     public ValueTask<bool> InvalidateKeyAsync(string key, CancellationToken ct = default)
-        => _cache.RemoveAsync(new CacheKey(NormalizeRequired(key, nameof(key))), ct);
+        => _invalidationOperations.InvalidateKeyAsync(NormalizeRequired(key, nameof(key)), ct);
 
     /// <summary>
     /// Gets recent policy/intention entries.
     /// </summary>
     public IReadOnlyList<CacheIntentEntry> GetRecentPolicies(int take = 100)
-        => _intentRegistry.GetRecent(Math.Clamp(take, 1, 500));
+        => _policyInspectionProvider.GetRecent(take);
+
+    /// <summary>
+    /// Gets event/stream feed status.
+    /// </summary>
+    public VapeCacheAdminEventStreamStatus GetEventStreamStatus()
+        => _eventStreamFeedProvider.GetStatus();
 
     /// <summary>
     /// Triggers reconciliation if reconciliation service is available.
     /// </summary>
     public async ValueTask<bool> ReconcileAsync(CancellationToken ct = default)
-    {
-        if (_reconciliation is null)
-            return false;
-
-        await _reconciliation.ReconcileAsync(ct).ConfigureAwait(false);
-        return true;
-    }
+        => await _reconciliationStatusProvider.ReconcileAsync(ct).ConfigureAwait(false);
 
     /// <summary>
     /// Flushes reconciliation state if reconciliation service is available.
     /// </summary>
     public async ValueTask<bool> FlushReconciliationAsync(CancellationToken ct = default)
-    {
-        if (_reconciliation is null)
-            return false;
-
-        await _reconciliation.FlushAsync(ct).ConfigureAwait(false);
-        return true;
-    }
+        => await _reconciliationStatusProvider.FlushAsync(ct).ConfigureAwait(false);
 
     private static string NormalizeRequired(string value, string paramName)
     {

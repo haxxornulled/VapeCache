@@ -13,7 +13,7 @@ builder.Host.ConfigureContainer<ContainerBuilder>(static _ => { });
 var allowInsecureAdminInDevelopment = !builder.Configuration.GetValue<bool>(
     "VapeCache:Endpoints:RequireAdminAuthorizationInDevelopment");
 var adminAuthorizationPolicy = VapeCacheAdminPageDefaults.AuthorizationPolicyName;
-var enableBreakerControlEndpoints =
+var enableAdminControlEndpoints =
     builder.Configuration.GetValue<bool>("VapeCache:Endpoints:EnableBreakerControl");
 var includeIntentEndpoints =
     builder.Environment.IsDevelopment()
@@ -63,7 +63,7 @@ builder.AddVapeCacheClientBuilder(registerCoreServices: false)
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();
-builder.Services.AddScoped<VapeCacheAdminOrchestrator>();
+builder.Services.AddVapeCacheAdminUi();
 builder.Services.AddScoped<CacheWorkbenchOrchestrator>();
 builder.Services.AddScoped<VapeCacheDashboardOrchestrator>();
 
@@ -76,7 +76,7 @@ app.MapVapeCacheEndpoints(
     includeLiveStreamEndpoint: includeLiveStreamEndpoint,
     includeIntentEndpoints: includeIntentEndpoints,
     includeDashboardEndpoint: false);
-if (enableBreakerControlEndpoints)
+if (enableAdminControlEndpoints)
 {
     app.MapVapeCacheAdminEndpoints(
         prefix: "/vapecache/admin",
