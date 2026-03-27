@@ -15,7 +15,7 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 
 - git push access for the public OSS repo
 - NuGet.org publish credentials (`NUGET_API_KEY`) with push access for all `VapeCache.*` package IDs
-- GitHub Packages token (`GITHUB_PACKAGES_TOKEN` or `GITHUB_TOKEN`) with `write:packages` and `read:packages` scopes (and repo access for private repos if needed)
+- GitHub Packages token (`PACKAGES_PUBLISH_TOKEN`) with `write:packages` and `read:packages` scopes (and repo access for private repos if needed)
 - local environment with PowerShell (`pwsh` preferred, `powershell.exe` supported) and `.NET 10 SDK`
 - one online Enterprise self-hosted runner with labels `self-hosted`, `windows`, and `x64`
 
@@ -97,8 +97,8 @@ This split is intentional:
    - `./tools/publish-release-packages.ps1 -PackageVersion <package-version>`
    - if you receive HTTP 403, verify the key is valid and has owner/package permissions for every `VapeCache.*` package
 6. Publish to GitHub Packages:
-   - set `GITHUB_PACKAGES_TOKEN` (or `GITHUB_TOKEN`) in the shell
-   - `./tools/publish-release-packages.ps1 -PackageVersion <package-version> -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $env:GITHUB_PACKAGES_TOKEN`
+   - set `PACKAGES_PUBLISH_TOKEN` in the shell
+   - `./tools/publish-release-packages.ps1 -PackageVersion <package-version> -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $env:PACKAGES_PUBLISH_TOKEN`
    - if you receive HTTP 403, verify token scopes include `write:packages`
 7. Verify push logs (both feeds) include all OSS package IDs:
    - `VapeCache.Core`

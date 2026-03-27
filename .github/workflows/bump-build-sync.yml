@@ -1,0 +1,78 @@
+name: Bump Build Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      packageVersion:
+        description: "Optional explicit package version (for example 1.2.18). Defaults to next patch."
+        required: false
+        type: string
+      commitMessage:
+        description: "Optional commit message override."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bump-build-sync-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bump_build_sync:
+    if: github.repository == 'haxxornulled/VapeCache-Enterprise'
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 90
+    env:
+      DOTNET_INSTALL_DIR: ${{ github.workspace }}/.dotnet
+      PACKAGE_VERSION: ${{ github.event.inputs.packageVersion || '' }}
+      COMMIT_MESSAGE: ${{ github.event.inputs.commitMessage || '' }}
+    steps:
+      - name: Guard Repo And Branch
+        shell: pwsh
+        run: |
+          if ("${{ github.repository }}" -ne "haxxornulled/VapeCache-Enterprise") {
+            throw "This workflow only runs from haxxornulled/VapeCache-Enterprise. Current repository: ${{ github.repository }}"
+          }
+
+          if ("${{ github.ref }}" -ne "refs/heads/main") {
+            throw "This workflow must run from refs/heads/main. Current ref: ${{ github.ref }}"
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Configure Git Identity
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Run Bump Build Commit Push Automation
+        shell: pwsh
+        run: |
+          $args = @(
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", "./tools/auto-bump-build-commit-push.ps1"
+          )
+
+          if (-not [string]::IsNullOrWhiteSpace($env:PACKAGE_VERSION)) {
+            $args += @("-PackageVersion", $env:PACKAGE_VERSION)
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($env:COMMIT_MESSAGE)) {
+            $args += @("-CommitMessage", $env:COMMIT_MESSAGE)
+          }
+
+          $args += @("-PushRemotes", "origin")
+
+          & pwsh @args
