@@ -21,12 +21,18 @@ concurrency:
 
 jobs:
   bump_build_sync:
-    if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
     env:
       PACKAGE_VERSION: ${{ inputs.packageVersion }}
       COMMIT_MESSAGE: ${{ inputs.commitMessage }}
     steps:
+      - name: Guard Branch (main only)
+        shell: pwsh
+        run: |
+          if ("${{ github.ref }}" -ne "refs/heads/main") {
+            throw "This workflow must run from refs/heads/main. Current ref: ${{ github.ref }}"
+          }
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
