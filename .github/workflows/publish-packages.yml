@@ -23,9 +23,10 @@ jobs:
   publish:
     if: github.repository == 'haxxornulled/VapeCache-Enterprise'
     runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 120
     env:
-      DOTNET_INSTALL_DIR: ${{ github.workspace }}\\.dotnet
-      PACKAGE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.packageVersion || '' }}
+      DOTNET_INSTALL_DIR: ${{ github.workspace }}\.dotnet
+      PACKAGE_VERSION: ${{ github.event.inputs.packageVersion || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -72,22 +73,20 @@ jobs:
         shell: pwsh
         env:
           PACKAGES_PUBLISH_TOKEN: ${{ secrets.PACKAGES_PUBLISH_TOKEN }}
-          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $apiKey = $env:PACKAGES_PUBLISH_TOKEN
-          if ([string]::IsNullOrWhiteSpace($apiKey)) {
-            $apiKey = $env:GITHUB_TOKEN
-          }
 
           if ([string]::IsNullOrWhiteSpace($apiKey)) {
             throw "No GitHub Packages token available. Set PACKAGES_PUBLISH_TOKEN secret."
           }
 
+          $packagesSource = "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+
           if ([string]::IsNullOrWhiteSpace($env:PACKAGE_VERSION)) {
-            pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $apiKey
+            pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -Source $packagesSource -ApiKey $apiKey
           }
           else {
-            pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -PackageVersion $env:PACKAGE_VERSION -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $apiKey
+            pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -PackageVersion $env:PACKAGE_VERSION -Source $packagesSource -ApiKey $apiKey
           }
 
       - name: Build Release Notes
