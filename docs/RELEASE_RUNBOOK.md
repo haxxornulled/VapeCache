@@ -33,6 +33,19 @@ Preferred one-command path:
 ./tools/release-orchestrator.ps1 -Configuration Release -PackageVersion <package-version>
 ```
 
+Fast local automation for version bump + validation + sync:
+
+```powershell
+./tools/auto-bump-build-commit-push.ps1
+```
+
+Notes:
+- defaults to next patch version inferred from current package versions
+- runs `dotnet build VapeCache.slnx -c Release`
+- commits only the release package `.csproj` version changes
+- pushes `main` to `origin` and `oss`
+- pass `-PackageVersion <version>` for explicit versioning
+
 GitHub Actions options:
 - `.github/workflows/ci.yml`: pull request and `main` branch validation (`release-check` with `-SkipPack -UsePublicSourcesOnly`)
 - `.github/workflows/publish-packages.yml`: release publish workflow (tag-triggered or manual `workflow_dispatch`)

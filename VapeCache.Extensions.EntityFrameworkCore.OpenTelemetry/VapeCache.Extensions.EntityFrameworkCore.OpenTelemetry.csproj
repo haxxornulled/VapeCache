@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry</PackageId>
     <Title>VapeCache EF Core OpenTelemetry Extensions</Title>
-    <Version>1.2.16</Version>
+    <Version>1.2.17</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry</Product>
@@ -37,5 +37,6 @@
     <ProjectReference Include="..\VapeCache.Extensions.EntityFrameworkCore\VapeCache.Extensions.EntityFrameworkCore.csproj" />
   </ItemGroup>
 </Project>
+
 
 

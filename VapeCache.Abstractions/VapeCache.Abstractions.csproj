@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -6,7 +6,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Abstractions</PackageId>
     <Title>VapeCache Abstractions</Title>
-    <Version>1.2.16</Version>
+    <Version>1.2.17</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache</Product>
@@ -38,5 +38,6 @@
     <PackageReference Include="LanguageExt.Core" Version="4.4.9" />
   </ItemGroup>
 </Project>
+
 
 
