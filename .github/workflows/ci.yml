@@ -16,7 +16,7 @@ concurrency:
 jobs:
   validate:
     if: github.repository == 'haxxornulled/VapeCache-Enterprise'
-    runs-on: windows-latest
+    runs-on: [self-hosted, windows, x64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

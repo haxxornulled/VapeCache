@@ -22,7 +22,7 @@ concurrency:
 jobs:
   bump_build_sync:
     if: github.repository == 'haxxornulled/VapeCache-Enterprise'
-    runs-on: windows-latest
+    runs-on: [self-hosted, windows, x64]
     env:
       PACKAGE_VERSION: ${{ inputs.packageVersion }}
       COMMIT_MESSAGE: ${{ inputs.commitMessage }}

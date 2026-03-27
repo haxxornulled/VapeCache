@@ -1,4 +1,4 @@
-# Release Runbook (OSS)
+# Release Runbook (Enterprise Source)
 
 This runbook standardizes OSS release execution to reduce single-operator risk.
 
@@ -17,6 +17,7 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 - NuGet.org publish credentials (`NUGET_API_KEY`) with push access for all `VapeCache.*` package IDs
 - GitHub Packages token (`GITHUB_PACKAGES_TOKEN` or `GITHUB_TOKEN`) with `write:packages` and `read:packages` scopes (and repo access for private repos if needed)
 - local environment with PowerShell (`pwsh` preferred, `powershell.exe` supported) and `.NET 10 SDK`
+- one online Enterprise self-hosted runner with labels `self-hosted`, `windows`, and `x64`
 
 ## Remote Expectations
 
@@ -47,9 +48,9 @@ Notes:
 - pass `-PackageVersion <version>` for explicit versioning
 
 GitHub Actions options:
-- `.github/workflows/ci.yml`: pull request and `main` branch validation (`release-check` with `-SkipPack -UsePublicSourcesOnly`)
-- `.github/workflows/bump-build-sync.yml`: manual bump/build/commit/push automation for `main`
-- `.github/workflows/publish-packages.yml`: release publish workflow (tag-triggered or manual `workflow_dispatch`)
+- `.github/workflows/ci.yml`: pull request and `main` branch validation (`release-check` with `-SkipPack -UsePublicSourcesOnly`) on Enterprise self-hosted runner
+- `.github/workflows/bump-build-sync.yml`: manual bump/build/commit/push automation for `main` on Enterprise self-hosted runner
+- `.github/workflows/publish-packages.yml`: release publish workflow (tag-triggered or manual `workflow_dispatch`) on Enterprise self-hosted runner
 - Trigger publish via `workflow_dispatch` (optional `packageVersion`) or by pushing a `v*` tag.
 
 Publish workflow scope:
