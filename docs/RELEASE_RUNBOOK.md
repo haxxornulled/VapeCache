@@ -53,9 +53,9 @@ GitHub Actions options:
 - Trigger publish via `workflow_dispatch` (optional `packageVersion`) or by pushing a `v*` tag.
 
 Publish workflow scope:
-- CI, bump/build/sync, and package publishing workflows are intended to run from the OSS repository `haxxornulled/VapeCache`
-- the private enterprise mirror should not be used as an Actions runner for these workflows
-- the workflow jobs now skip automatically when triggered outside the OSS repository
+- CI, bump/build/sync, and package publishing workflows are intended to run from the Enterprise repository `haxxornulled/VapeCache-Enterprise`
+- the OSS repository `haxxornulled/VapeCache` should be treated as the public downstream mirror
+- the workflow jobs now skip automatically when triggered outside the Enterprise repository
 
 The orchestrator enforces preflight checks, release-check gates, package packing + smoke tests, feed publishing, remote sync, tag push, and GitHub release updates.
 
