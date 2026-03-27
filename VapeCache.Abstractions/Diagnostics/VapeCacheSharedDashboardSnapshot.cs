@@ -47,25 +47,74 @@ public static class VapeCacheSharedDashboardSnapshotStore
 /// <param name="Autoscaler">Current autoscaler snapshot.</param>
 /// <param name="Lanes">Current lane snapshots.</param>
 /// <param name="Spill">Current spill store diagnostics.</param>
-public sealed record VapeCacheSharedDashboardSnapshot(
-    DateTimeOffset TimestampUtc,
-    [property: JsonConverter(typeof(JsonStringEnumConverter<BackendType>))] BackendType Backend,
-    double HitRate,
-    long Reads,
-    long Writes,
-    long Hits,
-    long Misses,
-    long FallbackToMemory,
-    long RedisBreakerOpened,
-    long StampedeKeyRejected,
-    long StampedeLockWaitTimeout,
-    long StampedeFailureBackoffRejected,
-    bool BreakerEnabled,
-    bool BreakerOpen,
-    int BreakerConsecutiveFailures,
-    TimeSpan? BreakerOpenRemaining,
-    bool BreakerForcedOpen,
-    string? BreakerReason,
-    RedisAutoscalerSnapshot? Autoscaler,
-    IReadOnlyList<RedisMuxLaneSnapshot> Lanes,
-    SpillStoreDiagnosticsSnapshot? Spill);
+public sealed record VapeCacheSharedDashboardSnapshot
+{
+    public VapeCacheSharedDashboardSnapshot(
+        DateTimeOffset TimestampUtc,
+        BackendType Backend,
+        double HitRate,
+        long Reads,
+        long Writes,
+        long Hits,
+        long Misses,
+        long FallbackToMemory,
+        long RedisBreakerOpened,
+        long StampedeKeyRejected,
+        long StampedeLockWaitTimeout,
+        long StampedeFailureBackoffRejected,
+        bool BreakerEnabled,
+        bool BreakerOpen,
+        int BreakerConsecutiveFailures,
+        TimeSpan? BreakerOpenRemaining,
+        bool BreakerForcedOpen,
+        string? BreakerReason,
+        RedisAutoscalerSnapshot? Autoscaler,
+        IReadOnlyList<RedisMuxLaneSnapshot> Lanes,
+        SpillStoreDiagnosticsSnapshot? Spill)
+    {
+        this.TimestampUtc = TimestampUtc;
+        this.Backend = Backend;
+        this.HitRate = HitRate;
+        this.Reads = Reads;
+        this.Writes = Writes;
+        this.Hits = Hits;
+        this.Misses = Misses;
+        this.FallbackToMemory = FallbackToMemory;
+        this.RedisBreakerOpened = RedisBreakerOpened;
+        this.StampedeKeyRejected = StampedeKeyRejected;
+        this.StampedeLockWaitTimeout = StampedeLockWaitTimeout;
+        this.StampedeFailureBackoffRejected = StampedeFailureBackoffRejected;
+        this.BreakerEnabled = BreakerEnabled;
+        this.BreakerOpen = BreakerOpen;
+        this.BreakerConsecutiveFailures = BreakerConsecutiveFailures;
+        this.BreakerOpenRemaining = BreakerOpenRemaining;
+        this.BreakerForcedOpen = BreakerForcedOpen;
+        this.BreakerReason = BreakerReason;
+        this.Autoscaler = Autoscaler;
+        this.Lanes = Lanes;
+        this.Spill = Spill;
+    }
+
+    public DateTimeOffset TimestampUtc { get; init; }
+    [property: JsonConverter(typeof(JsonStringEnumConverter<BackendType>))]
+    public BackendType Backend { get; init; }
+    public double HitRate { get; init; }
+    public long Reads { get; init; }
+    public long Writes { get; init; }
+    public long Hits { get; init; }
+    public long Misses { get; init; }
+    public long FallbackToMemory { get; init; }
+    public long RedisBreakerOpened { get; init; }
+    public long StampedeKeyRejected { get; init; }
+    public long StampedeLockWaitTimeout { get; init; }
+    public long StampedeFailureBackoffRejected { get; init; }
+    public bool BreakerEnabled { get; init; }
+    public bool BreakerOpen { get; init; }
+    public int BreakerConsecutiveFailures { get; init; }
+    public TimeSpan? BreakerOpenRemaining { get; init; }
+    public bool BreakerForcedOpen { get; init; }
+    public string? BreakerReason { get; init; }
+    public RedisAutoscalerSnapshot? Autoscaler { get; init; }
+    public IReadOnlyList<RedisMuxLaneSnapshot> Lanes { get; init; }
+    public SpillStoreDiagnosticsSnapshot? Spill { get; init; }
+}

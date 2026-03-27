@@ -3,22 +3,33 @@ using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Infrastructure.Caching;
 
-internal sealed class CacheBackendState(
-    ICurrentCacheService current,
-    IRedisCircuitBreakerState? breaker,
-    IRedisFailoverController? failover) : ICacheBackendState
+internal sealed class CacheBackendState : ICacheBackendState
 {
+    private readonly ICurrentCacheService _current;
+    private readonly IRedisCircuitBreakerState? _breaker;
+    private readonly IRedisFailoverController? _failover;
+
+    public CacheBackendState(
+        ICurrentCacheService current,
+        IRedisCircuitBreakerState? breaker,
+        IRedisFailoverController? failover)
+    {
+        _current = current;
+        _breaker = breaker;
+        _failover = failover;
+    }
+
     public BackendType EffectiveBackend
     {
         get
         {
-            if (failover?.IsForcedOpen == true || breaker?.IsOpen == true)
+            if (_failover?.IsForcedOpen == true || _breaker?.IsOpen == true)
                 return BackendType.InMemory;
 
-            if (breaker is not null || failover is not null)
+            if (_breaker is not null || _failover is not null)
                 return BackendType.Redis;
 
-            return BackendTypeResolver.TryParseName(current.CurrentName, out var parsed)
+            return BackendTypeResolver.TryParseName(_current.CurrentName, out var parsed)
                 ? parsed
                 : BackendType.Redis;
         }

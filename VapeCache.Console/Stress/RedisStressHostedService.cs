@@ -8,17 +8,35 @@ using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Console.Stress;
 
-internal sealed class RedisStressHostedService(
-    IOptions<RedisStressOptions> stressOptions,
-    IOptionsMonitor<RedisConnectionOptions> redisOptions,
-    IRedisConnectionFactory factory,
-    IRedisConnectionPool pool,
-    IRedisCommandExecutor executor,
-    IHostApplicationLifetime lifetime,
-    ILogger<RedisStressHostedService> logger) : IHostedLifecycleService
+internal sealed class RedisStressHostedService : IHostedLifecycleService
 {
+    private readonly IOptions<RedisStressOptions> stressOptions;
+    private readonly IOptionsMonitor<RedisConnectionOptions> redisOptions;
+    private readonly IRedisConnectionFactory factory;
+    private readonly IRedisConnectionPool pool;
+    private readonly IRedisCommandExecutor executor;
+    private readonly IHostApplicationLifetime lifetime;
+    private readonly ILogger<RedisStressHostedService> logger;
     private CancellationTokenSource? _cts;
     private Task? _runTask;
+
+    public RedisStressHostedService(
+        IOptions<RedisStressOptions> stressOptions,
+        IOptionsMonitor<RedisConnectionOptions> redisOptions,
+        IRedisConnectionFactory factory,
+        IRedisConnectionPool pool,
+        IRedisCommandExecutor executor,
+        IHostApplicationLifetime lifetime,
+        ILogger<RedisStressHostedService> logger)
+    {
+        this.stressOptions = stressOptions;
+        this.redisOptions = redisOptions;
+        this.factory = factory;
+        this.pool = pool;
+        this.executor = executor;
+        this.lifetime = lifetime;
+        this.logger = logger;
+    }
 
     /// <summary>
     /// Executes value.

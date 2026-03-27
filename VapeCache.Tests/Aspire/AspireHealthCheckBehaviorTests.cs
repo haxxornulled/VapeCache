@@ -99,8 +99,15 @@ public sealed class AspireHealthCheckBehaviorTests
         Assert.Equal(false, result.Data["forced_open"]);
     }
 
-    private sealed class FakePool(Result<IRedisConnectionLease> result) : IRedisConnectionPool
+    private sealed class FakePool : IRedisConnectionPool
     {
+        private readonly Result<IRedisConnectionLease> result;
+
+        public FakePool(Result<IRedisConnectionLease> result)
+        {
+            this.result = result;
+        }
+
         public ValueTask<Result<IRedisConnectionLease>> RentAsync(CancellationToken ct)
             => ValueTask.FromResult(result);
 
@@ -197,8 +204,17 @@ public sealed class AspireHealthCheckBehaviorTests
         public override void SetLength(long value) => throw new NotSupportedException();
     }
 
-    private sealed class FakeCacheService(string backendName, Exception? failure = null) : ICacheService
+    private sealed class FakeCacheService : ICacheService
     {
+        private readonly string backendName;
+        private readonly Exception? failure;
+
+        public FakeCacheService(string backendName, Exception? failure = null)
+        {
+            this.backendName = backendName;
+            this.failure = failure;
+        }
+
         public string Name => backendName;
 
         public ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
@@ -230,9 +246,14 @@ public sealed class AspireHealthCheckBehaviorTests
             => await factory(ct).ConfigureAwait(false);
     }
 
-    private sealed class FixedCacheStats(CacheStatsSnapshot snapshot) : ICacheStats
+    private sealed class FixedCacheStats : ICacheStats
     {
-        public CacheStatsSnapshot Snapshot { get; } = snapshot;
+        public FixedCacheStats(CacheStatsSnapshot snapshot)
+        {
+            Snapshot = snapshot;
+        }
+
+        public CacheStatsSnapshot Snapshot { get; }
     }
 
     private sealed class FakeBreakerState : IRedisCircuitBreakerState
@@ -270,10 +291,19 @@ public sealed class AspireHealthCheckBehaviorTests
         }
     }
 
-    private sealed class EffectiveBackendState(
-        IRedisCircuitBreakerState breaker,
-        IRedisFailoverController failover) : ICacheBackendState
+    private sealed class EffectiveBackendState : ICacheBackendState
     {
+        private readonly IRedisCircuitBreakerState breaker;
+        private readonly IRedisFailoverController failover;
+
+        public EffectiveBackendState(
+            IRedisCircuitBreakerState breaker,
+            IRedisFailoverController failover)
+        {
+            this.breaker = breaker;
+            this.failover = failover;
+        }
+
         public BackendType EffectiveBackend =>
             (failover.IsForcedOpen || breaker.IsOpen) ? BackendType.InMemory : BackendType.Redis;
     }

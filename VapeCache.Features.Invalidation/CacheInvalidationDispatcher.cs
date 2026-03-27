@@ -7,16 +7,24 @@ namespace VapeCache.Features.Invalidation;
 /// <summary>
 /// Dispatches events through registered invalidation policies and executes the merged plan.
 /// </summary>
-public sealed partial class CacheInvalidationDispatcher(
-    IServiceProvider serviceProvider,
-    ICacheInvalidationExecutor executor,
-    IOptionsMonitor<CacheInvalidationOptions> optionsMonitor,
-    ILogger<CacheInvalidationDispatcher> logger) : ICacheInvalidationDispatcher
+public sealed partial class CacheInvalidationDispatcher : ICacheInvalidationDispatcher
 {
-    private readonly IServiceProvider _serviceProvider = serviceProvider;
-    private readonly ICacheInvalidationExecutor _executor = executor;
-    private readonly IOptionsMonitor<CacheInvalidationOptions> _optionsMonitor = optionsMonitor;
-    private readonly ILogger<CacheInvalidationDispatcher> _logger = logger;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ICacheInvalidationExecutor _executor;
+    private readonly IOptionsMonitor<CacheInvalidationOptions> _optionsMonitor;
+    private readonly ILogger<CacheInvalidationDispatcher> _logger;
+
+    public CacheInvalidationDispatcher(
+        IServiceProvider serviceProvider,
+        ICacheInvalidationExecutor executor,
+        IOptionsMonitor<CacheInvalidationOptions> optionsMonitor,
+        ILogger<CacheInvalidationDispatcher> logger)
+    {
+        _serviceProvider = serviceProvider;
+        _executor = executor;
+        _optionsMonitor = optionsMonitor;
+        _logger = logger;
+    }
 
     /// <summary>
     /// Provides member behavior.

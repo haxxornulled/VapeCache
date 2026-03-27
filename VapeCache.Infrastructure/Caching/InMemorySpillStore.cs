@@ -8,10 +8,14 @@ namespace VapeCache.Infrastructure.Caching;
 /// For Enterprise spill-to-disk functionality with scatter/gather distribution
 /// and encryption at rest, install VapeCache.Persistence package.
 /// </summary>
-internal sealed class NoopSpillStore(
-    IOptionsMonitor<InMemorySpillOptions>? optionsMonitor = null) : IInMemorySpillStore, ISpillStoreDiagnostics
+internal sealed class NoopSpillStore : IInMemorySpillStore, ISpillStoreDiagnostics
 {
-    private readonly IOptionsMonitor<InMemorySpillOptions>? _optionsMonitor = optionsMonitor;
+    private readonly IOptionsMonitor<InMemorySpillOptions>? _optionsMonitor;
+
+    public NoopSpillStore(IOptionsMonitor<InMemorySpillOptions>? optionsMonitor = null)
+    {
+        _optionsMonitor = optionsMonitor;
+    }
 
     /// <summary>
     /// Executes value.

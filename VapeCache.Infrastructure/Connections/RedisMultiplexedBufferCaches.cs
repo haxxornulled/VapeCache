@@ -22,6 +22,10 @@ internal sealed class RedisMultiplexedBufferCaches
     private static readonly ConcurrentDictionary<ReadOnlyMemory<byte>[], byte> InFlightPayloadArrays = new();
 
     private const int MaxSharedCacheSize = 64;
+    private static int _sharedHeaderCount;
+    private static int _sharedSmallHeaderCount;
+    private static int _sharedPayloadArrayCount;
+    private static int _sharedSmallPayloadArrayCount;
 
     /// <summary>
     /// Executes value.
@@ -37,7 +41,7 @@ internal sealed class RedisMultiplexedBufferCaches
                 return buf;
             }
 
-            if (SharedSmallHeaderCache.TryTake(out var poolBuf) && poolBuf.Length >= minLength)
+            if (TryTakeShared(SharedSmallHeaderCache, ref _sharedSmallHeaderCount, out var poolBuf) && poolBuf.Length >= minLength)
             {
                 InFlightHeaderBuffers.TryRemove(poolBuf, out _);
                 return poolBuf;
@@ -53,10 +57,15 @@ internal sealed class RedisMultiplexedBufferCaches
             return largeBuf;
         }
 
-        if (SharedHeaderCache.TryTake(out var largePoolBuf) && largePoolBuf.Length >= minLength)
+        while (TryTakeShared(SharedHeaderCache, ref _sharedHeaderCount, out var largePoolBuf))
         {
-            InFlightHeaderBuffers.TryRemove(largePoolBuf, out _);
-            return largePoolBuf;
+            if (largePoolBuf.Length >= minLength)
+            {
+                InFlightHeaderBuffers.TryRemove(largePoolBuf, out _);
+                return largePoolBuf;
+            }
+
+            ArrayPool<byte>.Shared.Return(largePoolBuf);
         }
 
         return ArrayPool<byte>.Shared.Rent(Math.Max(2048, minLength));
@@ -119,8 +128,8 @@ internal sealed class RedisMultiplexedBufferCaches
                 return;
             }
 
-            if (SharedSmallHeaderCache.Count < MaxSharedCacheSize)
-                SharedSmallHeaderCache.Add(buffer);
+            if (TryAddShared(SharedSmallHeaderCache, ref _sharedSmallHeaderCount, buffer))
+                return;
             return;
         }
 
@@ -130,9 +139,8 @@ internal sealed class RedisMultiplexedBufferCaches
             return;
         }
 
-        if (SharedHeaderCache.Count < MaxSharedCacheSize)
+        if (TryAddShared(SharedHeaderCache, ref _sharedHeaderCount, buffer))
         {
-            SharedHeaderCache.Add(buffer);
             return;
         }
 
@@ -165,7 +173,7 @@ internal sealed class RedisMultiplexedBufferCaches
                 return arr;
             }
 
-            if (SharedSmallPayloadArrayCache.TryTake(out var poolArr) && poolArr.Length >= minLength)
+            if (TryTakeShared(SharedSmallPayloadArrayCache, ref _sharedSmallPayloadArrayCount, out var poolArr) && poolArr.Length >= minLength)
             {
                 InFlightPayloadArrays.TryRemove(poolArr, out _);
                 return poolArr;
@@ -181,10 +189,15 @@ internal sealed class RedisMultiplexedBufferCaches
             return largeArr;
         }
 
-        if (SharedPayloadArrayCache.TryTake(out var largePoolArr) && largePoolArr.Length >= minLength)
+        while (TryTakeShared(SharedPayloadArrayCache, ref _sharedPayloadArrayCount, out var largePoolArr))
         {
-            InFlightPayloadArrays.TryRemove(largePoolArr, out _);
-            return largePoolArr;
+            if (largePoolArr.Length >= minLength)
+            {
+                InFlightPayloadArrays.TryRemove(largePoolArr, out _);
+                return largePoolArr;
+            }
+
+            ArrayPool<ReadOnlyMemory<byte>>.Shared.Return(largePoolArr, clearArray: true);
         }
 
         return ArrayPool<ReadOnlyMemory<byte>>.Shared.Rent(Math.Max(64, minLength));
@@ -236,8 +249,8 @@ internal sealed class RedisMultiplexedBufferCaches
                 return;
             }
 
-            if (SharedSmallPayloadArrayCache.Count < MaxSharedCacheSize)
-                SharedSmallPayloadArrayCache.Add(payloads);
+            if (TryAddShared(SharedSmallPayloadArrayCache, ref _sharedSmallPayloadArrayCount, payloads))
+                return;
             return;
         }
 
@@ -247,12 +260,41 @@ internal sealed class RedisMultiplexedBufferCaches
             return;
         }
 
-        if (SharedPayloadArrayCache.Count < MaxSharedCacheSize)
+        if (TryAddShared(SharedPayloadArrayCache, ref _sharedPayloadArrayCount, payloads))
         {
-            SharedPayloadArrayCache.Add(payloads);
             return;
         }
 
         ArrayPool<ReadOnlyMemory<byte>>.Shared.Return(payloads, clearArray: true);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryTakeShared<T>(ConcurrentBag<T> bag, ref int count, out T item)
+    {
+        if (bag.TryTake(out item!))
+        {
+            Interlocked.Decrement(ref count);
+            return true;
+        }
+
+        item = default!;
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryAddShared<T>(ConcurrentBag<T> bag, ref int count, T item)
+    {
+        while (true)
+        {
+            var snapshot = Volatile.Read(ref count);
+            if (snapshot >= MaxSharedCacheSize)
+                return false;
+
+            if (Interlocked.CompareExchange(ref count, snapshot + 1, snapshot) != snapshot)
+                continue;
+
+            bag.Add(item);
+            return true;
+        }
     }
 }

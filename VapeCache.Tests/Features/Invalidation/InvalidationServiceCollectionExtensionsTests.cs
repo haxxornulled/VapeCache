@@ -113,7 +113,17 @@ public sealed class InvalidationServiceCollectionExtensionsTests
         return services;
     }
 
-    private sealed record OrderUpdatedEvent(string OrderId, string Zone);
+    private sealed record OrderUpdatedEvent
+    {
+        public OrderUpdatedEvent(string OrderId, string Zone)
+        {
+            this.OrderId = OrderId;
+            this.Zone = Zone;
+        }
+
+        public string OrderId { get; init; }
+        public string Zone { get; init; }
+    }
 
     private sealed class RecordingVapeCache : IVapeCache
     {

@@ -42,6 +42,18 @@ public sealed class GroceryStoreComparisonStressTestTests
     }
 
     [Fact]
+    public async Task RunStressTestAsync_executes_command_coverage_for_each_shopper_when_available()
+    {
+        var service = new CoverageAwareFakeService();
+        var sut = new GroceryStoreComparisonStressTest(service, NullLogger<GroceryStoreComparisonStressTest>.Instance, "VapeCache");
+
+        var result = await sut.RunStressTestAsync(shopperCount: 12, maxCartSize: 15);
+
+        Assert.Equal(12, result.SuccessCount);
+        Assert.Equal(12, service.CommandCoverageCalls);
+    }
+
+    [Fact]
     public async Task RunStressTestAsync_honors_cancellation_before_start()
     {
         await using var h = Harness.Create();
@@ -188,6 +200,38 @@ public sealed class GroceryStoreComparisonStressTestTests
             {
                 return ValueTask.FromResult(_sessions.TryGetValue(sessionId, out var session) ? session : null);
             }
+        }
+    }
+
+    private sealed class CoverageAwareFakeService : IGroceryStoreService, ICartBatchWriter, IGroceryStoreCommandCoverageRunner
+    {
+        private readonly BatchCapableFakeService _inner = new();
+
+        public int CommandCoverageCalls;
+
+        public ValueTask<Product?> GetProductAsync(string productId) => _inner.GetProductAsync(productId);
+        public ValueTask CacheProductAsync(Product product, TimeSpan ttl) => _inner.CacheProductAsync(product, ttl);
+        public ValueTask AddToCartAsync(string userId, CartItem item) => _inner.AddToCartAsync(userId, item);
+        public ValueTask AddToCartBatchAsync(string userId, IReadOnlyList<CartItem> items) => _inner.AddToCartBatchAsync(userId, items);
+        public ValueTask<CartItem[]> GetCartAsync(string userId) => _inner.GetCartAsync(userId);
+        public ValueTask<long> GetCartCountAsync(string userId) => _inner.GetCartCountAsync(userId);
+        public ValueTask ClearCartAsync(string userId) => _inner.ClearCartAsync(userId);
+        public ValueTask JoinFlashSaleAsync(string saleId, string userId) => _inner.JoinFlashSaleAsync(saleId, userId);
+        public ValueTask<bool> IsInFlashSaleAsync(string saleId, string userId) => _inner.IsInFlashSaleAsync(saleId, userId);
+        public ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId) => _inner.GetFlashSaleParticipantCountAsync(saleId);
+        public ValueTask SaveSessionAsync(string sessionId, UserSession session) => _inner.SaveSessionAsync(sessionId, session);
+        public ValueTask<UserSession?> GetSessionAsync(string sessionId) => _inner.GetSessionAsync(sessionId);
+
+        public ValueTask ExecuteShopperCommandCoverageAsync(
+            string shopperId,
+            string saleId,
+            string sessionId,
+            DateTime timestampUtc,
+            CartItem[] items,
+            CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref CommandCoverageCalls);
+            return ValueTask.CompletedTask;
         }
     }
 }

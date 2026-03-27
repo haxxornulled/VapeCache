@@ -8,11 +8,15 @@ namespace VapeCache.Application.Caching.Invalidation.Handlers;
 /// <summary>
 /// Publishes direct tag invalidation commands.
 /// </summary>
-public sealed class InvalidateCacheTagsCommandHandler(
-    ICacheInvalidationEventPublisher publisher)
+public sealed class InvalidateCacheTagsCommandHandler
     : ICommandHandler<InvalidateCacheTagsCommand, CacheInvalidationExecutionResult>
 {
-    private readonly ICacheInvalidationEventPublisher _publisher = publisher;
+    private readonly ICacheInvalidationEventPublisher _publisher;
+
+    public InvalidateCacheTagsCommandHandler(ICacheInvalidationEventPublisher publisher)
+    {
+        _publisher = publisher;
+    }
 
     /// <summary>
     /// Executes handle async.

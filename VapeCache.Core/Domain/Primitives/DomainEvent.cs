@@ -4,12 +4,19 @@ namespace VapeCache.Core.Domain.Primitives;
 /// Base immutable domain-event record.
 /// </summary>
 /// <param name="OccurredOnUtc">UTC timestamp when the event occurred.</param>
-public abstract record DomainEvent(DateTimeOffset OccurredOnUtc) : IDomainEvent
+public abstract record DomainEvent : IDomainEvent
 {
+    protected DomainEvent(DateTimeOffset occurredOnUtc)
+    {
+        OccurredOnUtc = occurredOnUtc;
+    }
+
     /// <summary>
     /// Initializes the event with the current UTC timestamp.
     /// </summary>
     protected DomainEvent() : this(DateTimeOffset.UtcNow)
     {
     }
+
+    public DateTimeOffset OccurredOnUtc { get; init; }
 }

@@ -264,6 +264,83 @@ internal static class RedisRespProtocol
     /// <summary>
     /// Gets value.
     /// </summary>
+    public static int GetUnlinkCommandLength(string[] keys)
+    {
+        if (keys.Length == 0)
+            return 0;
+
+        var len = GetHeaderLen(1 + keys.Length)
+                  + GetBulkStringLen("UNLINK") + 2;
+        for (var i = 0; i < keys.Length; i++)
+            len += GetBulkStringLen(keys[i]) + 2;
+        return len;
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public static int WriteUnlinkCommand(Span<byte> destination, string[] keys)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 1 + keys.Length);
+        idx += WriteBulkString(destination.Slice(idx), "UNLINK");
+        for (var i = 0; i < keys.Length; i++)
+            idx += WriteBulkString(destination.Slice(idx), keys[i]);
+        return idx;
+    }
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public static int GetUnlinkCommandLength(byte[]?[] keys)
+    {
+        var keyCount = 0;
+        var len = GetHeaderLen(1)
+                  + GetBulkStringLen("UNLINK") + 2;
+
+        for (var i = 0; i < keys.Length; i++)
+        {
+            var key = keys[i];
+            if (key is null || key.Length == 0)
+                continue;
+
+            len += GetBulkLen(key.Length) + key.Length + 2;
+            keyCount++;
+        }
+
+        return keyCount == 0 ? 0 : len + GetHeaderLen(1 + keyCount) - GetHeaderLen(1);
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public static int WriteUnlinkCommand(Span<byte> destination, byte[]?[] keys)
+    {
+        var keyCount = 0;
+        for (var i = 0; i < keys.Length; i++)
+        {
+            if (keys[i] is { Length: > 0 })
+                keyCount++;
+        }
+
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 1 + keyCount);
+        idx += WriteBulkString(destination.Slice(idx), "UNLINK");
+        for (var i = 0; i < keys.Length; i++)
+        {
+            var key = keys[i];
+            if (key is null || key.Length == 0)
+                continue;
+
+            idx += WriteBulkBytes(destination.Slice(idx), key);
+        }
+
+        return idx;
+    }
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetHGetCommandLength(string key, string field)
         => GetPrefixedSingleKeyCommandLength(HGetCommandPrefix, key) + GetBulkStringLen(field) + 2;
@@ -317,6 +394,44 @@ internal static class RedisRespProtocol
         idx += WritePrefixedSingleKeyCommand(destination.Slice(idx), HSetCommandPrefix, key);
         idx += WriteBulkString(destination.Slice(idx), field);
         idx += WriteBulkLength(destination.Slice(idx), valueLen);
+        return idx;
+    }
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public static int GetHSetCommandLength(string key, (string Field, ReadOnlyMemory<byte> Value)[] items)
+    {
+        if (items.Length == 0)
+            return 0;
+
+        var len = GetHeaderLen(2 + (items.Length * 2))
+                  + GetBulkStringLen("HSET") + 2
+                  + GetBulkStringLen(key) + 2;
+        for (var i = 0; i < items.Length; i++)
+        {
+            len += GetBulkStringLen(items[i].Field) + 2;
+            len += GetBulkLen(items[i].Value.Length) + items[i].Value.Length + 2;
+        }
+
+        return len;
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public static int WriteHSetCommand(Span<byte> destination, string key, (string Field, ReadOnlyMemory<byte> Value)[] items)
+    {
+        var idx = 0;
+        idx += WriteArrayHeader(destination.Slice(idx), 2 + (items.Length * 2));
+        idx += WriteBulkString(destination.Slice(idx), "HSET");
+        idx += WriteBulkString(destination.Slice(idx), key);
+        for (var i = 0; i < items.Length; i++)
+        {
+            idx += WriteBulkString(destination.Slice(idx), items[i].Field);
+            idx += WriteBulkBytes(destination.Slice(idx), items[i].Value.Span);
+        }
+
         return idx;
     }
 
@@ -2242,6 +2357,46 @@ internal static class RedisRespProtocol
         {
             len += GetBulkStringLen(fields[i].Field) + 2
                    + GetBulkLen(fields[i].ValueLength) + fields[i].ValueLength + 2;
+        }
+
+        return len;
+    }
+
+    public static int GetXAddIdempotentCommandLength(
+        string key,
+        string producerId,
+        string? idempotentId,
+        bool useAutoIdempotentId,
+        string entryId,
+        (string Field, ReadOnlyMemory<byte> Value)[] fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        if (fields.Length == 0)
+            throw new ArgumentException("XADD requires at least one field/value pair.", nameof(fields));
+
+        var parts = 2 + (useAutoIdempotentId ? 2 : 3) + 1 + (fields.Length * 2);
+        var len = GetHeaderLen(parts)
+                  + GetBulkStringLen("XADD") + 2
+                  + GetBulkStringLen(key) + 2;
+
+        if (useAutoIdempotentId)
+        {
+            len += GetBulkStringLen("IDMPAUTO") + 2
+                   + GetBulkStringLen(producerId) + 2;
+        }
+        else
+        {
+            var resolvedIdempotentId = idempotentId ?? throw new ArgumentNullException(nameof(idempotentId));
+            len += GetBulkStringLen("IDMP") + 2
+                   + GetBulkStringLen(producerId) + 2
+                   + GetBulkStringLen(resolvedIdempotentId) + 2;
+        }
+
+        len += GetBulkStringLen(entryId) + 2;
+        for (var i = 0; i < fields.Length; i++)
+        {
+            len += GetBulkStringLen(fields[i].Field) + 2
+                   + GetBulkLen(fields[i].Value.Length) + fields[i].Value.Length + 2;
         }
 
         return len;

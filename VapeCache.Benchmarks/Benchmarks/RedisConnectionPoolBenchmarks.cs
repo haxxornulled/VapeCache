@@ -67,8 +67,17 @@ public class RedisConnectionPoolBenchmarks
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-        private sealed class FakeConn(System.Net.Sockets.Socket socket, Stream stream) : IRedisConnection
+        private sealed class FakeConn : IRedisConnection
         {
+            private readonly System.Net.Sockets.Socket socket;
+            private readonly Stream stream;
+
+            public FakeConn(System.Net.Sockets.Socket socket, Stream stream)
+            {
+                this.socket = socket;
+                this.stream = stream;
+            }
+
             public System.Net.Sockets.Socket Socket => socket;
             public Stream Stream => stream;
             public ValueTask<Result<LanguageExt.Unit>> SendAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct) => ValueTask.FromResult<Result<LanguageExt.Unit>>(LanguageExt.Prelude.unit);

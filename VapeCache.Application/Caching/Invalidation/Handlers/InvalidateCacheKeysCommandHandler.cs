@@ -8,11 +8,15 @@ namespace VapeCache.Application.Caching.Invalidation.Handlers;
 /// <summary>
 /// Publishes direct key invalidation commands.
 /// </summary>
-public sealed class InvalidateCacheKeysCommandHandler(
-    ICacheInvalidationEventPublisher publisher)
+public sealed class InvalidateCacheKeysCommandHandler
     : ICommandHandler<InvalidateCacheKeysCommand, CacheInvalidationExecutionResult>
 {
-    private readonly ICacheInvalidationEventPublisher _publisher = publisher;
+    private readonly ICacheInvalidationEventPublisher _publisher;
+
+    public InvalidateCacheKeysCommandHandler(ICacheInvalidationEventPublisher publisher)
+    {
+        _publisher = publisher;
+    }
 
     /// <summary>
     /// Executes handle async.

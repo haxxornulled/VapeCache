@@ -44,6 +44,10 @@ Every published report must include:
 - Host/runtime (`dotnet --info` summary)
 - Run counts (warmups, measured, trials)
 
+Remote auth requirement:
+- Non-local Redis benchmark targets must use ACL credentials (username + password).
+- Benchmark commands that target non-local hosts are invalid evidence if auth is omitted.
+
 ## Language Rules
 
 Allowed:
@@ -97,8 +101,13 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -Track both `
   -VapeExecutorMode raw `
   -DisableTrackDefaults `
+  -CleanupRunKeys false `
   -ShopperCount 50000 `
   -MaxCartSize 40 `
+  -RedisHost benchmark-redis.example.internal `
+  -RedisPort 6379 `
+  -RedisUsername admin `
+  -RedisPassword <redacted> `
   -FailBelowRatio 1.0
 ```
 
@@ -111,6 +120,10 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -VapeExecutorMode raw `
   -ShopperCount 50000 `
   -MaxCartSize 40 `
+  -RedisHost benchmark-redis.example.internal `
+  -RedisPort 6379 `
+  -RedisUsername admin `
+  -RedisPassword <redacted> `
   -FailBelowRatio 1.0
 ```
 

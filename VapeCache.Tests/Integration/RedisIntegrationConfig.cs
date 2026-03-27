@@ -178,8 +178,15 @@ public static class RedisIntegrationConfig
         return string.Equals(line, "+" + expected, StringComparison.Ordinal);
     }
 
-    private sealed class OptionsMonitorStub<T>(T value) : IOptionsMonitor<T> where T : class
+    private sealed class OptionsMonitorStub<T> : IOptionsMonitor<T> where T : class
     {
+        private readonly T value;
+
+        public OptionsMonitorStub(T value)
+        {
+            this.value = value;
+        }
+
         public T CurrentValue => value;
         public T Get(string? name) => value;
         public IDisposable OnChange(Action<T, string?> listener) => new NoopDisposable();

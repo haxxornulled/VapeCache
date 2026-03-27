@@ -93,6 +93,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<byte[]?>(null);
     }
 
+    public ValueTask<bool> GetDiscardAsync(string key, CancellationToken ct)
+        => ValueTask.FromResult(_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.String);
+
     /// <summary>
     /// Attempts to value.
     /// </summary>
@@ -115,6 +118,19 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
             return ValueTask.FromResult(CopyNullableBuffer(entry.StringValue));
         }
         return ValueTask.FromResult<byte[]?>(null);
+    }
+
+    public ValueTask<bool> GetExDiscardAsync(string key, TimeSpan? ttl, CancellationToken ct)
+    {
+        if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.String)
+        {
+            if (ttl.HasValue)
+                entry.ExpiresAt = DateTimeOffset.UtcNow.Add(ttl.Value);
+
+            return ValueTask.FromResult(true);
+        }
+
+        return ValueTask.FromResult(false);
     }
 
     /// <summary>
@@ -146,6 +162,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<byte[]?>(null);
     }
 
+    public ValueTask<bool> GetRangeDiscardAsync(string key, long start, long end, CancellationToken ct)
+        => ValueTask.FromResult(_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.String && entry.StringValue is not null);
+
     /// <summary>
     /// Executes value.
     /// </summary>
@@ -153,6 +172,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
     {
         return GetAsync(key, ct);
     }
+
+    public ValueTask<bool> JsonGetDiscardAsync(string key, string? path, CancellationToken ct)
+        => GetDiscardAsync(key, ct);
 
     /// <summary>
     /// Executes value.
@@ -210,6 +232,12 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
         return ValueTask.FromResult(result);
     }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<int> MGetCountAsync(string[] keys, CancellationToken ct)
+        => ValueTask.FromResult(keys.Length);
 
     /// <summary>
     /// Sets value.
@@ -328,6 +356,41 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
     }
 
     /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<long> UnlinkManyAsync(string[] keys, CancellationToken ct)
+    {
+        long removed = 0;
+        for (var i = 0; i < keys.Length; i++)
+        {
+            if (_store.TryRemove(keys[i], out _))
+                removed++;
+        }
+
+        return ValueTask.FromResult(removed);
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<long> UnlinkManyAsync(byte[]?[] keys, CancellationToken ct)
+    {
+        long removed = 0;
+        for (var i = 0; i < keys.Length; i++)
+        {
+            var keyBytes = keys[i];
+            if (keyBytes is null || keyBytes.Length == 0)
+                continue;
+
+            var key = Encoding.UTF8.GetString(keyBytes);
+            if (_store.TryRemove(key, out _))
+                removed++;
+        }
+
+        return ValueTask.FromResult(removed);
+    }
+
+    /// <summary>
     /// Gets value.
     /// </summary>
     public ValueTask<RedisValueLease> GetLeaseAsync(string key, CancellationToken ct)
@@ -401,6 +464,44 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
     /// <summary>
     /// Executes value.
     /// </summary>
+    public ValueTask<long> HSetManyAsync(string key, (string Field, ReadOnlyMemory<byte> Value)[] items, CancellationToken ct)
+    {
+        if (items.Length == 0)
+            return ValueTask.FromResult(0L);
+
+        var entry = _store.GetOrAdd(key, _ => new CacheEntry { Type = EntryType.Hash, HashValue = new() });
+        lock (entry.Sync)
+        {
+            if (IsExpired(entry))
+            {
+                _store.TryRemove(key, out _);
+                return ValueTask.FromResult(0L);
+            }
+
+            if (entry.Type != EntryType.Hash)
+                throw new InvalidOperationException($"Key '{key}' is not a hash");
+
+            long added = 0;
+            for (var i = 0; i < items.Length; i++)
+            {
+                var bytes = items[i].Value.ToArray();
+                if (entry.HashValue!.TryAdd(items[i].Field, bytes))
+                {
+                    added++;
+                }
+                else
+                {
+                    entry.HashValue[items[i].Field] = bytes;
+                }
+            }
+
+            return ValueTask.FromResult(added);
+        }
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
     public ValueTask<byte[]?> HGetAsync(string key, string field, CancellationToken ct)
     {
         if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.Hash)
@@ -409,6 +510,14 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
             return ValueTask.FromResult(CopyNullableBuffer(value));
         }
         return ValueTask.FromResult<byte[]?>(null);
+    }
+
+    public ValueTask<bool> HGetDiscardAsync(string key, string field, CancellationToken ct)
+    {
+        if (_store.TryGetValue(key, out var entry) && !IsExpired(entry) && entry.Type == EntryType.Hash)
+            return ValueTask.FromResult(entry.HashValue!.ContainsKey(field));
+
+        return ValueTask.FromResult(false);
     }
 
     /// <summary>
@@ -436,6 +545,12 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
         return ValueTask.FromResult(result);
     }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<int> HMGetCountAsync(string key, string[] fields, CancellationToken ct)
+        => ValueTask.FromResult(fields.Length);
 
     /// <summary>
     /// Executes value.
@@ -552,6 +667,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         return ValueTask.FromResult<byte[]?>(null);
     }
 
+    public async ValueTask<bool> LPopDiscardAsync(string key, CancellationToken ct)
+        => (await LPopAsync(key, ct).ConfigureAwait(false)) is not null;
+
     /// <summary>
     /// Executes value.
     /// </summary>
@@ -594,6 +712,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
         return ValueTask.FromResult<byte[]?>(null);
     }
+
+    public async ValueTask<bool> LIndexDiscardAsync(string key, long index, CancellationToken ct)
+        => (await LIndexAsync(key, index, ct).ConfigureAwait(false)) is not null;
 
     /// <summary>
     /// Attempts to value.
@@ -640,6 +761,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
         return ValueTask.FromResult<byte[]?>(null);
     }
+
+    public async ValueTask<bool> RPopDiscardAsync(string key, CancellationToken ct)
+        => (await RPopAsync(key, ct).ConfigureAwait(false)) is not null;
 
     /// <summary>
     /// Attempts to value.
@@ -697,6 +821,45 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
             }
         }
         return ValueTask.FromResult(Array.Empty<byte[]?>());
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<int> LRangeCountAsync(string key, long start, long stop, CancellationToken ct)
+    {
+        if (_store.TryGetValue(key, out var entry))
+        {
+            lock (entry.Sync)
+            {
+                if (IsExpired(entry))
+                {
+                    _store.TryRemove(key, out _);
+                    return ValueTask.FromResult(0);
+                }
+
+                if (entry.Type != EntryType.List)
+                    return ValueTask.FromResult(0);
+
+                var list = entry.ListValue!;
+                var count = list.Count;
+                if (count == 0)
+                    return ValueTask.FromResult(0);
+
+                if (start < 0) start = count + start;
+                if (stop < 0) stop = count + stop;
+
+                start = Math.Max(0, Math.Min(start, count - 1));
+                stop = Math.Max(0, Math.Min(stop, count - 1));
+
+                if (start > stop)
+                    return ValueTask.FromResult(0);
+
+                return ValueTask.FromResult((int)(stop - start + 1));
+            }
+        }
+
+        return ValueTask.FromResult(0);
     }
 
     /// <summary>
@@ -903,6 +1066,31 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
             }
         }
         return ValueTask.FromResult(Array.Empty<byte[]?>());
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<int> SMembersCountAsync(string key, CancellationToken ct)
+    {
+        if (_store.TryGetValue(key, out var entry))
+        {
+            lock (entry.Sync)
+            {
+                if (IsExpired(entry))
+                {
+                    _store.TryRemove(key, out _);
+                    return ValueTask.FromResult(0);
+                }
+
+                if (entry.Type != EntryType.Set)
+                    return ValueTask.FromResult(0);
+
+                return ValueTask.FromResult(entry.SetValue!.Count);
+            }
+        }
+
+        return ValueTask.FromResult(0);
     }
 
     /// <summary>
@@ -1183,6 +1371,39 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    public ValueTask<int> ZRangeWithScoresCountAsync(string key, long start, long stop, bool descending, CancellationToken ct)
+    {
+        if (!_store.TryGetValue(key, out var entry))
+            return ValueTask.FromResult(0);
+
+        lock (entry.Sync)
+        {
+            if (IsExpired(entry))
+            {
+                _store.TryRemove(key, out _);
+                return ValueTask.FromResult(0);
+            }
+
+            if (entry.Type != EntryType.SortedSet)
+                return ValueTask.FromResult(0);
+
+            var itemCount = entry.SortedSetValue!.Count;
+            if (itemCount == 0)
+                return ValueTask.FromResult(0);
+
+            if (start < 0) start = itemCount + start;
+            if (stop < 0) stop = itemCount + stop;
+
+            start = Math.Max(0, Math.Min(start, itemCount - 1));
+            stop = Math.Max(0, Math.Min(stop, itemCount - 1));
+
+            if (start > stop)
+                return ValueTask.FromResult(0);
+
+            return ValueTask.FromResult((int)(stop - start + 1));
+        }
+    }
+
     public ValueTask<(byte[] Member, double Score)[]> ZRangeByScoreWithScoresAsync(
         string key,
         double min,
@@ -1232,6 +1453,52 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    public ValueTask<int> ZRangeByScoreWithScoresCountAsync(
+        string key,
+        double min,
+        double max,
+        bool descending,
+        long? offset,
+        long? count,
+        CancellationToken ct)
+    {
+        if (!_store.TryGetValue(key, out var entry))
+            return ValueTask.FromResult(0);
+
+        lock (entry.Sync)
+        {
+            if (IsExpired(entry))
+            {
+                _store.TryRemove(key, out _);
+                return ValueTask.FromResult(0);
+            }
+
+            if (entry.Type != EntryType.SortedSet)
+                return ValueTask.FromResult(0);
+
+            var skipped = 0L;
+            var taken = 0L;
+            IEnumerable<SortedSetEntry> source = descending ? entry.SortedSetValue!.Reverse() : entry.SortedSetValue!;
+            foreach (var item in source)
+            {
+                if (item.Score < min || item.Score > max)
+                    continue;
+
+                if (offset.HasValue && skipped < offset.Value)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                taken++;
+                if (count.HasValue && taken >= count.Value)
+                    break;
+            }
+
+            return ValueTask.FromResult((int)taken);
+        }
+    }
+
     // ========== RediSearch / RedisBloom / RedisTimeSeries ==========
 
     /// <summary>
@@ -1245,6 +1512,9 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
     /// </summary>
     public ValueTask<string[]> FtSearchAsync(string index, string query, int? offset, int? count, CancellationToken ct)
         => ValueTask.FromResult(Array.Empty<string>());
+
+    public ValueTask<long> FtSearchCountAsync(string index, string query, int? offset, int? count, CancellationToken ct)
+        => ValueTask.FromResult(0L);
 
     /// <summary>
     /// Executes value.
@@ -1377,6 +1647,35 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         }
     }
 
+    public ValueTask<long> TsRangeCountAsync(string key, long from, long to, CancellationToken ct)
+    {
+        if (!_store.TryGetValue(key, out var entry))
+            return ValueTask.FromResult(0L);
+
+        lock (entry.Sync)
+        {
+            if (IsExpired(entry))
+            {
+                _store.TryRemove(key, out _);
+                return ValueTask.FromResult(0L);
+            }
+
+            if (entry.Type != EntryType.TimeSeries)
+                return ValueTask.FromResult(0L);
+
+            long count = 0;
+            foreach (var pair in entry.TimeSeriesValue!)
+            {
+                if (pair.Key < from || pair.Key > to)
+                    continue;
+
+                count++;
+            }
+
+            return ValueTask.FromResult(count);
+        }
+    }
+
     public ValueTask<string> XAddIdempotentAsync(
         string key,
         string producerId,
@@ -1413,6 +1712,19 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
 
             return ValueTask.FromResult(existing);
         }
+    }
+
+    public async ValueTask<bool> XAddIdempotentAckAsync(
+        string key,
+        string producerId,
+        string? idempotentId,
+        bool useAutoIdempotentId,
+        string entryId,
+        (string Field, ReadOnlyMemory<byte> Value)[] fields,
+        CancellationToken ct)
+    {
+        _ = await XAddIdempotentAsync(key, producerId, idempotentId, useAutoIdempotentId, entryId, fields, ct).ConfigureAwait(false);
+        return true;
     }
 
     public ValueTask<bool> XCfgSetIdempotenceAsync(
@@ -1637,7 +1949,17 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
         TimeSeries
     }
 
-    private sealed record SortedSetEntry(byte[] Member, double Score);
+    private sealed record SortedSetEntry
+    {
+        public SortedSetEntry(byte[] member, double score)
+        {
+            Member = member;
+            Score = score;
+        }
+
+        public byte[] Member { get; init; }
+        public double Score { get; init; }
+    }
 
     private sealed class SortedSetEntryComparer : IComparer<SortedSetEntry>
     {

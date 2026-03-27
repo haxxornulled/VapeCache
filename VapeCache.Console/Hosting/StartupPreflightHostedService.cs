@@ -10,15 +10,29 @@ using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Console.Hosting;
 
-internal sealed class StartupPreflightHostedService(
-    IOptions<StartupPreflightOptions> options,
-    IRedisConnectionFactory factory,
-    IRedisFailoverController failover,
-    ICurrentCacheService current,
-    ILogger<StartupPreflightHostedService> logger) : IHostedLifecycleService
+internal sealed class StartupPreflightHostedService : IHostedLifecycleService
 {
     // RESP: *1\r\n$4\r\nPING\r\n
     private static readonly byte[] Ping = "*1\r\n$4\r\nPING\r\n"u8.ToArray();
+    private readonly IOptions<StartupPreflightOptions> options;
+    private readonly IRedisConnectionFactory factory;
+    private readonly IRedisFailoverController failover;
+    private readonly ICurrentCacheService current;
+    private readonly ILogger<StartupPreflightHostedService> logger;
+
+    public StartupPreflightHostedService(
+        IOptions<StartupPreflightOptions> options,
+        IRedisConnectionFactory factory,
+        IRedisFailoverController failover,
+        ICurrentCacheService current,
+        ILogger<StartupPreflightHostedService> logger)
+    {
+        this.options = options;
+        this.factory = factory;
+        this.failover = failover;
+        this.current = current;
+        this.logger = logger;
+    }
 
     /// <summary>
     /// Executes value.

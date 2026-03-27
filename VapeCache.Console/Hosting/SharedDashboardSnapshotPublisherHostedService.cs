@@ -6,17 +6,34 @@ using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Console.Hosting;
 
-internal sealed class SharedDashboardSnapshotPublisherHostedService(
-    ICacheStats cacheStats,
-    IRedisCircuitBreakerState breakerState,
-    IRedisFailoverController failoverController,
-    IEnumerable<IRedisMultiplexerDiagnostics> diagnostics,
-    ISpillStoreDiagnostics? spillDiagnostics,
-    IRedisCommandExecutor redis,
-    ILogger<SharedDashboardSnapshotPublisherHostedService> logger)
+internal sealed class SharedDashboardSnapshotPublisherHostedService
     : BackgroundService, IHostedLifecycleService
 {
-    private readonly IRedisMultiplexerDiagnostics? _diagnostic = GetFirstOrDefault(diagnostics);
+    private readonly ICacheStats cacheStats;
+    private readonly IRedisCircuitBreakerState breakerState;
+    private readonly IRedisFailoverController failoverController;
+    private readonly ISpillStoreDiagnostics? spillDiagnostics;
+    private readonly IRedisCommandExecutor redis;
+    private readonly ILogger<SharedDashboardSnapshotPublisherHostedService> logger;
+    private readonly IRedisMultiplexerDiagnostics? _diagnostic;
+
+    public SharedDashboardSnapshotPublisherHostedService(
+        ICacheStats cacheStats,
+        IRedisCircuitBreakerState breakerState,
+        IRedisFailoverController failoverController,
+        IEnumerable<IRedisMultiplexerDiagnostics> diagnostics,
+        ISpillStoreDiagnostics? spillDiagnostics,
+        IRedisCommandExecutor redis,
+        ILogger<SharedDashboardSnapshotPublisherHostedService> logger)
+    {
+        this.cacheStats = cacheStats;
+        this.breakerState = breakerState;
+        this.failoverController = failoverController;
+        this.spillDiagnostics = spillDiagnostics;
+        this.redis = redis;
+        this.logger = logger;
+        _diagnostic = GetFirstOrDefault(diagnostics);
+    }
 
     public Task StartingAsync(CancellationToken cancellationToken)
     {

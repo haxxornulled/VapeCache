@@ -1,3 +1,5 @@
+using Autofac;
+using Autofac.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -38,15 +40,37 @@ public static class ComparisonRunner
         HybridFailover
     }
 
-    private readonly record struct HarnessSettings(
-        int Runs,
-        int WarmupRuns,
-        bool AlternateOrder,
-        int DeterministicSeed,
-        bool CleanupRunKeys,
-        TimeSpan ProviderTimeout,
-        LogLevel BenchmarkLogLevel,
-        int? MaxDegreeOfParallelism);
+    private readonly record struct HarnessSettings
+    {
+        public HarnessSettings(
+            int Runs,
+            int WarmupRuns,
+            bool AlternateOrder,
+            int DeterministicSeed,
+            bool CleanupRunKeys,
+            TimeSpan ProviderTimeout,
+            LogLevel BenchmarkLogLevel,
+            int? MaxDegreeOfParallelism)
+        {
+            this.Runs = Runs;
+            this.WarmupRuns = WarmupRuns;
+            this.AlternateOrder = AlternateOrder;
+            this.DeterministicSeed = DeterministicSeed;
+            this.CleanupRunKeys = CleanupRunKeys;
+            this.ProviderTimeout = ProviderTimeout;
+            this.BenchmarkLogLevel = BenchmarkLogLevel;
+            this.MaxDegreeOfParallelism = MaxDegreeOfParallelism;
+        }
+
+        public int Runs { get; init; }
+        public int WarmupRuns { get; init; }
+        public bool AlternateOrder { get; init; }
+        public int DeterministicSeed { get; init; }
+        public bool CleanupRunKeys { get; init; }
+        public TimeSpan ProviderTimeout { get; init; }
+        public LogLevel BenchmarkLogLevel { get; init; }
+        public int? MaxDegreeOfParallelism { get; init; }
+    }
 
     /// <summary>
     /// Runs value.
@@ -72,7 +96,7 @@ public static class ComparisonRunner
         var benchTrack = GetTrackFromSources(
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_TRACK"),
             configuration["GroceryStoreComparison:BenchTrack"],
-            GroceryComparisonTrack.OptimizedProductPath);
+            GroceryComparisonTrack.ApplesToApples);
         var cleanupBenchKeys = GetBoolFromSources(
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_CLEANUP"),
             configuration["GroceryStoreComparison:CleanupBenchmarkKeys"],
@@ -122,8 +146,8 @@ public static class ComparisonRunner
 
         System.Console.WriteLine($"[BenchTrack] {benchTrack}");
         System.Console.WriteLine("Track Definitions:");
-        System.Console.WriteLine("  ApplesToApples: command/payload parity with StackExchange.Redis (JSON cart/session payloads).");
-        System.Console.WriteLine("  OptimizedProductPath: VapeCache optimized cart/session storage path.");
+        System.Console.WriteLine("  ApplesToApples: shared SuperCenter workload + provider swap (VapeCache vs StackExchange.Redis).");
+        System.Console.WriteLine("  OptimizedProductPath: same SuperCenter workload with tuned VapeCache runtime controls.");
         PrintBenchmarkHeader(redisHost, redisPort, shopperCount, maxCartSize, benchTrack, harness);
         System.Console.WriteLine();
 
@@ -231,7 +255,7 @@ public static class ComparisonRunner
                             prefix,
                             deterministicSeed,
                             harness).ConfigureAwait(false);
-                        PrintMachineResult(result);
+                        PrintMachineResult(result, track);
                         if (!warmup)
                             measuredVape.Add(result);
                     }
@@ -240,6 +264,7 @@ public static class ComparisonRunner
                         var prefix = $"cmp:{runId}:{track}:ser:i{iteration:D2}:";
                         iterationPrefixes.Add(prefix);
                         var result = await RunStackExchangeRedisTestAsync(
+                            configuration,
                             redisHost,
                             redisPort,
                             redisUsername,
@@ -249,7 +274,7 @@ public static class ComparisonRunner
                             prefix,
                             deterministicSeed,
                             harness).ConfigureAwait(false);
-                        PrintMachineResult(result);
+                        PrintMachineResult(result, track);
                         if (!warmup)
                             measuredSer.Add(result);
                     }
@@ -322,7 +347,9 @@ public static class ComparisonRunner
             ServiceReadOps: Median(results.Select(static r => r.ServiceReadOps).ToArray()),
             ServiceWriteOps: Median(results.Select(static r => r.ServiceWriteOps).ToArray()),
             ServiceTotalOps: Median(results.Select(static r => r.ServiceTotalOps).ToArray()),
-            ServiceCartItemWriteOps: Median(results.Select(static r => r.ServiceCartItemWriteOps).ToArray()));
+            ServiceCartItemWriteOps: Median(results.Select(static r => r.ServiceCartItemWriteOps).ToArray()),
+            ServiceAdminOps: Median(results.Select(static r => r.ServiceAdminOps).ToArray()),
+            ServiceOptionalSkips: Median(results.Select(static r => r.ServiceOptionalSkips).ToArray()));
     }
 
     private static async Task<StressTestResult> RunVapeCacheTestAsync(
@@ -398,7 +425,7 @@ public static class ComparisonRunner
         var executorMode = GetVapeExecutorModeFromSources(
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_VAPE_EXECUTOR_MODE"),
             configuration["GroceryStoreComparison:VapeExecutorMode"],
-            VapeExecutorMode.Raw);
+            VapeExecutorMode.HybridFailover);
         var enableDiskSpill = GetBoolFromSources(
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_ENABLE_DISK_SPILL"),
             configuration["GroceryStoreComparison:EnableDiskSpill"],
@@ -426,7 +453,7 @@ public static class ComparisonRunner
         var hybridAdmissionGate = GetBoolFromSources(
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_HYBRID_ADMISSION_GATE"),
             configuration["GroceryStoreComparison:HybridAdmissionGate"],
-            true);
+            false);
         var hybridAdmissionLimit = GetIntFromSources(
             Environment.GetEnvironmentVariable("VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT"),
             configuration["GroceryStoreComparison:HybridAdmissionLimit"],
@@ -437,19 +464,39 @@ public static class ComparisonRunner
             configuration["GroceryStoreComparison:HybridAdmissionWaitMs"],
             2,
             allowZero: true);
+        var hybridMirrorWrites = GetBoolFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_HYBRID_MIRROR_WRITES"),
+            configuration["GroceryStoreComparison:HybridMirrorWrites"],
+            false);
+        var hybridWarmReadFallback = GetBoolFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_HYBRID_WARM_READ_FALLBACK"),
+            configuration["GroceryStoreComparison:HybridWarmReadFallback"],
+            false);
+        var hybridRemoveStaleFallbackOnMiss = GetBoolFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_HYBRID_REMOVE_STALE_FALLBACK_ON_MISS"),
+            configuration["GroceryStoreComparison:HybridRemoveStaleFallbackOnMiss"],
+            false);
+        var checkoutLaneCount = GetIntFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_CHECKOUT_LANES"),
+            configuration["GroceryStoreComparison:CheckoutLanes"],
+            128);
 
         Environment.SetEnvironmentVariable("VAPECACHE_HYBRID_FAST_HEALTHY_PATH", hybridFastPath ? "1" : "0");
         Environment.SetEnvironmentVariable("VAPECACHE_HYBRID_ADMISSION_GATE", hybridAdmissionGate ? "1" : "0");
         Environment.SetEnvironmentVariable("VAPECACHE_HYBRID_PRIMARY_ADMISSION_LIMIT", hybridAdmissionLimit.ToString(CultureInfo.InvariantCulture));
         Environment.SetEnvironmentVariable("VAPECACHE_HYBRID_PRIMARY_ADMISSION_WAIT_MS", hybridAdmissionWaitMs.ToString(CultureInfo.InvariantCulture));
+        Environment.SetEnvironmentVariable("HybridFailover__MirrorWritesToFallbackWhenRedisHealthy", hybridMirrorWrites ? "true" : "false");
+        Environment.SetEnvironmentVariable("HybridFailover__WarmFallbackOnRedisReadHit", hybridWarmReadFallback ? "true" : "false");
+        Environment.SetEnvironmentVariable("HybridFailover__RemoveStaleFallbackOnRedisMiss", hybridRemoveStaleFallbackOnMiss ? "true" : "false");
 
         System.Console.WriteLine(
             $"[VapeConfig] ExecutorMode={executorMode}, Mux.Profile={muxProfile}, Mux.Connections={muxConnections}, Mux.BulkLanes={muxBulkLaneConnections}, Mux.MaxInFlight={muxInFlight}, Mux.Coalesce={muxCoalesce}, Mux.AdaptiveCoalesce={muxAdaptiveCoalescing}, Mux.SocketReader={muxSocketRespReader}, Mux.DedicatedWorkers={muxDedicatedLaneWorkers}, Mux.ResponseTimeoutMs={muxResponseTimeoutMs}, SpillSignals={muxEnableSpillPressureSignals}, SpillFilesThreshold={muxSpillPressureTotalFilesThreshold}, SpillActiveShardsThreshold={muxSpillPressureActiveShardsThreshold}, SpillImbalanceThreshold={muxSpillPressureImbalanceRatioThreshold:F2}, SpillSustainedWindow={muxSpillPressureSustainedWindow.TotalSeconds:N0}s");
         System.Console.WriteLine(
-            $"[HybridConfig] FastPath={hybridFastPath}, AdmissionGate={hybridAdmissionGate}, AdmissionLimit={hybridAdmissionLimit}, AdmissionWaitMs={hybridAdmissionWaitMs}");
+            $"[HybridConfig] FastPath={hybridFastPath}, AdmissionGate={hybridAdmissionGate}, AdmissionLimit={hybridAdmissionLimit}, AdmissionWaitMs={hybridAdmissionWaitMs}, MirrorWrites={hybridMirrorWrites}, WarmReadFallback={hybridWarmReadFallback}, RemoveStaleFallbackOnMiss={hybridRemoveStaleFallbackOnMiss}");
         System.Console.WriteLine(
             $"[SpillConfig] DiskSpill={enableDiskSpill}, ThresholdBytes={spillThresholdBytes}, SpillDir={spillDirectory ?? "<default>"}, PrimeRecords={spillPrimeRecords}, PrimePayloadBytes={spillPrimePayloadBytes}");
         System.Console.WriteLine($"[VapeConfig] KeyPrefix={keyPrefix}");
+        System.Console.WriteLine($"[WorkloadConfig] CheckoutLanes={checkoutLaneCount}");
 
         // Logging
         services.AddLogging(builder => ConfigureBenchmarkLogging(builder, harness.BenchmarkLogLevel));
@@ -549,6 +596,18 @@ public static class ComparisonRunner
         });
 
         services.AddVapecacheRedisConnections();
+        services.AddVapecacheCaching();
+        if (enableDiskSpill)
+            services.AddVapeCachePersistence();
+
+        services.AddOptions<InMemorySpillOptions>().Configure(options =>
+        {
+            options.EnableSpillToDisk = enableDiskSpill;
+            options.SpillThresholdBytes = Math.Max(1, spillThresholdBytes);
+            if (!string.IsNullOrWhiteSpace(spillDirectory))
+                options.SpillDirectory = spillDirectory;
+        });
+
         if (executorMode == VapeExecutorMode.Raw)
         {
             services.AddOptions<RedisCircuitBreakerOptions>().Configure(options =>
@@ -558,79 +617,52 @@ public static class ComparisonRunner
                     .SetValue(options, false);
             });
 
-            RegisterInternalBenchmarkServices(services);
-            services.AddSingleton<IRedisCommandExecutor>(_ =>
+            // Keep raw mode available for transport-only drills while retaining HybridCache APIs.
+            services.AddSingleton<IRedisCommandExecutor>(sp =>
             {
                 var executorType = typeof(RedisConnectionRegistration).Assembly.GetType(
                     "VapeCache.Infrastructure.Connections.RedisCommandExecutor",
                     throwOnError: true)!;
-                return (IRedisCommandExecutor)ActivatorUtilities.CreateInstance(_, executorType);
-            });
-        }
-        else
-        {
-            services.AddVapecacheCaching();
-            if (enableDiskSpill)
-            {
-                services.AddVapeCachePersistence();
-            }
-
-            services.AddOptions<InMemorySpillOptions>().Configure(options =>
-            {
-                options.EnableSpillToDisk = enableDiskSpill;
-                options.SpillThresholdBytes = Math.Max(1, spillThresholdBytes);
-                if (!string.IsNullOrWhiteSpace(spillDirectory))
-                    options.SpillDirectory = spillDirectory;
+                return (IRedisCommandExecutor)sp.GetRequiredService(executorType);
             });
         }
 
-        if (track == GroceryComparisonTrack.ApplesToApples)
-            services.AddSingleton<IGroceryStoreService>(sp =>
-                new VapeCacheRawParityGroceryStoreService(
-                    sp.GetRequiredService<IRedisCommandExecutor>(),
-                    keyPrefix));
-        else
-            services.AddSingleton<IGroceryStoreService>(sp =>
-                new VapeCacheRawGroceryStoreService(
-                    sp.GetRequiredService<IRedisCommandExecutor>(),
-                    keyPrefix,
-                    optimizedCleanupOnly: true,
-                    useLocalFlashSaleCountCache: true,
-                    useLocalCartReadCache: true));
+        services.AddSingleton<ISuperCenterStoreProvider>(sp =>
+            new VapeCacheSuperCenterProvider(
+                sp.GetRequiredService<IVapeCache>(),
+                sp.GetRequiredService<IRedisCommandExecutor>(),
+                keyPrefix));
+        services.AddSingleton<SuperCenterGroceryStoreService>();
+        services.AddSingleton<IGroceryStoreService>(sp => sp.GetRequiredService<SuperCenterGroceryStoreService>());
 
-        var provider = services.BuildServiceProvider();
-        try
+        using var provider = BuildAutofacServiceProvider(services);
+
+        if (executorMode == VapeExecutorMode.HybridFailover &&
+            enableDiskSpill &&
+            spillPrimeRecords > 0 &&
+            spillPrimePayloadBytes > 0)
         {
-            if (executorMode == VapeExecutorMode.HybridFailover &&
-                enableDiskSpill &&
-                spillPrimeRecords > 0 &&
-                spillPrimePayloadBytes > 0)
-            {
-                await PrimeSpillStoreAsync(provider, spillPrimeRecords, spillPrimePayloadBytes, CancellationToken.None).ConfigureAwait(false);
-            }
-
-            var service = provider.GetRequiredService<IGroceryStoreService>();
-            var logger = provider.GetRequiredService<ILogger<GroceryStoreComparisonStressTest>>();
-
-            var providerName = track == GroceryComparisonTrack.ApplesToApples
-                ? "VapeCache (ApplesToApples)"
-                : "VapeCache (OptimizedProductPath)";
-            var test = new GroceryStoreComparisonStressTest(
-                service,
-                logger,
-                providerName,
-                deterministicSeed,
-                harness.MaxDegreeOfParallelism);
-            return await RunWithOptionalTimeoutAsync(
-                    ct => test.RunStressTestAsync(shopperCount, maxCartSize, ct),
-                    harness.ProviderTimeout,
-                    providerName)
-                .ConfigureAwait(false);
+            await PrimeSpillStoreAsync(provider, spillPrimeRecords, spillPrimePayloadBytes, CancellationToken.None).ConfigureAwait(false);
         }
-        finally
-        {
-            await provider.DisposeAsync().ConfigureAwait(false);
-        }
+
+        var service = provider.GetRequiredService<IGroceryStoreService>();
+        var logger = provider.GetRequiredService<ILogger<GroceryStoreComparisonStressTest>>();
+
+        var providerName = track == GroceryComparisonTrack.ApplesToApples
+            ? "VapeCache (SuperCenter-A2A)"
+            : "VapeCache (SuperCenter-Tuned)";
+        var test = new GroceryStoreComparisonStressTest(
+            service,
+            logger,
+            providerName,
+            deterministicSeed,
+            harness.MaxDegreeOfParallelism,
+            checkoutLaneCount);
+        return await RunWithOptionalTimeoutAsync(
+                ct => test.RunStressTestAsync(shopperCount, maxCartSize, ct),
+                harness.ProviderTimeout,
+                providerName)
+            .ConfigureAwait(false);
     }
 
     private static async Task PrimeSpillStoreAsync(
@@ -683,7 +715,7 @@ public static class ComparisonRunner
         System.Console.WriteLine($"Redis Endpoint: {redisHost}:{redisPort}");
         System.Console.WriteLine($"Track: {track}");
         System.Console.WriteLine(
-            $"Workload Unit: 1 shopper = JoinFlashSale + IsInFlashSale + BuildCartItems(15..{maxCartSize}) + AddToCart + CartReadPhase + SessionAndSalePhase + ClearCart");
+            $"Workload Unit: 1 shopper = JoinFlashSale + IsInFlashSale + BuildCartItems(15..{maxCartSize}) + AddToCart + CartReadPhase + SessionAndSalePhase + CommandCoverageMatrix + TagInvalidation + Checkout");
         System.Console.WriteLine("Workload Shape: 25 products, 5 flash-sales, unique user/session ids per shopper.");
         System.Console.WriteLine(
             $"Harness: warmups={harness.WarmupRuns}, measured-runs={harness.Runs}, alternate-order={harness.AlternateOrder}, deterministic-seed={harness.DeterministicSeed}, cleanup-run-keys={harness.CleanupRunKeys}, timeout={harness.ProviderTimeout.TotalSeconds:N0}s, log-level={harness.BenchmarkLogLevel}, max-degree={(harness.MaxDegreeOfParallelism?.ToString(CultureInfo.InvariantCulture) ?? "auto")}");
@@ -695,6 +727,7 @@ public static class ComparisonRunner
     }
 
     private static async Task<StressTestResult> RunStackExchangeRedisTestAsync(
+        IConfiguration configuration,
         string redisHost,
         int redisPort,
         string? redisUsername,
@@ -706,6 +739,10 @@ public static class ComparisonRunner
         HarnessSettings harness)
     {
         var services = new ServiceCollection();
+        var checkoutLaneCount = GetIntFromSources(
+            Environment.GetEnvironmentVariable("VAPECACHE_BENCH_CHECKOUT_LANES"),
+            configuration["GroceryStoreComparison:CheckoutLanes"],
+            128);
 
         // Logging
         services.AddLogging(builder => ConfigureBenchmarkLogging(builder, harness.BenchmarkLogLevel));
@@ -725,15 +762,19 @@ public static class ComparisonRunner
             configOptions.Password = redisPassword;
         }
 
-        var multiplexer = await ConnectionMultiplexer.ConnectAsync(configOptions);
-        services.AddSingleton<IConnectionMultiplexer>(multiplexer);
-        services.AddSingleton<IGroceryStoreService>(sp =>
-            new StackExchangeRedisGroceryStoreService(
-                sp.GetRequiredService<IConnectionMultiplexer>(),
+        IConnectionMultiplexer? multiplexer = null;
+        multiplexer = await ConnectionMultiplexer.ConnectAsync(configOptions).ConfigureAwait(false);
+        services.AddSingleton(multiplexer);
+        services.AddSingleton<ISuperCenterStoreProvider>(sp =>
+            new StackExchangeSuperCenterProvider(
+                sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase(),
                 keyPrefix));
+        services.AddSingleton<SuperCenterGroceryStoreService>();
+        services.AddSingleton<IGroceryStoreService>(sp => sp.GetRequiredService<SuperCenterGroceryStoreService>());
         System.Console.WriteLine($"[SERConfig] KeyPrefix={keyPrefix}");
+        System.Console.WriteLine($"[WorkloadConfig] CheckoutLanes={checkoutLaneCount}");
 
-        var provider = services.BuildServiceProvider();
+        using var provider = BuildAutofacServiceProvider(services);
         try
         {
             var service = provider.GetRequiredService<IGroceryStoreService>();
@@ -745,7 +786,8 @@ public static class ComparisonRunner
                 logger,
                 providerName,
                 deterministicSeed,
-                harness.MaxDegreeOfParallelism);
+                harness.MaxDegreeOfParallelism,
+                checkoutLaneCount);
             return await RunWithOptionalTimeoutAsync(
                     ct => test.RunStressTestAsync(shopperCount, maxCartSize, ct),
                     harness.ProviderTimeout,
@@ -754,7 +796,7 @@ public static class ComparisonRunner
         }
         finally
         {
-            await provider.DisposeAsync().ConfigureAwait(false);
+            multiplexer.Dispose();
         }
     }
 
@@ -870,12 +912,12 @@ public static class ComparisonRunner
         System.Console.WriteLine("═══════════════════════════════════════════════════════════════════════════");
     }
 
-    private static void PrintMachineResult(StressTestResult result)
+    private static void PrintMachineResult(StressTestResult result, GroceryComparisonTrack track)
     {
         var allocPerShopper = result.SuccessCount <= 0 ? 0m : result.AllocatedBytes / (decimal)result.SuccessCount;
         var provider = result.ProviderName.Replace("|", "/", StringComparison.Ordinal);
         System.Console.WriteLine(
-            $"RESULT|Provider={provider}|Throughput={result.ThroughputShoppersPerSec:F2}|P95Ms={result.P95LatencyMs:F4}|P99Ms={result.P99LatencyMs:F4}|P999Ms={result.P999LatencyMs:F4}|AllocBytes={result.AllocatedBytes}|AllocBytesPerShopper={allocPerShopper:F2}|Gen0={result.Gen0Collections}|Gen1={result.Gen1Collections}|Gen2={result.Gen2Collections}|Success={result.SuccessCount}|Errors={result.ErrorCount}|ServiceReadOps={result.ServiceReadOps}|ServiceWriteOps={result.ServiceWriteOps}|ServiceTotalOps={result.ServiceTotalOps}|ServiceCartItemWrites={result.ServiceCartItemWriteOps}");
+            $"RESULT|Track={track}|Provider={provider}|Throughput={result.ThroughputShoppersPerSec:F2}|P50Ms={result.P50LatencyMs:F4}|P95Ms={result.P95LatencyMs:F4}|P99Ms={result.P99LatencyMs:F4}|P999Ms={result.P999LatencyMs:F4}|AllocBytes={result.AllocatedBytes}|AllocBytesPerShopper={allocPerShopper:F2}|Gen0={result.Gen0Collections}|Gen1={result.Gen1Collections}|Gen2={result.Gen2Collections}|Success={result.SuccessCount}|Errors={result.ErrorCount}|ServiceReadOps={result.ServiceReadOps}|ServiceWriteOps={result.ServiceWriteOps}|ServiceAdminOps={result.ServiceAdminOps}|ServiceTotalOps={result.ServiceTotalOps}|ServiceCartItemWrites={result.ServiceCartItemWriteOps}|OptionalSkips={result.ServiceOptionalSkips}");
     }
 
     private static void PrintMetric(string name, decimal vapeCacheValue, decimal stackExchangeValue, bool higher)
@@ -939,23 +981,18 @@ public static class ComparisonRunner
         return (values[mid - 1] + values[mid]) / 2m;
     }
 
-    private static void RegisterInternalBenchmarkServices(IServiceCollection services)
-    {
-        var infrastructureAssembly = typeof(RedisConnectionRegistration).Assembly;
-        var cacheStatsRegistryType = infrastructureAssembly.GetType(
-            "VapeCache.Infrastructure.Caching.CacheStatsRegistry",
-            throwOnError: true)!;
-
-        services.AddSingleton(
-            cacheStatsRegistryType,
-            _ => Activator.CreateInstance(cacheStatsRegistryType)!);
-    }
-
     private static void ConfigureBenchmarkLogging(ILoggingBuilder builder, LogLevel minLevel)
     {
         builder.ClearProviders();
         builder.SetMinimumLevel(minLevel);
         builder.AddConsole();
+    }
+
+    private static AutofacServiceProvider BuildAutofacServiceProvider(IServiceCollection services)
+    {
+        var builder = new ContainerBuilder();
+        builder.Populate(services);
+        return new AutofacServiceProvider(builder.Build());
     }
 
     private static async Task<StressTestResult> RunWithOptionalTimeoutAsync(
@@ -1072,14 +1109,14 @@ public static class ComparisonRunner
         if (string.IsNullOrWhiteSpace(value))
             return false;
 
-        if (TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out parsed) && parsed > TimeSpan.Zero)
-            return true;
-
         if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds) && seconds > 0d)
         {
             parsed = TimeSpan.FromSeconds(seconds);
             return true;
         }
+
+        if (TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out parsed) && parsed > TimeSpan.Zero)
+            return true;
 
         return false;
     }

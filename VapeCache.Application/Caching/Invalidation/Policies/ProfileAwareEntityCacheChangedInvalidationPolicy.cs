@@ -7,13 +7,17 @@ namespace VapeCache.Application.Caching.Invalidation.Policies;
 /// <summary>
 /// Maps entity-change events into invalidation targets based on the active runtime profile.
 /// </summary>
-public sealed class ProfileAwareEntityCacheChangedInvalidationPolicy(
-    IOptionsMonitor<CacheInvalidationOptions> optionsMonitor)
+public sealed class ProfileAwareEntityCacheChangedInvalidationPolicy
     : ICacheInvalidationPolicy<EntityCacheChangedEvent>
 {
     private static readonly string[] Empty = [];
 
-    private readonly IOptionsMonitor<CacheInvalidationOptions> _optionsMonitor = optionsMonitor;
+    private readonly IOptionsMonitor<CacheInvalidationOptions> _optionsMonitor;
+
+    public ProfileAwareEntityCacheChangedInvalidationPolicy(IOptionsMonitor<CacheInvalidationOptions> optionsMonitor)
+    {
+        _optionsMonitor = optionsMonitor;
+    }
 
     /// <summary>
     /// Executes build plan async.

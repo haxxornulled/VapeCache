@@ -4,6 +4,9 @@ param(
     [string]$Configuration = "Release",
     [string]$PackageVersion = "",
     [string]$PackageOutput = "artifacts/release-orchestrator-packages",
+    [string[]]$PackRestoreSource = @(),
+    [ValidateRange(1, 128)]
+    [int]$PackMaxCpuCount = 1,
     [string]$NuGetSource = "https://api.nuget.org/v3/index.json",
     [string]$NuGetApiKey = $env:NUGET_API_KEY,
     [string]$GitHubPackagesSource = "https://nuget.pkg.github.com/haxxornulled/index.json",
@@ -23,7 +26,8 @@ param(
     [switch]$SkipTagPush,
     [switch]$SkipGitHubReleases,
     [switch]$AllowDirty,
-    [switch]$CommitIfDirty
+    [switch]$CommitIfDirty,
+    [switch]$IgnoreFailedPackRestoreSources
 )
 
 Set-StrictMode -Version Latest
@@ -114,11 +118,25 @@ if (-not $SkipReleaseCheck)
 if (-not $SkipPack)
 {
     Invoke-ReleaseStep -Name "Pack release packages" -Action {
-        Invoke-ReleaseScript -ScriptPath (Join-Path $PSScriptRoot "pack-release-packages.ps1") -ArgumentList @(
+        $packArgs = @(
             "-Configuration", $Configuration,
             "-OutputDir", $PackageOutput,
-            "-PackageVersion", $resolvedPackageVersion
+            "-PackageVersion", $resolvedPackageVersion,
+            "-NoRestore",
+            "-MaxCpuCount", "$PackMaxCpuCount"
         )
+
+        foreach ($source in $PackRestoreSource)
+        {
+            $packArgs += @("-RestoreSource", $source)
+        }
+
+        if ($IgnoreFailedPackRestoreSources)
+        {
+            $packArgs += "-IgnoreFailedRestoreSources"
+        }
+
+        Invoke-ReleaseScript -ScriptPath (Join-Path $PSScriptRoot "pack-release-packages.ps1") -ArgumentList $packArgs
     }
 }
 

@@ -352,4 +352,20 @@ public class TypedCollectionsBenchmarks
     }
 }
 
-public record CartItem(Guid ProductId, string ProductName, decimal Price, int Quantity, DateTime AddedAt);
+public record CartItem
+{
+    public CartItem(Guid ProductId, string ProductName, decimal Price, int Quantity, DateTime AddedAt)
+    {
+        this.ProductId = ProductId;
+        this.ProductName = ProductName;
+        this.Price = Price;
+        this.Quantity = Quantity;
+        this.AddedAt = AddedAt;
+    }
+
+    public Guid ProductId { get; init; }
+    public string ProductName { get; init; }
+    public decimal Price { get; init; }
+    public int Quantity { get; init; }
+    public DateTime AddedAt { get; init; }
+}

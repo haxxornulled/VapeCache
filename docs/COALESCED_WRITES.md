@@ -845,7 +845,7 @@ for (var i = 0; i < _coalesceDrained.Count; i++)
 ### Benchmark Results
 
 **Environment**:
-- Remote Redis: 192.168.100.50:6379 (network latency ~1-2ms)
+- Remote Redis: benchmark-redis.example.internal:6379 (network latency ~1-2ms)
 - Iterations: 10,000 per payload size
 - Configuration: `EnableCoalescedSocketWrites = true`
 

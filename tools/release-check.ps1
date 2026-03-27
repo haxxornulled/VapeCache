@@ -1,11 +1,17 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
+    [string[]]$RestoreSource = @(),
+    [string[]]$PackRestoreSource = @(),
+    [ValidateRange(1, 128)]
+    [int]$PackMaxCpuCount = 1,
     [switch]$SkipBaseline,
     [switch]$SkipPerfGates,
     [switch]$SkipPack,
     [switch]$IncludeVulnerabilityAudit,
-    [switch]$UsePublicSourcesOnly
+    [switch]$UsePublicSourcesOnly,
+    [switch]$IgnoreFailedRestoreSources,
+    [switch]$IgnoreFailedPackRestoreSources
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,7 +49,17 @@ Invoke-ReleaseStep -Name "Release package branding metadata" -Action {
 }
 
 Invoke-ReleaseStep -Name "Restore" -Action {
-    if ($UsePublicSourcesOnly) {
+    if ($RestoreSource.Count -gt 0) {
+        $restoreArgs = @($solutionPath)
+        foreach ($source in $RestoreSource) {
+            $restoreArgs += @("--source", $source)
+        }
+        if ($IgnoreFailedRestoreSources) {
+            $restoreArgs += "-p:RestoreIgnoreFailedSources=true"
+        }
+        dotnet restore @restoreArgs
+    }
+    elseif ($UsePublicSourcesOnly) {
         dotnet restore $solutionPath --source "https://api.nuget.org/v3/index.json"
     }
     elseif ($hasNuGetConfig) {
@@ -91,10 +107,22 @@ if (-not $SkipPack) {
 
     if (Test-Path $packScript) {
         Invoke-ReleaseStep -Name "Pack release packages" -Action {
-            Invoke-ReleaseScript -ScriptPath $packScript -ArgumentList @(
+            $packArgs = @(
                 "-Configuration", $Configuration,
-                "-OutputDir", $packOutput
+                "-OutputDir", $packOutput,
+                "-NoRestore",
+                "-MaxCpuCount", "$PackMaxCpuCount"
             )
+
+            foreach ($source in $PackRestoreSource) {
+                $packArgs += @("-RestoreSource", $source)
+            }
+
+            if ($IgnoreFailedPackRestoreSources) {
+                $packArgs += "-IgnoreFailedRestoreSources"
+            }
+
+            Invoke-ReleaseScript -ScriptPath $packScript -ArgumentList $packArgs
         }
     }
 

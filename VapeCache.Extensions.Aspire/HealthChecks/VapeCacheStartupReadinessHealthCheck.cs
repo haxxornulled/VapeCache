@@ -5,8 +5,15 @@ namespace VapeCache.Extensions.Aspire.HealthChecks;
 /// <summary>
 /// Represents the vape cache startup readiness health check.
 /// </summary>
-public sealed class VapeCacheStartupReadinessHealthCheck(IVapeCacheStartupReadiness readiness) : IHealthCheck
+public sealed class VapeCacheStartupReadinessHealthCheck : IHealthCheck
 {
+    private readonly IVapeCacheStartupReadiness readiness;
+
+    public VapeCacheStartupReadinessHealthCheck(IVapeCacheStartupReadiness readiness)
+    {
+        this.readiness = readiness;
+    }
+
     /// <summary>
     /// Executes check health async.
     /// </summary>

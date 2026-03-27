@@ -1,36 +1,101 @@
 namespace VapeCache.Extensions.Aspire;
 
-internal readonly record struct RedisExporterMetricValues(
-    int ExporterUp,
-    double ConnectedClients,
-    double BlockedClients,
-    double OpsPerSecond,
-    double UsedMemoryBytes,
-    double MaxMemoryBytes,
-    long CommandsProcessedTotal,
-    long KeyspaceHitsTotal,
-    long KeyspaceMissesTotal,
-    long EvictedKeysTotal,
-    long NetInputBytesTotal,
-    long NetOutputBytesTotal);
-
-internal sealed record RedisExporterMetricsSnapshot(
-    bool Enabled,
-    int Up,
-    DateTimeOffset ObservedAtUtc,
-    DateTimeOffset? LastSuccessUtc,
-    double ConnectedClients,
-    double BlockedClients,
-    double OpsPerSecond,
-    double UsedMemoryBytes,
-    double MaxMemoryBytes,
-    long CommandsProcessedTotal,
-    long KeyspaceHitsTotal,
-    long KeyspaceMissesTotal,
-    long EvictedKeysTotal,
-    long NetInputBytesTotal,
-    long NetOutputBytesTotal)
+internal readonly record struct RedisExporterMetricValues
 {
+    public RedisExporterMetricValues(
+        int ExporterUp,
+        double ConnectedClients,
+        double BlockedClients,
+        double OpsPerSecond,
+        double UsedMemoryBytes,
+        double MaxMemoryBytes,
+        long CommandsProcessedTotal,
+        long KeyspaceHitsTotal,
+        long KeyspaceMissesTotal,
+        long EvictedKeysTotal,
+        long NetInputBytesTotal,
+        long NetOutputBytesTotal)
+    {
+        this.ExporterUp = ExporterUp;
+        this.ConnectedClients = ConnectedClients;
+        this.BlockedClients = BlockedClients;
+        this.OpsPerSecond = OpsPerSecond;
+        this.UsedMemoryBytes = UsedMemoryBytes;
+        this.MaxMemoryBytes = MaxMemoryBytes;
+        this.CommandsProcessedTotal = CommandsProcessedTotal;
+        this.KeyspaceHitsTotal = KeyspaceHitsTotal;
+        this.KeyspaceMissesTotal = KeyspaceMissesTotal;
+        this.EvictedKeysTotal = EvictedKeysTotal;
+        this.NetInputBytesTotal = NetInputBytesTotal;
+        this.NetOutputBytesTotal = NetOutputBytesTotal;
+    }
+
+    public int ExporterUp { get; init; }
+    public double ConnectedClients { get; init; }
+    public double BlockedClients { get; init; }
+    public double OpsPerSecond { get; init; }
+    public double UsedMemoryBytes { get; init; }
+    public double MaxMemoryBytes { get; init; }
+    public long CommandsProcessedTotal { get; init; }
+    public long KeyspaceHitsTotal { get; init; }
+    public long KeyspaceMissesTotal { get; init; }
+    public long EvictedKeysTotal { get; init; }
+    public long NetInputBytesTotal { get; init; }
+    public long NetOutputBytesTotal { get; init; }
+}
+
+internal sealed record RedisExporterMetricsSnapshot
+{
+    public RedisExporterMetricsSnapshot(
+        bool Enabled,
+        int Up,
+        DateTimeOffset ObservedAtUtc,
+        DateTimeOffset? LastSuccessUtc,
+        double ConnectedClients,
+        double BlockedClients,
+        double OpsPerSecond,
+        double UsedMemoryBytes,
+        double MaxMemoryBytes,
+        long CommandsProcessedTotal,
+        long KeyspaceHitsTotal,
+        long KeyspaceMissesTotal,
+        long EvictedKeysTotal,
+        long NetInputBytesTotal,
+        long NetOutputBytesTotal)
+    {
+        this.Enabled = Enabled;
+        this.Up = Up;
+        this.ObservedAtUtc = ObservedAtUtc;
+        this.LastSuccessUtc = LastSuccessUtc;
+        this.ConnectedClients = ConnectedClients;
+        this.BlockedClients = BlockedClients;
+        this.OpsPerSecond = OpsPerSecond;
+        this.UsedMemoryBytes = UsedMemoryBytes;
+        this.MaxMemoryBytes = MaxMemoryBytes;
+        this.CommandsProcessedTotal = CommandsProcessedTotal;
+        this.KeyspaceHitsTotal = KeyspaceHitsTotal;
+        this.KeyspaceMissesTotal = KeyspaceMissesTotal;
+        this.EvictedKeysTotal = EvictedKeysTotal;
+        this.NetInputBytesTotal = NetInputBytesTotal;
+        this.NetOutputBytesTotal = NetOutputBytesTotal;
+    }
+
+    public bool Enabled { get; init; }
+    public int Up { get; init; }
+    public DateTimeOffset ObservedAtUtc { get; init; }
+    public DateTimeOffset? LastSuccessUtc { get; init; }
+    public double ConnectedClients { get; init; }
+    public double BlockedClients { get; init; }
+    public double OpsPerSecond { get; init; }
+    public double UsedMemoryBytes { get; init; }
+    public double MaxMemoryBytes { get; init; }
+    public long CommandsProcessedTotal { get; init; }
+    public long KeyspaceHitsTotal { get; init; }
+    public long KeyspaceMissesTotal { get; init; }
+    public long EvictedKeysTotal { get; init; }
+    public long NetInputBytesTotal { get; init; }
+    public long NetOutputBytesTotal { get; init; }
+
     public static RedisExporterMetricsSnapshot Unknown { get; } = new(
         Enabled: false,
         Up: 0,

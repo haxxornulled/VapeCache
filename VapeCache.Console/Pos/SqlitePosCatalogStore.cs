@@ -4,9 +4,7 @@ using Microsoft.Extensions.Options;
 
 namespace VapeCache.Console.Pos;
 
-internal sealed class SqlitePosCatalogStore(
-    IOptionsMonitor<PosSearchDemoOptions> optionsMonitor,
-    ILogger<SqlitePosCatalogStore> logger)
+internal sealed class SqlitePosCatalogStore
 {
     private static readonly PosCatalogProduct[] RequiredProducts =
     [
@@ -22,9 +20,19 @@ internal sealed class SqlitePosCatalogStore(
     private static readonly string[] NounSeed = ["Pencil", "Pen", "Notebook", "Marker", "Headphones", "Mouse", "Lamp", "Cable", "Mug", "Folder"];
 
     private readonly SemaphoreSlim _initGate = new(1, 1);
+    private readonly IOptionsMonitor<PosSearchDemoOptions> optionsMonitor;
+    private readonly ILogger<SqlitePosCatalogStore> logger;
     private int _initialized;
     private string? _connectionString;
     private string? _resolvedPath;
+
+    public SqlitePosCatalogStore(
+        IOptionsMonitor<PosSearchDemoOptions> optionsMonitor,
+        ILogger<SqlitePosCatalogStore> logger)
+    {
+        this.optionsMonitor = optionsMonitor;
+        this.logger = logger;
+    }
 
     public async ValueTask EnsureInitializedAsync(CancellationToken ct)
     {

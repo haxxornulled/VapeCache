@@ -92,8 +92,15 @@ public sealed class AspireStartupWarmupHostedServiceTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class FailingPool(Exception exception) : IRedisConnectionPool
+    private sealed class FailingPool : IRedisConnectionPool
     {
+        private readonly Exception exception;
+
+        public FailingPool(Exception exception)
+        {
+            this.exception = exception;
+        }
+
         public ValueTask<Result<IRedisConnectionLease>> RentAsync(CancellationToken ct)
             => ValueTask.FromResult(new Result<IRedisConnectionLease>(exception));
 

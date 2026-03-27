@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using VapeCache.UI.Components;
@@ -8,6 +9,25 @@ using VapeCache.Extensions.AdminAuth;
 using VapeCache.Extensions.Aspire;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Prefer a real connection string from env/Aspire when present so direct UI runs
+// and AppHost runs resolve Redis the same way.
+var redisConnectionString = builder.Configuration["RedisConnection:ConnectionString"];
+if (string.IsNullOrWhiteSpace(redisConnectionString))
+{
+    redisConnectionString = Environment.GetEnvironmentVariable("VAPECACHE_REDIS_CONNECTIONSTRING");
+}
+
+if (string.IsNullOrWhiteSpace(redisConnectionString))
+{
+    redisConnectionString = builder.Configuration.GetConnectionString("redis");
+}
+
+if (!string.IsNullOrWhiteSpace(redisConnectionString))
+{
+    builder.Configuration["RedisConnection:ConnectionString"] = redisConnectionString;
+}
+
 builder.Host.UseServiceProviderFactory(new AutofacServiceProviderFactory());
 builder.Host.ConfigureContainer<ContainerBuilder>(static _ => { });
 var allowInsecureAdminInDevelopment = !builder.Configuration.GetValue<bool>(

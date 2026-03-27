@@ -37,9 +37,15 @@ public static class AspireEndpointAutoMapExtensions
         return builder;
     }
 
-    private sealed class VapeCacheEndpointStartupFilter(IOptions<VapeCacheEndpointOptions> options)
-        : IStartupFilter
+    private sealed class VapeCacheEndpointStartupFilter : IStartupFilter
     {
+        private readonly IOptions<VapeCacheEndpointOptions> options;
+
+        public VapeCacheEndpointStartupFilter(IOptions<VapeCacheEndpointOptions> options)
+        {
+            this.options = options;
+        }
+
         /// <summary>
         /// Executes value.
         /// </summary>

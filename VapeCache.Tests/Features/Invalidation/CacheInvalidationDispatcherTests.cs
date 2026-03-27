@@ -69,5 +69,13 @@ public sealed class CacheInvalidationDispatcherTests
             => throw new InvalidOperationException("policy failure");
     }
 
-    private sealed record OrderEvent(string Id);
+    private sealed record OrderEvent
+    {
+        public OrderEvent(string Id)
+        {
+            this.Id = Id;
+        }
+
+        public string Id { get; init; }
+    }
 }

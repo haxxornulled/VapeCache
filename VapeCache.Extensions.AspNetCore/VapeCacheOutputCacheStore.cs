@@ -10,10 +10,7 @@ namespace VapeCache.Extensions.AspNetCore;
 /// <summary>
 /// ASP.NET Core output-cache store backed by <see cref="ICacheService"/>.
 /// </summary>
-public sealed partial class VapeCacheOutputCacheStore(
-    ICacheService cache,
-    IOptionsMonitor<VapeCacheOutputCacheStoreOptions> optionsMonitor,
-    ILogger<VapeCacheOutputCacheStore> logger) : IOutputCacheStore
+public sealed partial class VapeCacheOutputCacheStore : IOutputCacheStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly byte[] EnvelopePrefix = "VCOUT1:"u8.ToArray();
@@ -24,6 +21,20 @@ public sealed partial class VapeCacheOutputCacheStore(
         Tags: null);
     private string[]? _cachedSetIntentTags;
     private CacheIntent? _cachedSetIntent;
+
+    private readonly ICacheService cache;
+    private readonly IOptionsMonitor<VapeCacheOutputCacheStoreOptions> optionsMonitor;
+    private readonly ILogger<VapeCacheOutputCacheStore> logger;
+
+    public VapeCacheOutputCacheStore(
+        ICacheService cache,
+        IOptionsMonitor<VapeCacheOutputCacheStoreOptions> optionsMonitor,
+        ILogger<VapeCacheOutputCacheStore> logger)
+    {
+        this.cache = cache;
+        this.optionsMonitor = optionsMonitor;
+        this.logger = logger;
+    }
 
     /// <inheritdoc />
     public async ValueTask<byte[]?> GetAsync(string key, CancellationToken cancellationToken)

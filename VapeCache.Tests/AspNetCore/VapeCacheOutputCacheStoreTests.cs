@@ -167,8 +167,15 @@ public sealed class VapeCacheOutputCacheStoreTests
         }
     }
 
-    private sealed class StaticOptionsMonitor<T>(T value) : IOptionsMonitor<T>
+    private sealed class StaticOptionsMonitor<T> : IOptionsMonitor<T>
     {
+        private readonly T value;
+
+        public StaticOptionsMonitor(T value)
+        {
+            this.value = value;
+        }
+
         public T CurrentValue => value;
         public T Get(string? name) => value;
         public IDisposable OnChange(Action<T, string?> listener) => NoopDisposable.Instance;

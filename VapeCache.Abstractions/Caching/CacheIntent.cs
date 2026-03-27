@@ -48,22 +48,54 @@ public enum CacheIntentKind
 /// <summary>
 /// Represents the cache intent.
 /// </summary>
-public sealed record CacheIntent(
-    CacheIntentKind Kind,
-    string? Reason = null,
-    string? Owner = null,
-    string[]? Tags = null);
+public sealed record CacheIntent
+{
+    public CacheIntent(
+        CacheIntentKind Kind,
+        string? Reason = null,
+        string? Owner = null,
+        string[]? Tags = null)
+    {
+        this.Kind = Kind;
+        this.Reason = Reason;
+        this.Owner = Owner;
+        this.Tags = Tags;
+    }
+
+    public CacheIntentKind Kind { get; init; }
+    public string? Reason { get; init; }
+    public string? Owner { get; init; }
+    public string[]? Tags { get; init; }
+}
 
 /// <summary>
 /// Represents the cache intent entry.
 /// </summary>
-public sealed record CacheIntentEntry(
-    string Key,
-    BackendType Backend,
-    CacheIntent Intent,
-    DateTimeOffset RecordedAtUtc,
-    DateTimeOffset? ExpiresAtUtc,
-    int PayloadBytes);
+public sealed record CacheIntentEntry
+{
+    public CacheIntentEntry(
+        string Key,
+        BackendType Backend,
+        CacheIntent Intent,
+        DateTimeOffset RecordedAtUtc,
+        DateTimeOffset? ExpiresAtUtc,
+        int PayloadBytes)
+    {
+        this.Key = Key;
+        this.Backend = Backend;
+        this.Intent = Intent;
+        this.RecordedAtUtc = RecordedAtUtc;
+        this.ExpiresAtUtc = ExpiresAtUtc;
+        this.PayloadBytes = PayloadBytes;
+    }
+
+    public string Key { get; init; }
+    public BackendType Backend { get; init; }
+    public CacheIntent Intent { get; init; }
+    public DateTimeOffset RecordedAtUtc { get; init; }
+    public DateTimeOffset? ExpiresAtUtc { get; init; }
+    public int PayloadBytes { get; init; }
+}
 
 /// <summary>
 /// Defines the cache intent registry contract.

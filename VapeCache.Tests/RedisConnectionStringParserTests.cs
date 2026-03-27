@@ -75,13 +75,13 @@ public sealed class RedisConnectionStringParserTests
     [Fact]
     public void Parses_stackexchange_style_endpoint_with_acl()
     {
-        const string cs = "192.168.100.50,user=admin,password=redis4me!!,ssl=false,abortConnect=false,connectTimeout=5000,syncTimeout=5000";
+        const string cs = "redis.example.internal,user=app,password=unit-test-secret,ssl=false,abortConnect=false,connectTimeout=5000,syncTimeout=5000";
         var ok = RedisConnectionStringParser.TryParse(cs, out var parsed, out var err);
         Assert.True(ok, err);
-        Assert.Equal("192.168.100.50", parsed.Host);
+        Assert.Equal("redis.example.internal", parsed.Host);
         Assert.Equal(6379, parsed.Port);
-        Assert.Equal("admin", parsed.Username);
-        Assert.Equal("redis4me!!", parsed.Password);
+        Assert.Equal("app", parsed.Username);
+        Assert.Equal("unit-test-secret", parsed.Password);
         Assert.False(parsed.UseTls);
         Assert.Equal(0, parsed.Database);
     }

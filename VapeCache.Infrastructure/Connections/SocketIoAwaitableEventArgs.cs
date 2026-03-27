@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Collections.Generic;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,12 +14,10 @@ namespace VapeCache.Infrastructure.Connections;
 /// </summary>
 internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueTaskSource<int>
 {
-    private static readonly ArraySegment<byte> EmptySegment = new(Array.Empty<byte>());
-
     private ManualResetValueTaskSourceCore<int> _core;
     private int _completed;
     private CancellationTokenRegistration _ctr;
-    private ArraySegment<byte>[]? _currentBufferList;
+    private readonly BufferListWindow _bufferListWindow = new();
 
     public SocketIoAwaitableEventArgs()
     {
@@ -47,10 +47,6 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
         SetBuffer(Array.Empty<byte>(), 0, 0);
     }
 
-    [ThreadStatic] private static ArraySegment<byte>[]? _cachedSubset8;
-    [ThreadStatic] private static ArraySegment<byte>[]? _cachedSubset16;
-    [ThreadStatic] private static ArraySegment<byte>[]? _cachedSubset32;
-
     /// <summary>
     /// Sets value.
     /// </summary>
@@ -67,34 +63,8 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
 
         BufferList = null;
         SetBuffer(null, 0, 0);
-
-        ArraySegment<byte>[] subset;
-        if (count <= 8)
-        {
-            subset = _cachedSubset8 ?? new ArraySegment<byte>[8];
-            _cachedSubset8 = null;
-        }
-        else if (count <= 16)
-        {
-            subset = _cachedSubset16 ?? new ArraySegment<byte>[16];
-            _cachedSubset16 = null;
-        }
-        else if (count <= 32)
-        {
-            subset = _cachedSubset32 ?? new ArraySegment<byte>[32];
-            _cachedSubset32 = null;
-        }
-        else
-        {
-            subset = new ArraySegment<byte>[count];
-        }
-
-        Array.Copy(buffers, offset, subset, 0, count);
-        for (var i = count; i < subset.Length; i++)
-            subset[i] = EmptySegment;
-
-        Volatile.Write(ref _currentBufferList, subset);
-        BufferList = subset;
+        _bufferListWindow.Reset(buffers, offset, count);
+        BufferList = _bufferListWindow;
     }
 
     /// <summary>
@@ -102,28 +72,7 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
     /// </summary>
     public void ReturnBufferList()
     {
-        var list = Interlocked.Exchange(ref _currentBufferList, null);
-        if (list == null) return;
-
-        // Now we own this list exclusively, safe to return to pool
-        // Return to pool based on size
-        if (list.Length == 8 && _cachedSubset8 == null)
-        {
-            Array.Clear(list, 0, list.Length); // Clear references
-            _cachedSubset8 = list;
-        }
-        else if (list.Length == 16 && _cachedSubset16 == null)
-        {
-            Array.Clear(list, 0, list.Length);
-            _cachedSubset16 = list;
-        }
-        else if (list.Length == 32 && _cachedSubset32 == null)
-        {
-            Array.Clear(list, 0, list.Length);
-            _cachedSubset32 = list;
-        }
-        // Else: let GC collect non-standard sizes
-
+        _bufferListWindow.Clear();
         BufferList = null;
     }
 
@@ -231,5 +180,81 @@ internal sealed class SocketIoAwaitableEventArgs : SocketAsyncEventArgs, IValueT
             throw new SocketException((int)SocketError);
 
         return BytesTransferred;
+    }
+
+    private sealed class BufferListWindow : IList<ArraySegment<byte>>
+    {
+        private static readonly ArraySegment<byte>[] Empty = Array.Empty<ArraySegment<byte>>();
+
+        private ArraySegment<byte>[] _source = Empty;
+        private int _offset;
+        private int _count;
+
+        public int Count => _count;
+        public bool IsReadOnly => true;
+
+        public ArraySegment<byte> this[int index]
+        {
+            get
+            {
+                if ((uint)index >= (uint)_count)
+                    throw new ArgumentOutOfRangeException(nameof(index));
+
+                return _source[_offset + index];
+            }
+            set => throw new NotSupportedException();
+        }
+
+        public void Reset(ArraySegment<byte>[] source, int offset, int count)
+        {
+            _source = source;
+            _offset = offset;
+            _count = count;
+        }
+
+        public void Clear()
+        {
+            _source = Empty;
+            _offset = 0;
+            _count = 0;
+        }
+
+        public int IndexOf(ArraySegment<byte> item)
+        {
+            for (var i = 0; i < _count; i++)
+            {
+                if (_source[_offset + i].Equals(item))
+                    return i;
+            }
+
+            return -1;
+        }
+
+        public bool Contains(ArraySegment<byte> item) => IndexOf(item) >= 0;
+
+        public void CopyTo(ArraySegment<byte>[] array, int arrayIndex)
+        {
+            ArgumentNullException.ThrowIfNull(array);
+            if (arrayIndex < 0 || arrayIndex > array.Length)
+                throw new ArgumentOutOfRangeException(nameof(arrayIndex));
+            if (array.Length - arrayIndex < _count)
+                throw new ArgumentException("Destination array is too small.", nameof(array));
+
+            Array.Copy(_source, _offset, array, arrayIndex, _count);
+        }
+
+        public IEnumerator<ArraySegment<byte>> GetEnumerator()
+        {
+            for (var i = 0; i < _count; i++)
+                yield return _source[_offset + i];
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public void Add(ArraySegment<byte> item) => throw new NotSupportedException();
+        public void Insert(int index, ArraySegment<byte> item) => throw new NotSupportedException();
+        public bool Remove(ArraySegment<byte> item) => throw new NotSupportedException();
+        public void RemoveAt(int index) => throw new NotSupportedException();
+        void ICollection<ArraySegment<byte>>.Clear() => throw new NotSupportedException();
     }
 }

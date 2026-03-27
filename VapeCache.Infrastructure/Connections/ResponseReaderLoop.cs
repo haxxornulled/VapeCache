@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using System.IO;
+using System.Runtime.CompilerServices;
 
 namespace VapeCache.Infrastructure.Connections;
 
@@ -31,50 +32,44 @@ internal sealed class ResponseReaderLoop
         _failTransportAsync = failTransportAsync;
     }
 
-    public async Task<(RedisRespReader.RespValue? Response, Exception? Error)> ReadAsync(bool poolBulk)
+    public ValueTask<ResponseReadResult> ReadAsync(bool poolBulk, RedisResponseMode responseMode)
     {
-        CancellationTokenSource? timeoutCts = null;
-        var readToken = _shutdownToken;
-        if (_responseTimeout > TimeSpan.Zero)
+        if (_responseTimeout <= TimeSpan.Zero)
         {
-            timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownToken);
-            timeoutCts.CancelAfter(_responseTimeout);
-            readToken = timeoutCts.Token;
+            return _useSocketReader
+                ? ReadSocketAsync(poolBulk, responseMode, _shutdownToken)
+                : ReadStreamAsync(poolBulk, responseMode, _shutdownToken);
         }
 
-        try
-        {
-            if (_useSocketReader)
-            {
-                var reader = _socketReaderAccessor() ?? throw new InvalidOperationException("RESP socket reader missing after connection established.");
-                return await ReadCoreAsync(
-                    () => reader.ReadAsync(poolBulk, readToken),
-                    readToken,
-                    ioeFatalMap: static _ => null).ConfigureAwait(false);
-            }
-
-            var streamReader = _streamReaderAccessor() ?? throw new InvalidOperationException("RESP reader missing after connection established.");
-            return await ReadCoreAsync(
-                () => streamReader.ReadAsync(poolBulk, readToken),
-                readToken,
-                ioeFatalMap: ex => ex.InnerException is SocketException se && _isFatalSocket(se.SocketErrorCode) ? ex : null).ConfigureAwait(false);
-        }
-        finally
-        {
-            timeoutCts?.Dispose();
-        }
+        return ReadWithTimeoutAsync(poolBulk, responseMode);
     }
 
-    private async Task<(RedisRespReader.RespValue? Response, Exception? Error)> ReadCoreAsync(
-        Func<ValueTask<RedisRespReader.RespValue>> read,
-        CancellationToken readToken,
-        Func<IOException, Exception?> ioeFatalMap)
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<ResponseReadResult> ReadWithTimeoutAsync(bool poolBulk, RedisResponseMode responseMode)
     {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownToken);
+        timeoutCts.CancelAfter(_responseTimeout);
+        var readToken = timeoutCts.Token;
+
+        return _useSocketReader
+            ? await ReadSocketAsync(poolBulk, responseMode, readToken).ConfigureAwait(false)
+            : await ReadStreamAsync(poolBulk, responseMode, readToken).ConfigureAwait(false);
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<ResponseReadResult> ReadSocketAsync(
+        bool poolBulk,
+        RedisResponseMode responseMode,
+        CancellationToken readToken)
+    {
+        var reader = _socketReaderAccessor() ?? throw new InvalidOperationException("RESP socket reader missing after connection established.");
         try
         {
             while (true)
             {
-                var response = await read().ConfigureAwait(false);
+                var response = responseMode == RedisResponseMode.Default
+                    ? await reader.ReadAsync(poolBulk, readToken).ConfigureAwait(false)
+                    : await reader.ReadCountAsync(responseMode, readToken).ConfigureAwait(false);
                 if (response.Kind == RedisRespReader.RespKind.Push)
                 {
                     RedisRespReader.ReturnBuffers(response);
@@ -82,8 +77,9 @@ internal sealed class ResponseReaderLoop
                 }
 
                 if (response.Kind == RedisRespReader.RespKind.Error)
-                    return (response, new InvalidOperationException(response.Text ?? "Redis error"));
-                return (response, null);
+                    return ResponseReadResult.FromResponse(response, new InvalidOperationException(response.Text ?? "Redis error"));
+
+                return ResponseReadResult.FromResponse(response);
             }
         }
         catch (OperationCanceledException) when (_shutdownToken.IsCancellationRequested)
@@ -92,22 +88,81 @@ internal sealed class ResponseReaderLoop
         }
         catch (OperationCanceledException oce)
         {
-            var timeout = new TimeoutException($"Redis response timed out after {_responseTimeout}.", oce);
-            return (null, timeout);
-        }
-        catch (IOException ioe) when (ioeFatalMap(ioe) is { } fatalIo)
-        {
-            await _failTransportAsync(fatalIo).ConfigureAwait(false);
-            return (null, fatalIo);
+            return ResponseReadResult.FromError(new TimeoutException($"Redis response timed out after {_responseTimeout}.", oce));
         }
         catch (SocketException se) when (_isFatalSocket(se.SocketErrorCode))
         {
             await _failTransportAsync(se).ConfigureAwait(false);
-            return (null, se);
+            return ResponseReadResult.FromError(se);
         }
         catch (Exception ex)
         {
-            return (null, ex);
+            return ResponseReadResult.FromError(ex);
         }
     }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<ResponseReadResult> ReadStreamAsync(
+        bool poolBulk,
+        RedisResponseMode responseMode,
+        CancellationToken readToken,
+        RedisRespReaderState? streamReader = null)
+    {
+        streamReader ??= _streamReaderAccessor() ?? throw new InvalidOperationException("RESP reader missing after connection established.");
+        try
+        {
+            while (true)
+            {
+                var response = responseMode == RedisResponseMode.Default
+                    ? await streamReader.ReadAsync(poolBulk, readToken).ConfigureAwait(false)
+                    : await streamReader.ReadCountAsync(responseMode, readToken).ConfigureAwait(false);
+                if (response.Kind == RedisRespReader.RespKind.Push)
+                {
+                    RedisRespReader.ReturnBuffers(response);
+                    continue;
+                }
+
+                if (response.Kind == RedisRespReader.RespKind.Error)
+                    return ResponseReadResult.FromResponse(response, new InvalidOperationException(response.Text ?? "Redis error"));
+                return ResponseReadResult.FromResponse(response);
+            }
+        }
+        catch (OperationCanceledException) when (_shutdownToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException oce)
+        {
+            return ResponseReadResult.FromError(new TimeoutException($"Redis response timed out after {_responseTimeout}.", oce));
+        }
+        catch (IOException ioe) when (ioe.InnerException is SocketException se && _isFatalSocket(se.SocketErrorCode))
+        {
+            await _failTransportAsync(ioe).ConfigureAwait(false);
+            return ResponseReadResult.FromError(ioe);
+        }
+        catch (Exception ex)
+        {
+            return ResponseReadResult.FromError(ex);
+        }
+    }
+}
+
+internal readonly struct ResponseReadResult
+{
+    private ResponseReadResult(RedisRespReader.RespValue response, Exception? error, bool hasResponse)
+    {
+        Response = response;
+        Error = error;
+        HasResponse = hasResponse;
+    }
+
+    public RedisRespReader.RespValue Response { get; }
+    public Exception? Error { get; }
+    public bool HasResponse { get; }
+
+    public static ResponseReadResult FromResponse(RedisRespReader.RespValue response, Exception? error = null)
+        => new(response, error, hasResponse: true);
+
+    public static ResponseReadResult FromError(Exception error)
+        => new(default, error, hasResponse: false);
 }

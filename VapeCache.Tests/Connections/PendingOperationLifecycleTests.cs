@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using VapeCache.Infrastructure.Connections;
@@ -114,6 +115,44 @@ public sealed class PendingOperationLifecycleTests
         Assert.True(WaitForPoolItem(pool, out var returned));
         Assert.Same(op, returned);
         Assert.False(pool.TryTake(out _));
+    }
+
+    [Fact]
+    public async Task Reused_operation_ignores_stale_caller_cancel_callback_when_current_token_is_none()
+    {
+        var inFlight = new SemaphoreSlim(1, 1);
+        var pool = new PendingOperationPool(CancellationToken.None, inFlight, null, null);
+        var staleCancelCallback = typeof(PendingOperation).GetMethod(
+            "TrySetCanceledFromCallerCallback",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(staleCancelCallback);
+
+        var first = pool.Rent();
+        first.Start(poolBulk: false, ct: CancellationToken.None, holdsSlot: false, sequenceId: 1);
+        first.TrySetResult(RedisRespReader.RespValue.Integer(1));
+        first.MarkResponseProcessed();
+        var firstResponse = await first.ValueTask;
+        Assert.Equal(1, firstResponse.IntegerValue);
+
+        var reused = pool.Rent();
+        Assert.Same(first, reused);
+
+        reused.Start(poolBulk: false, ct: CancellationToken.None, holdsSlot: false, sequenceId: 2);
+        var secondTask = reused.ValueTask.AsTask();
+
+        // Simulate a late callback from a prior operation generation.
+        staleCancelCallback!.Invoke(reused, null);
+
+        reused.TrySetResult(RedisRespReader.RespValue.Integer(2));
+        reused.MarkResponseProcessed();
+
+        var secondResponse = await secondTask;
+        Assert.Equal(RedisRespReader.RespKind.Integer, secondResponse.Kind);
+        Assert.Equal(2, secondResponse.IntegerValue);
+
+        Assert.True(WaitForPoolItem(pool, out var returned));
+        Assert.Same(reused, returned);
     }
 
     private static bool WaitForPoolItem(PendingOperationPool pool, out PendingOperation? operation)

@@ -181,16 +181,30 @@ public sealed class HybridCommandExecutorRedisOnlyTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class StaticResponseConnectionFactory(string response) : IRedisConnectionFactory
+    private sealed class StaticResponseConnectionFactory : IRedisConnectionFactory
     {
+        private readonly string response;
+
+        public StaticResponseConnectionFactory(string response)
+        {
+            this.response = response;
+        }
+
         public ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
             => ValueTask.FromResult(new Result<IRedisConnection>(new StaticResponseConnection(response)));
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class SingleConnectionFactory(IRedisConnection connection) : IRedisConnectionFactory
+    private sealed class SingleConnectionFactory : IRedisConnectionFactory
     {
+        private readonly IRedisConnection connection;
+
+        public SingleConnectionFactory(IRedisConnection connection)
+        {
+            this.connection = connection;
+        }
+
         public ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
             => ValueTask.FromResult(new Result<IRedisConnection>(connection));
 
@@ -246,10 +260,15 @@ public sealed class HybridCommandExecutorRedisOnlyTests
         }
     }
 
-    private sealed class ScriptedConnection(ScriptedResponseStream stream) : IRedisConnection
+    private sealed class ScriptedConnection : IRedisConnection
     {
+        public ScriptedConnection(ScriptedResponseStream stream)
+        {
+            Stream = stream;
+        }
+
         public Socket Socket { get; } = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        public Stream Stream { get; } = stream;
+        public Stream Stream { get; }
 
         public ValueTask<Result<Unit>> SendAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct)
             => ValueTask.FromResult<Result<Unit>>(Prelude.unit);

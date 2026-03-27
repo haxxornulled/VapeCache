@@ -145,6 +145,17 @@ internal static class BenchmarkRedisConfig
         if (envSocketRespReader.HasValue)
             enableSocketRespReader = envSocketRespReader.Value;
 
+        var responseTimeoutMs = TryGetInt("VAPECACHE_BENCH_MUX_RESPONSE_TIMEOUT_MS");
+        var responseTimeout = responseTimeoutMs switch
+        {
+            null => TimeSpan.FromSeconds(2),
+            <= 0 => TimeSpan.Zero,
+            _ => TimeSpan.FromMilliseconds(responseTimeoutMs.Value)
+        };
+        var bulkLaneResponseTimeout = responseTimeout > TimeSpan.Zero
+            ? responseTimeout
+            : TimeSpan.FromSeconds(5);
+
         var monitor = new SimpleOptionsMonitor(options);
         var factory = new RedisConnectionFactory(
             monitor,
@@ -160,7 +171,9 @@ internal static class BenchmarkRedisConfig
                 EnableCommandInstrumentation = enableInstrumentation,
                 EnableCoalescedSocketWrites = enableCoalescedWrites,
                 UseDedicatedLaneWorkers = useDedicatedLaneWorkers,
-                EnableSocketRespReader = enableSocketRespReader
+                EnableSocketRespReader = enableSocketRespReader,
+                ResponseTimeout = responseTimeout,
+                BulkLaneResponseTimeout = bulkLaneResponseTimeout
             }));
     }
 

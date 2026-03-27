@@ -3,32 +3,91 @@
 /// <summary>
 /// Represents the struct.
 /// </summary>
-public readonly record struct RedisConnectAttempt(string Host, int Port, bool UseTls);
+public readonly record struct RedisConnectAttempt
+{
+    public RedisConnectAttempt(string host, int port, bool useTls)
+    {
+        Host = host;
+        Port = port;
+        UseTls = useTls;
+    }
+
+    public string Host { get; init; }
+    public int Port { get; init; }
+    public bool UseTls { get; init; }
+}
 
 /// <summary>
 /// Represents the struct.
 /// </summary>
-public readonly record struct RedisConnected(
-    long ConnectionId,
-    string Host,
-    int Port,
-    bool UseTls,
-    TimeSpan ConnectTime);
+public readonly record struct RedisConnected
+{
+    public RedisConnected(long connectionId, string host, int port, bool useTls, TimeSpan connectTime)
+    {
+        ConnectionId = connectionId;
+        Host = host;
+        Port = port;
+        UseTls = useTls;
+        ConnectTime = connectTime;
+    }
+
+    public long ConnectionId { get; init; }
+    public string Host { get; init; }
+    public int Port { get; init; }
+    public bool UseTls { get; init; }
+    public TimeSpan ConnectTime { get; init; }
+}
 
 /// <summary>
 /// Represents the struct.
 /// </summary>
-public readonly record struct RedisConnectFailed(string Host, int Port, bool UseTls, Exception Exception);
+public readonly record struct RedisConnectFailed
+{
+    public RedisConnectFailed(string host, int port, bool useTls, Exception exception)
+    {
+        Host = host;
+        Port = port;
+        UseTls = useTls;
+        Exception = exception;
+    }
+
+    public string Host { get; init; }
+    public int Port { get; init; }
+    public bool UseTls { get; init; }
+    public Exception Exception { get; init; }
+}
 
 /// <summary>
 /// Represents the struct.
 /// </summary>
-public readonly record struct RedisAuthenticated(long ConnectionId, string? Username, bool UsedFallbackPasswordOnly);
+public readonly record struct RedisAuthenticated
+{
+    public RedisAuthenticated(long connectionId, string? username, bool usedFallbackPasswordOnly)
+    {
+        ConnectionId = connectionId;
+        Username = username;
+        UsedFallbackPasswordOnly = usedFallbackPasswordOnly;
+    }
+
+    public long ConnectionId { get; init; }
+    public string? Username { get; init; }
+    public bool UsedFallbackPasswordOnly { get; init; }
+}
 
 /// <summary>
 /// Represents the struct.
 /// </summary>
-public readonly record struct RedisDatabaseSelected(long ConnectionId, int Database);
+public readonly record struct RedisDatabaseSelected
+{
+    public RedisDatabaseSelected(long connectionId, int database)
+    {
+        ConnectionId = connectionId;
+        Database = database;
+    }
+
+    public long ConnectionId { get; init; }
+    public int Database { get; init; }
+}
 
 /// <summary>
 /// Defines the redis connection observer contract.

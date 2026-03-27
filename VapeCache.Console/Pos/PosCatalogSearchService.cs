@@ -8,18 +8,32 @@ using VapeCache.Abstractions.Modules;
 
 namespace VapeCache.Console.Pos;
 
-internal sealed class PosCatalogSearchService(
-    SqlitePosCatalogStore catalogStore,
-    IRedisSearchService redisSearch,
-    IRedisCommandExecutor redis,
-    IOptionsMonitor<PosSearchDemoOptions> optionsMonitor,
-    ILogger<PosCatalogSearchService> logger)
+internal sealed class PosCatalogSearchService
 {
     private static readonly string[] HashFields = ["sku", "code", "upc", "name", "category", "price", "stock"];
     private static readonly string[] IndexFields = ["sku", "code", "upc", "name", "category"];
 
+    private readonly SqlitePosCatalogStore catalogStore;
+    private readonly IRedisSearchService redisSearch;
+    private readonly IRedisCommandExecutor redis;
+    private readonly IOptionsMonitor<PosSearchDemoOptions> optionsMonitor;
+    private readonly ILogger<PosCatalogSearchService> logger;
     private readonly SemaphoreSlim _indexGate = new(1, 1);
     private int _indexInitialized;
+
+    public PosCatalogSearchService(
+        SqlitePosCatalogStore catalogStore,
+        IRedisSearchService redisSearch,
+        IRedisCommandExecutor redis,
+        IOptionsMonitor<PosSearchDemoOptions> optionsMonitor,
+        ILogger<PosCatalogSearchService> logger)
+    {
+        this.catalogStore = catalogStore;
+        this.redisSearch = redisSearch;
+        this.redis = redis;
+        this.optionsMonitor = optionsMonitor;
+        this.logger = logger;
+    }
 
     public async ValueTask InitializeAsync(CancellationToken ct)
     {

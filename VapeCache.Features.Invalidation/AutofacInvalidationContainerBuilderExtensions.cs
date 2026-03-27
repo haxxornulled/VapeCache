@@ -212,10 +212,15 @@ public static class AutofacInvalidationContainerBuilderExtensions
         return builder.AddKeyInvalidationPolicy(keysSelector, predicate);
     }
 
-    private sealed class StaticOptionsMonitor<T>(T value) : IOptionsMonitor<T>, IOptions<T>
+    private sealed class StaticOptionsMonitor<T> : IOptionsMonitor<T>, IOptions<T>
         where T : class
     {
-        private readonly T _value = value;
+        private readonly T _value;
+
+        public StaticOptionsMonitor(T value)
+        {
+            _value = value;
+        }
 
         public T CurrentValue => _value;
 
@@ -235,9 +240,14 @@ public static class AutofacInvalidationContainerBuilderExtensions
         }
     }
 
-    private sealed class AutofacBackedServiceProvider(ILifetimeScope scope) : IServiceProvider
+    private sealed class AutofacBackedServiceProvider : IServiceProvider
     {
-        private readonly ILifetimeScope _scope = scope;
+        private readonly ILifetimeScope _scope;
+
+        public AutofacBackedServiceProvider(ILifetimeScope scope)
+        {
+            _scope = scope;
+        }
 
         public object? GetService(Type serviceType)
             => _scope.ResolveOptional(serviceType);

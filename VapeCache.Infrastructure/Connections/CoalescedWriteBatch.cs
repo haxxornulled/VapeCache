@@ -27,7 +27,8 @@ internal sealed class CoalescedWriteBatch : IDisposable
     public byte[]? Scratch { get; internal set; }
     public int ScratchUsed { get; set; }
     public int ScratchBaseOffset { get; set; }
-    public List<IDisposable> Owners { get; } = new(8);
+    public List<IDisposable> PayloadOwners { get; } = new(8);
+    public List<byte[]> ScratchLeases { get; } = new(4);
 
     /// <summary>
     /// Executes value.
@@ -35,7 +36,8 @@ internal sealed class CoalescedWriteBatch : IDisposable
     public void Reset()
     {
         SegmentsToWrite.Clear();
-        Owners.Clear();
+        PayloadOwners.Clear();
+        ScratchLeases.Clear();
         ScratchUsed = 0;
         ScratchBaseOffset = 0;
     }
@@ -59,9 +61,12 @@ internal sealed class CoalescedWriteBatch : IDisposable
             Scratch = null;
             ScratchUsed = 0;
         }
-        for (var i = 0; i < Owners.Count; i++)
-            Owners[i].Dispose();
-        Owners.Clear();
+        for (var i = 0; i < PayloadOwners.Count; i++)
+            PayloadOwners[i].Dispose();
+        PayloadOwners.Clear();
+        for (var i = 0; i < ScratchLeases.Count; i++)
+            ArrayPool<byte>.Shared.Return(ScratchLeases[i]);
+        ScratchLeases.Clear();
     }
 
     /// <summary>
@@ -69,9 +74,12 @@ internal sealed class CoalescedWriteBatch : IDisposable
     /// </summary>
     public void RecycleAfterSend()
     {
-        for (var i = 0; i < Owners.Count; i++)
-            Owners[i].Dispose();
-        Owners.Clear();
+        for (var i = 0; i < PayloadOwners.Count; i++)
+            PayloadOwners[i].Dispose();
+        PayloadOwners.Clear();
+        for (var i = 0; i < ScratchLeases.Count; i++)
+            ArrayPool<byte>.Shared.Return(ScratchLeases[i]);
+        ScratchLeases.Clear();
         ScratchUsed = 0;
         ScratchBaseOffset = 0;
         SegmentsToWrite.Clear();
@@ -197,7 +205,7 @@ internal sealed class Coalescer
             }
 
             if (req.PayloadOwner is not null)
-                batch.Owners.Add(req.PayloadOwner);
+                batch.PayloadOwners.Add(req.PayloadOwner);
 
             _queue.Dequeue();
             operationsInBatch++;
@@ -262,7 +270,7 @@ internal sealed class Coalescer
             if (remainingSpace < smallCopyThreshold + 1024)
             {
                 // Keep the current scratch alive until the batch is sent.
-                batch.Owners.Add(new ArrayPoolLease(batch.Scratch));
+                batch.ScratchLeases.Add(batch.Scratch);
                 batch.Scratch = ArrayPool<byte>.Shared.Rent(8192);
                 batch.ScratchBaseOffset = 0;
             }
@@ -272,22 +280,5 @@ internal sealed class Coalescer
             }
             batch.ScratchUsed = 0;
         }
-    }
-}
-
-internal sealed class ArrayPoolLease : IDisposable
-{
-    private byte[]? _buffer;
-
-    public ArrayPoolLease(byte[] buffer) => _buffer = buffer;
-
-    /// <summary>
-    /// Releases resources used by the current instance.
-    /// </summary>
-    public void Dispose()
-    {
-        var buffer = Interlocked.Exchange(ref _buffer, null);
-        if (buffer is not null)
-            ArrayPool<byte>.Shared.Return(buffer);
     }
 }

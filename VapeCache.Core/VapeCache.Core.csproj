@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -6,7 +6,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Core</PackageId>
     <Title>VapeCache Core</Title>
-    <Version>1.2.15</Version>
+    <Version>1.2.16</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache</Product>
@@ -22,7 +22,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.10 release: stabilized Redis telemetry parser metrics, hardened connection registration across DI and Autofac, and refreshed production-capable documentation.</PackageReleaseNotes>
+    <PackageReleaseNotes>See GitHub releases and docs/UPGRADE_NOTES.md for release-specific notes.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
   </PropertyGroup>
   <ItemGroup>
@@ -35,4 +35,5 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
   </ItemGroup>
 </Project>
+
 

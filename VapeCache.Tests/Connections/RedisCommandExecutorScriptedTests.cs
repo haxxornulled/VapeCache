@@ -97,6 +97,87 @@ public sealed class RedisCommandExecutorScriptedTests
     }
 
     [Fact]
+    public async Task SmallLeaseAndPopOperations_stay_on_fast_lane_when_bulk_lane_exists()
+    {
+        var fastStream = new ScriptedResponseStream();
+        var bulkStream = new ScriptedResponseStream();
+
+        fastStream.Enqueue("$2\r\nfg\r\n");
+        bulkStream.Enqueue("$2\r\nbg\r\n");
+        fastStream.Enqueue("$2\r\nfe\r\n");
+        bulkStream.Enqueue("$2\r\nbe\r\n");
+        fastStream.Enqueue("$2\r\nfj\r\n");
+        bulkStream.Enqueue("$2\r\nbj\r\n");
+        fastStream.Enqueue("$2\r\nfl\r\n");
+        bulkStream.Enqueue("$2\r\nbl\r\n");
+        fastStream.Enqueue("$2\r\nfr\r\n");
+        bulkStream.Enqueue("$2\r\nbr\r\n");
+
+        await using var factory = new QueueConnectionFactory(
+            new ScriptedConnection(fastStream),
+            new ScriptedConnection(bulkStream));
+        await using var sut = CreateExecutor(
+            factory,
+            new RedisMultiplexerOptions
+            {
+                Connections = 2,
+                BulkLaneConnections = 1,
+                MaxInFlightPerConnection = 8,
+                EnableCoalescedSocketWrites = false,
+                EnableCommandInstrumentation = false,
+                ResponseTimeout = TimeSpan.FromSeconds(2),
+                BulkLaneResponseTimeout = TimeSpan.FromSeconds(2)
+            });
+
+        Assert.True(sut.TryGetLeaseAsync("k1", default, out var getLeaseTask));
+        using (var lease = await getLeaseTask)
+        {
+            Assert.Equal("fg", System.Text.Encoding.UTF8.GetString(lease.Span));
+        }
+
+        Assert.True(sut.TryGetExLeaseAsync("k1", TimeSpan.FromSeconds(1), default, out var getExLeaseTask));
+        using (var lease = await getExLeaseTask)
+        {
+            Assert.Equal("fe", System.Text.Encoding.UTF8.GetString(lease.Span));
+        }
+
+        Assert.True(sut.TryJsonGetLeaseAsync("j1", "$", default, out var jsonLeaseTask));
+        using (var lease = await jsonLeaseTask)
+        {
+            Assert.Equal("fj", System.Text.Encoding.UTF8.GetString(lease.Span));
+        }
+
+        Assert.True(sut.TryLPopLeaseAsync("l1", default, out var lpopLeaseTask));
+        using (var lease = await lpopLeaseTask)
+        {
+            Assert.Equal("fl", System.Text.Encoding.UTF8.GetString(lease.Span));
+        }
+
+        Assert.True(sut.TryRPopLeaseAsync("l1", default, out var rpopLeaseTask));
+        using (var lease = await rpopLeaseTask)
+        {
+            Assert.Equal("fr", System.Text.Encoding.UTF8.GetString(lease.Span));
+        }
+
+        var lanes = ((IRedisMultiplexerDiagnostics)sut).GetMuxLaneSnapshots();
+        RedisMuxLaneSnapshot? fastLane = null;
+        RedisMuxLaneSnapshot? bulkLane = null;
+        for (var i = 0; i < lanes.Count; i++)
+        {
+            var lane = lanes[i];
+            if (string.Equals(lane.Role, "read-write", StringComparison.Ordinal))
+                fastLane = lane;
+            else if (string.Equals(lane.Role, "bulk-read-write", StringComparison.Ordinal))
+                bulkLane = lane;
+        }
+
+        Assert.NotNull(fastLane);
+        Assert.NotNull(bulkLane);
+        Assert.True(fastLane!.Operations >= 5);
+        Assert.Equal(0L, bulkLane!.Operations);
+    }
+
+    [Fact]
     public async Task Executes_and_parses_core_command_surfaces()
     {
         var stream = new ScriptedResponseStream();
@@ -132,6 +213,15 @@ public sealed class RedisCommandExecutorScriptedTests
         Assert.True(sut.TryGetExAsync("k1", TimeSpan.FromSeconds(1), default, out var tryGetExTask));
         Assert.Equal("v1", System.Text.Encoding.UTF8.GetString((await tryGetExTask)!));
 
+        stream.Enqueue("$2\r\nv1\r\n");
+        Assert.True(await sut.GetDiscardAsync("k1", default));
+
+        stream.Enqueue("$2\r\nv1\r\n");
+        Assert.True(await sut.GetExDiscardAsync("k1", TimeSpan.FromSeconds(1), default));
+
+        stream.Enqueue("$1\r\n1\r\n");
+        Assert.True(await sut.GetRangeDiscardAsync("k1", 0, 0, default));
+
         stream.Enqueue("+OK\r\n");
         Assert.True(await sut.MSetAsync(new[] { ("k2", (ReadOnlyMemory<byte>)"v2"u8.ToArray()) }, default));
 
@@ -140,6 +230,9 @@ public sealed class RedisCommandExecutorScriptedTests
         Assert.Equal(2, mget.Length);
         Assert.NotNull(mget[0]);
         Assert.Null(mget[1]);
+
+        stream.Enqueue("*2\r\n$2\r\nv1\r\n$-1\r\n");
+        Assert.Equal(2, await sut.MGetCountAsync(new[] { "k1", "missing" }, default));
 
         stream.Enqueue("+OK\r\n");
         Assert.True(sut.TrySetAsync("k3", "v3"u8.ToArray(), null, default, out var trySetTask));
@@ -156,6 +249,9 @@ public sealed class RedisCommandExecutorScriptedTests
 
         stream.Enqueue(":1\r\n");
         Assert.Equal(1, await sut.UnlinkAsync("k1", default));
+
+        stream.Enqueue(":2\r\n");
+        Assert.Equal(2, await sut.UnlinkManyAsync(["k1"u8.ToArray(), "k2"u8.ToArray()], default));
 
         // Lease methods + try wrappers
         stream.Enqueue("$1\r\nz\r\n");
@@ -199,11 +295,17 @@ public sealed class RedisCommandExecutorScriptedTests
         var hmget = await sut.HMGetAsync("h1", new[] { "f1", "f2" }, default);
         Assert.Equal(2, hmget.Length);
 
+        stream.Enqueue("*2\r\n$1\r\nx\r\n$-1\r\n");
+        Assert.Equal(2, await sut.HMGetCountAsync("h1", new[] { "f1", "f2" }, default));
+
         stream.Enqueue("$1\r\nx\r\n");
         using (var lease = await sut.HGetLeaseAsync("h1", "f1", default))
         {
             Assert.False(lease.IsNull);
         }
+
+        stream.Enqueue("$1\r\nx\r\n");
+        Assert.True(await sut.HGetDiscardAsync("h1", "f1", default));
 
         // Lists + try wrappers
         stream.Enqueue(":1\r\n");
@@ -229,6 +331,9 @@ public sealed class RedisCommandExecutorScriptedTests
         stream.Enqueue("*2\r\n$1\r\na\r\n$1\r\nb\r\n");
         Assert.Equal(2, (await sut.LRangeAsync("l1", 0, -1, default)).Length);
 
+        stream.Enqueue("*2\r\n$1\r\na\r\n$1\r\nb\r\n");
+        Assert.Equal(2, await sut.LRangeCountAsync("l1", 0, -1, default));
+
         stream.Enqueue(":2\r\n");
         Assert.Equal(2, await sut.LLenAsync("l1", default));
 
@@ -239,12 +344,21 @@ public sealed class RedisCommandExecutorScriptedTests
         Assert.True(sut.TryLPopLeaseAsync("l1", default, out var tryLPopLeaseTask));
         using (var lease = await tryLPopLeaseTask) { Assert.False(lease.IsNull); }
 
+        stream.Enqueue("$1\r\na\r\n");
+        Assert.True(await sut.LPopDiscardAsync("l1", default));
+
         stream.Enqueue("$1\r\nb\r\n");
         using (var lease = await sut.RPopLeaseAsync("l1", default)) { Assert.False(lease.IsNull); }
 
         stream.Enqueue("$1\r\nb\r\n");
         Assert.True(sut.TryRPopLeaseAsync("l1", default, out var tryRPopLeaseTask));
         using (var lease = await tryRPopLeaseTask) { Assert.False(lease.IsNull); }
+
+        stream.Enqueue("$1\r\nb\r\n");
+        Assert.True(await sut.RPopDiscardAsync("l1", default));
+
+        stream.Enqueue("$1\r\na\r\n");
+        Assert.True(await sut.LIndexDiscardAsync("l1", 0, default));
 
         // Sets
         stream.Enqueue(":1\r\n");
@@ -262,6 +376,9 @@ public sealed class RedisCommandExecutorScriptedTests
 
         stream.Enqueue("*1\r\n$2\r\nm1\r\n");
         Assert.Single(await sut.SMembersAsync("s1", default));
+
+        stream.Enqueue("*1\r\n$2\r\nm1\r\n");
+        Assert.Equal(1, await sut.SMembersCountAsync("s1", default));
 
         stream.Enqueue(":1\r\n");
         Assert.Equal(1, await sut.SCardAsync("s1", default));
@@ -289,7 +406,13 @@ public sealed class RedisCommandExecutorScriptedTests
         Assert.Single(await sut.ZRangeWithScoresAsync("z1", 0, -1, false, default));
 
         stream.Enqueue("*2\r\n$2\r\nm1\r\n$3\r\n2.5\r\n");
+        Assert.Equal(1, await sut.ZRangeWithScoresCountAsync("z1", 0, -1, false, default));
+
+        stream.Enqueue("*2\r\n$2\r\nm1\r\n$3\r\n2.5\r\n");
         Assert.Single(await sut.ZRangeByScoreWithScoresAsync("z1", 0, 10, false, null, null, default));
+
+        stream.Enqueue("*2\r\n$2\r\nm1\r\n$3\r\n2.5\r\n");
+        Assert.Equal(1, await sut.ZRangeByScoreWithScoresCountAsync("z1", 0, 10, false, null, null, default));
 
         // JSON
         stream.Enqueue("$7\r\n{\"a\":1}\r\n");
@@ -301,6 +424,9 @@ public sealed class RedisCommandExecutorScriptedTests
         stream.Enqueue("$7\r\n{\"a\":1}\r\n");
         Assert.True(sut.TryJsonGetLeaseAsync("j1", ".", default, out var tryJsonLeaseTask));
         using (var lease = await tryJsonLeaseTask) { Assert.False(lease.IsNull); }
+
+        stream.Enqueue("$7\r\n{\"a\":1}\r\n");
+        Assert.True(await sut.JsonGetDiscardAsync("j1", ".", default));
 
         stream.Enqueue("+OK\r\n");
         Assert.True(await sut.JsonSetAsync("j1", ".", "{\"a\":1}"u8.ToArray(), default));
@@ -322,6 +448,9 @@ public sealed class RedisCommandExecutorScriptedTests
         stream.Enqueue("*0\r\n");
         Assert.Empty(await sut.FtSearchAsync("idx", "*", null, null, default));
 
+        stream.Enqueue("*1\r\n:0\r\n");
+        Assert.Equal(0, await sut.FtSearchCountAsync("idx", "*", 0, 0, default));
+
         stream.Enqueue(":1\r\n");
         Assert.True(await sut.BfAddAsync("bf1", "x"u8.ToArray(), default));
 
@@ -340,6 +469,9 @@ public sealed class RedisCommandExecutorScriptedTests
         stream.Enqueue("*1\r\n*2\r\n:100\r\n$1\r\n1\r\n");
         Assert.Single(await sut.TsRangeAsync("ts1", 0, 1000, default));
 
+        stream.Enqueue("*1\r\n*2\r\n:100\r\n$1\r\n1\r\n");
+        Assert.Equal(1, await sut.TsRangeCountAsync("ts1", 0, 1000, default));
+
         stream.Enqueue("$15\r\n1741350000000-0\r\n");
         var streamId = await sut.XAddIdempotentAsync(
             "stream:orders",
@@ -350,6 +482,16 @@ public sealed class RedisCommandExecutorScriptedTests
             fields: [("orderId", (ReadOnlyMemory<byte>)"123"u8.ToArray())],
             default);
         Assert.Equal("1741350000000-0", streamId);
+
+        stream.Enqueue("$15\r\n1741350000001-0\r\n");
+        Assert.True(await sut.XAddIdempotentAckAsync(
+            "stream:orders",
+            producerId: "producer-a",
+            idempotentId: "tx-002",
+            useAutoIdempotentId: false,
+            entryId: "*",
+            fields: [("orderId", (ReadOnlyMemory<byte>)"124"u8.ToArray())],
+            default));
 
         stream.Enqueue("+OK\r\n");
         Assert.True(await sut.XCfgSetIdempotenceAsync("stream:orders", durationSeconds: 600, maxSize: 256, default));
@@ -500,17 +642,30 @@ public sealed class RedisCommandExecutorScriptedTests
         method!.Invoke(executor, null);
     }
 
-    private sealed class SingleConnectionFactory(ScriptedConnection connection) : IRedisConnectionFactory
+    private sealed class SingleConnectionFactory : IRedisConnectionFactory
     {
+        private readonly ScriptedConnection connection;
+
+        public SingleConnectionFactory(ScriptedConnection connection)
+        {
+            this.connection = connection;
+        }
+
         public ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
             => ValueTask.FromResult(new Result<IRedisConnection>(connection));
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class ReconnectingConnectionFactory(ScriptedResponseStream stream) : IRedisConnectionFactory
+    private sealed class ReconnectingConnectionFactory : IRedisConnectionFactory
     {
+        private readonly ScriptedResponseStream stream;
         private int _createCount;
+
+        public ReconnectingConnectionFactory(ScriptedResponseStream stream)
+        {
+            this.stream = stream;
+        }
 
         public int CreateCount => Volatile.Read(ref _createCount);
 
@@ -523,10 +678,35 @@ public sealed class RedisCommandExecutorScriptedTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class ScriptedConnection(ScriptedResponseStream stream) : IRedisConnection
+    private sealed class QueueConnectionFactory : IRedisConnectionFactory
     {
+        private readonly Queue<ScriptedConnection> _connections;
+
+        public QueueConnectionFactory(params ScriptedConnection[] connections)
+        {
+            _connections = new Queue<ScriptedConnection>(connections);
+        }
+
+        public ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
+        {
+            if (_connections.Count == 0)
+                return ValueTask.FromResult(new Result<IRedisConnection>(new InvalidOperationException("No scripted connection available.")));
+
+            return ValueTask.FromResult<Result<IRedisConnection>>(_connections.Dequeue());
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class ScriptedConnection : IRedisConnection
+    {
+        public ScriptedConnection(ScriptedResponseStream stream)
+        {
+            Stream = stream;
+        }
+
         public Socket Socket { get; } = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        public Stream Stream { get; } = stream;
+        public Stream Stream { get; }
 
         public ValueTask<Result<Unit>> SendAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct)
             => ValueTask.FromResult<Result<Unit>>(Prelude.unit);

@@ -7,14 +7,21 @@ namespace VapeCache.Features.Invalidation;
 /// <summary>
 /// Executes invalidation plans against <see cref="IVapeCache"/>.
 /// </summary>
-public sealed partial class CacheInvalidationExecutor(
-    IVapeCache cache,
-    IOptionsMonitor<CacheInvalidationOptions> optionsMonitor,
-    ILogger<CacheInvalidationExecutor> logger) : ICacheInvalidationExecutor
+public sealed partial class CacheInvalidationExecutor : ICacheInvalidationExecutor
 {
-    private readonly IVapeCache _cache = cache;
-    private readonly IOptionsMonitor<CacheInvalidationOptions> _optionsMonitor = optionsMonitor;
-    private readonly ILogger<CacheInvalidationExecutor> _logger = logger;
+    private readonly IVapeCache _cache;
+    private readonly IOptionsMonitor<CacheInvalidationOptions> _optionsMonitor;
+    private readonly ILogger<CacheInvalidationExecutor> _logger;
+
+    public CacheInvalidationExecutor(
+        IVapeCache cache,
+        IOptionsMonitor<CacheInvalidationOptions> optionsMonitor,
+        ILogger<CacheInvalidationExecutor> logger)
+    {
+        _cache = cache;
+        _optionsMonitor = optionsMonitor;
+        _logger = logger;
+    }
 
     /// <summary>
     /// Executes nvalidate async.

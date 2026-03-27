@@ -76,6 +76,15 @@ cd VapeCache.Console
 dotnet run
 ```
 
+For a real Redis target without editing checked-in JSON:
+
+```powershell
+$env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
+dotnet run --project VapeCache.Console
+```
+
+When running through Aspire/AppHost, the same console and UI flows will also honor `ConnectionStrings:redis`.
+
 ### Head-to-Head Comparison Mode (VapeCache vs StackExchange.Redis)
 
 ```powershell
@@ -131,6 +140,7 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -Trials 5 `
   -Track both `
   -DisableTrackDefaults `
+  -CleanupRunKeys false `
   -ShopperCount 50000 `
   -MaxCartSize 40 `
   -FailBelowRatio 1.0
@@ -149,16 +159,15 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
 ```
 
 Benchmark defaults tuned for high-core hosts:
-- `MaxDegree=72` (stability-first default for 50k shopper runs on modern multi-core hosts).
 - `MuxProfile=FullTilt`, `MuxInFlight=8192`, `MuxCoalesce=true`.
 - Track-aware mux defaults are enabled by default:
-  - `optimized`: `MuxConnections=8`, `MuxAdaptiveCoalescing=true`
+  - `optimized`: `MuxConnections=1`, `MuxAdaptiveCoalescing=false`
   - `apples`: `MuxConnections=1`, `MuxAdaptiveCoalescing=false`
-- `CleanupRunKeys=true` to prevent key buildup and Redis memory-pressure drift across trials.
+- `CleanupRunKeys=false` by default to avoid adding cleanup command noise to measured trials.
 - `Track=both` runs apples and optimized in isolated passes per trial (no shared-run coupling).
 - `ServerGc=true` (`DOTNET_GCServer=1`) for steadier throughput under load.
-- For a fixed 28-core box, `-MaxDegree 68..80` is the preferred stability window for 50k x 40 runs.
-- For peak throughput sweeps, test `-MaxDegree 80` after stability is confirmed.
+- Strict/fair baseline (`-DisableTrackDefaults`): `MaxDegree=6`, `MuxConnections=1`, `MuxAdaptiveCoalescing=false`.
+- For tuned/showcase sweeps, increase `-MaxDegree` only after strict/fair tails remain green.
 Pass `-DisableTrackDefaults` to force a single mux profile/connection strategy across both tracks.
 To use the exact same Redis setting source as the Grocery Store host, pass the connection string directly:
 - URI style is supported: `redis://user:pass@host:port/db` (or `rediss://...`).
@@ -188,7 +197,7 @@ powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-grocery-dogfood.p
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-grocery-stampede.ps1 `
-  -RedisHost 192.168.100.50 `
+  -RedisHost redis.example.internal `
   -RedisPort 6379 `
   -RedisUsername admin `
   -RedisPassword "your-password"

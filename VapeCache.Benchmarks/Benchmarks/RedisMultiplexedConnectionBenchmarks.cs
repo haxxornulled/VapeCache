@@ -42,8 +42,15 @@ public class RedisMultiplexedConnectionBenchmarks
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-        private sealed class FakeConn(Stream stream) : IRedisConnection
+        private sealed class FakeConn : IRedisConnection
         {
+            private readonly Stream stream;
+
+            public FakeConn(Stream stream)
+            {
+                this.stream = stream;
+            }
+
             public System.Net.Sockets.Socket Socket => throw new NotSupportedException();
             public Stream Stream => stream;
 

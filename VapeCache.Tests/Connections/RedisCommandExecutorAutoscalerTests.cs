@@ -725,10 +725,16 @@ public sealed class RedisCommandExecutorAutoscalerTests
         return new Harness(executor, logger);
     }
 
-    private sealed class Harness(RedisCommandExecutor executor, ListLogger<RedisCommandExecutor> logger) : IDisposable
+    private sealed class Harness : IDisposable
     {
-        public RedisCommandExecutor Executor { get; } = executor;
-        public ListLogger<RedisCommandExecutor> Logger { get; } = logger;
+        public Harness(RedisCommandExecutor executor, ListLogger<RedisCommandExecutor> logger)
+        {
+            Executor = executor;
+            Logger = logger;
+        }
+
+        public RedisCommandExecutor Executor { get; }
+        public ListLogger<RedisCommandExecutor> Logger { get; }
 
         public void Dispose()
             => Executor.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -742,9 +748,14 @@ public sealed class RedisCommandExecutorAutoscalerTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class TestEnterpriseFeatureGate(bool autoscalerLicensed) : IEnterpriseFeatureGate
+    private sealed class TestEnterpriseFeatureGate : IEnterpriseFeatureGate
     {
-        public bool IsAutoscalerLicensed { get; } = autoscalerLicensed;
+        public TestEnterpriseFeatureGate(bool autoscalerLicensed)
+        {
+            IsAutoscalerLicensed = autoscalerLicensed;
+        }
+
+        public bool IsAutoscalerLicensed { get; }
         public bool IsDurableSpillLicensed => false;
         public bool IsReconciliationLicensed => false;
     }

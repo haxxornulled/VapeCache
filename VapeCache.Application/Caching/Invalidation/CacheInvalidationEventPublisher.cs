@@ -5,10 +5,14 @@ namespace VapeCache.Application.Caching.Invalidation;
 /// <summary>
 /// Default application publisher that routes events into the invalidation dispatcher.
 /// </summary>
-public sealed class CacheInvalidationEventPublisher(ICacheInvalidationDispatcher dispatcher)
-    : ICacheInvalidationEventPublisher
+public sealed class CacheInvalidationEventPublisher : ICacheInvalidationEventPublisher
 {
-    private readonly ICacheInvalidationDispatcher _dispatcher = dispatcher;
+    private readonly ICacheInvalidationDispatcher _dispatcher;
+
+    public CacheInvalidationEventPublisher(ICacheInvalidationDispatcher dispatcher)
+    {
+        _dispatcher = dispatcher;
+    }
 
     /// <summary>
     /// Provides member behavior.

@@ -122,15 +122,37 @@ public sealed class CacheTelemetryTests
         Assert.NotNull(match);
     }
 
-    private sealed record MeasurementSnapshot(double Value, IReadOnlyDictionary<string, string> Tags);
-
-    private sealed class FakeBackendState(BackendType backend) : ICacheBackendState
+    private sealed record MeasurementSnapshot
     {
-        public BackendType EffectiveBackend { get; } = backend;
+        public MeasurementSnapshot(double Value, IReadOnlyDictionary<string, string> Tags)
+        {
+            this.Value = Value;
+            this.Tags = Tags;
+        }
+
+        public double Value { get; init; }
+        public IReadOnlyDictionary<string, string> Tags { get; init; }
     }
 
-    private sealed class FakeSpillDiagnostics(SpillStoreDiagnosticsSnapshot snapshot) : ISpillStoreDiagnostics
+    private sealed class FakeBackendState : ICacheBackendState
     {
+        public FakeBackendState(BackendType backend)
+        {
+            EffectiveBackend = backend;
+        }
+
+        public BackendType EffectiveBackend { get; }
+    }
+
+    private sealed class FakeSpillDiagnostics : ISpillStoreDiagnostics
+    {
+        private readonly SpillStoreDiagnosticsSnapshot snapshot;
+
+        public FakeSpillDiagnostics(SpillStoreDiagnosticsSnapshot snapshot)
+        {
+            this.snapshot = snapshot;
+        }
+
         public SpillStoreDiagnosticsSnapshot GetSnapshot() => snapshot;
     }
 }

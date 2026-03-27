@@ -4,12 +4,25 @@ using Microsoft.Extensions.Options;
 
 namespace VapeCache.Console.Pos;
 
-internal sealed class PosSearchDemoHostedService(
-    IHostApplicationLifetime hostLifetime,
-    IOptionsMonitor<PosSearchDemoOptions> optionsMonitor,
-    PosCatalogSearchService searchService,
-    ILogger<PosSearchDemoHostedService> logger) : BackgroundService, IHostedLifecycleService
+internal sealed class PosSearchDemoHostedService : BackgroundService, IHostedLifecycleService
 {
+    private readonly IHostApplicationLifetime hostLifetime;
+    private readonly IOptionsMonitor<PosSearchDemoOptions> optionsMonitor;
+    private readonly PosCatalogSearchService searchService;
+    private readonly ILogger<PosSearchDemoHostedService> logger;
+
+    public PosSearchDemoHostedService(
+        IHostApplicationLifetime hostLifetime,
+        IOptionsMonitor<PosSearchDemoOptions> optionsMonitor,
+        PosCatalogSearchService searchService,
+        ILogger<PosSearchDemoHostedService> logger)
+    {
+        this.hostLifetime = hostLifetime;
+        this.optionsMonitor = optionsMonitor;
+        this.searchService = searchService;
+        this.logger = logger;
+    }
+
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;

@@ -1,22 +1,34 @@
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using LanguageExt;
 using LanguageExt.Common;
 using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
 
-internal sealed class RedisConnection(long id, Socket socket, Stream stream) : IRedisConnection
+internal sealed class RedisConnection : IRedisConnection
 {
+    private readonly Socket _socket;
+    private readonly Stream _stream;
     private int _disposed;
-    private readonly bool _useSocketIo = stream is NetworkStream;
+    private readonly bool _useSocketIo;
 
-    public long Id { get; } = id;
-    public Socket Socket => socket;
-    public Stream Stream => stream;
+    public RedisConnection(long id, Socket socket, Stream stream)
+    {
+        Id = id;
+        _socket = socket;
+        _stream = stream;
+        _useSocketIo = stream is NetworkStream;
+    }
+
+    public long Id { get; }
+    public Socket Socket => _socket;
+    public Stream Stream => _stream;
 
     /// <summary>
     /// Executes value.
     /// </summary>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public async ValueTask<Result<Unit>> SendAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct)
     {
         if (Volatile.Read(ref _disposed) == 1)
@@ -29,7 +41,7 @@ internal sealed class RedisConnection(long id, Socket socket, Stream stream) : I
                 var total = 0;
                 while (total < buffer.Length)
                 {
-                    var sent = await socket.SendAsync(buffer.Slice(total), SocketFlags.None, ct).ConfigureAwait(false);
+                    var sent = await _socket.SendAsync(buffer.Slice(total), SocketFlags.None, ct).ConfigureAwait(false);
                     if (sent <= 0) throw new IOException("Socket send returned 0.");
                     total += sent;
                     RedisTelemetry.BytesSent.Add(sent);
@@ -37,7 +49,7 @@ internal sealed class RedisConnection(long id, Socket socket, Stream stream) : I
             }
             else
             {
-                await stream.WriteAsync(buffer, ct).ConfigureAwait(false);
+                await _stream.WriteAsync(buffer, ct).ConfigureAwait(false);
                 RedisTelemetry.BytesSent.Add(buffer.Length);
             }
             return Prelude.unit;
@@ -51,6 +63,7 @@ internal sealed class RedisConnection(long id, Socket socket, Stream stream) : I
     /// <summary>
     /// Executes value.
     /// </summary>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public async ValueTask<Result<int>> ReceiveAsync(Memory<byte> buffer, CancellationToken ct)
     {
         if (Volatile.Read(ref _disposed) == 1)
@@ -59,8 +72,8 @@ internal sealed class RedisConnection(long id, Socket socket, Stream stream) : I
         try
         {
             var read = _useSocketIo
-                ? await socket.ReceiveAsync(buffer, SocketFlags.None, ct).ConfigureAwait(false)
-                : await stream.ReadAsync(buffer, ct).ConfigureAwait(false);
+                ? await _socket.ReceiveAsync(buffer, SocketFlags.None, ct).ConfigureAwait(false)
+                : await _stream.ReadAsync(buffer, ct).ConfigureAwait(false);
             if (read > 0) RedisTelemetry.BytesReceived.Add(read);
             return read;
         }
@@ -77,7 +90,7 @@ internal sealed class RedisConnection(long id, Socket socket, Stream stream) : I
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 
-        try { await stream.DisposeAsync().ConfigureAwait(false); } catch { }
-        try { socket.Dispose(); } catch { }
+        try { await _stream.DisposeAsync().ConfigureAwait(false); } catch { }
+        try { _socket.Dispose(); } catch { }
     }
 }

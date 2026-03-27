@@ -130,23 +130,67 @@ public sealed class VapeCacheAdminOrchestrator
 /// <summary>
 /// UI projection of runtime state used by the Blazor admin pages.
 /// </summary>
-public sealed record VapeCacheAdminSnapshot(
-    DateTimeOffset TimestampUtc,
-    BackendType Backend,
-    long Reads,
-    long Writes,
-    double HitRate,
-    CacheStatsSnapshot Stats,
-    bool BreakerEnabled,
-    bool BreakerOpen,
-    int BreakerConsecutiveFailures,
-    TimeSpan? BreakerOpenRemaining,
-    bool BreakerHalfOpenProbeInFlight,
-    bool BreakerForcedOpen,
-    string? BreakerReason,
-    RedisAutoscalerSnapshot? Autoscaler,
-    IReadOnlyList<RedisMuxLaneSnapshot> Lanes,
-    int HealthyLaneCount,
-    SpillStoreDiagnosticsSnapshot? Spill,
-    int ReconciliationPendingOperations,
-    bool ReconciliationEnabled);
+public sealed record VapeCacheAdminSnapshot
+{
+    public VapeCacheAdminSnapshot(
+        DateTimeOffset TimestampUtc,
+        BackendType Backend,
+        long Reads,
+        long Writes,
+        double HitRate,
+        CacheStatsSnapshot Stats,
+        bool BreakerEnabled,
+        bool BreakerOpen,
+        int BreakerConsecutiveFailures,
+        TimeSpan? BreakerOpenRemaining,
+        bool BreakerHalfOpenProbeInFlight,
+        bool BreakerForcedOpen,
+        string? BreakerReason,
+        RedisAutoscalerSnapshot? Autoscaler,
+        IReadOnlyList<RedisMuxLaneSnapshot> Lanes,
+        int HealthyLaneCount,
+        SpillStoreDiagnosticsSnapshot? Spill,
+        int ReconciliationPendingOperations,
+        bool ReconciliationEnabled)
+    {
+        this.TimestampUtc = TimestampUtc;
+        this.Backend = Backend;
+        this.Reads = Reads;
+        this.Writes = Writes;
+        this.HitRate = HitRate;
+        this.Stats = Stats;
+        this.BreakerEnabled = BreakerEnabled;
+        this.BreakerOpen = BreakerOpen;
+        this.BreakerConsecutiveFailures = BreakerConsecutiveFailures;
+        this.BreakerOpenRemaining = BreakerOpenRemaining;
+        this.BreakerHalfOpenProbeInFlight = BreakerHalfOpenProbeInFlight;
+        this.BreakerForcedOpen = BreakerForcedOpen;
+        this.BreakerReason = BreakerReason;
+        this.Autoscaler = Autoscaler;
+        this.Lanes = Lanes;
+        this.HealthyLaneCount = HealthyLaneCount;
+        this.Spill = Spill;
+        this.ReconciliationPendingOperations = ReconciliationPendingOperations;
+        this.ReconciliationEnabled = ReconciliationEnabled;
+    }
+
+    public DateTimeOffset TimestampUtc { get; init; }
+    public BackendType Backend { get; init; }
+    public long Reads { get; init; }
+    public long Writes { get; init; }
+    public double HitRate { get; init; }
+    public CacheStatsSnapshot Stats { get; init; }
+    public bool BreakerEnabled { get; init; }
+    public bool BreakerOpen { get; init; }
+    public int BreakerConsecutiveFailures { get; init; }
+    public TimeSpan? BreakerOpenRemaining { get; init; }
+    public bool BreakerHalfOpenProbeInFlight { get; init; }
+    public bool BreakerForcedOpen { get; init; }
+    public string? BreakerReason { get; init; }
+    public RedisAutoscalerSnapshot? Autoscaler { get; init; }
+    public IReadOnlyList<RedisMuxLaneSnapshot> Lanes { get; init; }
+    public int HealthyLaneCount { get; init; }
+    public SpillStoreDiagnosticsSnapshot? Spill { get; init; }
+    public int ReconciliationPendingOperations { get; init; }
+    public bool ReconciliationEnabled { get; init; }
+}

@@ -194,9 +194,16 @@ public sealed class RedisConnectionPoolIntegrationTests
         }
     }
 
-    private sealed class CountingFactory(IRedisConnectionFactory inner) : IRedisConnectionFactory
+    private sealed class CountingFactory : IRedisConnectionFactory
     {
+        private readonly IRedisConnectionFactory inner;
         private int _created;
+
+        public CountingFactory(IRedisConnectionFactory inner)
+        {
+            this.inner = inner;
+        }
+
         public int CreatedCount => Volatile.Read(ref _created);
 
         public async ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)

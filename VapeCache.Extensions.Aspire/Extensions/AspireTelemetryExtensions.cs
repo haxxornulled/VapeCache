@@ -306,9 +306,23 @@ public static class AspireTelemetryExtensions
         return new Uri($"{endpointText}{signalSuffix}", UriKind.Absolute);
     }
 
-    private sealed record ExporterConfiguration(
-        OtlpExportProtocol Protocol,
-        Uri MetricsEndpoint,
-        Uri TracesEndpoint,
-        string? Headers);
+    private sealed record ExporterConfiguration
+    {
+        public ExporterConfiguration(
+            OtlpExportProtocol protocol,
+            Uri metricsEndpoint,
+            Uri tracesEndpoint,
+            string? headers)
+        {
+            Protocol = protocol;
+            MetricsEndpoint = metricsEndpoint;
+            TracesEndpoint = tracesEndpoint;
+            Headers = headers;
+        }
+
+        public OtlpExportProtocol Protocol { get; init; }
+        public Uri MetricsEndpoint { get; init; }
+        public Uri TracesEndpoint { get; init; }
+        public string? Headers { get; init; }
+    }
 }

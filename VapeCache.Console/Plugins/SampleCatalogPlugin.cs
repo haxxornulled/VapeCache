@@ -5,10 +5,19 @@ using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Console.Plugins;
 
-internal sealed class SampleCatalogPlugin(
-    IOptionsMonitor<PluginDemoOptions> optionsMonitor,
-    ILogger<SampleCatalogPlugin> logger) : IVapeCachePlugin
+internal sealed class SampleCatalogPlugin : IVapeCachePlugin
 {
+    private readonly IOptionsMonitor<PluginDemoOptions> optionsMonitor;
+    private readonly ILogger<SampleCatalogPlugin> logger;
+
+    public SampleCatalogPlugin(
+        IOptionsMonitor<PluginDemoOptions> optionsMonitor,
+        ILogger<SampleCatalogPlugin> logger)
+    {
+        this.optionsMonitor = optionsMonitor;
+        this.logger = logger;
+    }
+
     public string Name => "sample-catalog";
 
     /// <summary>

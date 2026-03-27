@@ -8,12 +8,23 @@ namespace VapeCache.Console.GroceryStore;
 /// </summary>
 public static class MenuRunner
 {
-    private readonly record struct RedisComparisonSettings(
-        string Host,
-        int Port,
-        string? Username,
-        string Password,
-        string Source);
+    private readonly record struct RedisComparisonSettings
+    {
+        public RedisComparisonSettings(string host, int port, string? username, string password, string source)
+        {
+            Host = host;
+            Port = port;
+            Username = username;
+            Password = password;
+            Source = source;
+        }
+
+        public string Host { get; init; }
+        public int Port { get; init; }
+        public string? Username { get; init; }
+        public string Password { get; init; }
+        public string Source { get; init; }
+    }
 
     /// <summary>
     /// Runs value.

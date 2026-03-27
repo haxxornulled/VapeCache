@@ -115,15 +115,27 @@ public sealed class RedisExporterMetricsHostedServiceTests
         }
     }
 
-    private sealed class StaticHttpClientFactory(HttpClient client) : IHttpClientFactory
+    private sealed class StaticHttpClientFactory : IHttpClientFactory
     {
+        private readonly HttpClient client;
+
+        public StaticHttpClientFactory(HttpClient client)
+        {
+            this.client = client;
+        }
+
         public HttpClient CreateClient(string name) => client;
     }
 
-    private sealed class CountingHttpMessageHandler(
-        Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
+    private sealed class CountingHttpMessageHandler : HttpMessageHandler
     {
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> responseFactory;
         private int _requestCount;
+
+        public CountingHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
+        {
+            this.responseFactory = responseFactory;
+        }
 
         public int RequestCount => Volatile.Read(ref _requestCount);
 
@@ -188,12 +200,18 @@ public sealed class RedisExporterMetricsHostedServiceTests
             }
         }
 
-        private sealed class ChangeSubscription(
-            MutableOptionsMonitor owner,
-            Action<RedisExporterMetricsOptions, string?> listener) : IDisposable
+        private sealed class ChangeSubscription : IDisposable
         {
-            private MutableOptionsMonitor? _owner = owner;
-            private Action<RedisExporterMetricsOptions, string?>? _listener = listener;
+            private MutableOptionsMonitor? _owner;
+            private Action<RedisExporterMetricsOptions, string?>? _listener;
+
+            public ChangeSubscription(
+                MutableOptionsMonitor owner,
+                Action<RedisExporterMetricsOptions, string?> listener)
+            {
+                _owner = owner;
+                _listener = listener;
+            }
 
             public void Dispose()
             {

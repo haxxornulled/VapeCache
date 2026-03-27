@@ -3,7 +3,15 @@ namespace VapeCache.Abstractions.Caching;
 /// <summary>
 /// Untyped cache key for general removal operations.
 /// </summary>
-public readonly record struct CacheKey(string Value);
+public readonly record struct CacheKey
+{
+    public CacheKey(string value)
+    {
+        Value = value;
+    }
+
+    public string Value { get; init; }
+}
 
 /// <summary>
 /// Strongly-typed cache key that carries the type of the cached value.
@@ -11,8 +19,15 @@ public readonly record struct CacheKey(string Value);
 /// the type parameter at call sites.
 /// </summary>
 /// <typeparam name="T">The type of value associated with this cache key.</typeparam>
-public readonly record struct CacheKey<T>(string Value)
+public readonly record struct CacheKey<T>
 {
+    public CacheKey(string value)
+    {
+        Value = value;
+    }
+
+    public string Value { get; init; }
+
     /// <summary>
     /// Executes value.
     /// </summary>

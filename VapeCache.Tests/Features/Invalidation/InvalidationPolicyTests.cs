@@ -73,5 +73,15 @@ public sealed class InvalidationPolicyTests
         Assert.Single(plan.Keys);
     }
 
-    public sealed record OrderUpdatedEvent(string OrderId, string Region);
+    public sealed record OrderUpdatedEvent
+    {
+        public OrderUpdatedEvent(string OrderId, string Region)
+        {
+            this.OrderId = OrderId;
+            this.Region = Region;
+        }
+
+        public string OrderId { get; init; }
+        public string Region { get; init; }
+    }
 }

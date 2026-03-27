@@ -52,8 +52,17 @@ public static class StampedeRuntimePolicy
 /// </summary>
 /// <param name="IsValid">Whether the key is accepted by runtime policy.</param>
 /// <param name="Reason">Rejection reason when invalid.</param>
-public readonly record struct StampedeKeyValidationResult(bool IsValid, StampedeKeyRejectionReason Reason)
+public readonly record struct StampedeKeyValidationResult
 {
+    public StampedeKeyValidationResult(bool isValid, StampedeKeyRejectionReason reason)
+    {
+        IsValid = isValid;
+        Reason = reason;
+    }
+
+    public bool IsValid { get; init; }
+    public StampedeKeyRejectionReason Reason { get; init; }
+
     /// <summary>
     /// Successful validation result.
     /// </summary>

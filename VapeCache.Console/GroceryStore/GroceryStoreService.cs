@@ -484,16 +484,37 @@ public class GroceryStoreService : IGroceryStoreService, ICartBatchWriter
     public static Product[] GetAllProducts() => Products;
 }
 
-public readonly record struct GroceryStoreCacheTelemetrySnapshot(
-    long ProductGets,
-    long ProductHits,
-    long ProductMisses,
-    long ProductSets,
-    long FlashSaleGets,
-    long FlashSaleHits,
-    long FlashSaleMisses,
-    long FlashSaleSets)
+public readonly record struct GroceryStoreCacheTelemetrySnapshot
 {
+    public GroceryStoreCacheTelemetrySnapshot(
+        long ProductGets,
+        long ProductHits,
+        long ProductMisses,
+        long ProductSets,
+        long FlashSaleGets,
+        long FlashSaleHits,
+        long FlashSaleMisses,
+        long FlashSaleSets)
+    {
+        this.ProductGets = ProductGets;
+        this.ProductHits = ProductHits;
+        this.ProductMisses = ProductMisses;
+        this.ProductSets = ProductSets;
+        this.FlashSaleGets = FlashSaleGets;
+        this.FlashSaleHits = FlashSaleHits;
+        this.FlashSaleMisses = FlashSaleMisses;
+        this.FlashSaleSets = FlashSaleSets;
+    }
+
+    public long ProductGets { get; init; }
+    public long ProductHits { get; init; }
+    public long ProductMisses { get; init; }
+    public long ProductSets { get; init; }
+    public long FlashSaleGets { get; init; }
+    public long FlashSaleHits { get; init; }
+    public long FlashSaleMisses { get; init; }
+    public long FlashSaleSets { get; init; }
+
     public long TotalGets => ProductGets + FlashSaleGets;
     public long TotalHits => ProductHits + FlashSaleHits;
     public long TotalMisses => ProductMisses + FlashSaleMisses;

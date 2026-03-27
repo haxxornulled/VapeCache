@@ -4,13 +4,22 @@ using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
 
-internal sealed class RedisMultiplexerOptionsStartupHostedService(
-    IOptionsMonitor<RedisMultiplexerOptions> options,
-    RedisMultiplexerOptionsValidator validator) : IHostedService
+internal sealed class RedisMultiplexerOptionsStartupHostedService : IHostedService
 {
+    private readonly IOptionsMonitor<RedisMultiplexerOptions> _options;
+    private readonly RedisMultiplexerOptionsValidator _validator;
+
+    public RedisMultiplexerOptionsStartupHostedService(
+        IOptionsMonitor<RedisMultiplexerOptions> options,
+        RedisMultiplexerOptionsValidator validator)
+    {
+        _options = options;
+        _validator = validator;
+    }
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        var result = validator.Validate(Options.DefaultName, options.CurrentValue);
+        var result = _validator.Validate(Options.DefaultName, _options.CurrentValue);
         if (result.Failed)
             throw new OptionsValidationException(Options.DefaultName, typeof(RedisMultiplexerOptions), result.Failures);
 

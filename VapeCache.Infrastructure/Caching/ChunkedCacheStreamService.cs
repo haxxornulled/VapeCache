@@ -6,13 +6,19 @@ using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Infrastructure.Caching;
 
-internal sealed class ChunkedCacheStreamService(ICacheService cache) : ICacheChunkStreamService
+internal sealed class ChunkedCacheStreamService : ICacheChunkStreamService
 {
     private const int MinChunkSizeBytes = 4 * 1024;
     private const int MaxChunkSizeBytes = 1024 * 1024;
     private const int MaxContentTypeBytes = 1024;
     private const int ManifestMagic = 0x31534356; // VCS1 (little-endian)
     private const int ManifestHeaderBytes = 4 + 4 + 4 + 8 + 2 + 2;
+    private readonly ICacheService _cache;
+
+    public ChunkedCacheStreamService(ICacheService cache)
+    {
+        _cache = cache;
+    }
 
     /// <inheritdoc />
     public async ValueTask<CacheChunkStreamManifest> WriteAsync(
@@ -51,7 +57,7 @@ internal sealed class ChunkedCacheStreamService(ICacheService cache) : ICacheChu
                 Buffer.BlockCopy(rented, 0, chunk, 0, read);
 
                 var chunkKey = GetChunkKey(key, storageId, writtenChunkCount);
-                await cache.SetAsync(chunkKey, chunk, options, ct).ConfigureAwait(false);
+                await _cache.SetAsync(chunkKey, chunk, options, ct).ConfigureAwait(false);
 
                 writtenChunkCount++;
                 writtenBytes += read;
@@ -60,7 +66,7 @@ internal sealed class ChunkedCacheStreamService(ICacheService cache) : ICacheChu
             var stored = new StoredManifest(storageId, writtenChunkCount, chunkSize, writtenBytes, contentType);
             var manifestKey = GetManifestKey(key);
             var manifestBytes = SerializeManifest(in stored);
-            await cache.SetAsync(manifestKey, manifestBytes, options, ct).ConfigureAwait(false);
+            await _cache.SetAsync(manifestKey, manifestBytes, options, ct).ConfigureAwait(false);
 
             if (existing is not null && !string.Equals(existing.Value.StorageId, storageId, StringComparison.Ordinal))
                 await RemoveChunksByManifestAsync(key, existing.Value, ct).ConfigureAwait(false);
@@ -105,7 +111,7 @@ internal sealed class ChunkedCacheStreamService(ICacheService cache) : ICacheChu
             ct.ThrowIfCancellationRequested();
 
             var chunkKey = GetChunkKey(key, stored.Value.StorageId, i);
-            var chunk = await cache.GetAsync(chunkKey, ct).ConfigureAwait(false);
+            var chunk = await _cache.GetAsync(chunkKey, ct).ConfigureAwait(false);
             if (chunk is null)
                 throw new InvalidDataException($"Chunk '{i}' is missing for stream key '{key}'.");
 
@@ -130,7 +136,7 @@ internal sealed class ChunkedCacheStreamService(ICacheService cache) : ICacheChu
             ct.ThrowIfCancellationRequested();
 
             var chunkKey = GetChunkKey(key, stored.Value.StorageId, i);
-            var chunk = await cache.GetAsync(chunkKey, ct).ConfigureAwait(false);
+            var chunk = await _cache.GetAsync(chunkKey, ct).ConfigureAwait(false);
             if (chunk is null)
                 throw new InvalidDataException($"Chunk '{i}' is missing for stream key '{key}'.");
 
@@ -151,7 +157,7 @@ internal sealed class ChunkedCacheStreamService(ICacheService cache) : ICacheChu
         if (stored is not null)
             removedAny = await RemoveChunksByManifestAsync(key, stored.Value, ct).ConfigureAwait(false);
 
-        var manifestRemoved = await cache.RemoveAsync(GetManifestKey(key), ct).ConfigureAwait(false);
+        var manifestRemoved = await _cache.RemoveAsync(GetManifestKey(key), ct).ConfigureAwait(false);
         return removedAny || manifestRemoved;
     }
 
@@ -159,7 +165,7 @@ internal sealed class ChunkedCacheStreamService(ICacheService cache) : ICacheChu
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
-        var manifestBytes = await cache.GetAsync(GetManifestKey(key), ct).ConfigureAwait(false);
+        var manifestBytes = await _cache.GetAsync(GetManifestKey(key), ct).ConfigureAwait(false);
         if (manifestBytes is null)
             return null;
 
@@ -175,7 +181,7 @@ internal sealed class ChunkedCacheStreamService(ICacheService cache) : ICacheChu
         for (var i = 0; i < manifest.ChunkCount; i++)
         {
             var chunkKey = GetChunkKey(key, manifest.StorageId, i);
-            var removed = await cache.RemoveAsync(chunkKey, ct).ConfigureAwait(false);
+            var removed = await _cache.RemoveAsync(chunkKey, ct).ConfigureAwait(false);
             removedAny |= removed;
         }
 
@@ -288,13 +294,28 @@ internal sealed class ChunkedCacheStreamService(ICacheService cache) : ICacheChu
         return true;
     }
 
-    private readonly record struct StoredManifest(
-        string StorageId,
-        int ChunkCount,
-        int ChunkSizeBytes,
-        long ContentLengthBytes,
-        string? ContentType)
+    private readonly struct StoredManifest
     {
+        public StoredManifest(
+            string storageId,
+            int chunkCount,
+            int chunkSizeBytes,
+            long contentLengthBytes,
+            string? contentType)
+        {
+            StorageId = storageId;
+            ChunkCount = chunkCount;
+            ChunkSizeBytes = chunkSizeBytes;
+            ContentLengthBytes = contentLengthBytes;
+            ContentType = contentType;
+        }
+
+        public string StorageId { get; }
+        public int ChunkCount { get; }
+        public int ChunkSizeBytes { get; }
+        public long ContentLengthBytes { get; }
+        public string? ContentType { get; }
+
         public CacheChunkStreamManifest ToPublicManifest()
             => new(ChunkCount, ChunkSizeBytes, ContentLengthBytes, ContentType);
     }

@@ -109,8 +109,22 @@ public sealed class CacheInvalidationOptions
 /// <summary>
 /// Represents the struct.
 /// </summary>
-public readonly record struct CacheInvalidationRuntimeSettings(
-    bool ThrowOnFailure,
-    bool ExecuteTargetsInParallel,
-    bool EvaluatePoliciesInParallel,
-    int MaxConcurrency);
+public readonly record struct CacheInvalidationRuntimeSettings
+{
+    public CacheInvalidationRuntimeSettings(
+        bool ThrowOnFailure,
+        bool ExecuteTargetsInParallel,
+        bool EvaluatePoliciesInParallel,
+        int MaxConcurrency)
+    {
+        this.ThrowOnFailure = ThrowOnFailure;
+        this.ExecuteTargetsInParallel = ExecuteTargetsInParallel;
+        this.EvaluatePoliciesInParallel = EvaluatePoliciesInParallel;
+        this.MaxConcurrency = MaxConcurrency;
+    }
+
+    public bool ThrowOnFailure { get; init; }
+    public bool ExecuteTargetsInParallel { get; init; }
+    public bool EvaluatePoliciesInParallel { get; init; }
+    public int MaxConcurrency { get; init; }
+}

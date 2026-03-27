@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using System.Text.Json;
 using System.Diagnostics;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -16,27 +16,47 @@ namespace VapeCache.Infrastructure.Caching;
 /// automatic failover to in-memory caching when Redis is unavailable.
 /// Uses a circuit breaker pattern to detect failures and gradually recover.
 /// </summary>
-internal sealed partial class HybridCacheService(
-    RedisCacheService redis,
-    ICacheFallbackService fallback,
-    ICurrentCacheService current,
-    TimeProvider timeProvider,
-    IOptionsMonitor<RedisCircuitBreakerOptions> breakerOptions,
-    CacheStatsRegistry statsRegistry,
-    ILogger<HybridCacheService> logger,
-    IOptionsMonitor<HybridFailoverOptions>? failoverOptions = null,
-    IRedisReconciliationService? reconciliation = null,
-    IEnterpriseFeatureGate? enterpriseFeatureGate = null) : ICacheService
+internal sealed partial class HybridCacheService : ICacheService
     , ICacheTagService
     , IRedisCircuitBreakerState
     , IRedisFailoverController
 {
-    /// <inheritdoc />
-    public string Name => "hybrid";
+    private readonly RedisCacheService redis;
+    private readonly ICacheFallbackService fallback;
+    private readonly ICurrentCacheService current;
+    private readonly TimeProvider timeProvider;
+    private readonly ILogger<HybridCacheService> logger;
 
-    private readonly CacheStats _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
-    private readonly IOptionsMonitor<RedisCircuitBreakerOptions> _breakerOptions = breakerOptions;
-    private readonly IOptionsMonitor<HybridFailoverOptions> _failoverOptions = failoverOptions ?? DefaultHybridFailoverOptionsMonitor.Instance;
+    public HybridCacheService(
+        RedisCacheService redis,
+        ICacheFallbackService fallback,
+        ICurrentCacheService current,
+        TimeProvider timeProvider,
+        IOptionsMonitor<RedisCircuitBreakerOptions> breakerOptions,
+        CacheStatsRegistry statsRegistry,
+        ILogger<HybridCacheService> logger,
+        IOptionsMonitor<HybridFailoverOptions>? failoverOptions = null,
+        IRedisReconciliationService? reconciliation = null,
+        IEnterpriseFeatureGate? enterpriseFeatureGate = null)
+    {
+        this.redis = redis;
+        this.fallback = fallback;
+        this.current = current;
+        this.timeProvider = timeProvider;
+        this.logger = logger;
+        _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
+        _breakerOptions = breakerOptions;
+        _failoverOptions = failoverOptions ?? DefaultHybridFailoverOptionsMonitor.Instance;
+        this._reconciliation =
+            enterpriseFeatureGate?.IsReconciliationLicensed == true ? reconciliation : null;
+    }
+
+    /// <inheritdoc />
+    public string Name => BackendName;
+
+    private readonly CacheStats _stats;
+    private readonly IOptionsMonitor<RedisCircuitBreakerOptions> _breakerOptions;
+    private readonly IOptionsMonitor<HybridFailoverOptions> _failoverOptions;
     private RedisCircuitBreakerOptions _breaker => _breakerOptions.CurrentValue;
     private HybridFailoverOptions _failover => _failoverOptions.CurrentValue;
     private int _failures;
@@ -46,12 +66,25 @@ internal sealed partial class HybridCacheService(
     private string? _forcedReason;
     private int _openAttempts;
     private int _reconcileInFlight;
-    private readonly IRedisReconciliationService? _reconciliation =
-        enterpriseFeatureGate?.IsReconciliationLicensed == true ? reconciliation : null;
-    private static readonly JsonSerializerOptions TagJsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly byte[] TagEnvelopePrefix = "VCTAG1:"u8.ToArray();
+    private readonly IRedisReconciliationService? _reconciliation;
+    private const string BackendName = "hybrid";
+    private static readonly byte[] BinaryTagEnvelopePrefix = "VCTAG2:"u8.ToArray();
     private static readonly string[] ReadWarmTags = ["hybrid-failover", "read-warm"];
     private static readonly string[] WriteMirrorTags = ["hybrid-failover", "write-mirror"];
+    private static readonly CacheIntent ReadWarmIntent = new(
+        CacheIntentKind.ReadThrough,
+        Reason: "hybrid-failover-read-warm",
+        Owner: BackendName,
+        Tags: ReadWarmTags);
+    private static readonly CacheIntent WriteMirrorIntent = new(
+        CacheIntentKind.ReadThrough,
+        Reason: "hybrid-failover-write-mirror",
+        Owner: BackendName,
+        Tags: WriteMirrorTags);
+    private static readonly CacheIntent TagVersionFallbackWarmIntent = new(
+        CacheIntentKind.ComputedView,
+        Reason: "cache-tag-version-fallback-warm",
+        Owner: BackendName);
     private const string TagVersionKeyPrefix = "vapecache:tag:v1:";
     private static readonly Action<ILogger, string, Exception?> LogDiscardedStaleTaggedCacheEntry = LoggerMessage.Define<string>(
         LogLevel.Debug,
@@ -242,15 +275,15 @@ internal sealed partial class HybridCacheService(
                 using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
 
                 var v = await redis.GetAsync(key, probeCts?.Token ?? ct).ConfigureAwait(false);
-                v = await ResolveTaggedPayloadAsync(key, v, ct).ConfigureAwait(false);
+                var resolvedRedisPayload = await ResolveTaggedPayloadCoreAsync(key, v, ct).ConfigureAwait(false);
                 MarkRedisSuccess();
                 current.SetCurrent(redis.Name);
-                if (v is not null)
+                if (resolvedRedisPayload.HasValue)
                 {
-                    await TryWarmFallbackFromReadAsync(key, v, ct).ConfigureAwait(false);
+                    await TryWarmFallbackFromReadAsync(key, resolvedRedisPayload.Payload, ct).ConfigureAwait(false);
                     _stats.IncHit();
                     CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
-                    return v;
+                    return resolvedRedisPayload.ToArray();
                 }
 
                 await TryRemoveStaleFallbackOnMissAsync(key, ct).ConfigureAwait(false);
@@ -462,15 +495,15 @@ internal sealed partial class HybridCacheService(
                 using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
 
                 var redisBytes = await redis.GetAsync(key, probeCts?.Token ?? ct).ConfigureAwait(false);
-                redisBytes = await ResolveTaggedPayloadAsync(key, redisBytes, ct).ConfigureAwait(false);
+                var resolvedRedisPayload = await ResolveTaggedPayloadCoreAsync(key, redisBytes, ct).ConfigureAwait(false);
                 MarkRedisSuccess();
                 current.SetCurrent(redis.Name);
-                if (redisBytes is not null)
+                if (resolvedRedisPayload.HasValue)
                 {
-                    await TryWarmFallbackFromReadAsync(key, redisBytes, ct).ConfigureAwait(false);
+                    await TryWarmFallbackFromReadAsync(key, resolvedRedisPayload.Payload, ct).ConfigureAwait(false);
                     _stats.IncHit();
                     CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
-                    return deserialize(redisBytes);
+                    return deserialize(resolvedRedisPayload.Payload.Span);
                 }
 
                 await TryRemoveStaleFallbackOnMissAsync(key, ct).ConfigureAwait(false);
@@ -569,43 +602,53 @@ internal sealed partial class HybridCacheService(
         return SerializeTagEnvelope(payload, tagVersions);
     }
 
-    private async ValueTask<Dictionary<string, long>> CaptureTagVersionsAsync(string[] normalizedTags, CancellationToken ct)
+    private async ValueTask<TagVersionSnapshot[]> CaptureTagVersionsAsync(string[] normalizedTags, CancellationToken ct)
     {
-        var result = new Dictionary<string, long>(normalizedTags.Length, StringComparer.Ordinal);
-        foreach (var tag in normalizedTags)
-            result[tag] = await GetCurrentTagVersionAsync(tag, ct).ConfigureAwait(false);
+        var result = new TagVersionSnapshot[normalizedTags.Length];
+        for (var i = 0; i < normalizedTags.Length; i++)
+        {
+            var tag = normalizedTags[i];
+            result[i] = new TagVersionSnapshot(tag, await GetCurrentTagVersionAsync(tag, ct).ConfigureAwait(false));
+        }
 
         return result;
     }
 
     private async ValueTask<byte[]?> ResolveTaggedPayloadAsync(string key, byte[]? payload, CancellationToken ct)
     {
+        var resolved = await ResolveTaggedPayloadCoreAsync(key, payload, ct).ConfigureAwait(false);
+        return resolved.HasValue ? resolved.ToArray() : null;
+    }
+
+    private async ValueTask<TaggedPayloadResolution> ResolveTaggedPayloadCoreAsync(string key, byte[]? payload, CancellationToken ct)
+    {
         if (payload is null)
-            return null;
+            return default;
 
-        if (!TryDeserializeTagEnvelope(payload, out var envelope))
-            return payload;
+        if (TryDeserializeBinaryTagEnvelope(payload, out var binaryEnvelope))
+        {
+            if (binaryEnvelope.TagVersions.Length == 0
+                || await AreTagVersionsCurrentAsync(binaryEnvelope.TagVersions, ct).ConfigureAwait(false))
+            {
+                return new TaggedPayloadResolution(binaryEnvelope.Payload);
+            }
 
-        var tagVersions = envelope.TagVersions;
-        if (tagVersions is null || tagVersions.Count == 0)
-            return envelope.Payload;
+            await TryRemoveTaggedStaleEntryAsync(key, ct).ConfigureAwait(false);
+            LogDiscardedStaleTaggedCacheEntry(logger, key, null);
+            return default;
+        }
 
-        if (await AreTagVersionsCurrentAsync(tagVersions, ct).ConfigureAwait(false))
-            return envelope.Payload;
-
-        await TryRemoveTaggedStaleEntryAsync(key, ct).ConfigureAwait(false);
-        LogDiscardedStaleTaggedCacheEntry(logger, key, null);
-        return null;
+        return new TaggedPayloadResolution(payload, payload);
     }
 
     private async ValueTask<bool> AreTagVersionsCurrentAsync(
-        IReadOnlyDictionary<string, long> expectedVersions,
+        TagVersionSnapshot[] expectedVersions,
         CancellationToken ct)
     {
         foreach (var expected in expectedVersions)
         {
-            var currentVersion = await GetCurrentTagVersionAsync(expected.Key, ct).ConfigureAwait(false);
-            if (currentVersion != expected.Value)
+            var currentVersion = await GetCurrentTagVersionAsync(expected.Tag, ct).ConfigureAwait(false);
+            if (currentVersion != expected.Version)
                 return false;
         }
 
@@ -615,26 +658,43 @@ internal sealed partial class HybridCacheService(
     private async ValueTask<long> GetCurrentTagVersionAsync(string normalizedTag, CancellationToken ct)
     {
         var tagVersionKey = BuildTagVersionKey(normalizedTag);
-        var fallbackVersion = await GetTagVersionFromBackendAsync(fallback, tagVersionKey, ct).ConfigureAwait(false);
 
         var breaker = _breaker;
         if (breaker.Enabled && !IsRedisAllowedNow())
-            return fallbackVersion;
+            return await GetTagVersionFromBackendAsync(fallback, tagVersionKey, ct).ConfigureAwait(false);
 
         var probeTaken = false;
         try
         {
             if (!TryEnterHalfOpenProbe(breaker, out probeTaken))
-                return fallbackVersion;
+                return await GetTagVersionFromBackendAsync(fallback, tagVersionKey, ct).ConfigureAwait(false);
 
             using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
-            var redisVersion = await GetTagVersionFromBackendAsync(redis, tagVersionKey, probeCts?.Token ?? ct).ConfigureAwait(false);
-            MarkRedisSuccess();
-            if (redisVersion <= fallbackVersion)
-                return fallbackVersion;
+            if (ShouldPreferRedisFirstTagVersionRead())
+            {
+                var redisVersion = await GetTagVersionFromBackendAsync(redis, tagVersionKey, probeCts?.Token ?? ct).ConfigureAwait(false);
+                MarkRedisSuccess();
+                if (redisVersion == 0)
+                    return 0;
 
-            await TrySetFallbackTagVersionAsync(tagVersionKey, redisVersion, ct).ConfigureAwait(false);
-            return redisVersion;
+                var fallbackVersion = await GetTagVersionFromBackendAsync(fallback, tagVersionKey, ct).ConfigureAwait(false);
+                if (fallbackVersion > redisVersion)
+                    return fallbackVersion;
+
+                if (redisVersion > fallbackVersion)
+                    await TrySetFallbackTagVersionAsync(tagVersionKey, redisVersion, ct).ConfigureAwait(false);
+
+                return redisVersion;
+            }
+
+            var currentFallbackVersion = await GetTagVersionFromBackendAsync(fallback, tagVersionKey, ct).ConfigureAwait(false);
+            var currentRedisVersion = await GetTagVersionFromBackendAsync(redis, tagVersionKey, probeCts?.Token ?? ct).ConfigureAwait(false);
+            MarkRedisSuccess();
+            if (currentRedisVersion <= currentFallbackVersion)
+                return currentFallbackVersion;
+
+            await TrySetFallbackTagVersionAsync(tagVersionKey, currentRedisVersion, ct).ConfigureAwait(false);
+            return currentRedisVersion;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -644,7 +704,7 @@ internal sealed partial class HybridCacheService(
         {
             MarkRedisFailure();
             LogTagVersionReadFallback(logger, normalizedTag, ex);
-            return fallbackVersion;
+            return await GetTagVersionFromBackendAsync(fallback, tagVersionKey, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -652,6 +712,9 @@ internal sealed partial class HybridCacheService(
                 Interlocked.Decrement(ref _halfOpenProbeInFlight);
         }
     }
+
+    private bool ShouldPreferRedisFirstTagVersionRead()
+        => _reconciliation is null || _reconciliation.PendingOperations <= 0;
 
     private static async ValueTask<long> GetTagVersionFromBackendAsync(ICacheService backend, string tagVersionKey, CancellationToken ct)
     {
@@ -712,11 +775,7 @@ internal sealed partial class HybridCacheService(
     private async ValueTask TrySetFallbackTagVersionAsync(string tagVersionKey, long version, CancellationToken ct)
     {
         var payload = SerializeTagVersion(version);
-        var writeOptions = new CacheEntryOptions(
-            Intent: new CacheIntent(
-                CacheIntentKind.ComputedView,
-                Reason: "cache-tag-version-fallback-warm",
-                Owner: Name));
+        var writeOptions = new CacheEntryOptions(Intent: TagVersionFallbackWarmIntent);
         try
         {
             await fallback.SetAsync(tagVersionKey, payload, writeOptions, ct).ConfigureAwait(false);
@@ -803,43 +862,84 @@ internal sealed partial class HybridCacheService(
         return true;
     }
 
-    private static byte[] SerializeTagEnvelope(ReadOnlyMemory<byte> payload, Dictionary<string, long> tagVersions)
+    private static byte[] SerializeTagEnvelope(ReadOnlyMemory<byte> payload, TagVersionSnapshot[] tagVersions)
     {
-        var envelope = new TaggedCacheEnvelope
+        var length = BinaryTagEnvelopePrefix.Length + sizeof(int) + sizeof(int) + payload.Length;
+        for (var i = 0; i < tagVersions.Length; i++)
         {
-            Payload = payload.ToArray(),
-            TagVersions = tagVersions
-        };
+            var tag = tagVersions[i];
+            length += sizeof(int) + Encoding.UTF8.GetByteCount(tag.Tag) + sizeof(long);
+        }
 
-        var json = JsonSerializer.SerializeToUtf8Bytes(envelope, TagJsonOptions);
-        var buffer = GC.AllocateUninitializedArray<byte>(TagEnvelopePrefix.Length + json.Length);
-        TagEnvelopePrefix.AsSpan().CopyTo(buffer);
-        json.AsSpan().CopyTo(buffer.AsSpan(TagEnvelopePrefix.Length));
+        var buffer = GC.AllocateUninitializedArray<byte>(length);
+        var span = buffer.AsSpan();
+        var offset = 0;
+
+        BinaryTagEnvelopePrefix.CopyTo(buffer, offset);
+        offset += BinaryTagEnvelopePrefix.Length;
+
+        BinaryPrimitives.WriteInt32LittleEndian(span.Slice(offset, sizeof(int)), tagVersions.Length);
+        offset += sizeof(int);
+
+        for (var i = 0; i < tagVersions.Length; i++)
+        {
+            var tag = tagVersions[i];
+            var tagLength = Encoding.UTF8.GetByteCount(tag.Tag);
+            BinaryPrimitives.WriteInt32LittleEndian(span.Slice(offset, sizeof(int)), tagLength);
+            offset += sizeof(int);
+            offset += Encoding.UTF8.GetBytes(tag.Tag, span.Slice(offset, tagLength));
+            BinaryPrimitives.WriteInt64LittleEndian(span.Slice(offset, sizeof(long)), tag.Version);
+            offset += sizeof(long);
+        }
+
+        BinaryPrimitives.WriteInt32LittleEndian(span.Slice(offset, sizeof(int)), payload.Length);
+        offset += sizeof(int);
+        payload.Span.CopyTo(span.Slice(offset, payload.Length));
         return buffer;
     }
 
-    private static bool TryDeserializeTagEnvelope(byte[] payload, out TaggedCacheEnvelope envelope)
+    private static bool TryDeserializeBinaryTagEnvelope(byte[] payload, out BinaryTaggedCacheEnvelope envelope)
     {
-        envelope = default!;
-        if (!payload.AsSpan().StartsWith(TagEnvelopePrefix))
+        envelope = default;
+        var span = payload.AsSpan();
+        if (!span.StartsWith(BinaryTagEnvelopePrefix))
             return false;
 
-        try
+        var offset = BinaryTagEnvelopePrefix.Length;
+        if (!TryReadInt32(span, ref offset, out var tagCount)
+            || tagCount < 0
+            || tagCount > 1024)
         {
-            var parsed = JsonSerializer.Deserialize<TaggedCacheEnvelope>(
-                payload.AsSpan(TagEnvelopePrefix.Length),
-                TagJsonOptions);
-            if (parsed is null || parsed.Payload is null)
+            return false;
+        }
+
+        var tagVersions = tagCount == 0 ? Array.Empty<TagVersionSnapshot>() : new TagVersionSnapshot[tagCount];
+        for (var i = 0; i < tagCount; i++)
+        {
+            if (!TryReadInt32(span, ref offset, out var tagByteCount)
+                || tagByteCount < 0
+                || span.Length - offset < tagByteCount + sizeof(long))
+            {
+                return false;
+            }
+
+            var tag = Encoding.UTF8.GetString(span.Slice(offset, tagByteCount));
+            offset += tagByteCount;
+            if (!TryReadInt64(span, ref offset, out var version))
                 return false;
 
-            parsed.TagVersions ??= new Dictionary<string, long>(StringComparer.Ordinal);
-            envelope = parsed;
-            return true;
+            tagVersions[i] = new TagVersionSnapshot(tag, version);
         }
-        catch (JsonException)
+
+        if (!TryReadInt32(span, ref offset, out var payloadLength)
+            || payloadLength < 0
+            || span.Length - offset != payloadLength)
         {
             return false;
         }
+
+        envelope = new BinaryTaggedCacheEnvelope(payload, offset, payloadLength, tagVersions);
+        return true;
     }
 
     private async ValueTask TryWarmFallbackFromReadAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)
@@ -850,13 +950,7 @@ internal sealed partial class HybridCacheService(
 
         try
         {
-            var writeOptions = new CacheEntryOptions(
-                Ttl: options.FallbackWarmReadTtl,
-                Intent: new CacheIntent(
-                    CacheIntentKind.ReadThrough,
-                    Reason: "hybrid-failover-read-warm",
-                    Owner: Name,
-                    Tags: ReadWarmTags));
+            var writeOptions = new CacheEntryOptions(Ttl: options.FallbackWarmReadTtl, Intent: ReadWarmIntent);
             await fallback.SetAsync(key, value, writeOptions, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -889,11 +983,7 @@ internal sealed partial class HybridCacheService(
             var ttl = sourceOptions.Ttl ?? options.FallbackMirrorWriteTtlWhenMissing;
             var writeOptions = new CacheEntryOptions(
                 Ttl: ttl,
-                Intent: sourceOptions.Intent ?? new CacheIntent(
-                    CacheIntentKind.ReadThrough,
-                    Reason: "hybrid-failover-write-mirror",
-                    Owner: Name,
-                    Tags: WriteMirrorTags));
+                Intent: sourceOptions.Intent ?? WriteMirrorIntent);
             await fallback.SetAsync(key, value, writeOptions, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -933,6 +1023,35 @@ internal sealed partial class HybridCacheService(
     private static bool ShouldMirrorPayload(HybridFailoverOptions options, int payloadBytes)
         => options.MaxMirrorPayloadBytes <= 0 || payloadBytes <= options.MaxMirrorPayloadBytes;
 
+    private static bool TryReadInt32(ReadOnlySpan<byte> buffer, ref int offset, out int value)
+    {
+        value = 0;
+        if (buffer.Length - offset < sizeof(int))
+            return false;
+
+        value = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(offset, sizeof(int)));
+        offset += sizeof(int);
+        return true;
+    }
+
+    private static bool TryReadInt64(ReadOnlySpan<byte> buffer, ref int offset, out long value)
+    {
+        value = 0;
+        if (buffer.Length - offset < sizeof(long))
+            return false;
+
+        value = BinaryPrimitives.ReadInt64LittleEndian(buffer.Slice(offset, sizeof(long)));
+        offset += sizeof(long);
+        return true;
+    }
+
+    private static byte[] CopyBuffer(ReadOnlySpan<byte> value)
+    {
+        var buffer = GC.AllocateUninitializedArray<byte>(value.Length);
+        value.CopyTo(buffer);
+        return buffer;
+    }
+
     /// <summary>
     /// Executes value.
     /// </summary>
@@ -961,7 +1080,7 @@ internal sealed partial class HybridCacheService(
 
     private void TryStartReconciliation()
     {
-        if (reconciliation is null)
+        if (_reconciliation is null)
             return;
 
         if (Interlocked.CompareExchange(ref _reconcileInFlight, 1, 0) != 0)
@@ -973,7 +1092,7 @@ internal sealed partial class HybridCacheService(
             var sw = Stopwatch.StartNew();
             try
             {
-                await reconciliation.ReconcileAsync().ConfigureAwait(false);
+                await _reconciliation.ReconcileAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1071,9 +1190,51 @@ internal sealed partial class HybridCacheService(
         }
     }
 
-    private sealed class TaggedCacheEnvelope
+    private readonly struct TagVersionSnapshot
     {
-        public byte[] Payload { get; set; } = Array.Empty<byte>();
-        public Dictionary<string, long>? TagVersions { get; set; }
+        public TagVersionSnapshot(string tag, long version)
+        {
+            Tag = tag;
+            Version = version;
+        }
+
+        public string Tag { get; }
+        public long Version { get; }
+    }
+
+    private readonly struct BinaryTaggedCacheEnvelope
+    {
+        public BinaryTaggedCacheEnvelope(
+            byte[] buffer,
+            int payloadOffset,
+            int payloadLength,
+            TagVersionSnapshot[] tagVersions)
+        {
+            Buffer = buffer;
+            PayloadOffset = payloadOffset;
+            PayloadLength = payloadLength;
+            TagVersions = tagVersions;
+        }
+
+        public byte[] Buffer { get; }
+        public int PayloadOffset { get; }
+        public int PayloadLength { get; }
+        public TagVersionSnapshot[] TagVersions { get; }
+        public ReadOnlyMemory<byte> Payload => Buffer.AsMemory(PayloadOffset, PayloadLength);
+    }
+
+    private readonly struct TaggedPayloadResolution
+    {
+        public TaggedPayloadResolution(ReadOnlyMemory<byte> payload, byte[]? exactArray = null)
+        {
+            Payload = payload;
+            ExactArray = exactArray;
+            HasValue = true;
+        }
+
+        public bool HasValue { get; }
+        public ReadOnlyMemory<byte> Payload { get; }
+        private byte[]? ExactArray { get; }
+        public byte[] ToArray() => ExactArray ?? CopyBuffer(Payload.Span);
     }
 }

@@ -389,10 +389,19 @@ npm run build</code></pre>
         };
     }
 
-    private sealed record DashboardAssetBundle(
-        string IndexHtml,
-        string Script,
-        string Style);
+    private sealed record DashboardAssetBundle
+    {
+        public DashboardAssetBundle(string IndexHtml, string Script, string Style)
+        {
+            this.IndexHtml = IndexHtml;
+            this.Script = Script;
+            this.Style = Style;
+        }
+
+        public string IndexHtml { get; init; }
+        public string Script { get; init; }
+        public string Style { get; init; }
+    }
 
     private static void MapBreakerControlEndpoints(RouteGroupBuilder group)
     {
@@ -490,74 +499,199 @@ npm run build</code></pre>
 /// <summary>
 /// Status payload for VapeCache runtime diagnostics endpoint.
 /// </summary>
-public sealed record VapeCacheEndpointStatusResponse(
-    DateTimeOffset TimestampUtc,
-    [property: JsonConverter(typeof(JsonStringEnumConverter<BackendType>))] BackendType CurrentBackend,
-    VapeCacheEndpointStatsResponse Stats,
-    VapeCacheEndpointBreakerResponse CircuitBreaker,
-    SpillStoreDiagnosticsSnapshot? Spill,
-    RedisAutoscalerSnapshot? Autoscaler,
-    IReadOnlyList<RedisMuxLaneSnapshot>? Lanes = null);
+public sealed record VapeCacheEndpointStatusResponse
+{
+    public VapeCacheEndpointStatusResponse(
+        DateTimeOffset TimestampUtc,
+        BackendType CurrentBackend,
+        VapeCacheEndpointStatsResponse Stats,
+        VapeCacheEndpointBreakerResponse CircuitBreaker,
+        SpillStoreDiagnosticsSnapshot? Spill,
+        RedisAutoscalerSnapshot? Autoscaler,
+        IReadOnlyList<RedisMuxLaneSnapshot>? Lanes = null)
+    {
+        this.TimestampUtc = TimestampUtc;
+        this.CurrentBackend = CurrentBackend;
+        this.Stats = Stats;
+        this.CircuitBreaker = CircuitBreaker;
+        this.Spill = Spill;
+        this.Autoscaler = Autoscaler;
+        this.Lanes = Lanes;
+    }
+
+    public DateTimeOffset TimestampUtc { get; init; }
+
+    [property: JsonConverter(typeof(JsonStringEnumConverter<BackendType>))]
+    public BackendType CurrentBackend { get; init; }
+
+    public VapeCacheEndpointStatsResponse Stats { get; init; }
+    public VapeCacheEndpointBreakerResponse CircuitBreaker { get; init; }
+    public SpillStoreDiagnosticsSnapshot? Spill { get; init; }
+    public RedisAutoscalerSnapshot? Autoscaler { get; init; }
+    public IReadOnlyList<RedisMuxLaneSnapshot>? Lanes { get; init; }
+}
 
 /// <summary>
 /// Cache stats payload exposed by endpoint wrappers.
 /// </summary>
-public sealed record VapeCacheEndpointStatsResponse(
-    long GetCalls,
-    long Hits,
-    long Misses,
-    long SetCalls,
-    long RemoveCalls,
-    long FallbackToMemory,
-    long RedisBreakerOpened,
-    long StampedeKeyRejected,
-    long StampedeLockWaitTimeout,
-    long StampedeFailureBackoffRejected,
-    double HitRate,
-    SpillStoreDiagnosticsSnapshot? Spill,
-    RedisAutoscalerSnapshot? Autoscaler,
-    IReadOnlyList<RedisMuxLaneSnapshot>? Lanes = null);
+public sealed record VapeCacheEndpointStatsResponse
+{
+    public VapeCacheEndpointStatsResponse(
+        long GetCalls,
+        long Hits,
+        long Misses,
+        long SetCalls,
+        long RemoveCalls,
+        long FallbackToMemory,
+        long RedisBreakerOpened,
+        long StampedeKeyRejected,
+        long StampedeLockWaitTimeout,
+        long StampedeFailureBackoffRejected,
+        double HitRate,
+        SpillStoreDiagnosticsSnapshot? Spill,
+        RedisAutoscalerSnapshot? Autoscaler,
+        IReadOnlyList<RedisMuxLaneSnapshot>? Lanes = null)
+    {
+        this.GetCalls = GetCalls;
+        this.Hits = Hits;
+        this.Misses = Misses;
+        this.SetCalls = SetCalls;
+        this.RemoveCalls = RemoveCalls;
+        this.FallbackToMemory = FallbackToMemory;
+        this.RedisBreakerOpened = RedisBreakerOpened;
+        this.StampedeKeyRejected = StampedeKeyRejected;
+        this.StampedeLockWaitTimeout = StampedeLockWaitTimeout;
+        this.StampedeFailureBackoffRejected = StampedeFailureBackoffRejected;
+        this.HitRate = HitRate;
+        this.Spill = Spill;
+        this.Autoscaler = Autoscaler;
+        this.Lanes = Lanes;
+    }
+
+    public long GetCalls { get; init; }
+    public long Hits { get; init; }
+    public long Misses { get; init; }
+    public long SetCalls { get; init; }
+    public long RemoveCalls { get; init; }
+    public long FallbackToMemory { get; init; }
+    public long RedisBreakerOpened { get; init; }
+    public long StampedeKeyRejected { get; init; }
+    public long StampedeLockWaitTimeout { get; init; }
+    public long StampedeFailureBackoffRejected { get; init; }
+    public double HitRate { get; init; }
+    public SpillStoreDiagnosticsSnapshot? Spill { get; init; }
+    public RedisAutoscalerSnapshot? Autoscaler { get; init; }
+    public IReadOnlyList<RedisMuxLaneSnapshot>? Lanes { get; init; }
+}
 
 /// <summary>
 /// Circuit breaker status payload exposed by endpoint wrappers.
 /// </summary>
-public sealed record VapeCacheEndpointBreakerResponse(
-    bool Enabled,
-    bool IsOpen,
-    int ConsecutiveFailures,
-    TimeSpan? OpenRemaining,
-    bool HalfOpenProbeInFlight,
-    bool IsForcedOpen,
-    string? Reason);
+public sealed record VapeCacheEndpointBreakerResponse
+{
+    public VapeCacheEndpointBreakerResponse(
+        bool Enabled,
+        bool IsOpen,
+        int ConsecutiveFailures,
+        TimeSpan? OpenRemaining,
+        bool HalfOpenProbeInFlight,
+        bool IsForcedOpen,
+        string? Reason)
+    {
+        this.Enabled = Enabled;
+        this.IsOpen = IsOpen;
+        this.ConsecutiveFailures = ConsecutiveFailures;
+        this.OpenRemaining = OpenRemaining;
+        this.HalfOpenProbeInFlight = HalfOpenProbeInFlight;
+        this.IsForcedOpen = IsForcedOpen;
+        this.Reason = Reason;
+    }
+
+    public bool Enabled { get; init; }
+    public bool IsOpen { get; init; }
+    public int ConsecutiveFailures { get; init; }
+    public TimeSpan? OpenRemaining { get; init; }
+    public bool HalfOpenProbeInFlight { get; init; }
+    public bool IsForcedOpen { get; init; }
+    public string? Reason { get; init; }
+}
 
 /// <summary>
 /// Request payload to force-open the circuit breaker.
 /// </summary>
-public sealed record VapeCacheForceOpenRequest(string? Reason);
+public sealed record VapeCacheForceOpenRequest
+{
+    public VapeCacheForceOpenRequest(string? Reason)
+    {
+        this.Reason = Reason;
+    }
+
+    public string? Reason { get; init; }
+}
 
 /// <summary>
 /// Response payload for breaker control operations.
 /// </summary>
-public sealed record VapeCacheBreakerControlResponse(
-    bool IsForcedOpen,
-    string? Reason);
+public sealed record VapeCacheBreakerControlResponse
+{
+    public VapeCacheBreakerControlResponse(bool IsForcedOpen, string? Reason)
+    {
+        this.IsForcedOpen = IsForcedOpen;
+        this.Reason = Reason;
+    }
+
+    public bool IsForcedOpen { get; init; }
+    public string? Reason { get; init; }
+}
 
 /// <summary>
 /// Response payload for reconciliation control operations.
 /// </summary>
-public sealed record VapeCacheReconciliationControlResponse(
-    bool Enabled,
-    bool Invoked,
-    int PendingOperations,
-    string Operation);
+public sealed record VapeCacheReconciliationControlResponse
+{
+    public VapeCacheReconciliationControlResponse(
+        bool Enabled,
+        bool Invoked,
+        int PendingOperations,
+        string Operation)
+    {
+        this.Enabled = Enabled;
+        this.Invoked = Invoked;
+        this.PendingOperations = PendingOperations;
+        this.Operation = Operation;
+    }
+
+    public bool Enabled { get; init; }
+    public bool Invoked { get; init; }
+    public int PendingOperations { get; init; }
+    public string Operation { get; init; }
+}
 
 /// <summary>
 /// Shared dashboard snapshot payload envelope for cross-process telemetry validation.
 /// </summary>
-public sealed record VapeCacheSharedDashboardSnapshotEnvelope(
-    DateTimeOffset RetrievedAtUtc,
-    string RedisKey,
-    bool Exists,
-    bool IsFresh,
-    TimeSpan? Age,
-    VapeCacheSharedDashboardSnapshot? Snapshot);
+public sealed record VapeCacheSharedDashboardSnapshotEnvelope
+{
+    public VapeCacheSharedDashboardSnapshotEnvelope(
+        DateTimeOffset RetrievedAtUtc,
+        string RedisKey,
+        bool Exists,
+        bool IsFresh,
+        TimeSpan? Age,
+        VapeCacheSharedDashboardSnapshot? Snapshot)
+    {
+        this.RetrievedAtUtc = RetrievedAtUtc;
+        this.RedisKey = RedisKey;
+        this.Exists = Exists;
+        this.IsFresh = IsFresh;
+        this.Age = Age;
+        this.Snapshot = Snapshot;
+    }
+
+    public DateTimeOffset RetrievedAtUtc { get; init; }
+    public string RedisKey { get; init; }
+    public bool Exists { get; init; }
+    public bool IsFresh { get; init; }
+    public TimeSpan? Age { get; init; }
+    public VapeCacheSharedDashboardSnapshot? Snapshot { get; init; }
+}

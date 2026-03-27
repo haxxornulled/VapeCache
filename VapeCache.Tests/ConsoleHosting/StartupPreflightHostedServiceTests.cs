@@ -155,10 +155,16 @@ public sealed class StartupPreflightHostedServiceTests
         Assert.Equal("memory", current.CurrentName);
     }
 
-    private sealed class StubFactory(Func<CancellationToken, ValueTask<Result<IRedisConnection>>> create)
-        : IRedisConnectionFactory
+    private sealed class StubFactory : IRedisConnectionFactory
     {
+        private readonly Func<CancellationToken, ValueTask<Result<IRedisConnection>>> create;
         private int _calls;
+
+        public StubFactory(Func<CancellationToken, ValueTask<Result<IRedisConnection>>> create)
+        {
+            this.create = create;
+        }
+
         public int Calls => Volatile.Read(ref _calls);
 
         public async ValueTask<Result<IRedisConnection>> CreateAsync(CancellationToken ct)
@@ -170,10 +176,15 @@ public sealed class StartupPreflightHostedServiceTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class StubConnection(Stream stream) : IRedisConnection
+    private sealed class StubConnection : IRedisConnection
     {
+        public StubConnection(Stream stream)
+        {
+            Stream = stream;
+        }
+
         public Socket Socket { get; } = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        public Stream Stream { get; } = stream;
+        public Stream Stream { get; }
 
         public ValueTask<Result<Unit>> SendAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct)
             => ValueTask.FromResult<Result<Unit>>(Prelude.unit);
@@ -189,10 +200,15 @@ public sealed class StartupPreflightHostedServiceTests
         }
     }
 
-    private sealed class PingPongStream(bool pong) : Stream
+    private sealed class PingPongStream : Stream
     {
-        private readonly byte[] _response = pong ? "+PONG\r\n"u8.ToArray() : "-ERR nope\r\n"u8.ToArray();
+        private readonly byte[] _response;
         private int _offset = int.MaxValue;
+
+        public PingPongStream(bool pong)
+        {
+            _response = pong ? "+PONG\r\n"u8.ToArray() : "-ERR nope\r\n"u8.ToArray();
+        }
 
         public override bool CanRead => true;
         public override bool CanSeek => false;

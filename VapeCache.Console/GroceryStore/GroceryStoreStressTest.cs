@@ -566,27 +566,77 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
             StopHostOnCompletion: options.StopHostOnCompletion);
     }
 
-    private readonly record struct StressWorkload(
-        int ConcurrentShoppers,
-        int TotalShoppers,
-        TimeSpan TargetDuration,
-        TimeSpan StartupDelay,
-        TimeSpan CountdownDelay,
-        int BrowseChancePercent,
-        int BrowseMinProducts,
-        int BrowseMaxProducts,
-        int FlashSaleJoinChancePercent,
-        int AddToCartChancePercent,
-        int CartItemsMin,
-        int CartItemsMax,
-        int CartItemQuantityMin,
-        int CartItemQuantityMax,
-        int ViewCartChancePercent,
-        int CheckoutChancePercent,
-        int RemoveFromCartChancePercent,
-        TimeSpan StatsInterval,
-        string? HotProductId,
-        int HotProductBiasPercent,
-        bool ForceHotProductFlashSale,
-        bool StopHostOnCompletion);
+    private readonly record struct StressWorkload
+    {
+        public StressWorkload(
+            int ConcurrentShoppers,
+            int TotalShoppers,
+            TimeSpan TargetDuration,
+            TimeSpan StartupDelay,
+            TimeSpan CountdownDelay,
+            int BrowseChancePercent,
+            int BrowseMinProducts,
+            int BrowseMaxProducts,
+            int FlashSaleJoinChancePercent,
+            int AddToCartChancePercent,
+            int CartItemsMin,
+            int CartItemsMax,
+            int CartItemQuantityMin,
+            int CartItemQuantityMax,
+            int ViewCartChancePercent,
+            int CheckoutChancePercent,
+            int RemoveFromCartChancePercent,
+            TimeSpan StatsInterval,
+            string? HotProductId,
+            int HotProductBiasPercent,
+            bool ForceHotProductFlashSale,
+            bool StopHostOnCompletion)
+        {
+            this.ConcurrentShoppers = ConcurrentShoppers;
+            this.TotalShoppers = TotalShoppers;
+            this.TargetDuration = TargetDuration;
+            this.StartupDelay = StartupDelay;
+            this.CountdownDelay = CountdownDelay;
+            this.BrowseChancePercent = BrowseChancePercent;
+            this.BrowseMinProducts = BrowseMinProducts;
+            this.BrowseMaxProducts = BrowseMaxProducts;
+            this.FlashSaleJoinChancePercent = FlashSaleJoinChancePercent;
+            this.AddToCartChancePercent = AddToCartChancePercent;
+            this.CartItemsMin = CartItemsMin;
+            this.CartItemsMax = CartItemsMax;
+            this.CartItemQuantityMin = CartItemQuantityMin;
+            this.CartItemQuantityMax = CartItemQuantityMax;
+            this.ViewCartChancePercent = ViewCartChancePercent;
+            this.CheckoutChancePercent = CheckoutChancePercent;
+            this.RemoveFromCartChancePercent = RemoveFromCartChancePercent;
+            this.StatsInterval = StatsInterval;
+            this.HotProductId = HotProductId;
+            this.HotProductBiasPercent = HotProductBiasPercent;
+            this.ForceHotProductFlashSale = ForceHotProductFlashSale;
+            this.StopHostOnCompletion = StopHostOnCompletion;
+        }
+
+        public int ConcurrentShoppers { get; init; }
+        public int TotalShoppers { get; init; }
+        public TimeSpan TargetDuration { get; init; }
+        public TimeSpan StartupDelay { get; init; }
+        public TimeSpan CountdownDelay { get; init; }
+        public int BrowseChancePercent { get; init; }
+        public int BrowseMinProducts { get; init; }
+        public int BrowseMaxProducts { get; init; }
+        public int FlashSaleJoinChancePercent { get; init; }
+        public int AddToCartChancePercent { get; init; }
+        public int CartItemsMin { get; init; }
+        public int CartItemsMax { get; init; }
+        public int CartItemQuantityMin { get; init; }
+        public int CartItemQuantityMax { get; init; }
+        public int ViewCartChancePercent { get; init; }
+        public int CheckoutChancePercent { get; init; }
+        public int RemoveFromCartChancePercent { get; init; }
+        public TimeSpan StatsInterval { get; init; }
+        public string? HotProductId { get; init; }
+        public int HotProductBiasPercent { get; init; }
+        public bool ForceHotProductFlashSale { get; init; }
+        public bool StopHostOnCompletion { get; init; }
+    }
 }

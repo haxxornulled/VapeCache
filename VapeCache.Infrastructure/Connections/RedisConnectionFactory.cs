@@ -13,13 +13,24 @@ using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
 
-internal sealed partial class RedisConnectionFactory(
-    IOptionsMonitor<RedisConnectionOptions> options,
-    IRedisConnectionStringBuilder connectionStringBuilder,
-    ILogger<RedisConnectionFactory> logger,
-    IEnumerable<IRedisConnectionObserver> observers) : IRedisConnectionFactory
+internal sealed partial class RedisConnectionFactory : IRedisConnectionFactory
 {
-    internal RedisConnectionFactory(
+    private readonly IOptionsMonitor<RedisConnectionOptions> options;
+    private readonly IRedisConnectionStringBuilder connectionStringBuilder;
+    private readonly ILogger<RedisConnectionFactory> logger;
+    public RedisConnectionFactory(
+        IOptionsMonitor<RedisConnectionOptions> options,
+        IRedisConnectionStringBuilder connectionStringBuilder,
+        ILogger<RedisConnectionFactory> logger,
+        IEnumerable<IRedisConnectionObserver> observers)
+    {
+        this.options = options;
+        this.connectionStringBuilder = connectionStringBuilder;
+        this.logger = logger;
+        _observers = observers as IRedisConnectionObserver[] ?? observers.ToArray();
+    }
+
+    public RedisConnectionFactory(
         IOptionsMonitor<RedisConnectionOptions> options,
         ILogger<RedisConnectionFactory> logger,
         IEnumerable<IRedisConnectionObserver> observers)
@@ -30,7 +41,7 @@ internal sealed partial class RedisConnectionFactory(
     private int _disposed;
     private static long _ids;
     private int _loggedConnectionStringResolution;
-    private readonly IRedisConnectionObserver[] _observers = observers as IRedisConnectionObserver[] ?? observers.ToArray();
+    private readonly IRedisConnectionObserver[] _observers;
 
     /// <summary>
     /// Creates value.

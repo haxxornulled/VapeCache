@@ -2,7 +2,7 @@ param(
     [int]$Trials = 5,
     [int]$ShopperCount = 50000,
     [int]$MaxCartSize = 40,
-    [int]$MaxDegree = 72,
+    [int]$MaxDegree = 0,
     [ValidateSet("optimized", "apples", "both")]
     [string]$Track = "both",
     [ValidateSet("raw", "hybrid")]
@@ -35,11 +35,17 @@ param(
     [ValidateSet("true", "false")]
     [string]$HybridFastPath = "true",
     [ValidateSet("true", "false")]
-    [string]$HybridAdmissionGate = "true",
+    [string]$HybridAdmissionGate = "false",
     [int]$HybridAdmissionLimit = 10,
     [int]$HybridAdmissionWaitMs = 2,
     [ValidateSet("true", "false")]
-    [string]$CleanupRunKeys = "true",
+    [string]$HybridMirrorWrites = "false",
+    [ValidateSet("true", "false")]
+    [string]$HybridWarmReadFallback = "false",
+    [ValidateSet("true", "false")]
+    [string]$HybridRemoveStaleFallbackOnMiss = "false",
+    [ValidateSet("true", "false")]
+    [string]$CleanupRunKeys = "false",
     [ValidateSet("auto", "true", "false")]
     [string]$ServerGc = "true",
     [string]$RedisConnectionString = "",
@@ -53,12 +59,21 @@ param(
     [int]$StableCpuSamples = 8,
     [int]$MaxHostIsolationWaitSeconds = 180,
     [int]$PauseBetweenTrialsMs = 250,
+    [int]$MaxRunRetries = 0,
+    [int]$RetryDelaySeconds = 5,
+    [int]$ChildRunTimeoutSeconds = 900,
     [ValidateSet("Trace", "Debug", "Information", "Warning", "Error", "Critical", "None")]
     [string]$BenchLogLevel = "Debug",
     [ValidateSet("true", "false")]
     [string]$GroceryVerbose = "true",
     [double]$FailBelowRatio = 1.0,
-    [switch]$DisableTrackDefaults
+    [switch]$DisableTrackDefaults,
+    [switch]$EnforceMetricGates,
+    [double]$MaxP50Ratio = 1.25,
+    [double]$MaxP95Ratio = 1.30,
+    [double]$MaxP99Ratio = 1.35,
+    [double]$MaxAllocRatio = 1.40,
+    [string]$SummaryJsonPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -135,8 +150,24 @@ if ($MaxHostIsolationWaitSeconds -le 0) {
     throw "MaxHostIsolationWaitSeconds must be greater than zero."
 }
 
+if ($MaxRunRetries -lt 0) {
+    throw "MaxRunRetries cannot be negative."
+}
+
+if ($RetryDelaySeconds -lt 0) {
+    throw "RetryDelaySeconds cannot be negative."
+}
+
+if ($ChildRunTimeoutSeconds -le 0) {
+    throw "ChildRunTimeoutSeconds must be greater than zero."
+}
+
 if ($PauseBetweenTrialsMs -lt 0) {
     throw "PauseBetweenTrialsMs cannot be negative."
+}
+
+if ($MaxP50Ratio -le 0 -or $MaxP95Ratio -le 0 -or $MaxP99Ratio -le 0 -or $MaxAllocRatio -le 0) {
+    throw "Metric gate ratios must be greater than zero."
 }
 
 $hasMaxDegreeOverride = $PSBoundParameters.ContainsKey("MaxDegree")
@@ -155,6 +186,85 @@ elseif ($ServerGc -eq "false") {
     $env:DOTNET_GCServer = "0"
 }
 
+function Test-IsLocalRedisHost([string]$HostValue) {
+    if ([string]::IsNullOrWhiteSpace($HostValue)) {
+        return $false
+    }
+
+    $normalized = $HostValue.Trim().ToLowerInvariant()
+    if ($normalized -eq "localhost" -or $normalized -eq "127.0.0.1" -or $normalized -eq "::1") {
+        return $true
+    }
+
+    try {
+        $ip = [System.Net.IPAddress]::Parse($normalized)
+        return [System.Net.IPAddress]::IsLoopback($ip)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Get-ConnectionStringAuthMetadata([string]$Value) {
+    $result = [pscustomobject]@{
+        IsRemote = $true
+        HasUsername = $false
+        HasPassword = $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $result
+    }
+
+    $uri = $null
+    if ([Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri)) {
+        $result.IsRemote = -not (Test-IsLocalRedisHost -HostValue $uri.Host)
+        if (-not [string]::IsNullOrWhiteSpace($uri.UserInfo)) {
+            $parts = $uri.UserInfo.Split(":", 2, [System.StringSplitOptions]::None)
+            if ($parts.Length -gt 0 -and -not [string]::IsNullOrWhiteSpace($parts[0])) {
+                $result.HasUsername = $true
+            }
+            if ($parts.Length -gt 1 -and -not [string]::IsNullOrWhiteSpace($parts[1])) {
+                $result.HasPassword = $true
+            }
+        }
+
+        return $result
+    }
+
+    $segments = $Value.Split(",", [System.StringSplitOptions]::RemoveEmptyEntries)
+    if ($segments.Length -gt 0) {
+        $hostToken = $segments[0]
+        $hostName = $hostToken
+        if ($hostToken.Contains("=")) {
+            $hostName = ($hostToken.Split("=", 2, [System.StringSplitOptions]::None)[1]).Trim()
+        }
+        if ($hostName.Contains(":")) {
+            $hostName = $hostName.Split(":", 2, [System.StringSplitOptions]::None)[0]
+        }
+
+        $result.IsRemote = -not (Test-IsLocalRedisHost -HostValue $hostName)
+    }
+
+    foreach ($segment in $segments) {
+        $parts = $segment.Split("=", 2, [System.StringSplitOptions]::None)
+        if ($parts.Length -ne 2) {
+            continue
+        }
+
+        $key = $parts[0].Trim().ToLowerInvariant()
+        $val = $parts[1].Trim()
+        if ($key -eq "user" -or $key -eq "username") {
+            $result.HasUsername = -not [string]::IsNullOrWhiteSpace($val)
+        }
+        elseif ($key -eq "password" -or $key -eq "pwd") {
+            $result.HasPassword = -not [string]::IsNullOrWhiteSpace($val)
+        }
+    }
+
+    return $result
+}
+
 $useConnectionString = -not [string]::IsNullOrWhiteSpace($RedisConnectionString)
 $authMode = if ($useConnectionString) {
     "connection-string"
@@ -167,6 +277,18 @@ elseif ([string]::IsNullOrWhiteSpace($RedisUsername)) {
 }
 else {
     "acl"
+}
+
+if ($useConnectionString) {
+    $authMetadata = Get-ConnectionStringAuthMetadata -Value $RedisConnectionString
+    if ($authMetadata.IsRemote -and (-not $authMetadata.HasUsername -or -not $authMetadata.HasPassword)) {
+        throw "Remote Redis connection strings must include ACL username and password. Provide credentials in -RedisConnectionString."
+    }
+}
+elseif (-not (Test-IsLocalRedisHost -HostValue $RedisHost)) {
+    if ([string]::IsNullOrWhiteSpace($RedisUsername) -or [string]::IsNullOrWhiteSpace($RedisPassword)) {
+        throw "Remote Redis endpoints require ACL authentication. Provide -RedisUsername and -RedisPassword."
+    }
 }
 
 if ($RequireHostIsolation -and -not $useConnectionString) {
@@ -238,7 +360,18 @@ function Get-EffectiveMuxSettings([string]$RunTrack) {
     $effectiveSpillImbalanceRatioThreshold = $MuxSpillImbalanceRatioThreshold
     $effectiveSpillSustainedWindowSeconds = $MuxSpillSustainedWindowSeconds
 
-    if (-not $DisableTrackDefaults -and $RunTrack -eq "apples") {
+    if ($DisableTrackDefaults) {
+        if (-not $hasMuxConnectionsOverride) {
+            # Strict/fair baseline: single connection avoids queue fan-out jitter and improves parity.
+            $effectiveConnections = 1
+        }
+
+        if (-not $hasMuxAdaptiveCoalescingOverride) {
+            # Strict/fair baseline: disable adaptive coalescing for tighter tail behavior.
+            $effectiveAdaptive = "false"
+        }
+    }
+    elseif ($RunTrack -eq "apples") {
         if (-not $hasMuxConnectionsOverride) {
             # Apples-to-apples workload favors fewer connections to reduce fan-out overhead.
             $effectiveConnections = 1
@@ -263,7 +396,7 @@ function Get-EffectiveMuxSettings([string]$RunTrack) {
             $effectiveSpillSustainedWindowSeconds = 45
         }
     }
-    elseif (-not $DisableTrackDefaults -and $RunTrack -eq "optimized") {
+    elseif ($RunTrack -eq "optimized") {
         if (-not $hasMuxConnectionsOverride) {
             # Optimized path sustains the best Vape/SER ratio with a single fast lane in this workload.
             $effectiveConnections = 1
@@ -315,11 +448,16 @@ function Get-EffectiveMaxDegree([string]$RunTrack) {
         return $null
     }
 
-    if (-not $DisableTrackDefaults -and $RunTrack -eq "apples") {
+    if ($DisableTrackDefaults) {
+        # Strict/fair baseline used when track defaults are intentionally disabled.
+        return 6
+    }
+
+    if ($RunTrack -eq "apples") {
         # Keep apples runs in the fairness window where both clients stay CPU/network balanced.
         return 6
     }
-    if (-not $DisableTrackDefaults -and $RunTrack -eq "optimized") {
+    if ($RunTrack -eq "optimized") {
         # Optimized path holds a stronger relative lead at this worker pressure.
         return 10
     }
@@ -372,6 +510,9 @@ function Set-HybridEnvironment([string]$RunTrack) {
     $effectiveLimit = Get-EffectiveHybridAdmissionLimit -RunTrack $RunTrack
     $env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT = "$effectiveLimit"
     $env:VAPECACHE_BENCH_HYBRID_ADMISSION_WAIT_MS = "$HybridAdmissionWaitMs"
+    $env:VAPECACHE_BENCH_HYBRID_MIRROR_WRITES = $HybridMirrorWrites.ToLowerInvariant()
+    $env:VAPECACHE_BENCH_HYBRID_WARM_READ_FALLBACK = $HybridWarmReadFallback.ToLowerInvariant()
+    $env:VAPECACHE_BENCH_HYBRID_REMOVE_STALE_FALLBACK_ON_MISS = $HybridRemoveStaleFallbackOnMiss.ToLowerInvariant()
     return $effectiveLimit
 }
 
@@ -411,6 +552,8 @@ else {
 
 Write-Host "Grocery head-to-head benchmark"
 Write-Host "Trials: $Trials"
+Write-Host "Parse retries per run: $MaxRunRetries (delay ${RetryDelaySeconds}s)"
+Write-Host "Child timeout per run: ${ChildRunTimeoutSeconds}s"
 Write-Host "Shoppers: $ShopperCount"
 Write-Host "Max cart size: $MaxCartSize"
 Write-Host "Track: $Track"
@@ -458,7 +601,11 @@ else {
     Write-Host "Hybrid admission limit: $selectedHybridLimit"
 }
 Write-Host "Cleanup: RunKeys=$($env:VAPECACHE_BENCH_CLEANUP_RUN_KEYS)"
-Write-Host "Hybrid: FastPath=$($env:VAPECACHE_BENCH_HYBRID_FAST_PATH) AdmissionGate=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_GATE) AdmissionLimit=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT) AdmissionWaitMs=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_WAIT_MS)"
+if ($ShopperCount -ge 500000 -and $CleanupRunKeys -eq "false") {
+    Write-Warning "Large runs with CleanupRunKeys=false can force Redis memory churn/reloads (LOADING) and invalidate long soak runs."
+    Write-Warning "For stability soak campaigns, prefer -CleanupRunKeys true."
+}
+Write-Host "Hybrid: FastPath=$($env:VAPECACHE_BENCH_HYBRID_FAST_PATH) AdmissionGate=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_GATE) AdmissionLimit=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT) AdmissionWaitMs=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_WAIT_MS) MirrorWrites=$($env:VAPECACHE_BENCH_HYBRID_MIRROR_WRITES) WarmReadFallback=$($env:VAPECACHE_BENCH_HYBRID_WARM_READ_FALLBACK) RemoveStaleFallbackOnMiss=$($env:VAPECACHE_BENCH_HYBRID_REMOVE_STALE_FALLBACK_ON_MISS)"
 Write-Host "Spill: EnableDiskSpill=$($env:VAPECACHE_BENCH_ENABLE_DISK_SPILL) ThresholdBytes=$($env:VAPECACHE_BENCH_SPILL_THRESHOLD_BYTES) PrimeRecords=$($env:VAPECACHE_BENCH_SPILL_PRIME_RECORDS) PrimePayloadBytes=$($env:VAPECACHE_BENCH_SPILL_PRIME_PAYLOAD_BYTES) Directory=$(if ([string]::IsNullOrWhiteSpace($env:VAPECACHE_BENCH_SPILL_DIRECTORY)) { "<default>" } else { $env:VAPECACHE_BENCH_SPILL_DIRECTORY })"
 Write-Host "Logging: BenchLogLevel=$($env:VAPECACHE_BENCH_LOG_LEVEL) GroceryVerbose=$($env:VAPECACHE_GROCERYSTORE_VERBOSE)"
 Write-Host "DOTNET_GCServer: $(if ([string]::IsNullOrWhiteSpace($env:DOTNET_GCServer)) { "default" } else { $env:DOTNET_GCServer })"
@@ -520,6 +667,22 @@ function Get-StdDev([double[]]$values) {
     return [Math]::Sqrt($sum / ($values.Count - 1))
 }
 
+function Get-GeometricMean([double[]]$values) {
+    if ($values.Count -eq 0) {
+        return [double]::NaN
+    }
+
+    $sumLog = 0.0
+    foreach ($value in $values) {
+        if ($value -le 0 -or [double]::IsNaN($value) -or [double]::IsInfinity($value)) {
+            return [double]::NaN
+        }
+        $sumLog += [Math]::Log($value)
+    }
+
+    return [Math]::Exp($sumLog / $values.Count)
+}
+
 function Get-TrackSummary([string]$trackName, [System.Collections.Generic.List[object]]$rows) {
     if ($rows.Count -eq 0) {
         return $null
@@ -527,31 +690,74 @@ function Get-TrackSummary([string]$trackName, [System.Collections.Generic.List[o
 
     $vapeValues = @($rows | ForEach-Object { [double]$_.VapeThroughput })
     $serValues = @($rows | ForEach-Object { [double]$_.SerThroughput })
-    $ratioValues = @($rows | ForEach-Object { [double]$_.Ratio })
+    $throughputRatioValues = @($rows | ForEach-Object { [double]$_.ThroughputRatio })
+    $p50RatioValues = @($rows | ForEach-Object { [double]$_.P50Ratio })
+    $p95RatioValues = @($rows | ForEach-Object { [double]$_.P95Ratio })
+    $p99RatioValues = @($rows | ForEach-Object { [double]$_.P99Ratio })
+    $allocRatioValues = @($rows | ForEach-Object { [double]$_.AllocRatio })
     $vapeMedian = Get-Median -values $vapeValues
     $serMedian = Get-Median -values $serValues
     $ratioOfMedians = if ($serMedian -gt 0) { $vapeMedian / $serMedian } else { [double]::PositiveInfinity }
-    $ratioMedian = Get-Median -values $ratioValues
-    $ratioCov = if ($ratioMedian -ne 0) { (Get-StdDev -values $ratioValues) / $ratioMedian } else { 0.0 }
-    $ratioMin = ($ratioValues | Measure-Object -Minimum).Minimum
-    $ratioMax = ($ratioValues | Measure-Object -Maximum).Maximum
+    $throughputRatioMedian = Get-Median -values $throughputRatioValues
+    $throughputRatioCov = if ($throughputRatioMedian -ne 0) { (Get-StdDev -values $throughputRatioValues) / $throughputRatioMedian } else { 0.0 }
+    $throughputRatioMin = ($throughputRatioValues | Measure-Object -Minimum).Minimum
+    $throughputRatioMax = ($throughputRatioValues | Measure-Object -Maximum).Maximum
+    $p50RatioMedian = Get-Median -values $p50RatioValues
+    $p95RatioMedian = Get-Median -values $p95RatioValues
+    $p99RatioMedian = Get-Median -values $p99RatioValues
+    $allocRatioMedian = Get-Median -values $allocRatioValues
 
     return [pscustomobject]@{
         Track = $trackName
         Trials = $rows.Count
         VapeMedian = [Math]::Round($vapeMedian, 0)
         SerMedian = [Math]::Round($serMedian, 0)
-        MedianRatio = [Math]::Round($ratioMedian, 3)
-        RatioOfMedians = [Math]::Round($ratioOfMedians, 3)
-        RatioCoV = [Math]::Round($ratioCov * 100.0, 1)
-        RatioSpread = ("{0:N3} .. {1:N3}" -f $ratioMin, $ratioMax)
+        ThroughputRatioMedian = [Math]::Round($throughputRatioMedian, 3)
+        ThroughputRatioOfMedians = [Math]::Round($ratioOfMedians, 3)
+        ThroughputRatioCoV = [Math]::Round($throughputRatioCov * 100.0, 1)
+        ThroughputRatioSpread = ("{0:N3} .. {1:N3}" -f $throughputRatioMin, $throughputRatioMax)
+        P50RatioMedian = [Math]::Round($p50RatioMedian, 3)
+        P95RatioMedian = [Math]::Round($p95RatioMedian, 3)
+        P99RatioMedian = [Math]::Round($p99RatioMedian, 3)
+        AllocRatioMedian = [Math]::Round($allocRatioMedian, 3)
     }
+}
+
+function Parse-ResultLine([string]$line) {
+    $parts = $line.Split('|')
+    $map = @{}
+    foreach ($part in $parts) {
+        if ($part -notmatch '=') { continue }
+        $kv = $part.Split('=', 2)
+        $map[$kv[0]] = $kv[1]
+    }
+
+    return $map
+}
+
+function Parse-MetricOrNaN([hashtable]$map, [string]$key) {
+    if (-not $map.ContainsKey($key)) {
+        return [double]::NaN
+    }
+
+    $value = 0.0
+    $ok = [double]::TryParse(
+        $map[$key],
+        [System.Globalization.NumberStyles]::Float,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [ref]$value)
+    if (-not $ok) {
+        return [double]::NaN
+    }
+
+    return $value
 }
 
 function Parse-BenchmarkOutput([object[]]$OutputLines) {
     $throughputPattern = '^Throughput \(shoppers/sec\)\s+([0-9,]+(?:\.[0-9]+)?)\s+([0-9,]+(?:\.[0-9]+)?)\b'
     $trackPattern = '^Track:\s*(.+)$'
     $parsedByTrack = @{}
+    $providersByTrack = @{}
     $currentTrack = "single"
 
     foreach ($line in $OutputLines) {
@@ -562,21 +768,189 @@ function Parse-BenchmarkOutput([object[]]$OutputLines) {
             continue
         }
 
+        if ($text -like "RESULT|*") {
+            $result = Parse-ResultLine -line $text
+            $provider = if ($result.ContainsKey("Provider")) { $result["Provider"] } else { "" }
+            if ([string]::IsNullOrWhiteSpace($provider)) {
+                continue
+            }
+
+            $track = if ($result.ContainsKey("Track")) { $result["Track"] } else { $currentTrack }
+            if ([string]::IsNullOrWhiteSpace($track)) {
+                $track = "single"
+            }
+
+            if (-not $providersByTrack.ContainsKey($track)) {
+                $providersByTrack[$track] = @{}
+            }
+
+            $providersByTrack[$track][$provider] = [pscustomobject]@{
+                Throughput = Parse-MetricOrNaN -map $result -key "Throughput"
+                P50Ms = Parse-MetricOrNaN -map $result -key "P50Ms"
+                P95Ms = Parse-MetricOrNaN -map $result -key "P95Ms"
+                P99Ms = Parse-MetricOrNaN -map $result -key "P99Ms"
+                AllocBytesPerShopper = Parse-MetricOrNaN -map $result -key "AllocBytesPerShopper"
+            }
+            continue
+        }
+
         $throughputMatch = [regex]::Match($text, $throughputPattern)
         if (-not $throughputMatch.Success) {
             continue
         }
 
         $parsedByTrack[$currentTrack] = [pscustomobject]@{
-            Vape = [double](($throughputMatch.Groups[1].Value) -replace ",", "")
-            Ser = [double](($throughputMatch.Groups[2].Value) -replace ",", "")
+            VapeThroughput = [double](($throughputMatch.Groups[1].Value) -replace ",", "")
+            SerThroughput = [double](($throughputMatch.Groups[2].Value) -replace ",", "")
+            VapeP50Ms = [double]::NaN
+            SerP50Ms = [double]::NaN
+            VapeP95Ms = [double]::NaN
+            SerP95Ms = [double]::NaN
+            VapeP99Ms = [double]::NaN
+            SerP99Ms = [double]::NaN
+            VapeAllocBytesPerShopper = [double]::NaN
+            SerAllocBytesPerShopper = [double]::NaN
+        }
+    }
+
+    foreach ($trackKey in $providersByTrack.Keys) {
+        $providerMap = $providersByTrack[$trackKey]
+        $vapeProvider = $providerMap.Keys | Where-Object { $_ -like "VapeCache*" } | Select-Object -First 1
+        $serProvider = $providerMap.Keys | Where-Object { $_ -like "StackExchange.Redis*" } | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($vapeProvider) -or [string]::IsNullOrWhiteSpace($serProvider)) {
+            continue
+        }
+
+        $vape = $providerMap[$vapeProvider]
+        $ser = $providerMap[$serProvider]
+        $parsedByTrack[$trackKey] = [pscustomobject]@{
+            VapeThroughput = [double]$vape.Throughput
+            SerThroughput = [double]$ser.Throughput
+            VapeP50Ms = [double]$vape.P50Ms
+            SerP50Ms = [double]$ser.P50Ms
+            VapeP95Ms = [double]$vape.P95Ms
+            SerP95Ms = [double]$ser.P95Ms
+            VapeP99Ms = [double]$vape.P99Ms
+            SerP99Ms = [double]$ser.P99Ms
+            VapeAllocBytesPerShopper = [double]$vape.AllocBytesPerShopper
+            SerAllocBytesPerShopper = [double]$ser.AllocBytesPerShopper
         }
     }
 
     return $parsedByTrack
 }
 
+function New-TrialRow([int]$Run, [pscustomobject]$Metrics) {
+    $vapeThroughput = [double]$Metrics.VapeThroughput
+    $serThroughput = [double]$Metrics.SerThroughput
+    $vapeP50Ms = [double]$Metrics.VapeP50Ms
+    $serP50Ms = [double]$Metrics.SerP50Ms
+    $vapeP95Ms = [double]$Metrics.VapeP95Ms
+    $serP95Ms = [double]$Metrics.SerP95Ms
+    $vapeP99Ms = [double]$Metrics.VapeP99Ms
+    $serP99Ms = [double]$Metrics.SerP99Ms
+    $vapeAllocPerShopper = [double]$Metrics.VapeAllocBytesPerShopper
+    $serAllocPerShopper = [double]$Metrics.SerAllocBytesPerShopper
+
+    $throughputRatio = if ($serThroughput -gt 0) { $vapeThroughput / $serThroughput } else { [double]::PositiveInfinity }
+    $p50Ratio = if ($serP50Ms -gt 0) { $vapeP50Ms / $serP50Ms } else { [double]::NaN }
+    $p95Ratio = if ($serP95Ms -gt 0) { $vapeP95Ms / $serP95Ms } else { [double]::NaN }
+    $p99Ratio = if ($serP99Ms -gt 0) { $vapeP99Ms / $serP99Ms } else { [double]::NaN }
+    $allocRatio = if ($serAllocPerShopper -gt 0) { $vapeAllocPerShopper / $serAllocPerShopper } else { [double]::NaN }
+
+    return [pscustomobject]@{
+        Run = $Run
+        VapeThroughput = $vapeThroughput
+        SerThroughput = $serThroughput
+        ThroughputRatio = [Math]::Round($throughputRatio, 3)
+        VapeP50Ms = $vapeP50Ms
+        SerP50Ms = $serP50Ms
+        P50Ratio = [Math]::Round($p50Ratio, 3)
+        VapeP95Ms = $vapeP95Ms
+        SerP95Ms = $serP95Ms
+        P95Ratio = [Math]::Round($p95Ratio, 3)
+        VapeP99Ms = $vapeP99Ms
+        SerP99Ms = $serP99Ms
+        P99Ratio = [Math]::Round($p99Ratio, 3)
+        VapeAllocBytesPerShopper = $vapeAllocPerShopper
+        SerAllocBytesPerShopper = $serAllocPerShopper
+        AllocRatio = [Math]::Round($allocRatio, 3)
+    }
+}
+
+function Get-DotnetProcessSnapshot {
+    $snapshot = @{}
+    $processes = @(Get-CimInstance Win32_Process -Filter "Name='dotnet.exe'" -ErrorAction SilentlyContinue)
+    foreach ($process in $processes) {
+        $processId = [int]$process.ProcessId
+        $snapshot[$processId] = [pscustomobject]@{
+            ProcessId = $processId
+            ParentProcessId = [int]$process.ParentProcessId
+            CommandLine = [string]$process.CommandLine
+        }
+    }
+
+    return $snapshot
+}
+
+function Get-DotnetDescendantProcessIds([hashtable]$Snapshot, [int]$RootProcessId) {
+    $descendants = New-Object 'System.Collections.Generic.HashSet[int]'
+    $queue = New-Object 'System.Collections.Generic.Queue[int]'
+    $queue.Enqueue($RootProcessId)
+
+    while ($queue.Count -gt 0) {
+        $parentId = $queue.Dequeue()
+        foreach ($entry in $Snapshot.Values) {
+            if ($entry.ParentProcessId -ne $parentId) {
+                continue
+            }
+
+            if ($descendants.Add($entry.ProcessId)) {
+                $queue.Enqueue($entry.ProcessId)
+            }
+        }
+    }
+
+    return @($descendants)
+}
+
+function Get-NewVapeCacheDotnetProcessIds([hashtable]$BeforeSnapshot, [hashtable]$AfterSnapshot) {
+    $newProcesses = New-Object System.Collections.Generic.List[int]
+    foreach ($entry in $AfterSnapshot.Values) {
+        if ($BeforeSnapshot.ContainsKey($entry.ProcessId)) {
+            continue
+        }
+
+        $commandLine = if ($null -eq $entry.CommandLine) { "" } else { $entry.CommandLine }
+        if ($commandLine.IndexOf("VapeCache.Console", [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            continue
+        }
+
+        $newProcesses.Add($entry.ProcessId)
+    }
+
+    return @($newProcesses)
+}
+
+function Stop-DotnetProcesses([int[]]$ProcessIds, [string]$Reason) {
+    if ($null -eq $ProcessIds -or $ProcessIds.Count -eq 0) {
+        return
+    }
+
+    $uniqueIds = @($ProcessIds | Sort-Object -Unique)
+    foreach ($processId in $uniqueIds) {
+        try {
+            Stop-Process -Id $processId -Force -ErrorAction Stop
+            Write-Warning ("Stopped dotnet PID {0} ({1})." -f $processId, $Reason)
+        }
+        catch {
+            # Ignore races where process exits before cleanup.
+        }
+    }
+}
+
 function Invoke-BenchmarkRun([string]$RunTrack) {
+    $beforeSnapshot = Get-DotnetProcessSnapshot
     $hadTrack = Test-Path Env:VAPECACHE_BENCH_TRACK
     $previousTrack = $env:VAPECACHE_BENCH_TRACK
     $hadExecutorMode = Test-Path Env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE
@@ -585,6 +959,19 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
     $previousMaxDegree = $env:VAPECACHE_BENCH_MAX_DEGREE
     $hadHybridLimit = Test-Path Env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT
     $previousHybridLimit = $env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT
+    $hybridEnvNames = @(
+        "VAPECACHE_BENCH_HYBRID_FAST_PATH",
+        "VAPECACHE_BENCH_HYBRID_ADMISSION_GATE",
+        "VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT",
+        "VAPECACHE_BENCH_HYBRID_ADMISSION_WAIT_MS",
+        "VAPECACHE_BENCH_HYBRID_MIRROR_WRITES",
+        "VAPECACHE_BENCH_HYBRID_WARM_READ_FALLBACK",
+        "VAPECACHE_BENCH_HYBRID_REMOVE_STALE_FALLBACK_ON_MISS"
+    )
+    $previousHybridEnv = @{}
+    foreach ($name in $hybridEnvNames) {
+        $previousHybridEnv[$name] = [Environment]::GetEnvironmentVariable($name)
+    }
     $muxEnvNames = @(
         "VAPECACHE_BENCH_MUX_PROFILE",
         "VAPECACHE_BENCH_MUX_CONNECTIONS",
@@ -617,10 +1004,43 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
     $settings = Get-EffectiveMuxSettings -RunTrack $RunTrack
     Set-MuxEnvironment -Settings $settings
     $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+    $stdoutPath = [System.IO.Path]::GetTempFileName()
+    $stderrPath = [System.IO.Path]::GetTempFileName()
+    $runOutput = @()
+    $child = $null
     try {
         Write-Host ("  [TrackConfig] {0}: MaxDegree={1} Profile={2} Connections={3} InFlight={4} Coalesce={5} Adaptive={6} SocketReader={7} DedicatedWorkers={8} TimeoutMs={9} SpillSignals={10} SpillFiles={11} SpillShards={12} SpillImbalance={13} SpillWindowSec={14} HybridAdmissionLimit={15}" -f $RunTrack, $(if ($null -ne $maxDegree) { $maxDegree } else { "auto" }), $settings.Profile, $settings.Connections, $settings.InFlight, $settings.Coalesce, $settings.Adaptive, $settings.SocketReader, $settings.DedicatedWorkers, $settings.ResponseTimeoutMs, $settings.EnableSpillPressureSignals, $settings.SpillFilesThreshold, $settings.SpillActiveShardsThreshold, $settings.SpillImbalanceRatioThreshold, $settings.SpillSustainedWindowSeconds, $effectiveHybridLimit)
+        $arguments = "run --project `"$projectPath`" -c Release --no-build -- --compare"
+        $child = Start-Process -FilePath "dotnet" -ArgumentList $arguments -NoNewWindow -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        Write-Host ("  [ChildProcess] PID={0} Track={1}" -f $child.Id, $RunTrack)
         $PSNativeCommandUseErrorActionPreference = $false
-        $runOutput = @(dotnet run --project "$projectPath" -c Release --no-build -- --compare 2>&1)
+        $timeoutMs = [Math]::Max(1000, $ChildRunTimeoutSeconds * 1000)
+        if (-not $child.WaitForExit($timeoutMs)) {
+            $timeoutSnapshot = Get-DotnetProcessSnapshot
+            $descendants = Get-DotnetDescendantProcessIds -Snapshot $timeoutSnapshot -RootProcessId $child.Id
+            $newVapeProcesses = Get-NewVapeCacheDotnetProcessIds -BeforeSnapshot $beforeSnapshot -AfterSnapshot $timeoutSnapshot
+            $cleanupCandidates = @($child.Id) + $descendants + $newVapeProcesses
+            Stop-DotnetProcesses -ProcessIds $cleanupCandidates -Reason ("timeout after {0}s for track {1}" -f $ChildRunTimeoutSeconds, $RunTrack)
+            throw "Benchmark child process timed out after ${ChildRunTimeoutSeconds}s for track '$RunTrack'."
+        }
+
+        if (Test-Path $stdoutPath) {
+            $runOutput += @(Get-Content -Path $stdoutPath)
+        }
+        if (Test-Path $stderrPath) {
+            $runOutput += @(Get-Content -Path $stderrPath)
+        }
+
+        if ($null -ne $child -and $child.ExitCode -ne 0) {
+            $runOutput += "dotnet run exited with code $($child.ExitCode)."
+        }
+
+        $afterSnapshot = Get-DotnetProcessSnapshot
+        $newVapeProcesses = Get-NewVapeCacheDotnetProcessIds -BeforeSnapshot $beforeSnapshot -AfterSnapshot $afterSnapshot
+        if ($newVapeProcesses.Count -gt 0) {
+            Stop-DotnetProcesses -ProcessIds $newVapeProcesses -Reason ("post-run cleanup for track {0}" -f $RunTrack)
+        }
+
         $parsed = Parse-BenchmarkOutput -OutputLines $runOutput
         return [pscustomobject]@{
             Output = $runOutput
@@ -647,11 +1067,14 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
         else {
             Remove-Item Env:VAPECACHE_BENCH_MAX_DEGREE -ErrorAction SilentlyContinue
         }
-        if ($hadHybridLimit) {
-            $env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT = $previousHybridLimit
-        }
-        else {
-            Remove-Item Env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT -ErrorAction SilentlyContinue
+        foreach ($name in $hybridEnvNames) {
+            $value = $previousHybridEnv[$name]
+            if ([string]::IsNullOrEmpty($value)) {
+                Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
+            }
+            else {
+                [Environment]::SetEnvironmentVariable($name, $value)
+            }
         }
 
         $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
@@ -665,6 +1088,122 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
                 [Environment]::SetEnvironmentVariable($name, $value)
             }
         }
+
+        Remove-Item -Path $stdoutPath -ErrorAction SilentlyContinue
+        Remove-Item -Path $stderrPath -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-RunFailureHints([object[]]$OutputLines) {
+    $hints = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $OutputLines -or $OutputLines.Count -eq 0) {
+        return $hints
+    }
+
+    if ($OutputLines | Where-Object { "$_" -like "*LOADING Redis is loading the dataset in memory*" } | Select-Object -First 1) {
+        $hints.Add("Redis reported LOADING (dataset reload in progress).")
+    }
+
+    if ($OutputLines | Where-Object { "$_" -like "*EndOfStreamException*" } | Select-Object -First 1) {
+        $hints.Add("Socket read hit EndOfStreamException (transport reset/disconnect burst).")
+    }
+
+    if ($OutputLines | Where-Object { "$_" -like "*Unable to parse*" } | Select-Object -First 1) {
+        $hints.Add("Harness parse failure detected in child run output.")
+    }
+
+    return $hints
+}
+
+function Invoke-IsolatedBothTrackRunWithRetry([int]$RunIndex) {
+    $maxAttempts = 1 + $MaxRunRetries
+    $lastOutput = @()
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        if ($attempt -gt 1) {
+            Write-Host "  Retry attempt $attempt/$maxAttempts for run $RunIndex due to previous parse failure..."
+            if ($RetryDelaySeconds -gt 0) {
+                Start-Sleep -Seconds $RetryDelaySeconds
+            }
+        }
+
+        $applesRun = Invoke-BenchmarkRun -RunTrack "apples"
+        $optimizedRun = Invoke-BenchmarkRun -RunTrack "optimized"
+        $combinedOutput = @($applesRun.Output + $optimizedRun.Output)
+        $lastOutput = $combinedOutput
+
+        if ($applesRun.ParsedByTrack.Count -gt 0 -and $optimizedRun.ParsedByTrack.Count -gt 0) {
+            return [pscustomobject]@{
+                ApplesRun = $applesRun
+                OptimizedRun = $optimizedRun
+                Output = $combinedOutput
+                Parsed = $true
+            }
+        }
+
+        Write-Warning "Unable to parse isolated both-track throughput values on run $RunIndex (attempt $attempt/$maxAttempts)."
+        $hints = Get-RunFailureHints -OutputLines $combinedOutput
+        foreach ($hint in $hints) {
+            Write-Warning "  Hint: $hint"
+        }
+
+        if ($attempt -eq $maxAttempts) {
+            return [pscustomobject]@{
+                ApplesRun = $applesRun
+                OptimizedRun = $optimizedRun
+                Output = $combinedOutput
+                Parsed = $false
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        ApplesRun = $null
+        OptimizedRun = $null
+        Output = $lastOutput
+        Parsed = $false
+    }
+}
+
+function Invoke-SingleTrackRunWithRetry([int]$RunIndex, [string]$RunTrack) {
+    $maxAttempts = 1 + $MaxRunRetries
+    $lastOutput = @()
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        if ($attempt -gt 1) {
+            Write-Host "  Retry attempt $attempt/$maxAttempts for run $RunIndex ($RunTrack) due to previous parse failure..."
+            if ($RetryDelaySeconds -gt 0) {
+                Start-Sleep -Seconds $RetryDelaySeconds
+            }
+        }
+
+        $run = Invoke-BenchmarkRun -RunTrack $RunTrack
+        $lastOutput = $run.Output
+        if ($run.ParsedByTrack.Count -gt 0) {
+            return [pscustomobject]@{
+                Run = $run
+                Output = $run.Output
+                Parsed = $true
+            }
+        }
+
+        Write-Warning "Unable to parse throughput output on run $RunIndex ($RunTrack) (attempt $attempt/$maxAttempts)."
+        $hints = Get-RunFailureHints -OutputLines $run.Output
+        foreach ($hint in $hints) {
+            Write-Warning "  Hint: $hint"
+        }
+
+        if ($attempt -eq $maxAttempts) {
+            return [pscustomobject]@{
+                Run = $run
+                Output = $run.Output
+                Parsed = $false
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Run = $null
+        Output = $lastOutput
+        Parsed = $false
     }
 }
 
@@ -674,6 +1213,8 @@ $trackResults = @{
     OptimizedProductPath = New-Object System.Collections.Generic.List[object]
 }
 $isolateBoth = $Track -eq "both"
+$trackSummaryByName = @{}
+$trackSummaries = New-Object System.Collections.Generic.List[object]
 
 for ($trial = 1; $trial -le $Trials; $trial++) {
     if ($RequireHostIsolation) {
@@ -687,16 +1228,16 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
     $optimized = $null
 
     if ($isolateBoth) {
-        $applesRun = Invoke-BenchmarkRun -RunTrack "apples"
-        $optimizedRun = Invoke-BenchmarkRun -RunTrack "optimized"
-        $output = @($applesRun.Output + $optimizedRun.Output)
-
-        if ($applesRun.ParsedByTrack.Count -eq 0 -or $optimizedRun.ParsedByTrack.Count -eq 0) {
+        $isolatedRun = Invoke-IsolatedBothTrackRunWithRetry -RunIndex $trial
+        $output = $isolatedRun.Output
+        if (-not $isolatedRun.Parsed) {
             Write-Host "Unable to parse isolated both-track throughput values on run $trial."
             $output | ForEach-Object { Write-Host $_ }
             exit 2
         }
 
+        $applesRun = $isolatedRun.ApplesRun
+        $optimizedRun = $isolatedRun.OptimizedRun
         $apples = $applesRun.ParsedByTrack["ApplesToApples"]
         if ($null -eq $apples) {
             $apples = $applesRun.ParsedByTrack["single"]
@@ -708,16 +1249,16 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
         }
     }
     else {
-        $run = Invoke-BenchmarkRun -RunTrack $Track
-        $output = $run.Output
-        $parsedByTrack = $run.ParsedByTrack
-
-        if ($parsedByTrack.Count -eq 0) {
+        $singleRun = Invoke-SingleTrackRunWithRetry -RunIndex $trial -RunTrack $Track
+        $output = $singleRun.Output
+        if (-not $singleRun.Parsed) {
             Write-Host "Unable to parse throughput output on run $trial."
             $output | ForEach-Object { Write-Host $_ }
             exit 2
         }
 
+        $run = $singleRun.Run
+        $parsedByTrack = $run.ParsedByTrack
         if ($Track -eq "apples") {
             $selected = $parsedByTrack["ApplesToApples"]
             if ($null -eq $selected) {
@@ -734,24 +1275,24 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
 
     if ($Track -eq "both") {
         if ($null -ne $apples) {
-            $applesRatio = if ($apples.Ser -gt 0) { $apples.Vape / $apples.Ser } else { [double]::PositiveInfinity }
-            $trackResults["ApplesToApples"].Add([pscustomobject]@{
-                Run = $trial
-                VapeThroughput = [double]$apples.Vape
-                SerThroughput = [double]$apples.Ser
-                Ratio = [double]$applesRatio
-            })
-            Write-Host ("  ApplesToApples: Vape={0:N0} SER={1:N0} Ratio={2:N3}" -f $apples.Vape, $apples.Ser, $applesRatio)
+            $applesRow = New-TrialRow -Run $trial -Metrics $apples
+            $trackResults["ApplesToApples"].Add($applesRow)
+            Write-Host ("  ApplesToApples: Vape={0:N0} SER={1:N0} ThrRatio={2:N3} p99Ratio={3:N3} allocRatio={4:N3}" -f
+                $applesRow.VapeThroughput,
+                $applesRow.SerThroughput,
+                $applesRow.ThroughputRatio,
+                $applesRow.P99Ratio,
+                $applesRow.AllocRatio)
         }
         if ($null -ne $optimized) {
-            $optimizedRatio = if ($optimized.Ser -gt 0) { $optimized.Vape / $optimized.Ser } else { [double]::PositiveInfinity }
-            $trackResults["OptimizedProductPath"].Add([pscustomobject]@{
-                Run = $trial
-                VapeThroughput = [double]$optimized.Vape
-                SerThroughput = [double]$optimized.Ser
-                Ratio = [double]$optimizedRatio
-            })
-            Write-Host ("  OptimizedProductPath: Vape={0:N0} SER={1:N0} Ratio={2:N3}" -f $optimized.Vape, $optimized.Ser, $optimizedRatio)
+            $optimizedRow = New-TrialRow -Run $trial -Metrics $optimized
+            $trackResults["OptimizedProductPath"].Add($optimizedRow)
+            Write-Host ("  OptimizedProductPath: Vape={0:N0} SER={1:N0} ThrRatio={2:N3} p99Ratio={3:N3} allocRatio={4:N3}" -f
+                $optimizedRow.VapeThroughput,
+                $optimizedRow.SerThroughput,
+                $optimizedRow.ThroughputRatio,
+                $optimizedRow.P99Ratio,
+                $optimizedRow.AllocRatio)
         }
         $selected = if ($null -ne $optimized) { $optimized } else { $apples }
         if ($null -eq $selected) {
@@ -767,18 +1308,14 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
         exit 2
     }
 
-    $vape = [double]$selected.Vape
-    $ser = [double]$selected.Ser
-    $ratio = if ($ser -gt 0) { $vape / $ser } else { [double]::PositiveInfinity }
-
-    $results.Add([pscustomobject]@{
-        Run = $trial
-        VapeThroughput = $vape
-        SerThroughput = $ser
-        Ratio = [Math]::Round($ratio, 3)
-    })
-
-    Write-Host ("  Vape={0:N0} SER={1:N0} Ratio={2:N3}" -f $vape, $ser, $ratio)
+    $row = New-TrialRow -Run $trial -Metrics $selected
+    $results.Add($row)
+    Write-Host ("  Vape={0:N0} SER={1:N0} ThrRatio={2:N3} p99Ratio={3:N3} allocRatio={4:N3}" -f
+        $row.VapeThroughput,
+        $row.SerThroughput,
+        $row.ThroughputRatio,
+        $row.P99Ratio,
+        $row.AllocRatio)
 
     if ($PauseBetweenTrialsMs -gt 0 -and $trial -lt $Trials) {
         Start-Sleep -Milliseconds $PauseBetweenTrialsMs
@@ -787,50 +1324,156 @@ for ($trial = 1; $trial -le $Trials; $trial++) {
 
 $vapeMedian = Get-Median -values @($results | ForEach-Object { [double]$_.VapeThroughput })
 $serMedian = Get-Median -values @($results | ForEach-Object { [double]$_.SerThroughput })
-$ratioMedian = if ($serMedian -gt 0) { $vapeMedian / $serMedian } else { [double]::PositiveInfinity }
+$throughputRatioMedian = if ($serMedian -gt 0) { $vapeMedian / $serMedian } else { [double]::PositiveInfinity }
 $vapeValues = @($results | ForEach-Object { [double]$_.VapeThroughput })
 $serValues = @($results | ForEach-Object { [double]$_.SerThroughput })
-$ratioValues = @($results | ForEach-Object { [double]$_.Ratio })
+$throughputRatioValues = @($results | ForEach-Object { [double]$_.ThroughputRatio })
+$p50RatioValues = @($results | ForEach-Object { [double]$_.P50Ratio })
+$p95RatioValues = @($results | ForEach-Object { [double]$_.P95Ratio })
+$p99RatioValues = @($results | ForEach-Object { [double]$_.P99Ratio })
+$allocRatioValues = @($results | ForEach-Object { [double]$_.AllocRatio })
 $vapeCov = if ($vapeMedian -ne 0) { (Get-StdDev -values $vapeValues) / $vapeMedian } else { 0.0 }
 $serCov = if ($serMedian -ne 0) { (Get-StdDev -values $serValues) / $serMedian } else { 0.0 }
-$ratioCov = if ($ratioMedian -ne 0) { (Get-StdDev -values $ratioValues) / $ratioMedian } else { 0.0 }
-$ratioMin = ($ratioValues | Measure-Object -Minimum).Minimum
-$ratioMax = ($ratioValues | Measure-Object -Maximum).Maximum
+$throughputRatioCov = if ($throughputRatioMedian -ne 0) { (Get-StdDev -values $throughputRatioValues) / $throughputRatioMedian } else { 0.0 }
+$throughputRatioMin = ($throughputRatioValues | Measure-Object -Minimum).Minimum
+$throughputRatioMax = ($throughputRatioValues | Measure-Object -Maximum).Maximum
+$p50RatioMedian = Get-Median -values $p50RatioValues
+$p95RatioMedian = Get-Median -values $p95RatioValues
+$p99RatioMedian = Get-Median -values $p99RatioValues
+$allocRatioMedian = Get-Median -values $allocRatioValues
 
 Write-Host ""
 Write-Host "Results:"
-$results | Format-Table Run, VapeThroughput, SerThroughput, Ratio -AutoSize
+$results | Format-Table Run, VapeThroughput, SerThroughput, ThroughputRatio, P50Ratio, P95Ratio, P99Ratio, AllocRatio -AutoSize
 Write-Host ("Median Vape throughput: {0:N0} shoppers/sec" -f $vapeMedian)
 Write-Host ("Median SER throughput:  {0:N0} shoppers/sec" -f $serMedian)
-Write-Host ("Median Ratio (Vape/SER): {0:N3}" -f $ratioMedian)
-Write-Host ("Stability (CoV): Vape={0:P1} SER={1:P1} Ratio={2:P1}" -f $vapeCov, $serCov, $ratioCov)
-Write-Host ("Ratio spread: {0:N3} .. {1:N3}" -f $ratioMin, $ratioMax)
+Write-Host ("Median throughput ratio (Vape/SER): {0:N3}" -f $throughputRatioMedian)
+Write-Host ("Median latency ratios: p50={0:N3} p95={1:N3} p99={2:N3}" -f $p50RatioMedian, $p95RatioMedian, $p99RatioMedian)
+Write-Host ("Median allocation ratio (Vape/SER): {0:N3}" -f $allocRatioMedian)
+Write-Host ("Stability (CoV): Vape={0:P1} SER={1:P1} ThroughputRatio={2:P1}" -f $vapeCov, $serCov, $throughputRatioCov)
+Write-Host ("Throughput ratio spread: {0:N3} .. {1:N3}" -f $throughputRatioMin, $throughputRatioMax)
 
 if ($Track -eq "both") {
-    $trackSummaries = New-Object System.Collections.Generic.List[object]
     foreach ($trackName in @("ApplesToApples", "OptimizedProductPath")) {
         $summary = Get-TrackSummary -trackName $trackName -rows $trackResults[$trackName]
         if ($null -ne $summary) {
             $trackSummaries.Add($summary)
+            $trackSummaryByName[$trackName] = $summary
         }
     }
 
     if ($trackSummaries.Count -gt 0) {
         Write-Host ""
         Write-Host "Track summary (vs SER):"
-        $trackSummaries | Format-Table Track, Trials, VapeMedian, SerMedian, MedianRatio, RatioOfMedians, RatioCoV, RatioSpread -AutoSize
+        $trackSummaries | Format-Table Track, Trials, ThroughputRatioMedian, ThroughputRatioOfMedians, P50RatioMedian, P95RatioMedian, P99RatioMedian, AllocRatioMedian, ThroughputRatioCoV, ThroughputRatioSpread -AutoSize
+        foreach ($summary in $trackSummaries) {
+            Write-Host ("TRACK-SUMMARY|Track={0}|Trials={1}|ThroughputRatioMedian={2:N3}|P50RatioMedian={3:N3}|P95RatioMedian={4:N3}|P99RatioMedian={5:N3}|AllocRatioMedian={6:N3}" -f
+                $summary.Track,
+                $summary.Trials,
+                $summary.ThroughputRatioMedian,
+                $summary.P50RatioMedian,
+                $summary.P95RatioMedian,
+                $summary.P99RatioMedian,
+                $summary.AllocRatioMedian)
+        }
+
+        $geoSource = @($trackSummaries | ForEach-Object { [double]$_.ThroughputRatioMedian })
+        $throughputGeoMeanAcrossTracks = Get-GeometricMean -values $geoSource
+        if (-not [double]::IsNaN($throughputGeoMeanAcrossTracks)) {
+            Write-Host ("Throughput geometric mean across tracks (vs SER): {0:N3}" -f $throughputGeoMeanAcrossTracks)
+            Write-Host ("TRACK-GEOMEAN|ThroughputRatio={0:N3}" -f $throughputGeoMeanAcrossTracks)
+        }
         Write-Host "Reporting guidance: OptimizedProductPath = hot-path comparison, ApplesToApples = parity/fallback behavior."
     }
 }
 
-if ($vapeCov -gt 0.08 -or $serCov -gt 0.08 -or $ratioCov -gt 0.08) {
+if ($vapeCov -gt 0.08 -or $serCov -gt 0.08 -or $throughputRatioCov -gt 0.08) {
     Write-Warning ("Environment appears noisy (CoV > 8%). Re-run on an isolated Redis host and quiet client machine for stable comparisons.")
 }
 
-if ($ratioMedian -lt $FailBelowRatio) {
-    Write-Error ("FAIL: median Vape/SER ratio {0:N3} is below threshold {1:N3}" -f $ratioMedian, $FailBelowRatio)
+if (-not [string]::IsNullOrWhiteSpace($SummaryJsonPath)) {
+    $summaryPayload = @{
+        GeneratedUtc = (Get-Date).ToUniversalTime().ToString("o")
+        Track = $Track
+        Trials = $Trials
+        ThroughputRatioMedian = [Math]::Round($throughputRatioMedian, 3)
+        P50RatioMedian = [Math]::Round($p50RatioMedian, 3)
+        P95RatioMedian = [Math]::Round($p95RatioMedian, 3)
+        P99RatioMedian = [Math]::Round($p99RatioMedian, 3)
+        AllocRatioMedian = [Math]::Round($allocRatioMedian, 3)
+        TrackSummaries = @($trackSummaries | ForEach-Object { $_ })
+        Gates = @{
+            ThroughputMin = [double]$FailBelowRatio
+            MaxP50Ratio = [double]$MaxP50Ratio
+            MaxP95Ratio = [double]$MaxP95Ratio
+            MaxP99Ratio = [double]$MaxP99Ratio
+            MaxAllocRatio = [double]$MaxAllocRatio
+            EnforceMetricGates = $EnforceMetricGates.IsPresent
+        }
+    }
+
+    $summaryDirectory = Split-Path -Parent $SummaryJsonPath
+    if (-not [string]::IsNullOrWhiteSpace($summaryDirectory)) {
+        New-Item -ItemType Directory -Path $summaryDirectory -Force | Out-Null
+    }
+
+    $summaryPayload | ConvertTo-Json -Depth 6 | Set-Content -Path $SummaryJsonPath -Encoding utf8
+    Write-Host "Summary JSON written to: $SummaryJsonPath"
+}
+
+Write-Host ("GATE-CHECK|ThroughputRatioMedian={0:N3}|MinRequired={1:N3}|EnforceMetrics={2}" -f $throughputRatioMedian, $FailBelowRatio, $EnforceMetricGates.IsPresent)
+Write-Host ("GATE-CHECK|P50RatioMedian={0:N3}|P95RatioMedian={1:N3}|P99RatioMedian={2:N3}|AllocRatioMedian={3:N3}" -f $p50RatioMedian, $p95RatioMedian, $p99RatioMedian, $allocRatioMedian)
+
+$violations = New-Object System.Collections.Generic.List[string]
+if ($throughputRatioMedian -lt $FailBelowRatio) {
+    $violations.Add(("Median throughput ratio {0:N3} is below threshold {1:N3}" -f $throughputRatioMedian, $FailBelowRatio))
+}
+
+if ($EnforceMetricGates) {
+    if ([double]::IsNaN($p50RatioMedian) -or $p50RatioMedian -gt $MaxP50Ratio) {
+        $violations.Add(("Median p50 ratio {0:N3} exceeds threshold {1:N3}" -f $p50RatioMedian, $MaxP50Ratio))
+    }
+
+    if ([double]::IsNaN($p95RatioMedian) -or $p95RatioMedian -gt $MaxP95Ratio) {
+        $violations.Add(("Median p95 ratio {0:N3} exceeds threshold {1:N3}" -f $p95RatioMedian, $MaxP95Ratio))
+    }
+
+    if ([double]::IsNaN($p99RatioMedian) -or $p99RatioMedian -gt $MaxP99Ratio) {
+        $violations.Add(("Median p99 ratio {0:N3} exceeds threshold {1:N3}" -f $p99RatioMedian, $MaxP99Ratio))
+    }
+
+    if ([double]::IsNaN($allocRatioMedian) -or $allocRatioMedian -gt $MaxAllocRatio) {
+        $violations.Add(("Median allocation ratio {0:N3} exceeds threshold {1:N3}" -f $allocRatioMedian, $MaxAllocRatio))
+    }
+
+    if ($Track -eq "both") {
+        foreach ($trackName in @("ApplesToApples", "OptimizedProductPath")) {
+            if (-not $trackSummaryByName.ContainsKey($trackName)) {
+                $violations.Add("Missing track summary for $trackName.")
+                continue
+            }
+
+            $summary = $trackSummaryByName[$trackName]
+            if ([double]$summary.P50RatioMedian -gt $MaxP50Ratio) {
+                $violations.Add(("Track '{0}' p50 ratio {1:N3} exceeds threshold {2:N3}" -f $trackName, $summary.P50RatioMedian, $MaxP50Ratio))
+            }
+            if ([double]$summary.P95RatioMedian -gt $MaxP95Ratio) {
+                $violations.Add(("Track '{0}' p95 ratio {1:N3} exceeds threshold {2:N3}" -f $trackName, $summary.P95RatioMedian, $MaxP95Ratio))
+            }
+            if ([double]$summary.P99RatioMedian -gt $MaxP99Ratio) {
+                $violations.Add(("Track '{0}' p99 ratio {1:N3} exceeds threshold {2:N3}" -f $trackName, $summary.P99RatioMedian, $MaxP99Ratio))
+            }
+            if ([double]$summary.AllocRatioMedian -gt $MaxAllocRatio) {
+                $violations.Add(("Track '{0}' alloc ratio {1:N3} exceeds threshold {2:N3}" -f $trackName, $summary.AllocRatioMedian, $MaxAllocRatio))
+            }
+        }
+    }
+}
+
+if ($violations.Count -gt 0) {
+    Write-Error ("FAIL:`n{0}" -f ($violations -join "`n"))
     exit 1
 }
 
-Write-Host ("PASS: median Vape/SER ratio {0:N3} meets threshold {1:N3}" -f $ratioMedian, $FailBelowRatio)
+Write-Host ("PASS: median throughput ratio {0:N3} meets threshold {1:N3}" -f $throughputRatioMedian, $FailBelowRatio)
 exit 0

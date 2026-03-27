@@ -8,12 +8,25 @@ namespace VapeCache.Extensions.AspNetCore;
 /// <summary>
 /// Emits node-affinity hints for sticky-session routing during local in-memory failover.
 /// </summary>
-public sealed partial class VapeCacheFailoverAffinityMiddleware(
-    RequestDelegate next,
-    IOptionsMonitor<VapeCacheFailoverAffinityOptions> optionsMonitor,
-    IRedisCircuitBreakerState breakerState,
-    ILogger<VapeCacheFailoverAffinityMiddleware> logger)
+public sealed partial class VapeCacheFailoverAffinityMiddleware
 {
+    private readonly RequestDelegate next;
+    private readonly IOptionsMonitor<VapeCacheFailoverAffinityOptions> optionsMonitor;
+    private readonly IRedisCircuitBreakerState breakerState;
+    private readonly ILogger<VapeCacheFailoverAffinityMiddleware> logger;
+
+    public VapeCacheFailoverAffinityMiddleware(
+        RequestDelegate next,
+        IOptionsMonitor<VapeCacheFailoverAffinityOptions> optionsMonitor,
+        IRedisCircuitBreakerState breakerState,
+        ILogger<VapeCacheFailoverAffinityMiddleware> logger)
+    {
+        this.next = next;
+        this.optionsMonitor = optionsMonitor;
+        this.breakerState = breakerState;
+        this.logger = logger;
+    }
+
     /// <summary>
     /// Executes middleware logic for the current request.
     /// </summary>

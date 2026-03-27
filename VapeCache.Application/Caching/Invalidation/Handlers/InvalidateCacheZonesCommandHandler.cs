@@ -8,11 +8,15 @@ namespace VapeCache.Application.Caching.Invalidation.Handlers;
 /// <summary>
 /// Publishes direct zone invalidation commands.
 /// </summary>
-public sealed class InvalidateCacheZonesCommandHandler(
-    ICacheInvalidationEventPublisher publisher)
+public sealed class InvalidateCacheZonesCommandHandler
     : ICommandHandler<InvalidateCacheZonesCommand, CacheInvalidationExecutionResult>
 {
-    private readonly ICacheInvalidationEventPublisher _publisher = publisher;
+    private readonly ICacheInvalidationEventPublisher _publisher;
+
+    public InvalidateCacheZonesCommandHandler(ICacheInvalidationEventPublisher publisher)
+    {
+        _publisher = publisher;
+    }
 
     /// <summary>
     /// Executes handle async.

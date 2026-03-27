@@ -6,14 +6,26 @@ using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Extensions.Aspire.Hosting;
 
-internal sealed partial class VapeCacheStartupWarmupHostedService(
-    IOptions<VapeCacheStartupWarmupOptions> options,
-    IRedisConnectionPool pool,
-    IVapeCacheStartupReadiness readiness,
-    ILogger<VapeCacheStartupWarmupHostedService> logger) : IHostedService
+internal sealed partial class VapeCacheStartupWarmupHostedService : IHostedService
 {
     private static readonly ReadOnlyMemory<byte> PingCommand = "*1\r\n$4\r\nPING\r\n"u8.ToArray();
     private static ReadOnlySpan<byte> PongResponse => "+PONG\r\n"u8;
+    private readonly IOptions<VapeCacheStartupWarmupOptions> options;
+    private readonly IRedisConnectionPool pool;
+    private readonly IVapeCacheStartupReadiness readiness;
+    private readonly ILogger<VapeCacheStartupWarmupHostedService> logger;
+
+    public VapeCacheStartupWarmupHostedService(
+        IOptions<VapeCacheStartupWarmupOptions> options,
+        IRedisConnectionPool pool,
+        IVapeCacheStartupReadiness readiness,
+        ILogger<VapeCacheStartupWarmupHostedService> logger)
+    {
+        this.options = options;
+        this.pool = pool;
+        this.readiness = readiness;
+        this.logger = logger;
+    }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {

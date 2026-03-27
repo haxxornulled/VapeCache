@@ -5,13 +5,28 @@ using VapeCache.Abstractions.Caching;
 
 namespace VapeCache.Console.Plugins;
 
-internal sealed class PluginDemoHostedService(
-    IEnumerable<IVapeCachePlugin> plugins,
-    IOptionsMonitor<PluginDemoOptions> optionsMonitor,
-    ICacheService cache,
-    ICurrentCacheService current,
-    ILogger<PluginDemoHostedService> logger) : BackgroundService, IHostedLifecycleService
+internal sealed class PluginDemoHostedService : BackgroundService, IHostedLifecycleService
 {
+    private readonly IEnumerable<IVapeCachePlugin> plugins;
+    private readonly IOptionsMonitor<PluginDemoOptions> optionsMonitor;
+    private readonly ICacheService cache;
+    private readonly ICurrentCacheService current;
+    private readonly ILogger<PluginDemoHostedService> logger;
+
+    public PluginDemoHostedService(
+        IEnumerable<IVapeCachePlugin> plugins,
+        IOptionsMonitor<PluginDemoOptions> optionsMonitor,
+        ICacheService cache,
+        ICurrentCacheService current,
+        ILogger<PluginDemoHostedService> logger)
+    {
+        this.plugins = plugins;
+        this.optionsMonitor = optionsMonitor;
+        this.cache = cache;
+        this.current = current;
+        this.logger = logger;
+    }
+
     /// <summary>
     /// Executes value.
     /// </summary>

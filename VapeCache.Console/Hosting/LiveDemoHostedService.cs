@@ -8,13 +8,27 @@ using VapeCache.Abstractions.Diagnostics;
 
 namespace VapeCache.Console.Hosting;
 
-internal sealed class LiveDemoHostedService(
-    IOptions<LiveDemoOptions> demoOptions,
-    ICacheService cache,
-    ICacheBackendState backendState,
-    IRedisCircuitBreakerState? circuitBreaker,
-    ILogger<LiveDemoHostedService> logger) : BackgroundService, IHostedLifecycleService
+internal sealed class LiveDemoHostedService : BackgroundService, IHostedLifecycleService
 {
+    private readonly IOptions<LiveDemoOptions> demoOptions;
+    private readonly ICacheService cache;
+    private readonly ICacheBackendState backendState;
+    private readonly IRedisCircuitBreakerState? circuitBreaker;
+    private readonly ILogger<LiveDemoHostedService> logger;
+
+    public LiveDemoHostedService(
+        IOptions<LiveDemoOptions> demoOptions,
+        ICacheService cache,
+        ICacheBackendState backendState,
+        IRedisCircuitBreakerState? circuitBreaker,
+        ILogger<LiveDemoHostedService> logger)
+    {
+        this.demoOptions = demoOptions;
+        this.cache = cache;
+        this.backendState = backendState;
+        this.circuitBreaker = circuitBreaker;
+        this.logger = logger;
+    }
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;

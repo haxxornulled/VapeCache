@@ -5,7 +5,7 @@
 - **Date:** March 4, 2026
 - **Build:** `Release` (`.NET 10.0`)
 - **Target:** `VapeCache` vs `StackExchange.Redis` (SER)
-- **Redis:** `192.168.100.50:6379` (ACL auth)
+- **Redis:** `benchmark-redis.example.internal:6379` (ACL auth)
 - **Harness:** strict 10-trial runs, host isolation enabled, Server GC enabled
 - **Workload focus:** Grocery Store comparison (`50,000 shoppers`, `40 max cart items`)
 - **Authoritative artifact:** `docs/GROCERY_HEAD_TO_HEAD_2026-03-04.md`
@@ -53,9 +53,9 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -RequireHostIsolation `
   -MaxHostCpuPercent 40 `
   -StableCpuSamples 6 `
-  -RedisHost 192.168.100.50 `
+  -RedisHost benchmark-redis.example.internal `
   -RedisUsername admin `
-  -RedisPassword "redis4me!!"
+  -RedisPassword "<redacted>"
 ```
 
 ```powershell

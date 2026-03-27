@@ -22,6 +22,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     private readonly bool _optimizedCleanupOnly;
     private readonly ConcurrentDictionary<string, long>? _flashSaleCounts;
     private readonly ConcurrentDictionary<string, CachedCart>? _cartCache;
+    private readonly ConcurrentDictionary<string, UserSession>? _sessionCache;
     private static readonly Product[] Products = GroceryStoreService.GetAllProducts();
     private static readonly IReadOnlyDictionary<string, Product> ProductsById = BuildProductMap(Products);
     private static readonly IReadOnlyDictionary<string, int> ProductIndexById = BuildProductIndexMap(Products);
@@ -46,7 +47,8 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         string? keyPrefix = null,
         bool optimizedCleanupOnly = false,
         bool useLocalFlashSaleCountCache = false,
-        bool useLocalCartReadCache = false)
+        bool useLocalCartReadCache = false,
+        bool useLocalSessionCache = false)
     {
         _redis = redis;
         _keyPrefix = NormalizeKeyPrefix(keyPrefix);
@@ -56,6 +58,9 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
             : null;
         _cartCache = useLocalCartReadCache
             ? new ConcurrentDictionary<string, CachedCart>(StringComparer.Ordinal)
+            : null;
+        _sessionCache = useLocalSessionCache
+            ? new ConcurrentDictionary<string, UserSession>(StringComparer.Ordinal)
             : null;
     }
 
@@ -260,6 +265,7 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     public async ValueTask SaveSessionAsync(string sessionId, UserSession session)
     {
         Interlocked.Increment(ref _sessionWriteOps);
+        _sessionCache?[sessionId] = session;
         var serialized = SessionBinaryCodec.Serialize(session);
         await _redis.SetAsync(Key($"session:{sessionId}"), serialized, TimeSpan.FromHours(1), CancellationToken.None);
     }
@@ -270,15 +276,23 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
     public async ValueTask<UserSession?> GetSessionAsync(string sessionId)
     {
         Interlocked.Increment(ref _sessionReadOps);
+        if (_sessionCache is not null && _sessionCache.TryGetValue(sessionId, out var cachedSession))
+            return cachedSession;
+
         using var lease = await _redis.GetLeaseAsync(Key($"session:{sessionId}"), CancellationToken.None);
         if (lease.IsNull)
             return null;
 
         if (SessionBinaryCodec.TryDeserialize(lease.Span, out var session))
+        {
+            _sessionCache?[sessionId] = session;
             return session;
+        }
 
         // Backward compatibility with legacy JSON session payloads.
-        return Deserialize<UserSession>(lease.Span);
+        var deserialized = Deserialize<UserSession>(lease.Span);
+        _sessionCache?[sessionId] = deserialized;
+        return deserialized;
     }
 
     public GroceryStoreComparisonTelemetrySnapshot GetTelemetrySnapshot()
@@ -556,7 +570,15 @@ public sealed class VapeCacheRawGroceryStoreService : IGroceryStoreService, ICar
         return await task.ConfigureAwait(false);
     }
 
-    private readonly record struct CachedCart(CartItem[] Items);
+    private readonly record struct CachedCart
+    {
+        public CachedCart(CartItem[] items)
+        {
+            Items = items;
+        }
+
+        public CartItem[] Items { get; init; }
+    }
 
     private string GetOptimizedCartKey(string userId) => Key($"cart:optimized:{userId}");
 

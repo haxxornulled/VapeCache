@@ -27,9 +27,15 @@ public sealed class RedisRespTests
         Assert.Equal("+PONG", line);
     }
 
-    private sealed class StubConnection(byte[] response) : IRedisConnection
+    private sealed class StubConnection : IRedisConnection
     {
+        private readonly byte[] response;
         private int _offset;
+
+        public StubConnection(byte[] response)
+        {
+            this.response = response;
+        }
 
         public Socket Socket { get; } = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         public Stream Stream { get; } = Stream.Null;

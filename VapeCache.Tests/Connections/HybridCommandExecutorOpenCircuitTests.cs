@@ -36,8 +36,14 @@ public sealed class HybridCommandExecutorOpenCircuitTests
         Assert.Equal("v1", System.Text.Encoding.UTF8.GetString((await sut.GetExAsync("k1", TimeSpan.FromMinutes(1), default))!));
         Assert.True(await sut.MSetAsync(new[] { ("k2", (ReadOnlyMemory<byte>)"v2"u8.ToArray()) }, default));
         Assert.Equal("v2", System.Text.Encoding.UTF8.GetString((await sut.MGetAsync(new[] { "k2" }, default))[0]!));
+        Assert.Equal(1, await sut.MGetCountAsync(new[] { "k2" }, default));
+        Assert.True(await sut.GetDiscardAsync("k2", default));
+        Assert.True(await sut.GetExDiscardAsync("k2", TimeSpan.FromMinutes(1), default));
         Assert.True(await sut.DeleteAsync("k2", default));
         Assert.True(await sut.UnlinkAsync("k1", default) >= 0);
+        await sut.SetAsync("unlink:1", "v1"u8.ToArray(), null, default);
+        await sut.SetAsync("unlink:2", "v2"u8.ToArray(), null, default);
+        Assert.Equal(2, await sut.UnlinkManyAsync(["unlink:1"u8.ToArray(), "unlink:2"u8.ToArray()], default));
         Assert.True(await sut.TtlSecondsAsync("k1", default) <= 0);
         Assert.True(await sut.PTtlMillisecondsAsync("k1", default) <= 0);
 
@@ -69,6 +75,8 @@ public sealed class HybridCommandExecutorOpenCircuitTests
         Assert.NotNull(await tryHGetTask);
         var hm = await sut.HMGetAsync("h1", new[] { "f1", "missing" }, default);
         Assert.Equal(2, hm.Length);
+        Assert.Equal(2, await sut.HMGetCountAsync("h1", new[] { "f1", "missing" }, default));
+        Assert.True(await sut.HGetDiscardAsync("h1", "f1", default));
         using (var hLease = await sut.HGetLeaseAsync("h1", "f1", default)) { Assert.False(hLease.IsNull); }
 
         // List + Try wrappers
@@ -81,10 +89,17 @@ public sealed class HybridCommandExecutorOpenCircuitTests
         Assert.NotNull(await tryRPopTask);
         await sut.LPushAsync("l2", "x"u8.ToArray(), default);
         Assert.NotNull(await sut.LPopAsync("l2", default));
+        await sut.LPushAsync("l2:discard", "x"u8.ToArray(), default);
+        Assert.True(await sut.LPopDiscardAsync("l2:discard", default));
         await sut.RPushAsync("l3", "x"u8.ToArray(), default);
         Assert.NotNull(await sut.RPopAsync("l3", default));
+        await sut.RPushAsync("l3:discard", "x"u8.ToArray(), default);
+        Assert.True(await sut.RPopDiscardAsync("l3:discard", default));
         var lr = await sut.LRangeAsync("l1", 0, -1, default);
         Assert.NotNull(lr);
+        Assert.Equal(lr.Length, await sut.LRangeCountAsync("l1", 0, -1, default));
+        await sut.RPushAsync("idx:list:discard", "first"u8.ToArray(), default);
+        Assert.True(await sut.LIndexDiscardAsync("idx:list:discard", 0, default));
         await sut.RPushAsync("l4", "x"u8.ToArray(), default);
         using (var lease = await sut.LPopLeaseAsync("l4", default)) { Assert.False(lease.IsNull); }
         Assert.True(sut.TryLPopLeaseAsync("l4", default, out var tryLPopLeaseTask));
@@ -101,6 +116,7 @@ public sealed class HybridCommandExecutorOpenCircuitTests
         Assert.True(await tryIsMemberTask);
         Assert.Equal(1, await sut.SCardAsync("s1", default));
         Assert.Single(await sut.SMembersAsync("s1", default));
+        Assert.Equal(1, await sut.SMembersCountAsync("s1", default));
         Assert.Equal(1, await sut.SRemAsync("s1", "m1"u8.ToArray(), default));
 
         // Sorted set
@@ -110,12 +126,15 @@ public sealed class HybridCommandExecutorOpenCircuitTests
         Assert.Equal(0, await sut.ZRankAsync("z1", "m1"u8.ToArray(), false, default));
         Assert.True(await sut.ZIncrByAsync("z1", 1, "m1"u8.ToArray(), default) > 1);
         Assert.NotEmpty(await sut.ZRangeWithScoresAsync("z1", 0, -1, false, default));
+        Assert.Equal(1, await sut.ZRangeWithScoresCountAsync("z1", 0, -1, false, default));
         Assert.NotEmpty(await sut.ZRangeByScoreWithScoresAsync("z1", 0, 10, false, null, null, default));
+        Assert.Equal(1, await sut.ZRangeByScoreWithScoresCountAsync("z1", 0, 10, false, null, null, default));
         Assert.Equal(1, await sut.ZRemAsync("z1", "m1"u8.ToArray(), default));
 
         // JSON/module commands
         Assert.True(await sut.JsonSetAsync("j1", ".", "{\"a\":1}"u8.ToArray(), default));
         Assert.NotNull(await sut.JsonGetAsync("j1", ".", default));
+        Assert.True(await sut.JsonGetDiscardAsync("j1", ".", default));
         using (var jLease = await sut.JsonGetLeaseAsync("j1", ".", default)) { Assert.False(jLease.IsNull); }
         Assert.True(sut.TryJsonGetLeaseAsync("j1", ".", default, out var tryJsonLeaseTask));
         using (var jLease = await tryJsonLeaseTask) { Assert.False(jLease.IsNull); }
@@ -127,11 +146,21 @@ public sealed class HybridCommandExecutorOpenCircuitTests
 
         Assert.True(await sut.FtCreateAsync("idx", "doc:", new[] { "title" }, default));
         Assert.Empty(await sut.FtSearchAsync("idx", "*", null, null, default));
+        Assert.Equal(0, await sut.FtSearchCountAsync("idx", "*", 0, 0, default));
         Assert.True(await sut.BfAddAsync("bf1", "x"u8.ToArray(), default));
         Assert.True(await sut.BfExistsAsync("bf1", "x"u8.ToArray(), default));
         Assert.True(await sut.TsCreateAsync("ts1", default));
         Assert.Equal(100, await sut.TsAddAsync("ts1", 100, 1.0, default));
         Assert.Single(await sut.TsRangeAsync("ts1", 0, 200, default));
+        Assert.Equal(1, await sut.TsRangeCountAsync("ts1", 0, 200, default));
+        Assert.True(await sut.XAddIdempotentAckAsync(
+            "stream:orders",
+            producerId: "producer-a",
+            idempotentId: "tx-001",
+            useAutoIdempotentId: false,
+            entryId: "*",
+            fields: [("orderId", (ReadOnlyMemory<byte>)"123"u8.ToArray())],
+            default));
 
         // Streaming + server commands
         await sut.SetAsync("k-scan", "v"u8.ToArray(), null, default);
@@ -166,6 +195,7 @@ public sealed class HybridCommandExecutorOpenCircuitTests
         await sut.RPushAsync("idx:list", "first"u8.ToArray(), default);
         Assert.Equal("first", System.Text.Encoding.UTF8.GetString((await sut.LIndexAsync("idx:list", 0, default))!));
         Assert.Equal("bc", System.Text.Encoding.UTF8.GetString((await sut.GetRangeAsync("exp1", 1, 2, default))!));
+        Assert.True(await sut.GetRangeDiscardAsync("exp1", 1, 2, default));
 
         // Batch surface
         await using (var batch = sut.CreateBatch())

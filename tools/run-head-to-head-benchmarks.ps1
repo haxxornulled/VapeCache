@@ -17,6 +17,85 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Test-IsLocalRedisHost([string]$HostValue) {
+    if ([string]::IsNullOrWhiteSpace($HostValue)) {
+        return $false
+    }
+
+    $normalized = $HostValue.Trim().ToLowerInvariant()
+    if ($normalized -eq "localhost" -or $normalized -eq "127.0.0.1" -or $normalized -eq "::1") {
+        return $true
+    }
+
+    try {
+        $ip = [System.Net.IPAddress]::Parse($normalized)
+        return [System.Net.IPAddress]::IsLoopback($ip)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Get-ConnectionStringAuthMetadata([string]$Value) {
+    $result = [pscustomobject]@{
+        IsRemote = $true
+        HasUsername = $false
+        HasPassword = $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $result
+    }
+
+    $uri = $null
+    if ([Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri)) {
+        $result.IsRemote = -not (Test-IsLocalRedisHost -HostValue $uri.Host)
+        if (-not [string]::IsNullOrWhiteSpace($uri.UserInfo)) {
+            $parts = $uri.UserInfo.Split(":", 2, [System.StringSplitOptions]::None)
+            if ($parts.Length -gt 0 -and -not [string]::IsNullOrWhiteSpace($parts[0])) {
+                $result.HasUsername = $true
+            }
+            if ($parts.Length -gt 1 -and -not [string]::IsNullOrWhiteSpace($parts[1])) {
+                $result.HasPassword = $true
+            }
+        }
+
+        return $result
+    }
+
+    $segments = $Value.Split(",", [System.StringSplitOptions]::RemoveEmptyEntries)
+    if ($segments.Length -gt 0) {
+        $hostToken = $segments[0]
+        $hostName = $hostToken
+        if ($hostToken.Contains("=")) {
+            $hostName = ($hostToken.Split("=", 2, [System.StringSplitOptions]::None)[1]).Trim()
+        }
+        if ($hostName.Contains(":")) {
+            $hostName = $hostName.Split(":", 2, [System.StringSplitOptions]::None)[0]
+        }
+
+        $result.IsRemote = -not (Test-IsLocalRedisHost -HostValue $hostName)
+    }
+
+    foreach ($segment in $segments) {
+        $parts = $segment.Split("=", 2, [System.StringSplitOptions]::None)
+        if ($parts.Length -ne 2) {
+            continue
+        }
+
+        $key = $parts[0].Trim().ToLowerInvariant()
+        $val = $parts[1].Trim()
+        if ($key -eq "user" -or $key -eq "username") {
+            $result.HasUsername = -not [string]::IsNullOrWhiteSpace($val)
+        }
+        elseif ($key -eq "password" -or $key -eq "pwd") {
+            $result.HasPassword = -not [string]::IsNullOrWhiteSpace($val)
+        }
+    }
+
+    return $result
+}
+
 if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
     $env:VAPECACHE_REDIS_CONNECTIONSTRING = $ConnectionString
 }
@@ -24,6 +103,22 @@ if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
 if ([string]::IsNullOrWhiteSpace($env:VAPECACHE_REDIS_CONNECTIONSTRING) -and [string]::IsNullOrWhiteSpace($env:VAPECACHE_REDIS_HOST)) {
     Write-Host "Set VAPECACHE_REDIS_CONNECTIONSTRING or VAPECACHE_REDIS_HOST before running head-to-head benchmarks."
     exit 1
+}
+
+if (-not [string]::IsNullOrWhiteSpace($env:VAPECACHE_REDIS_CONNECTIONSTRING)) {
+    $authMetadata = Get-ConnectionStringAuthMetadata -Value $env:VAPECACHE_REDIS_CONNECTIONSTRING
+    if ($authMetadata.IsRemote -and (-not $authMetadata.HasUsername -or -not $authMetadata.HasPassword)) {
+        Write-Host "Remote Redis connection strings must include ACL username and password."
+        exit 1
+    }
+}
+elseif (-not (Test-IsLocalRedisHost -HostValue $env:VAPECACHE_REDIS_HOST)) {
+    $hasUser = -not [string]::IsNullOrWhiteSpace($env:VAPECACHE_REDIS_USERNAME)
+    $hasPassword = -not [string]::IsNullOrWhiteSpace($env:VAPECACHE_REDIS_PASSWORD)
+    if (-not $hasUser -or -not $hasPassword) {
+        Write-Host "Remote Redis endpoints require VAPECACHE_REDIS_USERNAME and VAPECACHE_REDIS_PASSWORD."
+        exit 1
+    }
 }
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")

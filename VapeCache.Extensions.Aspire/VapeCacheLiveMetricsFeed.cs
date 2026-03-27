@@ -38,33 +38,88 @@ public interface IVapeCacheLiveMetricsFeed
 /// <param name="Spill">Optional spill-store diagnostics snapshot.</param>
 /// <param name="Autoscaler">Optional redis autoscaler snapshot.</param>
 /// <param name="Lanes">Optional lane-level mux diagnostics snapshots.</param>
-public sealed record VapeCacheLiveSample(
-    DateTimeOffset TimestampUtc,
-    [property: JsonConverter(typeof(JsonStringEnumConverter<BackendType>))] BackendType CurrentBackend,
-    long Hits,
-    long Misses,
-    long SetCalls,
-    long RemoveCalls,
-    long FallbackToMemory,
-    long RedisBreakerOpened,
-    long StampedeKeyRejected,
-    long StampedeLockWaitTimeout,
-    long StampedeFailureBackoffRejected,
-    double HitRate,
-    SpillStoreDiagnosticsSnapshot? Spill,
-    RedisAutoscalerSnapshot? Autoscaler,
-    IReadOnlyList<RedisMuxLaneSnapshot>? Lanes = null);
-
-internal sealed class VapeCacheLiveMetricsFeed(
-    ICacheStats stats,
-    IRedisCircuitBreakerState? breakerState,
-    IRedisFailoverController? failoverController,
-    IOptions<VapeCacheEndpointOptions> options,
-    ISpillStoreDiagnostics? spillDiagnostics = null,
-    IRedisMultiplexerDiagnostics? diagnostics = null) : BackgroundService, IVapeCacheLiveMetricsFeed
+public sealed record VapeCacheLiveSample
 {
+    public VapeCacheLiveSample(
+        DateTimeOffset TimestampUtc,
+        BackendType CurrentBackend,
+        long Hits,
+        long Misses,
+        long SetCalls,
+        long RemoveCalls,
+        long FallbackToMemory,
+        long RedisBreakerOpened,
+        long StampedeKeyRejected,
+        long StampedeLockWaitTimeout,
+        long StampedeFailureBackoffRejected,
+        double HitRate,
+        SpillStoreDiagnosticsSnapshot? Spill,
+        RedisAutoscalerSnapshot? Autoscaler,
+        IReadOnlyList<RedisMuxLaneSnapshot>? Lanes = null)
+    {
+        this.TimestampUtc = TimestampUtc;
+        this.CurrentBackend = CurrentBackend;
+        this.Hits = Hits;
+        this.Misses = Misses;
+        this.SetCalls = SetCalls;
+        this.RemoveCalls = RemoveCalls;
+        this.FallbackToMemory = FallbackToMemory;
+        this.RedisBreakerOpened = RedisBreakerOpened;
+        this.StampedeKeyRejected = StampedeKeyRejected;
+        this.StampedeLockWaitTimeout = StampedeLockWaitTimeout;
+        this.StampedeFailureBackoffRejected = StampedeFailureBackoffRejected;
+        this.HitRate = HitRate;
+        this.Spill = Spill;
+        this.Autoscaler = Autoscaler;
+        this.Lanes = Lanes;
+    }
+
+    public DateTimeOffset TimestampUtc { get; init; }
+
+    [property: JsonConverter(typeof(JsonStringEnumConverter<BackendType>))]
+    public BackendType CurrentBackend { get; init; }
+
+    public long Hits { get; init; }
+    public long Misses { get; init; }
+    public long SetCalls { get; init; }
+    public long RemoveCalls { get; init; }
+    public long FallbackToMemory { get; init; }
+    public long RedisBreakerOpened { get; init; }
+    public long StampedeKeyRejected { get; init; }
+    public long StampedeLockWaitTimeout { get; init; }
+    public long StampedeFailureBackoffRejected { get; init; }
+    public double HitRate { get; init; }
+    public SpillStoreDiagnosticsSnapshot? Spill { get; init; }
+    public RedisAutoscalerSnapshot? Autoscaler { get; init; }
+    public IReadOnlyList<RedisMuxLaneSnapshot>? Lanes { get; init; }
+}
+
+internal sealed class VapeCacheLiveMetricsFeed : BackgroundService, IVapeCacheLiveMetricsFeed
+{
+    private readonly ICacheStats stats;
+    private readonly IRedisCircuitBreakerState? breakerState;
+    private readonly IRedisFailoverController? failoverController;
+    private readonly IOptions<VapeCacheEndpointOptions> options;
+    private readonly ISpillStoreDiagnostics? spillDiagnostics;
+    private readonly IRedisMultiplexerDiagnostics? diagnostics;
     private readonly ConcurrentDictionary<int, Subscriber> _subscribers = new();
     private int _subscriberId;
+
+    public VapeCacheLiveMetricsFeed(
+        ICacheStats stats,
+        IRedisCircuitBreakerState? breakerState,
+        IRedisFailoverController? failoverController,
+        IOptions<VapeCacheEndpointOptions> options,
+        ISpillStoreDiagnostics? spillDiagnostics = null,
+        IRedisMultiplexerDiagnostics? diagnostics = null)
+    {
+        this.stats = stats;
+        this.breakerState = breakerState;
+        this.failoverController = failoverController;
+        this.options = options;
+        this.spillDiagnostics = spillDiagnostics;
+        this.diagnostics = diagnostics;
+    }
 
     /// <summary>
     /// Executes value.
@@ -154,9 +209,14 @@ internal sealed class VapeCacheLiveMetricsFeed(
             subscriber.CompleteAndDispose();
     }
 
-    private sealed class Subscriber(Channel<VapeCacheLiveSample> channel)
+    private sealed class Subscriber
     {
-        public Channel<VapeCacheLiveSample> Channel { get; } = channel;
+        public Subscriber(Channel<VapeCacheLiveSample> Channel)
+        {
+            this.Channel = Channel;
+        }
+
+        public Channel<VapeCacheLiveSample> Channel { get; }
         public CancellationTokenRegistration CancellationRegistration { get; set; }
 
         public void CompleteAndDispose()
@@ -166,7 +226,17 @@ internal sealed class VapeCacheLiveMetricsFeed(
         }
     }
 
-    private sealed record SubscriberCancellationState(VapeCacheLiveMetricsFeed Owner, int Id);
+    private sealed record SubscriberCancellationState
+    {
+        public SubscriberCancellationState(VapeCacheLiveMetricsFeed Owner, int Id)
+        {
+            this.Owner = Owner;
+            this.Id = Id;
+        }
+
+        public VapeCacheLiveMetricsFeed Owner { get; init; }
+        public int Id { get; init; }
+    }
 
     private static BackendType ResolveDashboardBackend(bool breakerOpen, bool forcedOpen)
         => (forcedOpen || breakerOpen) ? BackendType.InMemory : BackendType.Redis;

@@ -8,13 +8,25 @@ using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Console.Hosting;
 
-internal sealed class RedisSanityCheckHostedService(
-    IOptions<StartupPreflightOptions> options,
-    IRedisConnectionFactory factory,
-    IRedisFailoverController failover,
-    ILogger<RedisSanityCheckHostedService> logger) : BackgroundService, IHostedLifecycleService
+internal sealed class RedisSanityCheckHostedService : BackgroundService, IHostedLifecycleService
 {
     private static readonly byte[] Ping = "*1\r\n$4\r\nPING\r\n"u8.ToArray();
+    private readonly IOptions<StartupPreflightOptions> options;
+    private readonly IRedisConnectionFactory factory;
+    private readonly IRedisFailoverController failover;
+    private readonly ILogger<RedisSanityCheckHostedService> logger;
+
+    public RedisSanityCheckHostedService(
+        IOptions<StartupPreflightOptions> options,
+        IRedisConnectionFactory factory,
+        IRedisFailoverController failover,
+        ILogger<RedisSanityCheckHostedService> logger)
+    {
+        this.options = options;
+        this.factory = factory;
+        this.failover = failover;
+        this.logger = logger;
+    }
 
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 

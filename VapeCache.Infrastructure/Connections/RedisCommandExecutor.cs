@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Buffers.Text;
 using System.Diagnostics;
 using System.Globalization;
@@ -118,6 +118,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private int _configuredBulkLaneConnections;
     private int _configuredPubSubLaneConnections;
     private int _configuredBlockingLaneConnections;
+    private string[]? _cachedModuleList;
     private bool _autoAdjustBulkLanes;
     private double _bulkLaneTargetRatio;
     private int _bulkLaneConnections;
@@ -128,6 +129,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private HGetHeaderCacheEntry? _hgetHeaderCache;
     private HSetHeaderCacheEntry? _hsetHeaderCache;
     private static readonly ReadOnlyMemory<byte> AskingCommand = "*1\r\n$6\r\nASKING\r\n"u8.ToArray();
+    private const int RawTransientRetryDelayMilliseconds = 25;
 
     public RedisCommandExecutor(
         IRedisConnectionFactory factory,
@@ -221,7 +223,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         LogNormalizationIfChanged("RedisMultiplexer", configuredMuxOptions, o);
         LogNormalizationIfChanged("RedisConnection", configuredConnectionOptions, connOpts);
         ApplyAutoscaleOptions(runtime.Multiplexer);
-        _autoscaleTask = Task.Run(AutoscaleLoopAsync);
+        EnsureAutoscaleLoopStarted();
     }
 
     private static RedisTransportProfile NormalizeTransportProfile(RedisTransportProfile profile)
@@ -576,8 +578,21 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return false;
     }
 
-    private readonly record struct RedisClusterRedirectTarget(bool IsAsk, int Slot, string Host, int Port)
+    private readonly record struct RedisClusterRedirectTarget
     {
+        public RedisClusterRedirectTarget(bool IsAsk, int Slot, string Host, int Port)
+        {
+            this.IsAsk = IsAsk;
+            this.Slot = Slot;
+            this.Host = Host;
+            this.Port = Port;
+        }
+
+        public bool IsAsk { get; init; }
+        public int Slot { get; init; }
+        public string Host { get; init; }
+        public int Port { get; init; }
+
         public string Kind => IsAsk ? "ASK" : "MOVED";
     }
 
@@ -692,6 +707,26 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
 
         return -1;
+    }
+
+    private static ReadOnlyMemory<byte> GetRedirectCommand(ReadOnlyMemory<byte> command, bool redirectsEnabled, out byte[]? redirectBuffer)
+    {
+        if (!redirectsEnabled)
+        {
+            redirectBuffer = null;
+            return command;
+        }
+
+        var length = command.Length;
+        redirectBuffer = ArrayPool<byte>.Shared.Rent(length);
+        command.Span.CopyTo(redirectBuffer.AsSpan(0, length));
+        return redirectBuffer.AsMemory(0, length);
+    }
+
+    private static void ReturnRedirectCommandBuffer(byte[]? redirectBuffer)
+    {
+        if (redirectBuffer is not null)
+            ArrayPool<byte>.Shared.Return(redirectBuffer);
     }
 
     private async ValueTask<RedisRespReader.RespValue> ExecuteWithClusterRedirectsAsync(
@@ -887,13 +922,30 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return GetAsyncSlow(key, ct);
     }
 
+    public ValueTask<bool> GetDiscardAsync(string key, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryQueueGetDiscardFast(key, ct, out var fastTask))
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => GetDiscardAsyncSlow(key, token),
+                ct);
+        }
+
+        return GetDiscardAsyncSlow(key, ct);
+    }
+
     private async ValueTask<byte[]?> GetAsyncSlow(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("GET");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
         var len = RedisRespProtocol.GetGetCommandLength(key);
         byte[]? rented = null;
+        byte[]? redirectBuffer = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
@@ -901,9 +953,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
             var command = rented.AsMemory(0, written);
-            var redirectCommand = _clusterRedirectsEnabled
-                ? command.ToArray()
-                : null;
+            var redirectCommand = GetRedirectCommand(command, _clusterRedirectsEnabled, out redirectBuffer);
 
             var resp = await ExecuteWithClusterRedirectsAsync(
                 token => conn.ExecuteAsync(
@@ -913,7 +963,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                     poolBulk: false,
                     token,
                     headerBuffer: rented),
-                redirectCommand ?? command,
+                redirectCommand,
                 poolBulk: false,
                 ct).ConfigureAwait(false);
             rented = null; // returned by writer
@@ -941,9 +991,54 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+            ReturnRedirectCommandBuffer(redirectBuffer);
+        }
+    }
+
+    private async ValueTask<bool> GetDiscardAsyncSlow(string key, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("GET");
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+        var len = RedisRespProtocol.GetGetCommandLength(key);
+        byte[]? rented = null;
+        byte[]? redirectBuffer = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
+            var command = rented.AsMemory(0, written);
+            var redirectCommand = GetRedirectCommand(command, _clusterRedirectsEnabled, out redirectBuffer);
+
+            var resp = await ExecuteWithClusterRedirectsAsync(
+                token => conn.ExecuteAsync(
+                    command,
+                    payload: ReadOnlyMemory<byte>.Empty,
+                    appendCrlf: false,
+                    poolBulk: false,
+                    token,
+                    headerBuffer: rented,
+                    responseMode: RedisResponseMode.BulkStringDiscard),
+                redirectCommand,
+                poolBulk: false,
+                ct).ConfigureAwait(false);
+            rented = null;
+            return await ReadOptionalBulkDiscardResponseAsync(conn, "GET", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+            ReturnRedirectCommandBuffer(redirectBuffer);
         }
     }
 
@@ -1003,20 +1098,19 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private async ValueTask<RedisValueLease> GetLeaseAsyncSlow(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("GET");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
         var len = RedisRespProtocol.GetGetCommandLength(key);
         byte[]? rented = null;
+        byte[]? redirectBuffer = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulkRead();
+            conn = NextRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
             var command = rented.AsMemory(0, written);
-            var redirectCommand = _clusterRedirectsEnabled
-                ? command.ToArray()
-                : null;
+            var redirectCommand = GetRedirectCommand(command, _clusterRedirectsEnabled, out redirectBuffer);
 
             var resp = await ExecuteWithClusterRedirectsAsync(
                 token => conn.ExecuteAsync(
@@ -1026,8 +1120,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                     poolBulk: true,
                     token,
                     headerBuffer: rented),
-                redirectCommand ?? command,
-                poolBulk: true,
+                redirectCommand,
+                poolBulk: false,
                 ct).ConfigureAwait(false);
             rented = null; // returned by writer
             return await ReadOptionalLeaseResponseAsync(conn, "GET", resp).ConfigureAwait(false);
@@ -1039,9 +1133,9 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+            ReturnRedirectCommandBuffer(redirectBuffer);
         }
     }
 
@@ -1056,7 +1150,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulkRead();
+            conn = NextRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
@@ -1108,11 +1202,37 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return GetExAsyncSlow(key, ttl, ct);
     }
 
+    public ValueTask<bool> GetExDiscardAsync(string key, TimeSpan? ttl, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled())
+        {
+            int? ttlMs = null;
+            if (ttl is not null)
+            {
+                var ms = (long)ttl.Value.TotalMilliseconds;
+                ttlMs = (int)Math.Clamp(ms, 1, int.MaxValue);
+            }
+
+            if (TryQueueGetExDiscardFast(key, ttlMs, ct, out var fastTask))
+            {
+                if (fastTask.IsCompletedSuccessfully)
+                    return fastTask;
+
+                return AwaitFastWithTransientFallbackAsync(
+                    fastTask,
+                    token => GetExDiscardAsyncSlow(key, ttl, token),
+                    ct);
+            }
+        }
+
+        return GetExDiscardAsyncSlow(key, ttl, ct);
+    }
+
     private async ValueTask<byte[]?> GetExAsyncSlow(string key, TimeSpan? ttl, CancellationToken ct)
     {
         using var activity = StartCommandActivity("GETEX");
         activity?.SetTag("db.redis.ttl_ms", ttl is null ? null : (long)ttl.Value.TotalMilliseconds);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         int? ttlMs = null;
@@ -1127,7 +1247,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         try
         {
             var len = RedisRespProtocol.GetGetExCommandLength(key, ttlMs);
-            conn = Next();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetExCommand(rented.AsSpan(0, len), key, ttlMs);
             var resp = await conn.ExecuteAsync(
@@ -1147,8 +1267,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1217,7 +1336,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("GETEX");
         activity?.SetTag("db.redis.ttl_ms", ttl is null ? null : (long)ttl.Value.TotalMilliseconds);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         int? ttlMs = null;
@@ -1232,7 +1351,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         try
         {
             var len = RedisRespProtocol.GetGetExCommandLength(key, ttlMs);
-            conn = NextBulk();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetExCommand(rented.AsSpan(0, len), key, ttlMs);
             var resp = await conn.ExecuteAsync(
@@ -1252,8 +1371,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1264,7 +1382,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public async ValueTask<byte[]?> GetRangeAsync(string key, long start, long end, CancellationToken ct)
     {
         using var activity = StartCommandActivity("GETRANGE");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
         var len = RedisRespProtocol.GetGetRangeCommandLength(key, start, end);
         byte[]? rented = null;
@@ -1291,8 +1409,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1304,7 +1421,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("MGET");
         activity?.SetTag("db.redis.key_count", keys.Length);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetMGetCommandLength(keys);
@@ -1366,8 +1483,164 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private async ValueTask<bool> GetExDiscardAsyncSlow(string key, TimeSpan? ttl, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("GETEX");
+        activity?.SetTag("db.redis.ttl_ms", ttl is null ? null : (long)ttl.Value.TotalMilliseconds);
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        int? ttlMs = null;
+        if (ttl is not null)
+        {
+            var ms = (long)ttl.Value.TotalMilliseconds;
+            ttlMs = (int)Math.Clamp(ms, 1, int.MaxValue);
+        }
+
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            var len = RedisRespProtocol.GetGetExCommandLength(key, ttlMs);
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteGetExCommand(rented.AsSpan(0, len), key, ttlMs);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard).ConfigureAwait(false);
+            rented = null;
+            return await ReadOptionalBulkDiscardResponseAsync(conn, "GETEX", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public ValueTask<bool> GetRangeDiscardAsync(string key, long start, long end, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryQueueGetRangeDiscardFast(key, start, end, ct, out var fastTask))
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => GetRangeDiscardAsyncSlow(key, start, end, token),
+                ct);
+        }
+
+        return GetRangeDiscardAsyncSlow(key, start, end, ct);
+    }
+
+    private async ValueTask<bool> GetRangeDiscardAsyncSlow(string key, long start, long end, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("GETRANGE");
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+        var len = RedisRespProtocol.GetGetRangeCommandLength(key, start, end);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteGetRangeCommand(rented.AsSpan(0, len), key, start, end);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard).ConfigureAwait(false);
+            rented = null;
+            return await ReadOptionalBulkDiscardResponseAsync(conn, "GETRANGE", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<int> MGetCountAsync(string[] keys, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryQueueMGetCountFast(keys, ct, out var fastTask))
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => MGetCountAsyncSlow(keys, token),
+                ct);
+        }
+
+        return MGetCountAsyncSlow(keys, ct);
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<int> MGetCountAsyncSlow(string[] keys, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("MGET");
+        activity?.SetTag("db.redis.key_count", keys.Length);
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetMGetCommandLength(keys);
+        if (len == 0) return 0;
+
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteMGetCommand(rented.AsSpan(0, len), keys);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringArrayCountAllowNulls).ConfigureAwait(false);
+            rented = null; // returned by writer
+            return await ReadBulkArrayCountResponseAsync(conn, "MGET", resp, allowNullBulkStrings: true).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1424,11 +1697,59 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return false;
     }
 
+    private static bool ShouldRetryRawPathTransient(Exception ex, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested || ex is OperationCanceledException)
+            return false;
+
+        if (IsStaleGenerationException(ex))
+            return true;
+
+        for (var current = ex; current is not null; current = current.InnerException!)
+        {
+            if (current is EndOfStreamException or TimeoutException or SocketException or ObjectDisposedException)
+                return true;
+
+            if (current is IOException)
+                return true;
+
+            if (current is InvalidOperationException invalid &&
+                invalid.Message.Contains("LOADING Redis is loading the dataset in memory", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (current.InnerException is null)
+                break;
+        }
+
+        return false;
+    }
+
+    private static Task DelayBeforeRawTransientRetryAsync(CancellationToken ct)
+        => Task.Delay(RawTransientRetryDelayMilliseconds, ct);
+
+    private static async ValueTask<T> AwaitFastWithTransientFallbackAsync<T>(
+        ValueTask<T> fastTask,
+        Func<CancellationToken, ValueTask<T>> slowPath,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await fastTask.ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ShouldRetryRawPathTransient(ex, ct))
+        {
+            await DelayBeforeRawTransientRetryAsync(ct).ConfigureAwait(false);
+            return await slowPath(ct).ConfigureAwait(false);
+        }
+    }
+
     private async ValueTask<bool> SetAsyncSlow(string key, ReadOnlyMemory<byte> value, TimeSpan? ttl, CancellationToken ct)
     {
         using var activity = StartCommandActivity("SET");
         activity?.SetTag("db.redis.ttl_ms", ttl is null ? null : (long)ttl.Value.TotalMilliseconds);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
         int? ttlMs = null;
         if (ttl is not null)
@@ -1438,6 +1759,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
 
         byte[]? rented = null;
+        byte[]? redirectBuffer = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
@@ -1450,24 +1772,26 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 var headerLen = len - value.Length - 2; // exclude value bytes + CRLF
                 rented = conn.RentHeaderBuffer(headerLen);
                 var written = RedisRespProtocol.WriteSetCommandHeader(rented.AsSpan(0, headerLen), key, value.Length, null);
+                var command = rented.AsMemory(0, written);
 
-                byte[]? redirectCommand = null;
+                var redirectCommand = command;
                 if (_clusterRedirectsEnabled)
                 {
                     var fullLen = RedisRespProtocol.GetSetCommandLength(key, value.Length, null);
-                    redirectCommand = GC.AllocateUninitializedArray<byte>(fullLen);
-                    RedisRespProtocol.WriteSetCommand(redirectCommand.AsSpan(0, fullLen), key, value.Span, null);
+                    redirectBuffer = ArrayPool<byte>.Shared.Rent(fullLen);
+                    RedisRespProtocol.WriteSetCommand(redirectBuffer.AsSpan(0, fullLen), key, value.Span, null);
+                    redirectCommand = redirectBuffer.AsMemory(0, fullLen);
                 }
 
                 var resp = await ExecuteWithClusterRedirectsAsync(
                     token => conn.ExecuteAsync(
-                        rented.AsMemory(0, written),
+                        command,
                         payload: value,
                         appendCrlf: true,
                         poolBulk: false,
                         token,
                         headerBuffer: rented),
-                    redirectCommand ?? rented.AsMemory(0, written),
+                    redirectCommand,
                     poolBulk: false,
                     ct).ConfigureAwait(false);
                 rented = null; // returned by writer
@@ -1500,12 +1824,13 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 rented = conn.RentHeaderBuffer(headerLen);
                 var written = RedisRespProtocol.WritePSetExCommandHeader(rented.AsSpan(0, headerLen), key, ttlMs.Value, value.Length);
                 var command = rented.AsMemory(0, written);
-                byte[]? redirectCommand = null;
+                var redirectCommand = command;
                 if (_clusterRedirectsEnabled)
                 {
                     var fullLen = RedisRespProtocol.GetPSetExCommandLength(key, value.Length, ttlMs.Value);
-                    redirectCommand = GC.AllocateUninitializedArray<byte>(fullLen);
-                    RedisRespProtocol.WritePSetExCommand(redirectCommand.AsSpan(0, fullLen), key, value.Span, ttlMs.Value);
+                    redirectBuffer = ArrayPool<byte>.Shared.Rent(fullLen);
+                    RedisRespProtocol.WritePSetExCommand(redirectBuffer.AsSpan(0, fullLen), key, value.Span, ttlMs.Value);
+                    redirectCommand = redirectBuffer.AsMemory(0, fullLen);
                 }
 
                 var resp = await ExecuteWithClusterRedirectsAsync(
@@ -1516,7 +1841,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                         poolBulk: false,
                         token,
                         headerBuffer: rented),
-                    redirectCommand ?? command,
+                    redirectCommand,
                     poolBulk: false,
                     ct).ConfigureAwait(false);
                 rented = null; // returned by writer
@@ -1549,8 +1874,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null)
             {
                 if (ttlMs is not null)
@@ -1558,6 +1882,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 else if (conn is not null)
                     conn.ReturnHeaderBuffer(rented);
             }
+
+            ReturnRedirectCommandBuffer(redirectBuffer);
         }
     }
 
@@ -1678,6 +2004,133 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return await ThrowUnexpectedResponseAndResetAsync<bool>(conn, "SET", resp).ConfigureAwait(false);
     }
 
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<bool> ReadBulkOrSimpleAckResponseAsync(
+        RedisMultiplexedConnection conn,
+        string operation,
+        RedisRespReader.RespValue resp)
+    {
+        try
+        {
+            if (resp.Kind == RedisRespReader.RespKind.Error)
+                throw new InvalidOperationException($"Redis error: {resp.Text}");
+
+            if (resp.Kind is RedisRespReader.RespKind.BulkString or RedisRespReader.RespKind.SimpleString)
+                return true;
+
+            return await ThrowUnexpectedResponseAndResetAsync<bool>(conn, operation, resp, returnBuffers: false).ConfigureAwait(false);
+        }
+        finally
+        {
+            RedisRespReader.ReturnBuffers(resp);
+        }
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<bool> ReadOptionalBulkDiscardResponseAsync(
+        RedisMultiplexedConnection conn,
+        string operation,
+        RedisRespReader.RespValue resp)
+    {
+        try
+        {
+            if (resp.Kind == RedisRespReader.RespKind.Error)
+                throw new InvalidOperationException($"Redis error: {resp.Text}");
+
+            if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
+                return false;
+
+            if (resp.Kind is RedisRespReader.RespKind.BulkString or RedisRespReader.RespKind.SimpleString)
+                return true;
+
+            return await ThrowUnexpectedResponseAndResetAsync<bool>(conn, operation, resp, returnBuffers: false).ConfigureAwait(false);
+        }
+        finally
+        {
+            RedisRespReader.ReturnBuffers(resp);
+        }
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<int> ReadBulkArrayCountResponseAsync(
+        RedisMultiplexedConnection conn,
+        string operation,
+        RedisRespReader.RespValue resp,
+        bool allowNullBulkStrings)
+    {
+        try
+        {
+            if (resp.Kind is RedisRespReader.RespKind.Integer)
+                return checked((int)ParseLong(resp));
+
+            if (resp.Kind is RedisRespReader.RespKind.NullArray)
+                return 0;
+
+            if (resp.Kind is not RedisRespReader.RespKind.Array || resp.ArrayItems is null)
+                return await ThrowUnexpectedResponseAndResetAsync<int>(conn, operation, resp, returnBuffers: false).ConfigureAwait(false);
+
+            var items = resp.ArrayItems;
+            var count = resp.ArrayLength;
+            for (var i = 0; i < count; i++)
+            {
+                if (items[i].Kind == RedisRespReader.RespKind.BulkString)
+                    continue;
+
+                if (allowNullBulkStrings && items[i].Kind == RedisRespReader.RespKind.NullBulkString)
+                    continue;
+
+                return await ThrowUnexpectedResponseAndResetAsync<int>(conn, operation, resp, returnBuffers: false).ConfigureAwait(false);
+            }
+
+            return count;
+        }
+        finally
+        {
+            RedisRespReader.ReturnBuffers(resp);
+        }
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<int> ReadZRangeCountResponseAsync(
+        RedisMultiplexedConnection conn,
+        string operation,
+        RedisRespReader.RespValue resp)
+    {
+        try
+        {
+            if (resp.Kind is RedisRespReader.RespKind.Integer)
+                return checked((int)ParseLong(resp));
+
+            if (resp.Kind is RedisRespReader.RespKind.NullArray)
+                return 0;
+
+            if (resp.Kind is not RedisRespReader.RespKind.Array || resp.ArrayItems is null)
+                return await ThrowUnexpectedResponseAndResetAsync<int>(conn, operation, resp, returnBuffers: false).ConfigureAwait(false);
+
+            var items = resp.ArrayItems;
+            var itemCount = resp.ArrayLength;
+            if (itemCount == 0)
+                return 0;
+
+            if (itemCount % 2 != 0)
+                return await ThrowUnexpectedResponseAndResetAsync<int>(conn, operation, resp, returnBuffers: false).ConfigureAwait(false);
+
+            for (var i = 0; i < itemCount; i += 2)
+            {
+                if (items[i].Kind is not RedisRespReader.RespKind.BulkString)
+                    return await ThrowUnexpectedResponseAndResetAsync<int>(conn, operation, resp, returnBuffers: false).ConfigureAwait(false);
+
+                _ = ParseDouble(items[i + 1]);
+            }
+
+            return itemCount / 2;
+        }
+        finally
+        {
+            RedisRespReader.ReturnBuffers(resp);
+        }
+    }
+
     /// <summary>
     /// Executes value.
     /// </summary>
@@ -1685,7 +2138,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("MSET");
         activity?.SetTag("db.redis.key_count", items.Length);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         if (items.Length == 0) return true;
@@ -1711,8 +2164,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null)
                 ArrayPool<byte>.Shared.Return(rented);
         }
@@ -1732,7 +2184,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private async ValueTask<bool> DeleteAsyncSlow(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("DEL");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
         var len = RedisRespProtocol.GetDelCommandLength(key);
         byte[]? rented = null;
@@ -1768,8 +2220,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1819,7 +2270,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public async ValueTask<long> UnlinkAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("UNLINK");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
         var len = RedisRespProtocol.GetUnlinkCommandLength(key);
         byte[]? rented = null;
@@ -1837,7 +2288,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 ct,
                 headerBuffer: rented).ConfigureAwait(false);
             rented = null; // returned by writer
-            return await ReadIntegerResponseAsync(conn, "HSET", resp).ConfigureAwait(false);
+            return await ReadIntegerResponseAsync(conn, "UNLINK", resp).ConfigureAwait(false);
         }
         catch
         {
@@ -1846,8 +2297,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1858,7 +2308,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public async ValueTask<long> TtlSecondsAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("TTL");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
         var len = RedisRespProtocol.GetTtlCommandLength(key);
         byte[]? rented = null;
@@ -1885,8 +2335,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1897,7 +2346,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public async ValueTask<long> PTtlMillisecondsAsync(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("PTTL");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
         var len = RedisRespProtocol.GetPTtlCommandLength(key);
         byte[]? rented = null;
@@ -1924,8 +2373,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -1936,7 +2384,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public async ValueTask<long> HSetAsync(string key, string field, ReadOnlyMemory<byte> value, CancellationToken ct)
     {
         using var activity = StartCommandActivity("HSET");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         byte[]? rented = null;
@@ -1944,32 +2392,14 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         try
         {
             conn = NextWrite();
-            var cached = Volatile.Read(ref _hsetHeaderCache);
-            byte[]? headerBuffer;
-            ReadOnlyMemory<byte> header;
-            if (TryGetHSetCachedHeader(cached, key, field, value.Length, out header))
-            {
-                headerBuffer = null;
-            }
-            else
-            {
-                var len = RedisRespProtocol.GetHSetCommandLength(key, field, value.Length);
-                var headerLen = len - value.Length - 2;
-                rented = conn.RentHeaderBuffer(headerLen);
-                var written = RedisRespProtocol.WriteHSetCommandHeader(rented.AsSpan(0, headerLen), key, field, value.Length);
-                header = rented.AsMemory(0, written);
-                headerBuffer = rented;
-
-                if (cached is null)
-                {
-                    var headerCopy = GC.AllocateUninitializedArray<byte>(written);
-                    rented.AsSpan(0, written).CopyTo(headerCopy);
-                    Interlocked.CompareExchange(
-                        ref _hsetHeaderCache,
-                        new HSetHeaderCacheEntry(key, field, value.Length, headerCopy),
-                        null);
-                }
-            }
+            PrepareHSetHeader(
+                conn,
+                key,
+                field,
+                value.Length,
+                ref rented,
+                out var header,
+                out var headerBuffer);
 
             var resp = await conn.ExecuteAsync(
                 header,
@@ -1979,7 +2409,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 ct,
                 headerBuffer: headerBuffer).ConfigureAwait(false);
             rented = null; // returned by writer
-            return await ReadIntegerResponseAsync(conn, "LPUSH", resp).ConfigureAwait(false);
+            return await ReadIntegerResponseAsync(conn, "HSET", resp).ConfigureAwait(false);
         }
         catch
         {
@@ -1988,8 +2418,49 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public async ValueTask<long> HSetManyAsync(string key, (string Field, ReadOnlyMemory<byte> Value)[] items, CancellationToken ct)
+    {
+        if (items.Length == 0)
+            return 0L;
+
+        using var activity = StartCommandActivity("HSET");
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetHSetCommandLength(key, items);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteHSetCommand(rented.AsSpan(0, len), key, items);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null; // returned by writer
+            return await ReadIntegerResponseAsync(conn, "HSET", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2008,39 +2479,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private async ValueTask<RedisValueLease> HGetLeaseAsyncSlow(string key, string field, CancellationToken ct)
     {
         using var activity = StartCommandActivity("HGET");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulkRead();
-            var cached = Volatile.Read(ref _hgetHeaderCache);
-            byte[]? headerBuffer;
-            ReadOnlyMemory<byte> header;
-            if (TryGetHGetCachedHeader(cached, key, field, out header))
-            {
-                headerBuffer = null;
-            }
-            else
-            {
-                var len = RedisRespProtocol.GetHGetCommandLength(key, field);
-                rented = conn.RentHeaderBuffer(len);
-                var written = RedisRespProtocol.WriteHGetCommand(rented.AsSpan(0, len), key, field);
-                header = rented.AsMemory(0, written);
-                headerBuffer = rented;
-
-                if (cached is null)
-                {
-                    var headerCopy = GC.AllocateUninitializedArray<byte>(written);
-                    rented.AsSpan(0, written).CopyTo(headerCopy);
-                    Interlocked.CompareExchange(
-                        ref _hgetHeaderCache,
-                        new HGetHeaderCacheEntry(key, field, headerCopy),
-                        null);
-                }
-            }
+            conn = NextRead();
+            PrepareHGetHeader(conn, key, field, ref rented, out var header, out var headerBuffer);
 
             var resp = await conn.ExecuteAsync(
                 header,
@@ -2059,8 +2506,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2076,10 +2522,26 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return HGetAsyncSlow(key, field, ct);
     }
 
+    public ValueTask<bool> HGetDiscardAsync(string key, string field, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && TryQueueHGetDiscardFast(key, field, ct, out var fastTask))
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => HGetDiscardAsyncSlow(key, field, token),
+                ct);
+        }
+
+        return HGetDiscardAsyncSlow(key, field, ct);
+    }
+
     private async ValueTask<byte[]?> HGetAsyncSlow(string key, string field, CancellationToken ct)
     {
         using var activity = StartCommandActivity("HGET");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         byte[]? rented = null;
@@ -2087,31 +2549,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         try
         {
             conn = NextRead();
-            var cached = Volatile.Read(ref _hgetHeaderCache);
-            byte[]? headerBuffer;
-            ReadOnlyMemory<byte> header;
-            if (TryGetHGetCachedHeader(cached, key, field, out header))
-            {
-                headerBuffer = null;
-            }
-            else
-            {
-                var len = RedisRespProtocol.GetHGetCommandLength(key, field);
-                rented = conn.RentHeaderBuffer(len);
-                var written = RedisRespProtocol.WriteHGetCommand(rented.AsSpan(0, len), key, field);
-                header = rented.AsMemory(0, written);
-                headerBuffer = rented;
-
-                if (cached is null)
-                {
-                    var headerCopy = GC.AllocateUninitializedArray<byte>(written);
-                    rented.AsSpan(0, written).CopyTo(headerCopy);
-                    Interlocked.CompareExchange(
-                        ref _hgetHeaderCache,
-                        new HGetHeaderCacheEntry(key, field, headerCopy),
-                        null);
-                }
-            }
+            PrepareHGetHeader(conn, key, field, ref rented, out var header, out var headerBuffer);
 
             var resp = await conn.ExecuteAsync(
                 header,
@@ -2130,8 +2568,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2143,7 +2580,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("HMGET");
         activity?.SetTag("db.redis.field_count", fields.Length);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetHMGetCommandLength(key, fields);
@@ -2205,8 +2642,185 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private async ValueTask<bool> HGetDiscardAsyncSlow(string key, string field, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("HGET");
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            PrepareHGetHeader(conn, key, field, ref rented, out var header, out var headerBuffer);
+
+            var resp = await conn.ExecuteAsync(
+                header,
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: headerBuffer,
+                responseMode: RedisResponseMode.BulkStringDiscard).ConfigureAwait(false);
+            rented = null;
+            return await ReadOptionalBulkDiscardResponseAsync(conn, "HGET", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<int> HMGetCountAsync(string key, string[] fields, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && TryQueueHMGetCountFast(key, fields, ct, out var fastTask))
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => HMGetCountAsyncSlow(key, fields, token),
+                ct);
+        }
+
+        return HMGetCountAsyncSlow(key, fields, ct);
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<int> HMGetCountAsyncSlow(string key, string[] fields, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("HMGET");
+        activity?.SetTag("db.redis.field_count", fields.Length);
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetHMGetCommandLength(key, fields);
+        if (len == 0) return 0;
+
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteHMGetCommand(rented.AsSpan(0, len), key, fields);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringArrayCountAllowNulls).ConfigureAwait(false);
+            rented = null; // returned by writer
+            return await ReadBulkArrayCountResponseAsync(conn, "HMGET", resp, allowNullBulkStrings: true).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public async ValueTask<long> UnlinkManyAsync(string[] keys, CancellationToken ct)
+    {
+        if (keys.Length == 0)
+            return 0L;
+
+        using var activity = StartCommandActivity("UNLINK");
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+        var len = RedisRespProtocol.GetUnlinkCommandLength(keys);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteUnlinkCommand(rented.AsSpan(0, len), keys);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null; // returned by writer
+            return await ReadIntegerResponseAsync(conn, "UNLINK", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public async ValueTask<long> UnlinkManyAsync(byte[]?[] keys, CancellationToken ct)
+    {
+        var len = RedisRespProtocol.GetUnlinkCommandLength(keys);
+        if (len == 0)
+            return 0L;
+
+        using var activity = StartCommandActivity("UNLINK");
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteUnlinkCommand(rented.AsSpan(0, len), keys);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented).ConfigureAwait(false);
+            rented = null; // returned by writer
+            return await ReadIntegerResponseAsync(conn, "UNLINK", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2217,7 +2831,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public async ValueTask<long> LPushAsync(string key, ReadOnlyMemory<byte> value, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LPUSH");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetLPushCommandLength(key, value.Length);
@@ -2246,8 +2860,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2263,10 +2876,26 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return LPopAsyncSlow(key, ct);
     }
 
+    public ValueTask<bool> LPopDiscardAsync(string key, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && TryQueueLPopDiscardFast(key, ct, out var fastTask))
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => LPopDiscardAsyncSlow(key, token),
+                ct);
+        }
+
+        return LPopDiscardAsyncSlow(key, ct);
+    }
+
     private async ValueTask<byte[]?> LPopAsyncSlow(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LPOP");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetLPopCommandLength(key);
@@ -2294,8 +2923,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2307,7 +2935,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("EXPIRE");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var seconds = (long)Math.Ceiling(ttl.TotalSeconds);
@@ -2340,8 +2968,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2357,31 +2984,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         try
         {
             conn = NextRead();
-            var cached = Volatile.Read(ref _hgetHeaderCache);
-            byte[]? headerBuffer;
-            ReadOnlyMemory<byte> header;
-            if (TryGetHGetCachedHeader(cached, key, field, out header))
-            {
-                headerBuffer = null;
-            }
-            else
-            {
-                var len = RedisRespProtocol.GetHGetCommandLength(key, field);
-                rented = conn.RentHeaderBuffer(len);
-                var written = RedisRespProtocol.WriteHGetCommand(rented.AsSpan(0, len), key, field);
-                header = rented.AsMemory(0, written);
-                headerBuffer = rented;
-
-                if (cached is null)
-                {
-                    var headerCopy = GC.AllocateUninitializedArray<byte>(written);
-                    rented.AsSpan(0, written).CopyTo(headerCopy);
-                    Interlocked.CompareExchange(
-                        ref _hgetHeaderCache,
-                        new HGetHeaderCacheEntry(key, field, headerCopy),
-                        null);
-                }
-            }
+            PrepareHGetHeader(conn, key, field, ref rented, out var header, out var headerBuffer);
 
             if (!conn.TryExecuteAsync(
                 header,
@@ -2508,7 +3111,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulkWrite();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetExCommand(rented.AsSpan(0, len), key, ttlMs);
             if (!conn.TryExecuteAsync(
@@ -2596,14 +3199,14 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     private async ValueTask<RedisValueLease> LPopLeaseAsyncSlow(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LPOP");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
         var len = RedisRespProtocol.GetLPopCommandLength(key);
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulkWrite();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteLPopCommand(rented.AsSpan(0, len), key);
             var resp = await conn.ExecuteAsync(
@@ -2623,8 +3226,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2640,10 +3242,26 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return LIndexAsyncSlow(key, index, ct);
     }
 
+    public ValueTask<bool> LIndexDiscardAsync(string key, long index, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && TryQueueLIndexDiscardFast(key, index, ct, out var fastTask))
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => LIndexDiscardAsyncSlow(key, index, token),
+                ct);
+        }
+
+        return LIndexDiscardAsyncSlow(key, index, ct);
+    }
+
     private async ValueTask<byte[]?> LIndexAsyncSlow(string key, long index, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LINDEX");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
         var len = RedisRespProtocol.GetLIndexCommandLength(key, index);
         byte[]? rented = null;
@@ -2670,8 +3288,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2682,7 +3299,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public async ValueTask<byte[]?[]> LRangeAsync(string key, long start, long stop, CancellationToken ct)
     {
         using var activity = StartCommandActivity("LRANGE");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetLRangeCommandLength(key, start, stop);
@@ -2742,8 +3359,137 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private async ValueTask<bool> LIndexDiscardAsyncSlow(string key, long index, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("LINDEX");
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+        var len = RedisRespProtocol.GetLIndexCommandLength(key, index);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteLIndexCommand(rented.AsSpan(0, len), key, index);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard).ConfigureAwait(false);
+            rented = null;
+            return await ReadOptionalBulkDiscardResponseAsync(conn, "LINDEX", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private async ValueTask<bool> LPopDiscardAsyncSlow(string key, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("LPOP");
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetLPopCommandLength(key);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteLPopCommand(rented.AsSpan(0, len), key);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard).ConfigureAwait(false);
+            rented = null;
+            return await ReadOptionalBulkDiscardResponseAsync(conn, "LPOP", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<int> LRangeCountAsync(string key, long start, long stop, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && TryQueueLRangeCountFast(key, start, stop, ct, out var fastTask))
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => LRangeCountAsyncSlow(key, start, stop, token),
+                ct);
+        }
+
+        return LRangeCountAsyncSlow(key, start, stop, ct);
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<int> LRangeCountAsyncSlow(string key, long start, long stop, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("LRANGE");
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetLRangeCommandLength(key, start, stop);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteLRangeCommand(rented.AsSpan(0, len), key, start, stop);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringArrayCountAllowNulls).ConfigureAwait(false);
+            rented = null; // returned by writer
+            return await ReadBulkArrayCountResponseAsync(conn, "LRANGE", resp, allowNullBulkStrings: true).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -2755,8 +3501,12 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         _msetLengthsCache = null;
         _jsonSetHeaderCache = null;
-        _hgetHeaderCache = null;
-        _hsetHeaderCache = null;
+        var hgetCache = Interlocked.Exchange(ref _hgetHeaderCache, null);
+        var hsetCache = Interlocked.Exchange(ref _hsetHeaderCache, null);
+        if (hgetCache is { IsPooled: true })
+            ArrayPool<byte>.Shared.Return(hgetCache.HeaderBuffer);
+        if (hsetCache is { IsPooled: true })
+            ArrayPool<byte>.Shared.Return(hsetCache.HeaderBuffer);
 
         _muxOptionsChangeRegistration?.Dispose();
         try { _autoscaleCts.Cancel(); } catch { }
@@ -2906,6 +3656,20 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             {
                 // autoscaler is best-effort; command execution remains primary
             }
+        }
+    }
+
+    private void EnsureAutoscaleLoopStarted()
+    {
+        if (!Volatile.Read(ref _autoscaleEnabled) || _autoscaleTask is not null)
+            return;
+
+        lock (_connGate)
+        {
+            if (!_autoscaleEnabled || _autoscaleTask is not null)
+                return;
+
+            _autoscaleTask = Task.Run(AutoscaleLoopAsync);
         }
     }
 
@@ -3391,6 +4155,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             _ = DisposeConnectionsAsync(blockingConnsToDispose);
 
         PrimeLanesInBackground();
+        EnsureAutoscaleLoopStarted();
     }
 
     private RedisMultiplexedConnection[]? ReconcileFastConnectionsUnsafe(int desiredFastConnections)
@@ -3714,16 +4479,37 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return "normal";
     }
 
-    private readonly record struct SpillPressureSample(
-        int SignalCount,
-        long TotalSpillFiles,
-        int ActiveShards,
-        double ImbalanceRatio,
-        bool HighFiles,
-        bool HighActiveShards,
-        bool HighImbalance,
-        bool WindowSatisfied)
+    private readonly record struct SpillPressureSample
     {
+        public SpillPressureSample(
+            int SignalCount,
+            long TotalSpillFiles,
+            int ActiveShards,
+            double ImbalanceRatio,
+            bool HighFiles,
+            bool HighActiveShards,
+            bool HighImbalance,
+            bool WindowSatisfied)
+        {
+            this.SignalCount = SignalCount;
+            this.TotalSpillFiles = TotalSpillFiles;
+            this.ActiveShards = ActiveShards;
+            this.ImbalanceRatio = ImbalanceRatio;
+            this.HighFiles = HighFiles;
+            this.HighActiveShards = HighActiveShards;
+            this.HighImbalance = HighImbalance;
+            this.WindowSatisfied = WindowSatisfied;
+        }
+
+        public int SignalCount { get; init; }
+        public long TotalSpillFiles { get; init; }
+        public int ActiveShards { get; init; }
+        public double ImbalanceRatio { get; init; }
+        public bool HighFiles { get; init; }
+        public bool HighActiveShards { get; init; }
+        public bool HighImbalance { get; init; }
+        public bool WindowSatisfied { get; init; }
+
         public static SpillPressureSample None { get; } = new(
             SignalCount: 0,
             TotalSpillFiles: 0,
@@ -4217,11 +5003,25 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return lanes;
     }
 
-    private readonly record struct LaneGroupSnapshot(
-        string Name,
-        RedisMultiplexedConnection[] Connections,
-        RedisMultiplexedConnection[] ReadConnections,
-        RedisMultiplexedConnection[] WriteConnections);
+    private readonly record struct LaneGroupSnapshot
+    {
+        public LaneGroupSnapshot(
+            string Name,
+            RedisMultiplexedConnection[] Connections,
+            RedisMultiplexedConnection[] ReadConnections,
+            RedisMultiplexedConnection[] WriteConnections)
+        {
+            this.Name = Name;
+            this.Connections = Connections;
+            this.ReadConnections = ReadConnections;
+            this.WriteConnections = WriteConnections;
+        }
+
+        public string Name { get; init; }
+        public RedisMultiplexedConnection[] Connections { get; init; }
+        public RedisMultiplexedConnection[] ReadConnections { get; init; }
+        public RedisMultiplexedConnection[] WriteConnections { get; init; }
+    }
 
     private static int FillLaneGroupSnapshots(
         LaneGroupSnapshot group,
@@ -4306,62 +5106,286 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int SelectAdjacentLaneIndex(int index, int laneCount)
+    private static int MixLaneSeed(int seed)
     {
-        if ((laneCount & (laneCount - 1)) == 0)
-            return (index + 1) & (laneCount - 1);
+        var x = (uint)seed;
+        x ^= x >> 16;
+        x *= 0x7FEB352D;
+        x ^= x >> 15;
+        x *= 0x846CA68B;
+        x ^= x >> 16;
+        return (int)(x & int.MaxValue);
+    }
 
-        var next = index + 1;
-        return next == laneCount ? 0 : next;
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int SelectSecondLaneIndex(int seed, int firstIndex, int laneCount)
+    {
+        if (laneCount <= 1)
+            return firstIndex;
+
+        // Pick a second lane that is independent from (and never equal to) the first.
+        var mixed = MixLaneSeed(seed ^ unchecked((int)0x9E3779B9));
+        var offset = 1 + SelectLaneIndex(mixed, laneCount - 1); // [1, laneCount-1]
+        if ((laneCount & (laneCount - 1)) == 0)
+            return (firstIndex + offset) & (laneCount - 1);
+
+        var second = firstIndex + offset;
+        return second >= laneCount ? second - laneCount : second;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int SelectThirdLaneIndex(int seed, int firstIndex, int secondIndex, int laneCount)
+    {
+        if (laneCount <= 2)
+            return firstIndex;
+
+        // Map one ordinal in [0, laneCount-3] to an absolute lane index while
+        // skipping the two existing candidates. This guarantees distinct indices.
+        var ordinal = SelectLaneIndex(MixLaneSeed(seed ^ unchecked((int)0x85EBCA6B)), laneCount - 2);
+        var low = Math.Min(firstIndex, secondIndex);
+        var high = Math.Max(firstIndex, secondIndex);
+        if (ordinal >= low)
+            ordinal++;
+        if (ordinal >= high)
+            ordinal++;
+        return ordinal;
+    }
+
+    private enum LaneSelectionProfile : byte
+    {
+        Balanced = 0,
+        Read = 1,
+        Write = 2,
+        Bulk = 3
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsLaneWithinBound(int queueDepth, int inFlight, int maxInFlight, int consecutiveFailures, LaneSelectionProfile profile)
+    {
+        queueDepth = Math.Max(0, queueDepth);
+        inFlight = Math.Max(0, inFlight);
+        maxInFlight = Math.Max(1, maxInFlight);
+        consecutiveFailures = Math.Max(0, consecutiveFailures);
+
+        if (consecutiveFailures >= 3 || inFlight >= maxInFlight)
+            return false;
+
+        int queueBound;
+        int maxInflightPercent;
+        switch (profile)
+        {
+            case LaneSelectionProfile.Read:
+                queueBound = Math.Max(2, maxInFlight / 8);
+                maxInflightPercent = 94;
+                break;
+            case LaneSelectionProfile.Write:
+                queueBound = Math.Max(4, maxInFlight / 4);
+                maxInflightPercent = 96;
+                break;
+            case LaneSelectionProfile.Bulk:
+                queueBound = Math.Max(8, maxInFlight / 2);
+                maxInflightPercent = 98;
+                break;
+            default:
+                queueBound = Math.Max(4, maxInFlight / 3);
+                maxInflightPercent = 95;
+                break;
+        }
+
+        if (queueDepth > queueBound)
+            return false;
+
+        var inFlightPercent = (inFlight * 100) / maxInFlight;
+        return inFlightPercent < maxInflightPercent;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int ComputeLaneSelectionScore(
+        int queueDepth,
+        int inFlight,
+        int maxInFlight,
+        int queueWaitEwmaMicros,
+        int timeoutPenalty,
+        int failurePenalty,
+        int consecutiveFailures,
+        LaneSelectionProfile profile)
+    {
+        queueDepth = Math.Max(0, queueDepth);
+        inFlight = Math.Max(0, inFlight);
+        maxInFlight = Math.Max(1, maxInFlight);
+        queueWaitEwmaMicros = Math.Max(0, queueWaitEwmaMicros);
+        timeoutPenalty = Math.Max(0, timeoutPenalty);
+        failurePenalty = Math.Max(0, failurePenalty);
+        consecutiveFailures = Math.Max(0, consecutiveFailures);
+
+        int queueWeight;
+        int inFlightWeight;
+        int queueWaitWeight;
+        int timeoutWeight;
+        int failureWeight;
+        int consecutiveFailureWeight;
+        int mildSaturationPercent;
+        int strongSaturationPercent;
+        int mildSaturationPenalty;
+        int strongSaturationPenalty;
+        int outOfBoundPenalty;
+
+        switch (profile)
+        {
+            case LaneSelectionProfile.Read:
+                queueWeight = 16;
+                inFlightWeight = 2;
+                queueWaitWeight = 8;
+                timeoutWeight = 3;
+                failureWeight = 3;
+                consecutiveFailureWeight = 320;
+                mildSaturationPercent = 70;
+                strongSaturationPercent = 85;
+                mildSaturationPenalty = 1024;
+                strongSaturationPenalty = 4096;
+                outOfBoundPenalty = 16384;
+                break;
+            case LaneSelectionProfile.Write:
+                queueWeight = 10;
+                inFlightWeight = 4;
+                queueWaitWeight = 6;
+                timeoutWeight = 3;
+                failureWeight = 4;
+                consecutiveFailureWeight = 384;
+                mildSaturationPercent = 75;
+                strongSaturationPercent = 90;
+                mildSaturationPenalty = 768;
+                strongSaturationPenalty = 3072;
+                outOfBoundPenalty = 14336;
+                break;
+            case LaneSelectionProfile.Bulk:
+                queueWeight = 4;
+                inFlightWeight = 7;
+                queueWaitWeight = 3;
+                timeoutWeight = 2;
+                failureWeight = 3;
+                consecutiveFailureWeight = 288;
+                mildSaturationPercent = 80;
+                strongSaturationPercent = 92;
+                mildSaturationPenalty = 512;
+                strongSaturationPenalty = 2048;
+                outOfBoundPenalty = 12288;
+                break;
+            default:
+                queueWeight = 8;
+                inFlightWeight = 4;
+                queueWaitWeight = 5;
+                timeoutWeight = 2;
+                failureWeight = 3;
+                consecutiveFailureWeight = 320;
+                mildSaturationPercent = 75;
+                strongSaturationPercent = 90;
+                mildSaturationPenalty = 768;
+                strongSaturationPenalty = 3072;
+                outOfBoundPenalty = 14336;
+                break;
+        }
+
+        var queueWaitDeciMs = queueWaitEwmaMicros / 100;
+        var score = checked((queueDepth * queueWeight) + (inFlight * inFlightWeight));
+        score = checked(score + (queueWaitDeciMs * queueWaitWeight));
+        score = checked(score + (timeoutPenalty * timeoutWeight));
+        score = checked(score + (failurePenalty * failureWeight));
+        if (consecutiveFailures > 0)
+            score = checked(score + (consecutiveFailures * consecutiveFailureWeight));
+        var inFlightPercent = (inFlight * 100) / maxInFlight;
+        if (inFlightPercent >= strongSaturationPercent)
+            score = checked(score + strongSaturationPenalty);
+        else if (inFlightPercent >= mildSaturationPercent)
+            score = checked(score + mildSaturationPenalty);
+
+        if (!IsLaneWithinBound(queueDepth, inFlight, maxInFlight, consecutiveFailures, profile))
+            score = checked(score + outOfBoundPenalty);
+
+        return score;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int GetLaneSelectionScore(RedisMultiplexedConnection lane, LaneSelectionProfile profile)
+        => ComputeLaneSelectionScore(
+            lane.WriteQueueDepth,
+            lane.InFlightCount,
+            lane.MaxInFlight,
+            lane.QueueWaitEwmaMicros,
+            lane.TimeoutPenalty,
+            lane.FailurePenalty,
+            lane.ConsecutiveFailureCount,
+            profile);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsLaneAdmissible(RedisMultiplexedConnection lane, LaneSelectionProfile profile)
+        => IsLaneWithinBound(
+            lane.WriteQueueDepth,
+            lane.InFlightCount,
+            lane.MaxInFlight,
+            lane.ConsecutiveFailureCount,
+            profile);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool ShouldProbeThirdCandidate(RedisMultiplexedConnection lane, LaneSelectionProfile profile)
+    {
+        if (!IsLaneAdmissible(lane, profile))
+            return true;
+
+        if (lane.TimeoutPenalty >= 192 || lane.FailurePenalty >= 192)
+            return true;
+
+        if (profile == LaneSelectionProfile.Bulk || profile == LaneSelectionProfile.Balanced)
+            return false;
+
+        var queueDepth = lane.WriteQueueDepth;
+        if (queueDepth >= 2)
+            return true;
+
+        var maxInFlight = Math.Max(1, lane.MaxInFlight);
+        var inFlightPercent = (lane.InFlightCount * 100) / maxInFlight;
+        return profile == LaneSelectionProfile.Read
+            ? queueDepth > 0 || inFlightPercent >= 70
+            : inFlightPercent >= 80;
+    }
+
+    private static RedisMultiplexedConnection SelectLane(
+        RedisMultiplexedConnection[] lanes,
+        ref int counter,
+        LaneSelectionProfile profile)
+    {
+        var laneCount = lanes.Length;
+        if (laneCount == 1)
+            return lanes[0];
+
+        var seed = Interlocked.Increment(ref counter) & int.MaxValue;
+        var aIndex = SelectLaneIndex(seed, laneCount);
+        var bIndex = SelectSecondLaneIndex(seed, aIndex, laneCount);
+        var best = ChooseLowerScoreLane(lanes[aIndex], lanes[bIndex], profile);
+
+        if (laneCount <= 2 || !ShouldProbeThirdCandidate(best, profile))
+            return best;
+
+        var cIndex = SelectThirdLaneIndex(seed, aIndex, bIndex, laneCount);
+        return ChooseLowerScoreLane(best, lanes[cIndex], profile);
     }
 
     private RedisMultiplexedConnection Next()
     {
         var conns = _conns;
-        if (conns.Length == 1)
-            return conns[0];
-
-        var idx = Interlocked.Increment(ref _rr) & int.MaxValue;
-        var laneCount = conns.Length;
-        var aIndex = SelectLaneIndex(idx, laneCount);
-        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
-        var a = conns[aIndex];
-        var b = conns[bIndex];
-        return ChooseLowerScoreLane(a, b);
+        return SelectLane(conns, ref _rr, LaneSelectionProfile.Balanced);
     }
 
     private RedisMultiplexedConnection NextRead()
     {
         var readConns = _readConns;
-        var laneCount = readConns.Length;
-        if (laneCount == 1)
-            return readConns[0];
-
-        // Power-of-two choices: pick the less-loaded read lane to reduce tail spikes.
-        var idx = Interlocked.Increment(ref _readRr) & int.MaxValue;
-        var aIndex = SelectLaneIndex(idx, laneCount);
-        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
-        var a = readConns[aIndex];
-        var b = readConns[bIndex];
-
-        return ChooseLowerScoreLane(a, b);
+        return SelectLane(readConns, ref _readRr, LaneSelectionProfile.Read);
     }
 
     private RedisMultiplexedConnection NextWrite()
     {
         var writeConns = _writeConns;
-        var laneCount = writeConns.Length;
-        if (laneCount == 1)
-            return writeConns[0];
-
-        // Power-of-two choices for writes to reduce queue hotspots and p99 tails.
-        var idx = Interlocked.Increment(ref _writeRr) & int.MaxValue;
-        var aIndex = SelectLaneIndex(idx, laneCount);
-        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
-        var a = writeConns[aIndex];
-        var b = writeConns[bIndex];
-
-        return ChooseLowerScoreLane(a, b);
+        return SelectLane(writeConns, ref _writeRr, LaneSelectionProfile.Write);
     }
 
     private RedisMultiplexedConnection NextBulk()
@@ -4369,16 +5393,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         var conns = _bulkConns;
         if (conns.Length == 0)
             return Next();
-        if (conns.Length == 1)
-            return conns[0];
-
-        var idx = Interlocked.Increment(ref _bulkRr) & int.MaxValue;
-        var laneCount = conns.Length;
-        var aIndex = SelectLaneIndex(idx, laneCount);
-        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
-        var a = conns[aIndex];
-        var b = conns[bIndex];
-        return ChooseLowerScoreLane(a, b);
+        return SelectLane(conns, ref _bulkRr, LaneSelectionProfile.Bulk);
     }
 
     private RedisMultiplexedConnection NextBulkRead()
@@ -4387,16 +5402,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         var laneCount = readConns.Length;
         if (laneCount == 0)
             return NextRead();
-        if (laneCount == 1)
-            return readConns[0];
-
-        var idx = Interlocked.Increment(ref _bulkReadRr) & int.MaxValue;
-        var aIndex = SelectLaneIndex(idx, laneCount);
-        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
-        var a = readConns[aIndex];
-        var b = readConns[bIndex];
-
-        return ChooseLowerScoreLane(a, b);
+        return SelectLane(readConns, ref _bulkReadRr, LaneSelectionProfile.Bulk);
     }
 
     private RedisMultiplexedConnection NextBulkWrite()
@@ -4405,28 +5411,27 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         var laneCount = writeConns.Length;
         if (laneCount == 0)
             return NextWrite();
-        if (laneCount == 1)
-            return writeConns[0];
-
-        var idx = Interlocked.Increment(ref _bulkWriteRr) & int.MaxValue;
-        var aIndex = SelectLaneIndex(idx, laneCount);
-        var bIndex = SelectAdjacentLaneIndex(aIndex, laneCount);
-        var a = writeConns[aIndex];
-        var b = writeConns[bIndex];
-
-        return ChooseLowerScoreLane(a, b);
+        return SelectLane(writeConns, ref _bulkWriteRr, LaneSelectionProfile.Bulk);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static RedisMultiplexedConnection ChooseLowerScoreLane(RedisMultiplexedConnection a, RedisMultiplexedConnection b)
+    private static RedisMultiplexedConnection ChooseLowerScoreLane(
+        RedisMultiplexedConnection a,
+        RedisMultiplexedConnection b,
+        LaneSelectionProfile profile)
     {
         if (!a.IsHealthy && b.IsHealthy)
             return b;
         if (!b.IsHealthy && a.IsHealthy)
             return a;
 
-        var aScore = a.GetLaneSelectionScore();
-        var bScore = b.GetLaneSelectionScore();
+        var aAdmissible = IsLaneAdmissible(a, profile);
+        var bAdmissible = IsLaneAdmissible(b, profile);
+        if (aAdmissible != bAdmissible)
+            return aAdmissible ? a : b;
+
+        var aScore = GetLaneSelectionScore(a, profile);
+        var bScore = GetLaneSelectionScore(b, profile);
         return aScore <= bScore ? a : b;
     }
 
@@ -4435,6 +5440,12 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         var runtime = ReadRuntimeConfig();
         return RedisTracing.StartCommand(op, runtime.EnableCommandInstrumentation);
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private CommandStopwatch StartCommandStopwatch()
+        => IsCommandInstrumentationEnabled()
+            ? CommandStopwatch.StartNew()
+            : default;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void RecordCommandCall()
@@ -4455,6 +5466,38 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         if (IsCommandInstrumentationEnabled())
             RedisMetrics.CommandMs.Record(elapsedMs);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void RecordCommandDuration(CommandStopwatch stopwatch)
+    {
+        if (stopwatch.IsActive)
+            RedisMetrics.CommandMs.Record(stopwatch.GetElapsedMilliseconds());
+    }
+
+    private readonly struct CommandStopwatch
+    {
+        private readonly long _startTimestamp;
+
+        private CommandStopwatch(long startTimestamp)
+        {
+            _startTimestamp = startTimestamp;
+        }
+
+        public bool IsActive => _startTimestamp != 0;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static CommandStopwatch StartNew()
+            => new(Stopwatch.GetTimestamp());
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double GetElapsedMilliseconds()
+        {
+            if (_startTimestamp == 0)
+                return 0d;
+
+            return (Stopwatch.GetTimestamp() - _startTimestamp) * 1000d / Stopwatch.Frequency;
+        }
     }
 
     private static bool TryGetJsonSetCachedHeader(
@@ -4515,38 +5558,82 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return false;
     }
 
+    private void PrepareHGetHeader(
+        RedisMultiplexedConnection conn,
+        string key,
+        string field,
+        ref byte[]? rented,
+        out ReadOnlyMemory<byte> header,
+        out byte[]? headerBuffer)
+    {
+        var cached = Volatile.Read(ref _hgetHeaderCache);
+        if (TryGetHGetCachedHeader(cached, key, field, out header))
+        {
+            headerBuffer = null;
+            return;
+        }
+
+        var len = RedisRespProtocol.GetHGetCommandLength(key, field);
+        rented = conn.RentHeaderBuffer(len);
+        var written = RedisRespProtocol.WriteHGetCommand(rented.AsSpan(0, len), key, field);
+        header = rented.AsMemory(0, written);
+        headerBuffer = rented;
+
+        if (cached is not null)
+            return;
+
+        var cacheEntry = new HGetHeaderCacheEntry(key, field, rented, written, isPooled: true);
+        if (Interlocked.CompareExchange(ref _hgetHeaderCache, cacheEntry, null) is null)
+        {
+            header = cacheEntry.Header;
+            headerBuffer = null;
+            rented = null;
+        }
+    }
+
+    private void PrepareHSetHeader(
+        RedisMultiplexedConnection conn,
+        string key,
+        string field,
+        int valueLength,
+        ref byte[]? rented,
+        out ReadOnlyMemory<byte> header,
+        out byte[]? headerBuffer)
+    {
+        var cached = Volatile.Read(ref _hsetHeaderCache);
+        if (TryGetHSetCachedHeader(cached, key, field, valueLength, out header))
+        {
+            headerBuffer = null;
+            return;
+        }
+
+        var len = RedisRespProtocol.GetHSetCommandLength(key, field, valueLength);
+        var headerLen = len - valueLength - 2;
+        rented = conn.RentHeaderBuffer(headerLen);
+        var written = RedisRespProtocol.WriteHSetCommandHeader(rented.AsSpan(0, headerLen), key, field, valueLength);
+        header = rented.AsMemory(0, written);
+        headerBuffer = rented;
+
+        if (cached is not null)
+            return;
+
+        var cacheEntry = new HSetHeaderCacheEntry(key, field, valueLength, rented, written, isPooled: true);
+        if (Interlocked.CompareExchange(ref _hsetHeaderCache, cacheEntry, null) is null)
+        {
+            header = cacheEntry.Header;
+            headerBuffer = null;
+            rented = null;
+        }
+    }
+
     private bool TryQueueHGetLeaseFast(string key, string field, CancellationToken ct, out ValueTask<RedisValueLease> task)
     {
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulkRead();
-            var cached = Volatile.Read(ref _hgetHeaderCache);
-            byte[]? headerBuffer;
-            ReadOnlyMemory<byte> header;
-            if (TryGetHGetCachedHeader(cached, key, field, out header))
-            {
-                headerBuffer = null;
-            }
-            else
-            {
-                var len = RedisRespProtocol.GetHGetCommandLength(key, field);
-                rented = conn.RentHeaderBuffer(len);
-                var written = RedisRespProtocol.WriteHGetCommand(rented.AsSpan(0, len), key, field);
-                header = rented.AsMemory(0, written);
-                headerBuffer = rented;
-
-                if (cached is null)
-                {
-                    var headerCopy = GC.AllocateUninitializedArray<byte>(written);
-                    rented.AsSpan(0, written).CopyTo(headerCopy);
-                    Interlocked.CompareExchange(
-                        ref _hgetHeaderCache,
-                        new HGetHeaderCacheEntry(key, field, headerCopy),
-                        null);
-                }
-            }
+            conn = NextRead();
+            PrepareHGetHeader(conn, key, field, ref rented, out var header, out var headerBuffer);
 
             if (!conn.TryExecuteAsync(
                 header,
@@ -4579,7 +5666,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         try
         {
             var len = RedisRespProtocol.GetGetExCommandLength(key, ttlMs);
-            conn = Next();
+            conn = NextRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteGetExCommand(rented.AsSpan(0, len), key, ttlMs);
             if (!conn.TryExecuteAsync(
@@ -4597,6 +5684,156 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
             rented = null;
             task = MapGetResponseAsync(conn, respTask, "GETEX");
+            return true;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null)
+                conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryQueueGetDiscardFast(string key, CancellationToken ct, out ValueTask<bool> task)
+    {
+        RecordCommandCall();
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            var len = RedisRespProtocol.GetGetCommandLength(key);
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteGetCommand(rented.AsSpan(0, len), key);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapBulkDiscardResponseAsync(conn, respTask, "GET");
+            return true;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null)
+                conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryQueueGetExDiscardFast(string key, int? ttlMs, CancellationToken ct, out ValueTask<bool> task)
+    {
+        RecordCommandCall();
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            var len = RedisRespProtocol.GetGetExCommandLength(key, ttlMs);
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteGetExCommand(rented.AsSpan(0, len), key, ttlMs);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapBulkDiscardResponseAsync(conn, respTask, "GETEX");
+            return true;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null)
+                conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryQueueGetRangeDiscardFast(string key, long start, long end, CancellationToken ct, out ValueTask<bool> task)
+    {
+        RecordCommandCall();
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            var len = RedisRespProtocol.GetGetRangeCommandLength(key, start, end);
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteGetRangeCommand(rented.AsSpan(0, len), key, start, end);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapBulkDiscardResponseAsync(conn, respTask, "GETRANGE");
+            return true;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null)
+                conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryQueueMGetCountFast(string[] keys, CancellationToken ct, out ValueTask<int> task)
+    {
+        RecordCommandCall();
+        if (keys.Length == 0)
+        {
+            task = new ValueTask<int>(0);
+            return true;
+        }
+
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            var len = RedisRespProtocol.GetMGetCommandLength(keys);
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteMGetCommand(rented.AsSpan(0, len), keys);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringArrayCountAllowNulls))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapCountResponseAsync(conn, respTask, "MGET");
             return true;
         }
         finally
@@ -4640,6 +5877,150 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
     }
 
+    private bool TryQueueLIndexDiscardFast(string key, long index, CancellationToken ct, out ValueTask<bool> task)
+    {
+        RecordCommandCall();
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            var len = RedisRespProtocol.GetLIndexCommandLength(key, index);
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteLIndexCommand(rented.AsSpan(0, len), key, index);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapBulkDiscardResponseAsync(conn, respTask, "LINDEX");
+            return true;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null)
+                conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryQueueLRangeCountFast(string key, long start, long stop, CancellationToken ct, out ValueTask<int> task)
+    {
+        RecordCommandCall();
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            var len = RedisRespProtocol.GetLRangeCommandLength(key, start, stop);
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteLRangeCommand(rented.AsSpan(0, len), key, start, stop);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringArrayCountAllowNulls))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapCountResponseAsync(conn, respTask, "LRANGE");
+            return true;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null)
+                conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryQueueLPopDiscardFast(string key, CancellationToken ct, out ValueTask<bool> task)
+    {
+        RecordCommandCall();
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            var len = RedisRespProtocol.GetLPopCommandLength(key);
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteLPopCommand(rented.AsSpan(0, len), key);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapBulkDiscardResponseAsync(conn, respTask, "LPOP");
+            return true;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null)
+                conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryQueueRPopDiscardFast(string key, CancellationToken ct, out ValueTask<bool> task)
+    {
+        RecordCommandCall();
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            var len = RedisRespProtocol.GetRPopCommandLength(key);
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapBulkDiscardResponseAsync(conn, respTask, "RPOP");
+            return true;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null)
+                conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
     private bool TryQueueJsonGetFast(string key, string? path, CancellationToken ct, out ValueTask<byte[]?> task)
     {
         byte[]? rented = null;
@@ -4647,7 +6028,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         try
         {
             var len = RedisRespProtocol.GetJsonGetCommandLength(key, path);
-            conn = Next();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteJsonGetCommand(rented.AsSpan(0, len), key, path);
             if (!conn.TryExecuteAsync(
@@ -4665,6 +6046,118 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
             rented = null;
             task = MapGetResponseAsync(conn, respTask, "JSON.GET");
+            return true;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null)
+                conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryQueueHGetDiscardFast(string key, string field, CancellationToken ct, out ValueTask<bool> task)
+    {
+        RecordCommandCall();
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            PrepareHGetHeader(conn, key, field, ref rented, out var header, out var headerBuffer);
+            if (!conn.TryExecuteAsync(
+                header,
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: headerBuffer,
+                responseMode: RedisResponseMode.BulkStringDiscard))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapBulkDiscardResponseAsync(conn, respTask, "HGET");
+            return true;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null)
+                conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryQueueHMGetCountFast(string key, string[] fields, CancellationToken ct, out ValueTask<int> task)
+    {
+        RecordCommandCall();
+        if (fields.Length == 0)
+        {
+            task = new ValueTask<int>(0);
+            return true;
+        }
+
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            var len = RedisRespProtocol.GetHMGetCommandLength(key, fields);
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteHMGetCommand(rented.AsSpan(0, len), key, fields);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringArrayCountAllowNulls))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapCountResponseAsync(conn, respTask, "HMGET");
+            return true;
+        }
+        finally
+        {
+            if (rented is not null && conn is not null)
+                conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private bool TryQueueSMembersCountFast(string key, CancellationToken ct, out ValueTask<int> task)
+    {
+        RecordCommandCall();
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            var len = RedisRespProtocol.GetSMembersCommandLength(key);
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteSMembersCommand(rented.AsSpan(0, len), key);
+            if (!conn.TryExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                out var respTask,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringArrayCountAllowNulls))
+            {
+                task = default;
+                return false;
+            }
+
+            rented = null;
+            task = MapCountResponseAsync(conn, respTask, "SMEMBERS");
             return true;
         }
         finally
@@ -4714,32 +6207,42 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
     private sealed class HGetHeaderCacheEntry
     {
-        public HGetHeaderCacheEntry(string key, string field, byte[] header)
+        public HGetHeaderCacheEntry(string key, string field, byte[] headerBuffer, int headerLength, bool isPooled)
         {
             Key = key;
             Field = field;
-            Header = header;
+            HeaderBuffer = headerBuffer;
+            HeaderLength = headerLength;
+            IsPooled = isPooled;
         }
 
         public string Key { get; }
         public string Field { get; }
-        public byte[] Header { get; }
+        public byte[] HeaderBuffer { get; }
+        public int HeaderLength { get; }
+        public bool IsPooled { get; }
+        public ReadOnlyMemory<byte> Header => HeaderBuffer.AsMemory(0, HeaderLength);
     }
 
     private sealed class HSetHeaderCacheEntry
     {
-        public HSetHeaderCacheEntry(string key, string field, int valueLength, byte[] header)
+        public HSetHeaderCacheEntry(string key, string field, int valueLength, byte[] headerBuffer, int headerLength, bool isPooled)
         {
             Key = key;
             Field = field;
             ValueLength = valueLength;
-            Header = header;
+            HeaderBuffer = headerBuffer;
+            HeaderLength = headerLength;
+            IsPooled = isPooled;
         }
 
         public string Key { get; }
         public string Field { get; }
         public int ValueLength { get; }
-        public byte[] Header { get; }
+        public byte[] HeaderBuffer { get; }
+        public int HeaderLength { get; }
+        public bool IsPooled { get; }
+        public ReadOnlyMemory<byte> Header => HeaderBuffer.AsMemory(0, HeaderLength);
     }
 
     private static ValueTask<byte[]?> MapGetResponseAsync(ValueTask<RedisRespReader.RespValue> respTask)
@@ -4993,6 +6496,68 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
     }
 
+    private static ValueTask<bool> MapBulkDiscardResponseAsync(
+        RedisMultiplexedConnection conn,
+        ValueTask<RedisRespReader.RespValue> respTask,
+        string op)
+    {
+        if (respTask.IsCompletedSuccessfully)
+        {
+            var resp = respTask.Result;
+            if (resp.Kind == RedisRespReader.RespKind.Error)
+                return new ValueTask<bool>(Task.FromException<bool>(new InvalidOperationException($"Redis error: {resp.Text}")));
+            if (resp.Kind == RedisRespReader.RespKind.NullBulkString)
+                return new ValueTask<bool>(false);
+            if (resp.Kind is RedisRespReader.RespKind.BulkString or RedisRespReader.RespKind.SimpleString)
+            {
+                RedisRespReader.ReturnBuffers(resp);
+                return new ValueTask<bool>(true);
+            }
+
+            return ThrowUnexpectedResponseAndResetAsync<bool>(conn, op, resp, returnBuffers: false);
+        }
+
+        return AwaitMapBulkDiscardResponseAsync(conn, respTask, op);
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<bool> AwaitMapBulkDiscardResponseAsync(
+        RedisMultiplexedConnection conn,
+        ValueTask<RedisRespReader.RespValue> respTask,
+        string op)
+    {
+        var resp = await respTask.ConfigureAwait(false);
+        return await ReadOptionalBulkDiscardResponseAsync(conn, op, resp).ConfigureAwait(false);
+    }
+
+    private static ValueTask<int> MapCountResponseAsync(
+        RedisMultiplexedConnection conn,
+        ValueTask<RedisRespReader.RespValue> respTask,
+        string op)
+    {
+        if (respTask.IsCompletedSuccessfully)
+        {
+            var resp = respTask.Result;
+            if (resp.Kind == RedisRespReader.RespKind.Integer)
+                return new ValueTask<int>(checked((int)resp.IntegerValue));
+            return ThrowUnexpectedResponseAndResetAsync<int>(conn, op, resp);
+        }
+
+        return AwaitMapCountResponseAsync(conn, respTask, op);
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private static async ValueTask<int> AwaitMapCountResponseAsync(
+        RedisMultiplexedConnection conn,
+        ValueTask<RedisRespReader.RespValue> respTask,
+        string op)
+    {
+        var resp = await respTask.ConfigureAwait(false);
+        if (resp.Kind == RedisRespReader.RespKind.Integer)
+            return checked((int)resp.IntegerValue);
+        return await ThrowUnexpectedResponseAndResetAsync<int>(conn, op, resp).ConfigureAwait(false);
+    }
+
     private ValueTask<long> MapIntegerResponseAsync(
         RedisMultiplexedConnection conn,
         ValueTask<RedisRespReader.RespValue> respTask,
@@ -5144,7 +6709,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulkRead();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteLPopCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
@@ -5253,7 +6818,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("RPUSH");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetRPushCommandLength(key, value.Length);
@@ -5282,8 +6847,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5300,7 +6864,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
         using var activity = StartCommandActivity("RPUSH");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var commandPrefixLen = RedisRespProtocol.GetRPushManyPrefixLength(key, count);
@@ -5354,8 +6918,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (headerBuffer is not null && conn is not null) conn.ReturnHeaderBuffer(headerBuffer);
             if (payloadArrayBuffer is not null && conn is not null) conn.ReturnPayloadArray(payloadArrayBuffer);
         }
@@ -5372,11 +6935,27 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return RPopAsyncSlow(key, ct);
     }
 
+    public ValueTask<bool> RPopDiscardAsync(string key, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && TryQueueRPopDiscardFast(key, ct, out var fastTask))
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => RPopDiscardAsyncSlow(key, token),
+                ct);
+        }
+
+        return RPopDiscardAsyncSlow(key, ct);
+    }
+
     private async ValueTask<byte[]?> RPopAsyncSlow(string key, CancellationToken ct)
     {
         using var activity = StartCommandActivity("RPOP");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetRPopCommandLength(key);
@@ -5384,19 +6963,19 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulkWrite();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             var resp = await conn.ExecuteAsync(
                 rented.AsMemory(0, written),
                 payload: ReadOnlyMemory<byte>.Empty,
                 appendCrlf: false,
-                poolBulk: true,
+                poolBulk: false,
                 ct,
                 headerBuffer: rented).ConfigureAwait(false);
             rented = null; // returned by writer
 
-            return await ReadOptionalBytesResponseAsync(conn, "RPOP", resp, copyPooled: true).ConfigureAwait(false);
+            return await ReadOptionalBytesResponseAsync(conn, "RPOP", resp, copyPooled: false).ConfigureAwait(false);
         }
         catch
         {
@@ -5405,8 +6984,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5423,14 +7001,14 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulkWrite();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
                 rented.AsMemory(0, written),
                 payload: ReadOnlyMemory<byte>.Empty,
                 appendCrlf: false,
-                poolBulk: true,
+                poolBulk: false,
                 ct,
                 out var respTask,
                 headerBuffer: rented))
@@ -5469,7 +7047,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("RPOP");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetRPopCommandLength(key);
@@ -5477,7 +7055,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulkWrite();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             var resp = await conn.ExecuteAsync(
@@ -5498,8 +7076,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5515,7 +7092,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulkWrite();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
             if (!conn.TryExecuteAsync(
@@ -5552,7 +7129,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public ValueTask<long> LLenAsync(string key, CancellationToken ct)
     {
         if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryLLenAsync(key, ct, out var fastTask))
-            return fastTask;
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => LLenAsyncSlow(key, token),
+                ct);
+        }
 
         return LLenAsyncSlow(key, ct);
     }
@@ -5561,7 +7146,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("LLEN");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetLLenCommandLength(key);
@@ -5590,8 +7175,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5643,7 +7227,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public ValueTask<long> SAddAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TrySAddAsync(key, member, ct, out var fastTask))
-            return fastTask;
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => SAddAsyncSlow(key, member, token),
+                ct);
+        }
 
         return SAddAsyncSlow(key, member, ct);
     }
@@ -5652,7 +7244,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("SADD");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetSAddCommandLength(key, member.Length);
@@ -5681,8 +7273,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5733,7 +7324,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("SREM");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetSRemCommandLength(key, member.Length);
@@ -5762,8 +7353,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5771,31 +7361,64 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     /// <summary>
     /// Executes value.
     /// </summary>
-    public async ValueTask<bool> SIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
+    public ValueTask<bool> SIsMemberAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TrySIsMemberAsync(key, member, ct, out var fastTask))
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => SIsMemberAsyncSlow(key, member, token),
+                ct);
+        }
+
+        return SIsMemberAsyncSlow(key, member, ct);
+    }
+
+    private async ValueTask<bool> SIsMemberAsyncSlow(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         using var activity = StartCommandActivity("SISMEMBER");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
-
-        var len = RedisRespProtocol.GetSIsMemberCommandLength(key, member.Length);
-        byte[]? rented = null;
-        RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextRead();
-            rented = conn.RentHeaderBuffer(len);
-            var written = RedisRespProtocol.WriteSIsMemberCommand(rented.AsSpan(0, len), key, member.Span);
-            var resp = await conn.ExecuteAsync(
-                rented.AsMemory(0, written),
-                payload: ReadOnlyMemory<byte>.Empty,
-                appendCrlf: false,
-                poolBulk: false,
-                ct,
-                headerBuffer: rented).ConfigureAwait(false);
-            rented = null; // returned by writer
+            for (var attempt = 0; ; attempt++)
+            {
+                var len = RedisRespProtocol.GetSIsMemberCommandLength(key, member.Length);
+                byte[]? rented = null;
+                RedisMultiplexedConnection? conn = null;
+                try
+                {
+                    conn = NextRead();
+                    rented = conn.RentHeaderBuffer(len);
+                    var written = RedisRespProtocol.WriteSIsMemberCommand(rented.AsSpan(0, len), key, member.Span);
+                    var resp = await conn.ExecuteAsync(
+                        rented.AsMemory(0, written),
+                        payload: ReadOnlyMemory<byte>.Empty,
+                        appendCrlf: false,
+                        poolBulk: false,
+                        ct,
+                        headerBuffer: rented).ConfigureAwait(false);
+                    rented = null; // returned by writer
 
-            return resp.Kind == RedisRespReader.RespKind.Integer && resp.IntegerValue == 1;
+                    if (resp.Kind == RedisRespReader.RespKind.Integer)
+                        return resp.IntegerValue == 1;
+
+                    return await ThrowUnexpectedResponseAndResetAsync<bool>(conn, "SISMEMBER", resp).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (attempt == 0 && ShouldRetryRawPathTransient(ex, ct))
+                {
+                    await DelayBeforeRawTransientRetryAsync(ct).ConfigureAwait(false);
+                    continue;
+                }
+                finally
+                {
+                    if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+                }
+            }
         }
         catch
         {
@@ -5804,9 +7427,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
-            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+                        RecordCommandDuration(sw);
         }
     }
 
@@ -5859,7 +7480,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("SMEMBERS");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetSMembersCommandLength(key);
@@ -5920,8 +7541,103 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private async ValueTask<bool> RPopDiscardAsyncSlow(string key, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("RPOP");
+        activity?.SetTag("db.redis.key", key);
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetRPopCommandLength(key);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteRPopCommand(rented.AsSpan(0, len), key);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard).ConfigureAwait(false);
+            rented = null;
+            return await ReadOptionalBulkDiscardResponseAsync(conn, "RPOP", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<int> SMembersCountAsync(string key, CancellationToken ct)
+    {
+        if (!IsCommandInstrumentationEnabled() && TryQueueSMembersCountFast(key, ct, out var fastTask))
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => SMembersCountAsyncSlow(key, token),
+                ct);
+        }
+
+        return SMembersCountAsyncSlow(key, ct);
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<int> SMembersCountAsyncSlow(string key, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("SMEMBERS");
+        activity?.SetTag("db.redis.key", key);
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetSMembersCommandLength(key);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteSMembersCommand(rented.AsSpan(0, len), key);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringArrayCountAllowNulls).ConfigureAwait(false);
+            rented = null; // returned by writer
+            return await ReadBulkArrayCountResponseAsync(conn, "SMEMBERS", resp, allowNullBulkStrings: true).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -5932,7 +7648,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public ValueTask<long> SCardAsync(string key, CancellationToken ct)
     {
         if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TrySCardAsync(key, ct, out var fastTask))
-            return fastTask;
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => SCardAsyncSlow(key, token),
+                ct);
+        }
 
         return SCardAsyncSlow(key, ct);
     }
@@ -5941,7 +7665,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("SCARD");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetSCardCommandLength(key);
@@ -5970,8 +7694,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6023,7 +7746,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public ValueTask<long> ZAddAsync(string key, double score, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryZAddAsync(key, score, member, ct, out var fastTask))
-            return fastTask;
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => ZAddAsyncSlow(key, score, member, token),
+                ct);
+        }
 
         return ZAddAsyncSlow(key, score, member, ct);
     }
@@ -6032,7 +7763,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("ZADD");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var scoreText = FormatDouble(score);
@@ -6062,8 +7793,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6075,7 +7805,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("ZREM");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetZRemCommandLength(key, member.Length);
@@ -6104,8 +7834,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6117,7 +7846,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("ZCARD");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetZCardCommandLength(key);
@@ -6146,8 +7875,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6158,7 +7886,15 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public ValueTask<double?> ZScoreAsync(string key, ReadOnlyMemory<byte> member, CancellationToken ct)
     {
         if (!IsCommandInstrumentationEnabled() && !_clusterRedirectsEnabled && TryZScoreAsync(key, member, ct, out var fastTask))
-            return fastTask;
+        {
+            if (fastTask.IsCompletedSuccessfully)
+                return fastTask;
+
+            return AwaitFastWithTransientFallbackAsync(
+                fastTask,
+                token => ZScoreAsyncSlow(key, member, token),
+                ct);
+        }
 
         return ZScoreAsyncSlow(key, member, ct);
     }
@@ -6167,7 +7903,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("ZSCORE");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetZScoreCommandLength(key, member.Length);
@@ -6196,8 +7932,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6209,7 +7944,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity(descending ? "ZREVRANK" : "ZRANK");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetZRankCommandLength(key, member.Length, descending);
@@ -6243,8 +7978,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6256,7 +7990,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("ZINCRBY");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var incrementText = FormatDouble(increment);
@@ -6288,8 +8022,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6298,7 +8031,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity(descending ? "ZREVRANGE" : "ZRANGE");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetZRangeWithScoresCommandLength(key, start, stop, descending);
@@ -6360,8 +8093,47 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    public async ValueTask<int> ZRangeWithScoresCountAsync(string key, long start, long stop, bool descending, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity(descending ? "ZREVRANGE" : "ZRANGE");
+        activity?.SetTag("db.redis.key", key);
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetZRangeWithScoresCommandLength(key, start, stop, descending);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteZRangeWithScoresCommand(rented.AsSpan(0, len), key, start, stop, descending);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.ZRangeWithScoresCount).ConfigureAwait(false);
+            rented = null;
+
+            return await ReadZRangeCountResponseAsync(conn, "ZRANGE", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6377,7 +8149,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity(descending ? "ZREVRANGEBYSCORE" : "ZRANGEBYSCORE");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var minText = FormatDouble(min);
@@ -6441,8 +8213,56 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    public async ValueTask<int> ZRangeByScoreWithScoresCountAsync(
+        string key,
+        double min,
+        double max,
+        bool descending,
+        long? offset,
+        long? count,
+        CancellationToken ct)
+    {
+        using var activity = StartCommandActivity(descending ? "ZREVRANGEBYSCORE" : "ZRANGEBYSCORE");
+        activity?.SetTag("db.redis.key", key);
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var minText = FormatDouble(min);
+        var maxText = FormatDouble(max);
+        var len = RedisRespProtocol.GetZRangeByScoreWithScoresCommandLength(key, minText, maxText, descending, offset, count);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteZRangeByScoreWithScoresCommand(rented.AsSpan(0, len), key, minText, maxText, descending, offset, count);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.ZRangeWithScoresCount).ConfigureAwait(false);
+            rented = null;
+
+            return await ReadZRangeCountResponseAsync(conn, "ZRANGEBYSCORE", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6460,11 +8280,14 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         return JsonGetAsyncSlow(key, path, ct);
     }
 
+    public ValueTask<bool> JsonGetDiscardAsync(string key, string? path, CancellationToken ct)
+        => JsonGetDiscardAsyncSlow(key, path, ct);
+
     private async ValueTask<byte[]?> JsonGetAsyncSlow(string key, string? path, CancellationToken ct)
     {
         using var activity = StartCommandActivity("JSON.GET");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetJsonGetCommandLength(key, path);
@@ -6472,7 +8295,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteJsonGetCommand(rented.AsSpan(0, len), key, path);
             var resp = await conn.ExecuteAsync(
@@ -6493,8 +8316,45 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    private async ValueTask<bool> JsonGetDiscardAsyncSlow(string key, string? path, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("JSON.GET");
+        activity?.SetTag("db.redis.key", key);
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetJsonGetCommandLength(key, path);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteJsonGetCommand(rented.AsSpan(0, len), key, path);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard).ConfigureAwait(false);
+            rented = null;
+            return await ReadOptionalBulkDiscardResponseAsync(conn, "JSON.GET", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6514,7 +8374,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("JSON.GET");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetJsonGetCommandLength(key, path);
@@ -6522,7 +8382,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulk();
+            conn = NextRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteJsonGetCommand(rented.AsSpan(0, len), key, path);
             var resp = await conn.ExecuteAsync(
@@ -6543,8 +8403,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6560,7 +8419,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = NextBulk();
+            conn = NextRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteJsonGetCommand(rented.AsSpan(0, len), key, path);
             if (!conn.TryExecuteAsync(
@@ -6598,7 +8457,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("JSON.SET");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         path ??= ".";
@@ -6606,7 +8465,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextWrite();
             var cached = Volatile.Read(ref _jsonSetHeaderCache);
             byte[]? headerBuffer;
             ReadOnlyMemory<byte> header;
@@ -6659,8 +8518,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6681,7 +8539,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("JSON.DEL");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetJsonDelCommandLength(key, path);
@@ -6689,7 +8547,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextRead();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteJsonDelCommand(rented.AsSpan(0, len), key, path);
             var resp = await conn.ExecuteAsync(
@@ -6710,8 +8568,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6724,7 +8581,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public async ValueTask<bool> FtCreateAsync(string index, string prefix, string[] fields, CancellationToken ct)
     {
         using var activity = StartCommandActivity("FT.CREATE");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetFtCreateCommandLength(index, prefix, fields);
@@ -6757,8 +8614,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6769,7 +8625,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public async ValueTask<string[]> FtSearchAsync(string index, string query, int? offset, int? count, CancellationToken ct)
     {
         using var activity = StartCommandActivity("FT.SEARCH");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetFtSearchCommandLength(index, query, offset, count);
@@ -6819,8 +8675,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -6988,7 +8843,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("BF.ADD");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetBfAddCommandLength(key, item.Length);
@@ -7017,8 +8872,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -7030,7 +8884,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("BF.EXISTS");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetBfExistsCommandLength(key, item.Length);
@@ -7059,8 +8913,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -7072,7 +8925,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("TS.CREATE");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetTsCreateCommandLength(key);
@@ -7101,8 +8954,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -7114,7 +8966,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("TS.ADD");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var valueText = FormatDouble(value);
@@ -7144,8 +8996,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -7154,7 +9005,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     {
         using var activity = StartCommandActivity("TS.RANGE");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetTsRangeCommandLength(key, from, to);
@@ -7223,8 +9074,47 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    public async ValueTask<long> TsRangeCountAsync(string key, long from, long to, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("TS.RANGE");
+        activity?.SetTag("db.redis.key", key);
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetTsRangeCommandLength(key, from, to);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteTsRangeCommand(rented.AsSpan(0, len), key, from, to);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.TimeSeriesRangeCount).ConfigureAwait(false);
+            rented = null;
+
+            return await ReadIntegerResponseAsync(conn, "TS.RANGE", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -7333,12 +9223,8 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
         using var activity = StartCommandActivity("XADD");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
-
-        var fieldsForLength = new (string Field, int ValueLength)[fields.Length];
-        for (var i = 0; i < fields.Length; i++)
-            fieldsForLength[i] = (fields[i].Field, fields[i].Value.Length);
 
         var len = RedisRespProtocol.GetXAddIdempotentCommandLength(
             key,
@@ -7346,13 +9232,13 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
             idempotentId,
             useAutoIdempotentId,
             entryId,
-            fieldsForLength);
+            fields);
 
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteXAddIdempotentCommand(
                 rented.AsSpan(0, len),
@@ -7396,8 +9282,116 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    public async ValueTask<bool> XAddIdempotentAckAsync(
+        string key,
+        string producerId,
+        string? idempotentId,
+        bool useAutoIdempotentId,
+        string entryId,
+        (string Field, ReadOnlyMemory<byte> Value)[] fields,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(producerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entryId);
+        ArgumentNullException.ThrowIfNull(fields);
+        if (fields.Length == 0)
+            throw new ArgumentException("XADD requires at least one field/value pair.", nameof(fields));
+        if (!useAutoIdempotentId && string.IsNullOrWhiteSpace(idempotentId))
+            throw new ArgumentException("idempotentId is required when useAutoIdempotentId=false.", nameof(idempotentId));
+
+        using var activity = StartCommandActivity("XADD");
+        activity?.SetTag("db.redis.key", key);
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetXAddIdempotentCommandLength(
+            key,
+            producerId,
+            idempotentId,
+            useAutoIdempotentId,
+            entryId,
+            fields);
+
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextWrite();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteXAddIdempotentCommand(
+                rented.AsSpan(0, len),
+                key,
+                producerId,
+                idempotentId,
+                useAutoIdempotentId,
+                entryId,
+                fields);
+
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.BulkStringDiscard).ConfigureAwait(false);
+            rented = null;
+
+            return await ReadBulkOrSimpleAckResponseAsync(conn, "XADD", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
+            if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
+        }
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    public async ValueTask<long> FtSearchCountAsync(string index, string query, int? offset, int? count, CancellationToken ct)
+    {
+        using var activity = StartCommandActivity("FT.SEARCH");
+        var sw = StartCommandStopwatch();
+        RecordCommandCall();
+
+        var len = RedisRespProtocol.GetFtSearchCommandLength(index, query, offset, count);
+        byte[]? rented = null;
+        RedisMultiplexedConnection? conn = null;
+        try
+        {
+            conn = NextRead();
+            rented = conn.RentHeaderBuffer(len);
+            var written = RedisRespProtocol.WriteFtSearchCommand(rented.AsSpan(0, len), index, query, offset, count);
+            var resp = await conn.ExecuteAsync(
+                rented.AsMemory(0, written),
+                payload: ReadOnlyMemory<byte>.Empty,
+                appendCrlf: false,
+                poolBulk: false,
+                ct,
+                headerBuffer: rented,
+                responseMode: RedisResponseMode.FtSearchCount).ConfigureAwait(false);
+            rented = null;
+
+            return await ReadIntegerResponseAsync(conn, "FT.SEARCH", resp).ConfigureAwait(false);
+        }
+        catch
+        {
+            RecordCommandFailure();
+            throw;
+        }
+        finally
+        {
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -7414,7 +9408,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
 
         using var activity = StartCommandActivity("XCFGSET");
         activity?.SetTag("db.redis.key", key);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetXCfgSetIdempotenceCommandLength(key, durationSeconds, maxSize);
@@ -7422,7 +9416,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextWrite();
             rented = conn.RentHeaderBuffer(len);
             var written = RedisRespProtocol.WriteXCfgSetIdempotenceCommand(rented.AsSpan(0, len), key, durationSeconds, maxSize);
             var resp = await conn.ExecuteAsync(
@@ -7434,6 +9428,9 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                 headerBuffer: rented).ConfigureAwait(false);
             rented = null;
 
+            if (resp.Kind == RedisRespReader.RespKind.Integer)
+                return resp.IntegerValue != 0;
+
             return string.Equals(await ReadSimpleStringResponseAsync(conn, "XCFGSET", resp).ConfigureAwait(false), "OK", StringComparison.Ordinal);
         }
         catch
@@ -7443,8 +9440,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -7465,7 +9461,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         var metricsCount = (includeCpu ? 1 : 0) + (includeNet ? 1 : 0);
 
         using var activity = StartCommandActivity("HOTKEYS START");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetHotKeysStartCommandLength(
@@ -7513,8 +9509,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -7522,7 +9517,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public async ValueTask<bool> HotKeysStopAsync(CancellationToken ct)
     {
         using var activity = StartCommandActivity("HOTKEYS STOP");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         RedisMultiplexedConnection? conn = null;
@@ -7550,15 +9545,14 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
         }
     }
 
     public async ValueTask<string[]> HotKeysGetAsync(CancellationToken ct)
     {
         using var activity = StartCommandActivity("HOTKEYS GET");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         RedisMultiplexedConnection? conn = null;
@@ -7594,8 +9588,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
         }
     }
 
@@ -7743,7 +9736,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         CancellationToken ct)
     {
         using var activity = StartCommandActivity(command);
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         var len = RedisRespProtocol.GetScanCommandLength(command, key, cursor, pattern, count);
@@ -7771,8 +9764,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -7988,14 +9980,14 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     public async ValueTask<string> PingAsync(CancellationToken ct)
     {
         using var activity = StartCommandActivity("PING");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         byte[]? rented = null;
         RedisMultiplexedConnection? conn = null;
         try
         {
-            conn = Next();
+            conn = NextRead();
             var cmd = RedisRespProtocol.PingCommand;
             var resp = await conn.ExecuteAsync(
                 cmd,
@@ -8014,8 +10006,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
@@ -8025,8 +10016,12 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
     /// </summary>
     public async ValueTask<string[]> ModuleListAsync(CancellationToken ct)
     {
+        var cached = Volatile.Read(ref _cachedModuleList);
+        if (cached is not null)
+            return cached;
+
         using var activity = StartCommandActivity("MODULE");
-        var sw = Stopwatch.StartNew();
+        var sw = StartCommandStopwatch();
         RecordCommandCall();
 
         byte[]? rented = null;
@@ -8076,6 +10071,7 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
                         }
                     }
 
+                    Volatile.Write(ref _cachedModuleList, result);
                     return result;
                 }
                 catch (InvalidOperationException ex)
@@ -8096,17 +10092,27 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
         finally
         {
-            sw.Stop();
-            RecordCommandDuration(sw.Elapsed.TotalMilliseconds);
+                        RecordCommandDuration(sw);
             if (rented is not null && conn is not null) conn.ReturnHeaderBuffer(rented);
         }
     }
 
-    private sealed record RuntimeConfig(
-        RedisMultiplexerOptions Multiplexer,
-        bool EnableCommandInstrumentation,
-        TimeSpan BulkLaneResponseTimeout)
+    private sealed record RuntimeConfig
     {
+        public RuntimeConfig(
+            RedisMultiplexerOptions Multiplexer,
+            bool EnableCommandInstrumentation,
+            TimeSpan BulkLaneResponseTimeout)
+        {
+            this.Multiplexer = Multiplexer;
+            this.EnableCommandInstrumentation = EnableCommandInstrumentation;
+            this.BulkLaneResponseTimeout = BulkLaneResponseTimeout;
+        }
+
+        public RedisMultiplexerOptions Multiplexer { get; init; }
+        public bool EnableCommandInstrumentation { get; init; }
+        public TimeSpan BulkLaneResponseTimeout { get; init; }
+
         public static RuntimeConfig Empty { get; } = new(
             new RedisMultiplexerOptions(),
             EnableCommandInstrumentation: false,

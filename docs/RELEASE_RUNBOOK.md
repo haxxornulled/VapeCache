@@ -7,6 +7,8 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 - branch is `main`
 - required checks are green
 - release version is already set in packable projects
+  - recommended path: `./tools/bump-package-versions.ps1 -PackageVersion <package-version>`
+- package packing is intentionally serialized by default (`-MaxCpuCount 1`) to keep release artifacts deterministic across the current project-reference graph
 - no unresolved P0 issues
 
 ## Required Access
@@ -27,7 +29,8 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 Preferred one-command path:
 
 ```powershell
-./tools/release-orchestrator.ps1 -Configuration Release -PackageVersion 1.2.10
+./tools/bump-package-versions.ps1 -PackageVersion <package-version>
+./tools/release-orchestrator.ps1 -Configuration Release -PackageVersion <package-version>
 ```
 
 GitHub Actions options:
@@ -43,6 +46,7 @@ Use `tools/release-orchestrator.ps1` as the primary entry point.
 The other scripts support a narrower part of the same release flow:
 
 - `tools/release-orchestrator.ps1`: full OSS release flow, including remote sync, pack, smoke, publish, tags, and GitHub releases
+- `tools/bump-package-versions.ps1`: updates all packable OSS package versions in one pass before release orchestration
 - `tools/release-check.ps1`: restore, build, tests, optional audits, and package smoke validation
 - `tools/pack-release-packages.ps1`: produce release `.nupkg` artifacts
 - `tools/publish-release-packages.ps1`: publish an already-packed artifact set to a package feed
@@ -60,19 +64,23 @@ This split is intentional:
    - `git fetch origin --tags`
    - `git fetch oss --tags`
    - `git status`
-2. Run release verification:
+2. Bump package versions in one pass:
+   - `./tools/bump-package-versions.ps1 -PackageVersion <package-version>`
+3. Run release verification:
    - `./tools/release-check.ps1 -Configuration Release`
-3. Pack release artifacts:
-   - `./tools/pack-release-packages.ps1 -Configuration Release -PackageVersion 1.2.9`
-4. Publish to NuGet.org:
+4. Pack release artifacts:
+   - `./tools/pack-release-packages.ps1 -Configuration Release -PackageVersion <package-version>`
+   - if restore must come from an explicit cache or mirror, pass one or more `-RestoreSource` values and optionally `-IgnoreFailedRestoreSources`
+   - example: `./tools/pack-release-packages.ps1 -Configuration Release -PackageVersion <package-version> -RestoreSource "$HOME\.nuget\packages" -IgnoreFailedRestoreSources`
+5. Publish to NuGet.org:
    - set `NUGET_API_KEY` in the shell or pass `-ApiKey`
-   - `./tools/publish-release-packages.ps1 -PackageVersion 1.2.9`
+   - `./tools/publish-release-packages.ps1 -PackageVersion <package-version>`
    - if you receive HTTP 403, verify the key is valid and has owner/package permissions for every `VapeCache.*` package
-5. Publish to GitHub Packages:
+6. Publish to GitHub Packages:
    - set `GITHUB_PACKAGES_TOKEN` (or `GITHUB_TOKEN`) in the shell
-   - `./tools/publish-release-packages.ps1 -PackageVersion 1.2.9 -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $env:GITHUB_PACKAGES_TOKEN`
+   - `./tools/publish-release-packages.ps1 -PackageVersion <package-version> -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $env:GITHUB_PACKAGES_TOKEN`
    - if you receive HTTP 403, verify token scopes include `write:packages`
-6. Verify push logs (both feeds) include all OSS package IDs:
+7. Verify push logs (both feeds) include all OSS package IDs:
    - `VapeCache.Core`
    - `VapeCache.Abstractions`
    - `VapeCache.Features.Invalidation`
@@ -86,8 +94,8 @@ This split is intentional:
    - `VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry`
    - `VapeCache.Extensions.AspNetCore`
    - `VapeCache.Extensions.Aspire`
-7. Push the release commit/tag to the public OSS repo.
-8. Verify consumer install from nuget.org and GitHub Packages.
+8. Push the release commit/tag to the public OSS repo.
+9. Verify consumer install from nuget.org and GitHub Packages.
 
 ## Post-Release Verification
 

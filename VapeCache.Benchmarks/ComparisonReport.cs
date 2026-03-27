@@ -9,25 +9,69 @@ internal enum ComparisonClient
     VapeCache = 2
 }
 
-internal sealed record ComparisonSample(
-    string Suite,
-    string Scenario,
-    string Parameters,
-    ComparisonClient Client,
-    double MeanMicroseconds,
-    long AllocatedBytesPerOperation);
+internal sealed record ComparisonSample
+{
+    public ComparisonSample(
+        string Suite,
+        string Scenario,
+        string Parameters,
+        ComparisonClient Client,
+        double MeanMicroseconds,
+        long AllocatedBytesPerOperation)
+    {
+        this.Suite = Suite;
+        this.Scenario = Scenario;
+        this.Parameters = Parameters;
+        this.Client = Client;
+        this.MeanMicroseconds = MeanMicroseconds;
+        this.AllocatedBytesPerOperation = AllocatedBytesPerOperation;
+    }
 
-internal sealed record ComparisonRow(
-    string Suite,
-    string Scenario,
-    string Parameters,
-    double StackExchangeMeanMicroseconds,
-    double VapeCacheMeanMicroseconds,
-    long StackExchangeAllocatedBytesPerOperation,
-    long VapeCacheAllocatedBytesPerOperation,
-    double RatioVapeToStackExchange,
-    double DeltaPercent,
-    string Winner);
+    public string Suite { get; init; }
+    public string Scenario { get; init; }
+    public string Parameters { get; init; }
+    public ComparisonClient Client { get; init; }
+    public double MeanMicroseconds { get; init; }
+    public long AllocatedBytesPerOperation { get; init; }
+}
+
+internal sealed record ComparisonRow
+{
+    public ComparisonRow(
+        string Suite,
+        string Scenario,
+        string Parameters,
+        double StackExchangeMeanMicroseconds,
+        double VapeCacheMeanMicroseconds,
+        long StackExchangeAllocatedBytesPerOperation,
+        long VapeCacheAllocatedBytesPerOperation,
+        double RatioVapeToStackExchange,
+        double DeltaPercent,
+        string Winner)
+    {
+        this.Suite = Suite;
+        this.Scenario = Scenario;
+        this.Parameters = Parameters;
+        this.StackExchangeMeanMicroseconds = StackExchangeMeanMicroseconds;
+        this.VapeCacheMeanMicroseconds = VapeCacheMeanMicroseconds;
+        this.StackExchangeAllocatedBytesPerOperation = StackExchangeAllocatedBytesPerOperation;
+        this.VapeCacheAllocatedBytesPerOperation = VapeCacheAllocatedBytesPerOperation;
+        this.RatioVapeToStackExchange = RatioVapeToStackExchange;
+        this.DeltaPercent = DeltaPercent;
+        this.Winner = Winner;
+    }
+
+    public string Suite { get; init; }
+    public string Scenario { get; init; }
+    public string Parameters { get; init; }
+    public double StackExchangeMeanMicroseconds { get; init; }
+    public double VapeCacheMeanMicroseconds { get; init; }
+    public long StackExchangeAllocatedBytesPerOperation { get; init; }
+    public long VapeCacheAllocatedBytesPerOperation { get; init; }
+    public double RatioVapeToStackExchange { get; init; }
+    public double DeltaPercent { get; init; }
+    public string Winner { get; init; }
+}
 
 internal static class ComparisonReport
 {

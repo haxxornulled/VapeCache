@@ -665,16 +665,57 @@ public static class RedisTelemetry
         }
     }
 
-    internal readonly record struct QueueDepthSnapshot(int Writes, int Pending, int WritesCapacity, int PendingCapacity);
-    internal readonly record struct MuxLaneUsageSnapshot(
-        long BytesSent,
-        long BytesReceived,
-        long Operations,
-        long Failures,
-        long Responses,
-        long OrphanedResponses,
-        long ResponseSequenceMismatches,
-        long TransportResets,
-        int InFlight,
-        int MaxInFlight);
+    internal readonly record struct QueueDepthSnapshot
+    {
+        public QueueDepthSnapshot(int Writes, int Pending, int WritesCapacity, int PendingCapacity)
+        {
+            this.Writes = Writes;
+            this.Pending = Pending;
+            this.WritesCapacity = WritesCapacity;
+            this.PendingCapacity = PendingCapacity;
+        }
+
+        public int Writes { get; init; }
+        public int Pending { get; init; }
+        public int WritesCapacity { get; init; }
+        public int PendingCapacity { get; init; }
+    }
+
+    internal readonly record struct MuxLaneUsageSnapshot
+    {
+        public MuxLaneUsageSnapshot(
+            long BytesSent,
+            long BytesReceived,
+            long Operations,
+            long Failures,
+            long Responses,
+            long OrphanedResponses,
+            long ResponseSequenceMismatches,
+            long TransportResets,
+            int InFlight,
+            int MaxInFlight)
+        {
+            this.BytesSent = BytesSent;
+            this.BytesReceived = BytesReceived;
+            this.Operations = Operations;
+            this.Failures = Failures;
+            this.Responses = Responses;
+            this.OrphanedResponses = OrphanedResponses;
+            this.ResponseSequenceMismatches = ResponseSequenceMismatches;
+            this.TransportResets = TransportResets;
+            this.InFlight = InFlight;
+            this.MaxInFlight = MaxInFlight;
+        }
+
+        public long BytesSent { get; init; }
+        public long BytesReceived { get; init; }
+        public long Operations { get; init; }
+        public long Failures { get; init; }
+        public long Responses { get; init; }
+        public long OrphanedResponses { get; init; }
+        public long ResponseSequenceMismatches { get; init; }
+        public long TransportResets { get; init; }
+        public int InFlight { get; init; }
+        public int MaxInFlight { get; init; }
+    }
 }

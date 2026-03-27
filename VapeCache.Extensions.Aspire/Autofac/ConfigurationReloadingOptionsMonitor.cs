@@ -114,12 +114,18 @@ internal sealed class ConfigurationReloadingOptionsMonitor<T> : IOptions<T>, IOp
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
-    private sealed class Subscription(
-        ConfigurationReloadingOptionsMonitor<T> owner,
-        Action<T, string?> listener) : IDisposable
+    private sealed class Subscription : IDisposable
     {
-        private ConfigurationReloadingOptionsMonitor<T>? _owner = owner;
-        private Action<T, string?>? _listener = listener;
+        private ConfigurationReloadingOptionsMonitor<T>? _owner;
+        private Action<T, string?>? _listener;
+
+        public Subscription(
+            ConfigurationReloadingOptionsMonitor<T> owner,
+            Action<T, string?> listener)
+        {
+            _owner = owner;
+            _listener = listener;
+        }
 
         public void Dispose()
         {

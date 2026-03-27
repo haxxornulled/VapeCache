@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.Logging</PackageId>
     <Title>VapeCache Extensions for Logging</Title>
-    <Version>1.2.15</Version>
+    <Version>1.2.16</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.Logging</Product>
@@ -23,7 +23,7 @@
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
-    <PackageReleaseNotes>1.2.10 release: extracted enterprise-grade Serilog + OTEL logging wiring into a dedicated package with optional rolling file sink support.</PackageReleaseNotes>
+    <PackageReleaseNotes>See GitHub releases and docs/UPGRADE_NOTES.md for release-specific notes.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
   </PropertyGroup>
@@ -45,4 +45,5 @@
     <PackageReference Include="Serilog.Sinks.Seq" Version="9.0.0" />
   </ItemGroup>
 </Project>
+
 

@@ -30,7 +30,7 @@ If you are using Redis ACL:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-pos-search-demo.ps1 `
-  -RedisHost 192.168.100.50 `
+  -RedisHost redis.example.internal `
   -RedisPort 6379 `
   -RedisUsername admin `
   -RedisPassword "your-password" `
@@ -50,7 +50,7 @@ Use the load runner to simulate many cashiers hitting a hot product first (for e
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-pos-search-load.ps1 `
-  -RedisHost 192.168.100.50 `
+  -RedisHost redis.example.internal `
   -RedisPort 6379 `
   -RedisUsername admin `
   -RedisPassword "your-password" `
@@ -74,7 +74,7 @@ Use auto-ramp to run multiple target rates in sequence and stop at the first uns
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-pos-search-load.ps1 `
-  -RedisHost 192.168.100.50 `
+  -RedisHost redis.example.internal `
   -RedisPort 6379 `
   -RedisUsername admin `
   -RedisPassword "your-password" `

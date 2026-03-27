@@ -626,32 +626,86 @@ internal sealed partial class SegmentedLogSpillStore : IInMemorySpillStore, ISpi
         return Crc32.HashToUInt32(data);
     }
 
-    private readonly record struct AppendResult(
-        int SegmentId,
-        long Offset,
-        int RecordLength);
-
-    private readonly record struct SegmentReservation(
-        SegmentState Segment,
-        long Offset);
-
-    private readonly record struct SpillLocation(
-        int SegmentId,
-        long Offset,
-        int PayloadLength,
-        byte Flags,
-        uint Crc32,
-        int RecordLength);
-
-    internal sealed record Settings(
-        long DefaultSegmentSizeBytes,
-        TimeSpan MaintenanceInterval,
-        double CompactWhenDeadRatioAtLeast,
-        TimeSpan DeleteRetiredSegmentAfter,
-        int MaxCompactionMovesPerCycle,
-        bool ValidatePayloadCrcOnRead = true,
-        bool ValidatePayloadCrcOnCompactionRead = true)
+    private readonly record struct AppendResult
     {
+        public AppendResult(int SegmentId, long Offset, int RecordLength)
+        {
+            this.SegmentId = SegmentId;
+            this.Offset = Offset;
+            this.RecordLength = RecordLength;
+        }
+
+        public int SegmentId { get; init; }
+        public long Offset { get; init; }
+        public int RecordLength { get; init; }
+    }
+
+    private readonly record struct SegmentReservation
+    {
+        public SegmentReservation(SegmentState Segment, long Offset)
+        {
+            this.Segment = Segment;
+            this.Offset = Offset;
+        }
+
+        public SegmentState Segment { get; init; }
+        public long Offset { get; init; }
+    }
+
+    private readonly record struct SpillLocation
+    {
+        public SpillLocation(
+            int SegmentId,
+            long Offset,
+            int PayloadLength,
+            byte Flags,
+            uint Crc32,
+            int RecordLength)
+        {
+            this.SegmentId = SegmentId;
+            this.Offset = Offset;
+            this.PayloadLength = PayloadLength;
+            this.Flags = Flags;
+            this.Crc32 = Crc32;
+            this.RecordLength = RecordLength;
+        }
+
+        public int SegmentId { get; init; }
+        public long Offset { get; init; }
+        public int PayloadLength { get; init; }
+        public byte Flags { get; init; }
+        public uint Crc32 { get; init; }
+        public int RecordLength { get; init; }
+    }
+
+    internal sealed record Settings
+    {
+        public Settings(
+            long DefaultSegmentSizeBytes,
+            TimeSpan MaintenanceInterval,
+            double CompactWhenDeadRatioAtLeast,
+            TimeSpan DeleteRetiredSegmentAfter,
+            int MaxCompactionMovesPerCycle,
+            bool ValidatePayloadCrcOnRead = true,
+            bool ValidatePayloadCrcOnCompactionRead = true)
+        {
+            this.DefaultSegmentSizeBytes = DefaultSegmentSizeBytes;
+            this.MaintenanceInterval = MaintenanceInterval;
+            this.CompactWhenDeadRatioAtLeast = CompactWhenDeadRatioAtLeast;
+            this.DeleteRetiredSegmentAfter = DeleteRetiredSegmentAfter;
+            this.MaxCompactionMovesPerCycle = MaxCompactionMovesPerCycle;
+            this.ValidatePayloadCrcOnRead = ValidatePayloadCrcOnRead;
+            this.ValidatePayloadCrcOnCompactionRead = ValidatePayloadCrcOnCompactionRead;
+        }
+
+        public long DefaultSegmentSizeBytes { get; init; }
+        public TimeSpan MaintenanceInterval { get; init; }
+        public double CompactWhenDeadRatioAtLeast { get; init; }
+        public TimeSpan DeleteRetiredSegmentAfter { get; init; }
+        public int MaxCompactionMovesPerCycle { get; init; }
+        public bool ValidatePayloadCrcOnRead { get; init; }
+        public bool ValidatePayloadCrcOnCompactionRead { get; init; }
+
         public static readonly Settings Default = new(
             DefaultSegmentSizeBytes: 128L * 1024L * 1024L,
             MaintenanceInterval: TimeSpan.FromMinutes(1),

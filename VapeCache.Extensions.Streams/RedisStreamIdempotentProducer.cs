@@ -4,10 +4,19 @@ using VapeCache.Guards;
 
 namespace VapeCache.Extensions.Streams;
 
-internal sealed class RedisStreamIdempotentProducer(
-    IRedisCommandExecutor redis,
-    IOptionsMonitor<RedisStreamIdempotentProducerOptions> options) : IRedisStreamIdempotentProducer
+internal sealed class RedisStreamIdempotentProducer : IRedisStreamIdempotentProducer
 {
+    private readonly IRedisCommandExecutor redis;
+    private readonly IOptionsMonitor<RedisStreamIdempotentProducerOptions> options;
+
+    public RedisStreamIdempotentProducer(
+        IRedisCommandExecutor redis,
+        IOptionsMonitor<RedisStreamIdempotentProducerOptions> options)
+    {
+        this.redis = redis;
+        this.options = options;
+    }
+
     public ValueTask<string> PublishAsync(
         string key,
         string producerId,

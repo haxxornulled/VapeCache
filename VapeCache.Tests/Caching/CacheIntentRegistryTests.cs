@@ -51,8 +51,15 @@ public sealed class CacheIntentRegistryTests
         Assert.Contains(recent, static entry => entry.Key == "active:key");
     }
 
-    private sealed class TestOptionsMonitor<T>(T current) : IOptionsMonitor<T>
+    private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
     {
+        private readonly T current;
+
+        public TestOptionsMonitor(T current)
+        {
+            this.current = current;
+        }
+
         public T CurrentValue => current;
         public T Get(string? name) => current;
         public IDisposable OnChange(Action<T, string?> listener) => NoopDisposable.Instance;

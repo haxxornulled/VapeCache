@@ -8,11 +8,15 @@ namespace VapeCache.Application.Caching.Invalidation.Handlers;
 /// <summary>
 /// Publishes generic entity cache invalidation commands as domain invalidation events.
 /// </summary>
-public sealed class InvalidateEntityCacheCommandHandler(
-    ICacheInvalidationEventPublisher publisher)
+public sealed class InvalidateEntityCacheCommandHandler
     : ICommandHandler<InvalidateEntityCacheCommand, CacheInvalidationExecutionResult>
 {
-    private readonly ICacheInvalidationEventPublisher _publisher = publisher;
+    private readonly ICacheInvalidationEventPublisher _publisher;
+
+    public InvalidateEntityCacheCommandHandler(ICacheInvalidationEventPublisher publisher)
+    {
+        _publisher = publisher;
+    }
 
     /// <summary>
     /// Executes handle async.

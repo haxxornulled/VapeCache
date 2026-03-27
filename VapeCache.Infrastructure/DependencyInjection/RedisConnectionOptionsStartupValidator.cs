@@ -5,13 +5,22 @@ using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Infrastructure.DependencyInjection;
 
-internal sealed class RedisConnectionOptionsStartupValidator(
-    IOptionsMonitor<RedisConnectionOptions> options,
-    RedisConnectionOptionsValidator validator) : IStartable
+internal sealed class RedisConnectionOptionsStartupValidator : IStartable
 {
+    private readonly IOptionsMonitor<RedisConnectionOptions> _options;
+    private readonly RedisConnectionOptionsValidator _validator;
+
+    public RedisConnectionOptionsStartupValidator(
+        IOptionsMonitor<RedisConnectionOptions> options,
+        RedisConnectionOptionsValidator validator)
+    {
+        _options = options;
+        _validator = validator;
+    }
+
     public void Start()
     {
-        var result = validator.Validate(Options.DefaultName, options.CurrentValue);
+        var result = _validator.Validate(Options.DefaultName, _options.CurrentValue);
         if (!result.Failed)
             return;
 

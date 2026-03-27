@@ -203,9 +203,14 @@ public class SpillStoreBenchmarks
     private static int NextIndex(ref int cursor, int length)
         => (Interlocked.Increment(ref cursor) & int.MaxValue) % length;
 
-    private sealed class ScatterFileSpillStore(string rootDirectory) : IInMemorySpillStore, IAsyncDisposable
+    private sealed class ScatterFileSpillStore : IInMemorySpillStore, IAsyncDisposable
     {
-        private readonly string _rootDirectory = rootDirectory;
+        private readonly string _rootDirectory;
+
+        public ScatterFileSpillStore(string rootDirectory)
+        {
+            _rootDirectory = rootDirectory;
+        }
 
         public ValueTask WriteAsync(Guid spillRef, ReadOnlyMemory<byte> data, CancellationToken ct)
         {

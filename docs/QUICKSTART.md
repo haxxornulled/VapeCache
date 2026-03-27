@@ -72,6 +72,10 @@ Equivalent environment variable:
 setx VAPECACHE_REDIS_CONNECTIONSTRING "redis://localhost:6379/0"
 ```
 
+The console host, direct UI run, and AppHost/Aspire wiring all honor that same
+`VAPECACHE_REDIS_CONNECTIONSTRING` value. When running under Aspire, `ConnectionStrings:redis`
+is also picked up automatically.
+
 If you build Redis URIs in code, use the runtime builder (don’t manually concatenate strings):
 
 ```csharp

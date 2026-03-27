@@ -72,8 +72,15 @@ public sealed class InMemoryCacheServiceEnterpriseGateTests
         Assert.Equal(payload, fetched);
     }
 
-    private sealed class TestEnterpriseFeatureGate(bool spillLicensed) : IEnterpriseFeatureGate
+    private sealed class TestEnterpriseFeatureGate : IEnterpriseFeatureGate
     {
+        private readonly bool spillLicensed;
+
+        public TestEnterpriseFeatureGate(bool spillLicensed)
+        {
+            this.spillLicensed = spillLicensed;
+        }
+
         public bool IsAutoscalerLicensed => false;
         public bool IsDurableSpillLicensed => spillLicensed;
         public bool IsReconciliationLicensed => false;

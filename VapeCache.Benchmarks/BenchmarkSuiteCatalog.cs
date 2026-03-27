@@ -330,18 +330,46 @@ public enum BenchmarkSuiteAudience
     Comparison = 2
 }
 
-public sealed record BenchmarkSuiteDefinition(
-    string Key,
-    BenchmarkSuiteAudience Audience,
-    string Description,
-    string[] Filters,
-    KeyValuePair<string, string>[] EnvironmentDefaults)
+public sealed record BenchmarkSuiteDefinition
 {
+    public BenchmarkSuiteDefinition(
+        string key,
+        BenchmarkSuiteAudience audience,
+        string description,
+        string[] filters,
+        KeyValuePair<string, string>[] environmentDefaults)
+    {
+        Key = key;
+        Audience = audience;
+        Description = description;
+        Filters = filters;
+        EnvironmentDefaults = environmentDefaults;
+    }
+
+    public string Key { get; init; }
+    public BenchmarkSuiteAudience Audience { get; init; }
+    public string Description { get; init; }
+    public string[] Filters { get; init; }
+    public KeyValuePair<string, string>[] EnvironmentDefaults { get; init; }
     public string DisplayName => $"{Audience}: {Key}";
 }
 
-public sealed record BenchmarkInvocationPlan(
-    string DisplayName,
-    string ReportAudience,
-    string[] Arguments,
-    KeyValuePair<string, string>[] EnvironmentDefaults);
+public sealed record BenchmarkInvocationPlan
+{
+    public BenchmarkInvocationPlan(
+        string displayName,
+        string reportAudience,
+        string[] arguments,
+        KeyValuePair<string, string>[] environmentDefaults)
+    {
+        DisplayName = displayName;
+        ReportAudience = reportAudience;
+        Arguments = arguments;
+        EnvironmentDefaults = environmentDefaults;
+    }
+
+    public string DisplayName { get; init; }
+    public string ReportAudience { get; init; }
+    public string[] Arguments { get; init; }
+    public KeyValuePair<string, string>[] EnvironmentDefaults { get; init; }
+}

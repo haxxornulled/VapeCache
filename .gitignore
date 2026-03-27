@@ -60,6 +60,9 @@ tmp/
 .tmp/
 artifacts/
 /.dotnet/
+/.dotnet-home/
+/.dotnet-local/
+/.nuget-packages/
 /Codex/
 **/TestResults/
 tools/VapeCache.DocCommenter/

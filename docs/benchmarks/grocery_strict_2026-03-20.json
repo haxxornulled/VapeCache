@@ -1,0 +1,48 @@
+﻿{
+    "TrackSummaries":  [
+                           {
+                               "Track":  "ApplesToApples",
+                               "Trials":  2,
+                               "VapeMedian":  6179,
+                               "SerMedian":  6677,
+                               "ThroughputRatioMedian":  0.925,
+                               "ThroughputRatioOfMedians":  0.925,
+                               "ThroughputRatioCoV":  4.9,
+                               "ThroughputRatioSpread":  "0.893 .. 0.957",
+                               "P50RatioMedian":  1.06,
+                               "P95RatioMedian":  1.227,
+                               "P99RatioMedian":  1.038,
+                               "AllocRatioMedian":  NaN
+                           },
+                           {
+                               "Track":  "OptimizedProductPath",
+                               "Trials":  2,
+                               "VapeMedian":  11117,
+                               "SerMedian":  6308,
+                               "ThroughputRatioMedian":  1.762,
+                               "ThroughputRatioOfMedians":  1.762,
+                               "ThroughputRatioCoV":  2.8,
+                               "ThroughputRatioSpread":  "1.727 .. 1.796",
+                               "P50RatioMedian":  0.554,
+                               "P95RatioMedian":  0.628,
+                               "P99RatioMedian":  0.657,
+                               "AllocRatioMedian":  0.413
+                           }
+                       ],
+    "Trials":  2,
+    "Track":  "both",
+    "GeneratedUtc":  "2026-03-21T03:14:47.1729045Z",
+    "AllocRatioMedian":  0.413,
+    "P50RatioMedian":  0.554,
+    "ThroughputRatioMedian":  1.762,
+    "P95RatioMedian":  0.628,
+    "Gates":  {
+                  "MaxP50Ratio":  1.25,
+                  "EnforceMetricGates":  true,
+                  "MaxAllocRatio":  1.4,
+                  "MaxP99Ratio":  1.35,
+                  "MaxP95Ratio":  1.3,
+                  "ThroughputMin":  1
+              },
+    "P99RatioMedian":  0.657
+}

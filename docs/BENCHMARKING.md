@@ -45,6 +45,17 @@ powershell -ExecutionPolicy Bypass -File tools/run-head-to-head-benchmarks.ps1 -
 
 `fair` mode disables instrumentation overhead for apples-to-apples client benchmarking.
 
+Strict/fair baseline defaults (when `-DisableTrackDefaults` is used and no explicit overrides are passed):
+- `MaxDegree=6`
+- `MuxConnections=1`
+- `MuxAdaptiveCoalescing=false`
+- `CleanupRunKeys=false`
+
+Remote endpoint auth requirement:
+- Non-local Redis targets now require ACL authentication.
+- For `tools/run-grocery-head-to-head.ps1`, provide both `-RedisUsername` and `-RedisPassword` when `-RedisHost` is not local.
+- For `tools/run-head-to-head-benchmarks.ps1`, set `VAPECACHE_REDIS_USERNAME` and `VAPECACHE_REDIS_PASSWORD` (or a credentialed `VAPECACHE_REDIS_CONNECTIONSTRING`) for non-local targets.
+
 Strict/fair grocery report command:
 
 ```powershell
@@ -52,8 +63,13 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -Trials 5 `
   -Track both `
   -DisableTrackDefaults `
+  -CleanupRunKeys false `
   -ShopperCount 50000 `
   -MaxCartSize 40 `
+  -RedisHost benchmark-redis.example.internal `
+  -RedisPort 6379 `
+  -RedisUsername admin `
+  -RedisPassword <redacted> `
   -FailBelowRatio 1.0
 ```
 
@@ -74,6 +90,25 @@ Hybrid hot-path guardrail knobs:
 - `-HybridAdmissionGate true|false`
 - `-HybridAdmissionLimit <int>`
 - `-HybridAdmissionWaitMs <int>`
+- `-HybridMirrorWrites true|false`
+- `-HybridWarmReadFallback true|false`
+- `-HybridRemoveStaleFallbackOnMiss true|false`
+
+Healthy Redis hybrid validation policy:
+- When benchmarking hybrid healthy-path performance, keep `HybridFastPath=true`.
+- Disable fallback warm/mirror work unless you are explicitly validating failover continuity.
+- Keep command instrumentation off for fair client/runtime comparisons. This pass found that always-on per-command timing materially distorts hybrid results.
+
+Per-shopper command-matrix requirement:
+- Grocery command coverage is not a partial smoke test. Each shopper must exercise Strings, Hashes, Lists, Sets, Sorted Sets, tag invalidation, and any capability-gated modules/types available on the target Redis instance.
+- On Redis 8.6+ targets, each shopper must also execute the stream idempotence path (`XADD` with `IDMP`/`IDMPAUTO` semantics plus `XCFGSET`).
+- When a target does not expose RedisJSON/RediSearch/RedisBloom/RedisTimeSeries, those commands should be reported as optional skips rather than silently removed from the benchmark story.
+
+Current optimized hybrid validation snapshot (`2026-03-21`):
+- Target: remote Redis `benchmark-redis.example.internal:6379` with ACL auth, optimized track, `ShopperCount=1000`, `MaxCartSize=35`.
+- Median-of-3 result after the command stopwatch removal pass: throughput ratio `1.002`, allocation ratio `1.371`, latency ratios `p50=0.981`, `p95=1.006`, `p99=1.037`.
+- Artifact: `artifacts/benchmarks/hybrid-optimized-no-command-stopwatch-3trial.json`
+- Caveat: the harness still flagged the environment as noisy (`CoV > 8%`), so use an isolated Redis target and a quieter client host before publishing a stronger external claim.
 
 Track defaults (when `-DisableTrackDefaults` is not used):
 - `apples`: conservative spill pressure thresholds to preserve parity behavior.
@@ -145,7 +180,8 @@ Primary artifact path:
 
 ## Interpreting Results
 
-- `Ratio (Vape/SER) < 1.00` means VapeCache is faster.
+- Throughput ratios (`Vape ops/sec / SER ops/sec`): `> 1.00` means VapeCache is faster.
+- Time/latency ratios (`Vape time / SER time`): `< 1.00` means VapeCache is faster.
 - Allocation deltas matter even when mean latency wins.
 - Confirm p95/p99/p999 behavior under sustained load before publishing claims.
 

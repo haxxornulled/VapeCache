@@ -16,6 +16,8 @@ internal delegate void AbortPendingRequestDelegate(PendingRequest request, Excep
 
 internal sealed class CoalescedWriteDispatcher : IDisposable
 {
+    private const int MaxVectoredSegmentsPerSend = 64;
+
     private readonly Queue<CoalescedPendingRequest> _coalesceQueue = new(16);
     private readonly List<PendingRequest> _coalesceDrained = new(8);
     private readonly List<CoalescedPendingRequest> _coalesceCaptured = new(8);
@@ -109,7 +111,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         var burstMode = UpdateBurstCoalescingMode(queuedDepth);
         var drainLimit = GetTailAwareDrainLimit(queuedDepth);
 
-        var firstCoalesced = ToCoalesced(first);
+        var firstCoalesced = ToCoalesced(in first);
         _coalesceQueue.Enqueue(firstCoalesced);
         _coalesceCaptured.Add(firstCoalesced);
 
@@ -131,7 +133,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             drainedFollower = true;
             spinAttempts = 0;
             _coalesceDrained.Add(nextReq);
-            var coalesced = ToCoalesced(nextReq);
+            var coalesced = ToCoalesced(in nextReq);
             _coalesceQueue.Enqueue(coalesced);
             _coalesceCaptured.Add(coalesced);
             if (_coalesceQueue.Count >= drainLimit)
@@ -141,28 +143,14 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         var requestCount = _coalesceDrained.Count;
         var requestCommitOffsets = RentRequestCommitOffsets(requestCount);
         BuildRequestCommitOffsets(_coalesceDrained, requestCommitOffsets);
-        var enqueuedToPending = 0;
-        long committedBytes = 0;
-
-        async ValueTask CommitSentBytesAsync(int sentBytes)
-        {
-            if (sentBytes <= 0)
-                return;
-
-            committedBytes += sentBytes;
-            RedisTelemetry.BytesSent.Add(sentBytes);
-            _recordBytesSent?.Invoke(sentBytes);
-
-            while (enqueuedToPending < requestCount &&
-                   committedBytes >= requestCommitOffsets[enqueuedToPending])
-            {
-                var op = _coalesceDrained[enqueuedToPending].Op;
-                op.AssignGeneration(generation);
-                op.AssignSequenceId(_nextPendingSequence());
-                await _enqueuePendingOperation(op, ct).ConfigureAwait(false);
-                enqueuedToPending++;
-            }
-        }
+        var commitTracker = new SendCommitTracker(
+            _coalesceDrained,
+            requestCommitOffsets,
+            requestCount,
+            generation,
+            _enqueuePendingOperation,
+            _nextPendingSequence,
+            _recordBytesSent);
 
         try
         {
@@ -171,30 +159,34 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
                 try
                 {
                     ct.ThrowIfCancellationRequested();
+                    var segmentsToWrite = _coalesceBatch.SegmentsToWrite;
+                    var segmentCount = segmentsToWrite.Count;
                     var totalBytes = 0;
-                    for (var i = 0; i < _coalesceBatch.SegmentsToWrite.Count; i++)
-                        totalBytes += _coalesceBatch.SegmentsToWrite[i].Length;
+                    for (var i = 0; i < segmentCount; i++)
+                        totalBytes += segmentsToWrite[i].Length;
 
                     if (totalBytes > 0)
                     {
                         RedisTelemetry.CoalescedWriteBatches.Add(1);
                         RedisTelemetry.CoalescedWriteBatchBytes.Record(totalBytes);
-                        RedisTelemetry.CoalescedWriteBatchSegments.Record(_coalesceBatch.SegmentsToWrite.Count);
+                        RedisTelemetry.CoalescedWriteBatchSegments.Record(segmentCount);
 
-                        if (!await TrySendVectoredAsync(socket, _coalesceBatch.SegmentsToWrite, CommitSentBytesAsync, ct).ConfigureAwait(false))
+                        var vectoredResult = await TrySendVectoredAsync(socket, _coalesceBatch.SegmentsToWrite, commitTracker, ct).ConfigureAwait(false);
+                        commitTracker = vectoredResult.Tracker;
+                        if (!vectoredResult.Success)
                         {
                             var rented = ArrayPool<byte>.Shared.Rent(totalBytes);
                             try
                             {
                                 var offset = 0;
-                                for (var i = 0; i < _coalesceBatch.SegmentsToWrite.Count; i++)
+                                for (var i = 0; i < segmentCount; i++)
                                 {
-                                    var segment = _coalesceBatch.SegmentsToWrite[i];
+                                    var segment = segmentsToWrite[i];
                                     segment.CopyTo(rented.AsMemory(offset, segment.Length));
                                     offset += segment.Length;
                                 }
 
-                                await SendAllAsync(socket, rented.AsMemory(0, totalBytes), CommitSentBytesAsync, ct).ConfigureAwait(false);
+                                commitTracker = await SendAllAsync(socket, rented.AsMemory(0, totalBytes), commitTracker, ct).ConfigureAwait(false);
                             }
                             finally
                             {
@@ -212,7 +204,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         catch (Exception ex)
         {
             var transportFailure = NormalizeTransportException(ex);
-            for (var i = enqueuedToPending; i < _coalesceDrained.Count; i++)
+            for (var i = commitTracker.EnqueuedCount; i < _coalesceDrained.Count; i++)
                 _abortPendingRequest(_coalesceDrained[i], transportFailure);
             throw transportFailure;
         }
@@ -236,10 +228,11 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
 
     private void BuildRequestCommitOffsets(List<PendingRequest> requests, long[] offsets)
     {
+        var requestSpan = CollectionsMarshal.AsSpan(requests);
         long running = 0;
-        for (var i = 0; i < requests.Count; i++)
+        for (var i = 0; i < requestSpan.Length; i++)
         {
-            running += GetRequestWireLength(requests[i]);
+            running += GetRequestWireLength(in requestSpan[i]);
             offsets[i] = running;
         }
     }
@@ -293,7 +286,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         }
     }
 
-    private CoalescedPendingRequest ToCoalesced(PendingRequest req)
+    private CoalescedPendingRequest ToCoalesced(in PendingRequest req)
     {
         int count = 1;
         if (!req.Payload.IsEmpty)
@@ -355,7 +348,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         _coalesceSegmentArrayPool.Return(segments, clearArray: true);
     }
 
-    private long GetRequestWireLength(PendingRequest request)
+    private long GetRequestWireLength(in PendingRequest request)
     {
         long total = request.Command.Length;
 
@@ -380,10 +373,10 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         return total;
     }
 
-    private static async ValueTask SendAllAsync(
+    private static async ValueTask<SendCommitTracker> SendAllAsync(
         Socket socket,
         ReadOnlyMemory<byte> buffer,
-        Func<int, ValueTask> onBytesCommitted,
+        SendCommitTracker commitTracker,
         CancellationToken ct)
     {
         while (!buffer.IsEmpty)
@@ -400,20 +393,22 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
 
             if (sent <= 0)
                 throw new IOException("Socket send returned 0.");
-            await onBytesCommitted(sent).ConfigureAwait(false);
+            await commitTracker.CommitAsync(sent, ct).ConfigureAwait(false);
             buffer = buffer.Slice(sent);
         }
+
+        return commitTracker;
     }
 
     // Uses vectored socket sends when all segments are array-backed. Falls back to copy-send otherwise.
-    private async ValueTask<bool> TrySendVectoredAsync(
+    private async ValueTask<VectoredSendResult> TrySendVectoredAsync(
         Socket socket,
         List<ReadOnlyMemory<byte>> segments,
-        Func<int, ValueTask> onBytesCommitted,
+        SendCommitTracker commitTracker,
         CancellationToken ct)
     {
         if (segments.Count == 0)
-            return true;
+            return new(success: true, commitTracker);
 
         var sendSegments = _socketSendSegmentArrayPool.Rent(segments.Count);
         var sendCount = 0;
@@ -427,7 +422,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             {
                 Array.Clear(sendSegments, 0, sendCount);
                 _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
-                return false;
+                return new(success: false, commitTracker);
             }
 
             sendSegments[sendCount++] = arraySegment;
@@ -436,7 +431,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         if (sendCount == 0)
         {
             _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
-            return true;
+            return new(success: true, commitTracker);
         }
 
         try
@@ -449,7 +444,8 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
                 try
                 {
                     _sendArgs.ResetForOperation();
-                    _sendArgs.SetBufferList(sendSegments, _socketSendWindow.Head, _socketSendWindow.Count);
+                    var sendWindowCount = Math.Min(_socketSendWindow.Count, MaxVectoredSegmentsPerSend);
+                    _sendArgs.SetBufferList(sendSegments, _socketSendWindow.Head, sendWindowCount);
                     if (socket.SendAsync(_sendArgs))
                     {
                         _sendArgs.RegisterCancellation(ct);
@@ -467,17 +463,104 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
 
                 if (sent <= 0)
                     throw new IOException("Socket send returned 0.");
-                await onBytesCommitted(sent).ConfigureAwait(false);
+                await commitTracker.CommitAsync(sent, ct).ConfigureAwait(false);
                 _socketSendWindow.Consume(sent);
             }
 
-            return true;
+            return new(success: true, commitTracker);
         }
         finally
         {
             _socketSendWindow.Reset();
             Array.Clear(sendSegments, 0, sendCount);
             _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
+        }
+    }
+
+    private readonly struct VectoredSendResult
+    {
+        public VectoredSendResult(bool success, SendCommitTracker tracker)
+        {
+            Success = success;
+            Tracker = tracker;
+        }
+
+        public bool Success { get; }
+        public SendCommitTracker Tracker { get; }
+    }
+
+    private struct SendCommitTracker
+    {
+        private readonly List<PendingRequest> _requests;
+        private readonly long[] _requestCommitOffsets;
+        private readonly int _requestCount;
+        private readonly long _generation;
+        private readonly EnqueuePendingOperationDelegate _enqueuePendingOperation;
+        private readonly NextPendingSequenceDelegate _nextPendingSequence;
+        private readonly Action<int>? _recordBytesSent;
+        private long _committedBytes;
+        private int _enqueuedCount;
+
+        public SendCommitTracker(
+            List<PendingRequest> requests,
+            long[] requestCommitOffsets,
+            int requestCount,
+            long generation,
+            EnqueuePendingOperationDelegate enqueuePendingOperation,
+            NextPendingSequenceDelegate nextPendingSequence,
+            Action<int>? recordBytesSent)
+        {
+            _requests = requests;
+            _requestCommitOffsets = requestCommitOffsets;
+            _requestCount = requestCount;
+            _generation = generation;
+            _enqueuePendingOperation = enqueuePendingOperation;
+            _nextPendingSequence = nextPendingSequence;
+            _recordBytesSent = recordBytesSent;
+            _committedBytes = 0;
+            _enqueuedCount = 0;
+        }
+
+        public int EnqueuedCount => _enqueuedCount;
+
+        public ValueTask CommitAsync(int sentBytes, CancellationToken ct)
+        {
+            if (sentBytes <= 0)
+                return ValueTask.CompletedTask;
+
+            _committedBytes += sentBytes;
+            RedisTelemetry.BytesSent.Add(sentBytes);
+            _recordBytesSent?.Invoke(sentBytes);
+
+            while (_enqueuedCount < _requestCount &&
+                   _committedBytes >= _requestCommitOffsets[_enqueuedCount])
+            {
+                var op = _requests[_enqueuedCount].Op;
+                op.AssignGeneration(_generation);
+                op.AssignSequenceId(_nextPendingSequence());
+                var enqueue = _enqueuePendingOperation(op, ct);
+                if (!enqueue.IsCompletedSuccessfully)
+                    return CommitSlowAsync(enqueue, ct);
+                _enqueuedCount++;
+            }
+
+            return ValueTask.CompletedTask;
+        }
+
+        private async ValueTask CommitSlowAsync(ValueTask firstEnqueue, CancellationToken ct)
+        {
+            await firstEnqueue.ConfigureAwait(false);
+            _enqueuedCount++;
+
+            while (_enqueuedCount < _requestCount &&
+                   _committedBytes >= _requestCommitOffsets[_enqueuedCount])
+            {
+                var op = _requests[_enqueuedCount].Op;
+                op.AssignGeneration(_generation);
+                op.AssignSequenceId(_nextPendingSequence());
+                await _enqueuePendingOperation(op, ct).ConfigureAwait(false);
+                _enqueuedCount++;
+            }
         }
     }
 

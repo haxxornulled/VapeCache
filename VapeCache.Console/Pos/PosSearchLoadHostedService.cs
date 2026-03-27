@@ -8,14 +8,31 @@ using VapeCache.Console.Stress;
 
 namespace VapeCache.Console.Pos;
 
-internal sealed class PosSearchLoadHostedService(
-    IHostApplicationLifetime hostLifetime,
-    IOptionsMonitor<PosSearchLoadOptions> loadOptionsMonitor,
-    IOptionsMonitor<PosSearchDemoOptions> demoOptionsMonitor,
-    PosCatalogSearchService searchService,
-    IRedisCircuitBreakerState? breakerState,
-    ILogger<PosSearchLoadHostedService> logger) : BackgroundService, IHostedLifecycleService
+internal sealed class PosSearchLoadHostedService : BackgroundService, IHostedLifecycleService
 {
+    private readonly IHostApplicationLifetime hostLifetime;
+    private readonly IOptionsMonitor<PosSearchLoadOptions> loadOptionsMonitor;
+    private readonly IOptionsMonitor<PosSearchDemoOptions> demoOptionsMonitor;
+    private readonly PosCatalogSearchService searchService;
+    private readonly IRedisCircuitBreakerState? breakerState;
+    private readonly ILogger<PosSearchLoadHostedService> logger;
+
+    public PosSearchLoadHostedService(
+        IHostApplicationLifetime hostLifetime,
+        IOptionsMonitor<PosSearchLoadOptions> loadOptionsMonitor,
+        IOptionsMonitor<PosSearchDemoOptions> demoOptionsMonitor,
+        PosCatalogSearchService searchService,
+        IRedisCircuitBreakerState? breakerState,
+        ILogger<PosSearchLoadHostedService> logger)
+    {
+        this.hostLifetime = hostLifetime;
+        this.loadOptionsMonitor = loadOptionsMonitor;
+        this.demoOptionsMonitor = demoOptionsMonitor;
+        this.searchService = searchService;
+        this.breakerState = breakerState;
+        this.logger = logger;
+    }
+
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -374,9 +391,9 @@ internal sealed class PosSearchLoadHostedService(
             LatencySampleSize: Math.Clamp(load.LatencySampleSize, 256, 1 << 20));
     }
 
-    private sealed class LoadStats(int latencySampleSize)
+    private sealed class LoadStats
     {
-        private readonly long[] _latencyMicros = new long[RoundUpToPowerOfTwo(latencySampleSize)];
+        private readonly long[] _latencyMicros;
 
         private long _requests;
         private long _cacheResponses;
@@ -384,6 +401,11 @@ internal sealed class PosSearchLoadHostedService(
         private long _noneResponses;
         private long _failures;
         private int _latencyCursor;
+
+        public LoadStats(int latencySampleSize)
+        {
+            _latencyMicros = new long[RoundUpToPowerOfTwo(latencySampleSize)];
+        }
 
         public void Record(PosSearchResult result)
         {
@@ -479,51 +501,144 @@ internal sealed class PosSearchLoadHostedService(
         }
     }
 
-    private readonly record struct Workload(
-        bool StopHostOnCompletion,
-        TimeSpan Duration,
-        int Concurrency,
-        TimeSpan LogEvery,
-        int TargetShoppersPerSecond,
-        bool EnableAutoRamp,
-        string RampSteps,
-        TimeSpan RampStepDuration,
-        bool StopOnFirstUnstable,
-        bool TreatOpenCircuitAsUnstable,
-        double MaxFailurePercent,
-        double MaxP95Ms,
-        string HotQuery,
-        string CashierQuery,
-        string LookupUpcQuery,
-        int HotQueryPercent,
-        int CashierQueryPercent,
-        int LookupUpcPercent,
-        int RandomQueryPercent,
-        int MaxRandomProductNumber,
-        int LatencySampleSize);
+    private readonly record struct Workload
+    {
+        public Workload(
+            bool StopHostOnCompletion,
+            TimeSpan Duration,
+            int Concurrency,
+            TimeSpan LogEvery,
+            int TargetShoppersPerSecond,
+            bool EnableAutoRamp,
+            string RampSteps,
+            TimeSpan RampStepDuration,
+            bool StopOnFirstUnstable,
+            bool TreatOpenCircuitAsUnstable,
+            double MaxFailurePercent,
+            double MaxP95Ms,
+            string HotQuery,
+            string CashierQuery,
+            string LookupUpcQuery,
+            int HotQueryPercent,
+            int CashierQueryPercent,
+            int LookupUpcPercent,
+            int RandomQueryPercent,
+            int MaxRandomProductNumber,
+            int LatencySampleSize)
+        {
+            this.StopHostOnCompletion = StopHostOnCompletion;
+            this.Duration = Duration;
+            this.Concurrency = Concurrency;
+            this.LogEvery = LogEvery;
+            this.TargetShoppersPerSecond = TargetShoppersPerSecond;
+            this.EnableAutoRamp = EnableAutoRamp;
+            this.RampSteps = RampSteps;
+            this.RampStepDuration = RampStepDuration;
+            this.StopOnFirstUnstable = StopOnFirstUnstable;
+            this.TreatOpenCircuitAsUnstable = TreatOpenCircuitAsUnstable;
+            this.MaxFailurePercent = MaxFailurePercent;
+            this.MaxP95Ms = MaxP95Ms;
+            this.HotQuery = HotQuery;
+            this.CashierQuery = CashierQuery;
+            this.LookupUpcQuery = LookupUpcQuery;
+            this.HotQueryPercent = HotQueryPercent;
+            this.CashierQueryPercent = CashierQueryPercent;
+            this.LookupUpcPercent = LookupUpcPercent;
+            this.RandomQueryPercent = RandomQueryPercent;
+            this.MaxRandomProductNumber = MaxRandomProductNumber;
+            this.LatencySampleSize = LatencySampleSize;
+        }
 
-    private readonly record struct LoadSnapshot(
-        TimeSpan Elapsed,
-        long Requests,
-        long CacheResponses,
-        long DatabaseResponses,
-        long NoneResponses,
-        long Failures,
-        double RequestsPerSecond,
-        double P50Ms,
-        double P95Ms,
-        double P99Ms);
+        public bool StopHostOnCompletion { get; init; }
+        public TimeSpan Duration { get; init; }
+        public int Concurrency { get; init; }
+        public TimeSpan LogEvery { get; init; }
+        public int TargetShoppersPerSecond { get; init; }
+        public bool EnableAutoRamp { get; init; }
+        public string RampSteps { get; init; }
+        public TimeSpan RampStepDuration { get; init; }
+        public bool StopOnFirstUnstable { get; init; }
+        public bool TreatOpenCircuitAsUnstable { get; init; }
+        public double MaxFailurePercent { get; init; }
+        public double MaxP95Ms { get; init; }
+        public string HotQuery { get; init; }
+        public string CashierQuery { get; init; }
+        public string LookupUpcQuery { get; init; }
+        public int HotQueryPercent { get; init; }
+        public int CashierQueryPercent { get; init; }
+        public int LookupUpcPercent { get; init; }
+        public int RandomQueryPercent { get; init; }
+        public int MaxRandomProductNumber { get; init; }
+        public int LatencySampleSize { get; init; }
+    }
 
-    private readonly record struct StepOutcome(
-        int TargetShoppersPerSecond,
-        LoadSnapshot Snapshot,
-        StepAssessment Assessment);
+    private readonly record struct LoadSnapshot
+    {
+        public LoadSnapshot(
+            TimeSpan Elapsed,
+            long Requests,
+            long CacheResponses,
+            long DatabaseResponses,
+            long NoneResponses,
+            long Failures,
+            double RequestsPerSecond,
+            double P50Ms,
+            double P95Ms,
+            double P99Ms)
+        {
+            this.Elapsed = Elapsed;
+            this.Requests = Requests;
+            this.CacheResponses = CacheResponses;
+            this.DatabaseResponses = DatabaseResponses;
+            this.NoneResponses = NoneResponses;
+            this.Failures = Failures;
+            this.RequestsPerSecond = RequestsPerSecond;
+            this.P50Ms = P50Ms;
+            this.P95Ms = P95Ms;
+            this.P99Ms = P99Ms;
+        }
 
-    private readonly record struct StepAssessment(
-        bool IsStable,
-        double FailurePercent,
-        bool BreakerOpened,
-        string Reason);
+        public TimeSpan Elapsed { get; init; }
+        public long Requests { get; init; }
+        public long CacheResponses { get; init; }
+        public long DatabaseResponses { get; init; }
+        public long NoneResponses { get; init; }
+        public long Failures { get; init; }
+        public double RequestsPerSecond { get; init; }
+        public double P50Ms { get; init; }
+        public double P95Ms { get; init; }
+        public double P99Ms { get; init; }
+    }
+
+    private readonly record struct StepOutcome
+    {
+        public StepOutcome(int TargetShoppersPerSecond, LoadSnapshot Snapshot, StepAssessment Assessment)
+        {
+            this.TargetShoppersPerSecond = TargetShoppersPerSecond;
+            this.Snapshot = Snapshot;
+            this.Assessment = Assessment;
+        }
+
+        public int TargetShoppersPerSecond { get; init; }
+        public LoadSnapshot Snapshot { get; init; }
+        public StepAssessment Assessment { get; init; }
+    }
+
+    private readonly record struct StepAssessment
+    {
+        public StepAssessment(bool IsStable, double FailurePercent, bool BreakerOpened, string Reason)
+        {
+            this.IsStable = IsStable;
+            this.FailurePercent = FailurePercent;
+            this.BreakerOpened = BreakerOpened;
+            this.Reason = Reason;
+        }
+
+        public bool IsStable { get; init; }
+        public double FailurePercent { get; init; }
+        public bool BreakerOpened { get; init; }
+        public string Reason { get; init; }
+    }
 
     private sealed class StepSignals
     {

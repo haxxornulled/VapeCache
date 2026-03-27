@@ -115,13 +115,43 @@ public sealed class RedisHotPathPerfGateTests
         return samples[rank];
     }
 
-    private sealed record PerfCase(
-        string Name,
-        int Length,
-        WriteCommandDelegate Writer,
-        double MinOpsPerSecond,
-        double MaxP95Us,
-        double MaxP99Us);
+    private sealed record PerfCase
+    {
+        public PerfCase(
+            string Name,
+            int Length,
+            WriteCommandDelegate Writer,
+            double MinOpsPerSecond,
+            double MaxP95Us,
+            double MaxP99Us)
+        {
+            this.Name = Name;
+            this.Length = Length;
+            this.Writer = Writer;
+            this.MinOpsPerSecond = MinOpsPerSecond;
+            this.MaxP95Us = MaxP95Us;
+            this.MaxP99Us = MaxP99Us;
+        }
 
-    private sealed record PerfResult(double ThroughputOpsPerSecond, double P95Us, double P99Us);
+        public string Name { get; init; }
+        public int Length { get; init; }
+        public WriteCommandDelegate Writer { get; init; }
+        public double MinOpsPerSecond { get; init; }
+        public double MaxP95Us { get; init; }
+        public double MaxP99Us { get; init; }
+    }
+
+    private sealed record PerfResult
+    {
+        public PerfResult(double ThroughputOpsPerSecond, double P95Us, double P99Us)
+        {
+            this.ThroughputOpsPerSecond = ThroughputOpsPerSecond;
+            this.P95Us = P95Us;
+            this.P99Us = P99Us;
+        }
+
+        public double ThroughputOpsPerSecond { get; init; }
+        public double P95Us { get; init; }
+        public double P99Us { get; init; }
+    }
 }

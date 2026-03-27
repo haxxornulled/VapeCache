@@ -143,10 +143,15 @@ public sealed class CacheInvalidationExecutorTests
             => ValueTask.FromResult(1L);
     }
 
-    private sealed class MutableOptionsMonitor<T>(T initialValue) : IOptionsMonitor<T>
+    private sealed class MutableOptionsMonitor<T> : IOptionsMonitor<T>
     {
         private readonly System.Threading.Lock _gate = new();
-        private T _value = initialValue;
+        private T _value;
+
+        public MutableOptionsMonitor(T initialValue)
+        {
+            _value = initialValue;
+        }
 
         public T CurrentValue
         {

@@ -115,46 +115,113 @@ public interface IVapeCacheAdminEventStreamFeedProvider
 /// <summary>
 /// Runtime stats snapshot projected for admin UI composition.
 /// </summary>
-public sealed record VapeCacheAdminStatsSnapshot(
-    DateTimeOffset TimestampUtc,
-    BackendType Backend,
-    CacheStatsSnapshot Stats,
-    long Reads,
-    long Writes,
-    double HitRate,
-    IReadOnlyList<RedisMuxLaneSnapshot> Lanes,
-    int HealthyLaneCount);
+public sealed record VapeCacheAdminStatsSnapshot
+{
+    public VapeCacheAdminStatsSnapshot(
+        DateTimeOffset TimestampUtc,
+        BackendType Backend,
+        CacheStatsSnapshot Stats,
+        long Reads,
+        long Writes,
+        double HitRate,
+        IReadOnlyList<RedisMuxLaneSnapshot> Lanes,
+        int HealthyLaneCount)
+    {
+        this.TimestampUtc = TimestampUtc;
+        this.Backend = Backend;
+        this.Stats = Stats;
+        this.Reads = Reads;
+        this.Writes = Writes;
+        this.HitRate = HitRate;
+        this.Lanes = Lanes;
+        this.HealthyLaneCount = HealthyLaneCount;
+    }
+
+    public DateTimeOffset TimestampUtc { get; init; }
+    public BackendType Backend { get; init; }
+    public CacheStatsSnapshot Stats { get; init; }
+    public long Reads { get; init; }
+    public long Writes { get; init; }
+    public double HitRate { get; init; }
+    public IReadOnlyList<RedisMuxLaneSnapshot> Lanes { get; init; }
+    public int HealthyLaneCount { get; init; }
+}
 
 /// <summary>
 /// Runtime breaker status projected for admin UI composition.
 /// </summary>
-public sealed record VapeCacheAdminBreakerStatus(
-    bool Enabled,
-    bool IsOpen,
-    int ConsecutiveFailures,
-    TimeSpan? OpenRemaining,
-    bool HalfOpenProbeInFlight,
-    bool IsForcedOpen,
-    string? Reason);
+public sealed record VapeCacheAdminBreakerStatus
+{
+    public VapeCacheAdminBreakerStatus(
+        bool Enabled,
+        bool IsOpen,
+        int ConsecutiveFailures,
+        TimeSpan? OpenRemaining,
+        bool HalfOpenProbeInFlight,
+        bool IsForcedOpen,
+        string? Reason)
+    {
+        this.Enabled = Enabled;
+        this.IsOpen = IsOpen;
+        this.ConsecutiveFailures = ConsecutiveFailures;
+        this.OpenRemaining = OpenRemaining;
+        this.HalfOpenProbeInFlight = HalfOpenProbeInFlight;
+        this.IsForcedOpen = IsForcedOpen;
+        this.Reason = Reason;
+    }
+
+    public bool Enabled { get; init; }
+    public bool IsOpen { get; init; }
+    public int ConsecutiveFailures { get; init; }
+    public TimeSpan? OpenRemaining { get; init; }
+    public bool HalfOpenProbeInFlight { get; init; }
+    public bool IsForcedOpen { get; init; }
+    public string? Reason { get; init; }
+}
 
 /// <summary>
 /// Runtime reconciliation status projected for admin UI composition.
 /// </summary>
-public sealed record VapeCacheAdminReconciliationStatus(
-    bool Enabled,
-    int PendingOperations);
+public sealed record VapeCacheAdminReconciliationStatus
+{
+    public VapeCacheAdminReconciliationStatus(bool Enabled, int PendingOperations)
+    {
+        this.Enabled = Enabled;
+        this.PendingOperations = PendingOperations;
+    }
+
+    public bool Enabled { get; init; }
+    public int PendingOperations { get; init; }
+}
 
 /// <summary>
 /// Runtime event-stream status projected for admin UI composition.
 /// </summary>
-public sealed record VapeCacheAdminEventStreamStatus(
-    bool FeedRegistered,
-    bool StreamEndpointEnabled,
-    bool IntentEndpointEnabled,
-    string StreamEndpointPath,
-    string SharedSnapshotEndpointPath,
-    string IntentEndpointPath)
+public sealed record VapeCacheAdminEventStreamStatus
 {
+    public VapeCacheAdminEventStreamStatus(
+        bool FeedRegistered,
+        bool StreamEndpointEnabled,
+        bool IntentEndpointEnabled,
+        string StreamEndpointPath,
+        string SharedSnapshotEndpointPath,
+        string IntentEndpointPath)
+    {
+        this.FeedRegistered = FeedRegistered;
+        this.StreamEndpointEnabled = StreamEndpointEnabled;
+        this.IntentEndpointEnabled = IntentEndpointEnabled;
+        this.StreamEndpointPath = StreamEndpointPath;
+        this.SharedSnapshotEndpointPath = SharedSnapshotEndpointPath;
+        this.IntentEndpointPath = IntentEndpointPath;
+    }
+
+    public bool FeedRegistered { get; init; }
+    public bool StreamEndpointEnabled { get; init; }
+    public bool IntentEndpointEnabled { get; init; }
+    public string StreamEndpointPath { get; init; }
+    public string SharedSnapshotEndpointPath { get; init; }
+    public string IntentEndpointPath { get; init; }
+
     /// <summary>
     /// Disabled stream status defaults.
     /// </summary>
@@ -166,4 +233,3 @@ public sealed record VapeCacheAdminEventStreamStatus(
         SharedSnapshotEndpointPath: "/vapecache/api/dashboard/shared-snapshot",
         IntentEndpointPath: "/vapecache/api/intent");
 }
-

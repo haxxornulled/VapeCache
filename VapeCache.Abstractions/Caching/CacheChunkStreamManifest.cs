@@ -7,9 +7,23 @@ namespace VapeCache.Abstractions.Caching;
 /// <param name="ChunkSizeBytes">Configured chunk size used at write time.</param>
 /// <param name="ContentLengthBytes">Total content length in bytes.</param>
 /// <param name="ContentType">Optional content type (for example, <c>video/mp4</c>).</param>
-public readonly record struct CacheChunkStreamManifest(
-    int ChunkCount,
-    int ChunkSizeBytes,
-    long ContentLengthBytes,
-    string? ContentType);
+public readonly record struct CacheChunkStreamManifest
+{
+    public CacheChunkStreamManifest(
+        int chunkCount,
+        int chunkSizeBytes,
+        long contentLengthBytes,
+        string? contentType)
+    {
+        ChunkCount = chunkCount;
+        ChunkSizeBytes = chunkSizeBytes;
+        ContentLengthBytes = contentLengthBytes;
+        ContentType = contentType;
+    }
+
+    public int ChunkCount { get; init; }
+    public int ChunkSizeBytes { get; init; }
+    public long ContentLengthBytes { get; init; }
+    public string? ContentType { get; init; }
+}
 

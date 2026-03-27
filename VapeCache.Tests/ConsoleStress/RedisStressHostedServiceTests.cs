@@ -212,9 +212,14 @@ public sealed class RedisStressHostedServiceTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class Lease(IRedisConnection connection) : IRedisConnectionLease
+    private sealed class Lease : IRedisConnectionLease
     {
-        public IRedisConnection Connection { get; } = connection;
+        public Lease(IRedisConnection connection)
+        {
+            Connection = connection;
+        }
+
+        public IRedisConnection Connection { get; }
 
         public ValueTask DisposeAsync() => Connection.DisposeAsync();
     }

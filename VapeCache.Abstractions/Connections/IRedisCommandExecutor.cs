@@ -17,9 +17,21 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// </summary>
     ValueTask<byte[]?> GetExAsync(string key, TimeSpan? ttl, CancellationToken ct);
     /// <summary>
+    /// Executes get async and reports whether a value was observed without materializing the payload.
+    /// </summary>
+    ValueTask<bool> GetDiscardAsync(string key, CancellationToken ct);
+    /// <summary>
+    /// Executes get ex async and reports whether a value was observed without materializing the payload.
+    /// </summary>
+    ValueTask<bool> GetExDiscardAsync(string key, TimeSpan? ttl, CancellationToken ct);
+    /// <summary>
     /// Executes mget async.
     /// </summary>
     ValueTask<byte[]?[]> MGetAsync(string[] keys, CancellationToken ct);
+    /// <summary>
+    /// Executes mget async and returns the number of values observed without materializing a result array.
+    /// </summary>
+    ValueTask<int> MGetCountAsync(string[] keys, CancellationToken ct);
     /// <summary>
     /// Executes try get async.
     /// </summary>
@@ -28,6 +40,14 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// Executes try get ex async.
     /// </summary>
     bool TryGetExAsync(string key, TimeSpan? ttl, CancellationToken ct, out ValueTask<byte[]?> task);
+    /// <summary>
+    /// Executes get range async.
+    /// </summary>
+    ValueTask<byte[]?> GetRangeAsync(string key, long start, long end, CancellationToken ct);
+    /// <summary>
+    /// Executes get range async and reports whether a value was observed without materializing the payload.
+    /// </summary>
+    ValueTask<bool> GetRangeDiscardAsync(string key, long start, long end, CancellationToken ct);
 
     /// <summary>
     /// Executes set async.
@@ -58,6 +78,18 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// Executes unlink async.
     /// </summary>
     ValueTask<long> UnlinkAsync(string key, CancellationToken ct);
+    /// <summary>
+    /// Executes unlink async for multiple keys in one command.
+    /// </summary>
+    ValueTask<long> UnlinkManyAsync(string[] keys, CancellationToken ct);
+    /// <summary>
+    /// Executes unlink async for multiple raw UTF-8 keys in one command without materializing strings.
+    /// </summary>
+    ValueTask<long> UnlinkManyAsync(byte[]?[] keys, CancellationToken ct);
+    /// <summary>
+    /// Executes expire async.
+    /// </summary>
+    ValueTask<bool> ExpireAsync(string key, TimeSpan ttl, CancellationToken ct);
 
     // Lease-based reads (avoid allocating byte[] on hot paths; caller must Dispose).
     /// <summary>
@@ -83,13 +115,25 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// </summary>
     ValueTask<long> HSetAsync(string key, string field, ReadOnlyMemory<byte> value, CancellationToken ct);
     /// <summary>
+    /// Executes hset async for multiple fields in one command.
+    /// </summary>
+    ValueTask<long> HSetManyAsync(string key, (string Field, ReadOnlyMemory<byte> Value)[] items, CancellationToken ct);
+    /// <summary>
     /// Executes hget async.
     /// </summary>
     ValueTask<byte[]?> HGetAsync(string key, string field, CancellationToken ct);
     /// <summary>
+    /// Executes hget async and reports whether a value was observed without materializing the payload.
+    /// </summary>
+    ValueTask<bool> HGetDiscardAsync(string key, string field, CancellationToken ct);
+    /// <summary>
     /// Executes hmget async.
     /// </summary>
     ValueTask<byte[]?[]> HMGetAsync(string key, string[] fields, CancellationToken ct);
+    /// <summary>
+    /// Executes hmget async and returns the number of values observed without materializing a result array.
+    /// </summary>
+    ValueTask<int> HMGetCountAsync(string key, string[] fields, CancellationToken ct);
     /// <summary>
     /// Executes hget lease async.
     /// </summary>
@@ -121,6 +165,14 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// </summary>
     ValueTask<byte[]?> RPopAsync(string key, CancellationToken ct);
     /// <summary>
+    /// Executes lpop async and reports whether a value was observed without materializing the payload.
+    /// </summary>
+    ValueTask<bool> LPopDiscardAsync(string key, CancellationToken ct);
+    /// <summary>
+    /// Executes rpop async and reports whether a value was observed without materializing the payload.
+    /// </summary>
+    ValueTask<bool> RPopDiscardAsync(string key, CancellationToken ct);
+    /// <summary>
     /// Executes try lpop async.
     /// </summary>
     bool TryLPopAsync(string key, CancellationToken ct, out ValueTask<byte[]?> task);
@@ -132,6 +184,18 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// Executes lrange async.
     /// </summary>
     ValueTask<byte[]?[]> LRangeAsync(string key, long start, long stop, CancellationToken ct);
+    /// <summary>
+    /// Executes lrange async and returns the number of values observed without materializing a result array.
+    /// </summary>
+    ValueTask<int> LRangeCountAsync(string key, long start, long stop, CancellationToken ct);
+    /// <summary>
+    /// Executes lindex async.
+    /// </summary>
+    ValueTask<byte[]?> LIndexAsync(string key, long index, CancellationToken ct);
+    /// <summary>
+    /// Executes lindex async and reports whether a value was observed without materializing the payload.
+    /// </summary>
+    ValueTask<bool> LIndexDiscardAsync(string key, long index, CancellationToken ct);
     /// <summary>
     /// Executes llen async.
     /// </summary>
@@ -171,6 +235,10 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// </summary>
     ValueTask<byte[]?[]> SMembersAsync(string key, CancellationToken ct);
     /// <summary>
+    /// Executes smembers async and returns the number of members observed without materializing a result array.
+    /// </summary>
+    ValueTask<int> SMembersCountAsync(string key, CancellationToken ct);
+    /// <summary>
     /// Executes scard async.
     /// </summary>
     ValueTask<long> SCardAsync(string key, CancellationToken ct);
@@ -209,9 +277,24 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// </summary>
     ValueTask<(byte[] Member, double Score)[]> ZRangeWithScoresAsync(string key, long start, long stop, bool descending, CancellationToken ct);
     /// <summary>
+    /// Executes zrange with scores async and returns the number of members observed without materializing a result array.
+    /// </summary>
+    ValueTask<int> ZRangeWithScoresCountAsync(string key, long start, long stop, bool descending, CancellationToken ct);
+    /// <summary>
     /// Executes zrange by score with scores async.
     /// </summary>
     ValueTask<(byte[] Member, double Score)[]> ZRangeByScoreWithScoresAsync(
+        string key,
+        double min,
+        double max,
+        bool descending,
+        long? offset,
+        long? count,
+        CancellationToken ct);
+    /// <summary>
+    /// Executes zrange by score with scores async and returns the number of members observed without materializing a result array.
+    /// </summary>
+    ValueTask<int> ZRangeByScoreWithScoresCountAsync(
         string key,
         double min,
         double max,
@@ -225,6 +308,10 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// Executes json get async.
     /// </summary>
     ValueTask<byte[]?> JsonGetAsync(string key, string? path, CancellationToken ct);
+    /// <summary>
+    /// Executes json get async and reports whether a value was observed without materializing the payload.
+    /// </summary>
+    ValueTask<bool> JsonGetDiscardAsync(string key, string? path, CancellationToken ct);
     // Lease-based JSON GET (avoid allocating byte[] on hot paths; caller must Dispose).
     /// <summary>
     /// Executes json get lease async.
@@ -256,6 +343,10 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// Executes ft search async.
     /// </summary>
     ValueTask<string[]> FtSearchAsync(string index, string query, int? offset, int? count, CancellationToken ct);
+    /// <summary>
+    /// Executes ft search async and returns the total hit count without materializing document ids.
+    /// </summary>
+    ValueTask<long> FtSearchCountAsync(string index, string query, int? offset, int? count, CancellationToken ct);
 
     // RedisBloom (BF.*)
     /// <summary>
@@ -280,12 +371,27 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// Executes ts range async.
     /// </summary>
     ValueTask<(long Timestamp, double Value)[]> TsRangeAsync(string key, long from, long to, CancellationToken ct);
+    /// <summary>
+    /// Executes ts range async and returns the number of samples without materializing the payload.
+    /// </summary>
+    ValueTask<long> TsRangeCountAsync(string key, long from, long to, CancellationToken ct);
 
     // Streams (XADD/XCFGSET)
     /// <summary>
     /// Executes idempotent stream append using Redis 8.6 IDMP/IDMPAUTO semantics.
     /// </summary>
     ValueTask<string> XAddIdempotentAsync(
+        string key,
+        string producerId,
+        string? idempotentId,
+        bool useAutoIdempotentId,
+        string entryId,
+        (string Field, ReadOnlyMemory<byte> Value)[] fields,
+        CancellationToken ct);
+    /// <summary>
+    /// Executes idempotent stream append and only validates the returned entry id shape.
+    /// </summary>
+    ValueTask<bool> XAddIdempotentAckAsync(
         string key,
         string producerId,
         string? idempotentId,

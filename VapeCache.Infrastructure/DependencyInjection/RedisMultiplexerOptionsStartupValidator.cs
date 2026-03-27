@@ -5,13 +5,22 @@ using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Infrastructure.DependencyInjection;
 
-internal sealed class RedisMultiplexerOptionsStartupValidator(
-    IOptionsMonitor<RedisMultiplexerOptions> options,
-    RedisMultiplexerOptionsValidator validator) : IStartable
+internal sealed class RedisMultiplexerOptionsStartupValidator : IStartable
 {
+    private readonly IOptionsMonitor<RedisMultiplexerOptions> _options;
+    private readonly RedisMultiplexerOptionsValidator _validator;
+
+    public RedisMultiplexerOptionsStartupValidator(
+        IOptionsMonitor<RedisMultiplexerOptions> options,
+        RedisMultiplexerOptionsValidator validator)
+    {
+        _options = options;
+        _validator = validator;
+    }
+
     public void Start()
     {
-        var result = validator.Validate(Options.DefaultName, options.CurrentValue);
+        var result = _validator.Validate(Options.DefaultName, _options.CurrentValue);
         if (!result.Failed)
             return;
 
