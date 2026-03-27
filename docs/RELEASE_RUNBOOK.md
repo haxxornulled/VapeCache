@@ -48,6 +48,7 @@ Notes:
 
 GitHub Actions options:
 - `.github/workflows/ci.yml`: pull request and `main` branch validation (`release-check` with `-SkipPack -UsePublicSourcesOnly`)
+- `.github/workflows/bump-build-sync.yml`: manual bump/build/commit/push automation for `main`
 - `.github/workflows/publish-packages.yml`: release publish workflow (tag-triggered or manual `workflow_dispatch`)
 - Trigger publish via `workflow_dispatch` (optional `packageVersion`) or by pushing a `v*` tag.
 
