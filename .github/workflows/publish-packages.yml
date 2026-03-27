@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.repository == 'haxxornulled/VapeCache'
     runs-on: windows-latest
     env:
       PACKAGE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.packageVersion || '' }}

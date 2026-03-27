@@ -52,6 +52,11 @@ GitHub Actions options:
 - `.github/workflows/publish-packages.yml`: release publish workflow (tag-triggered or manual `workflow_dispatch`)
 - Trigger publish via `workflow_dispatch` (optional `packageVersion`) or by pushing a `v*` tag.
 
+Publish workflow scope:
+- package publishing is intended to run from the OSS repository `haxxornulled/VapeCache`
+- the private enterprise mirror should not be used as a package publishing runner
+- the workflow now skips execution automatically when triggered outside the OSS repository
+
 The orchestrator enforces preflight checks, release-check gates, package packing + smoke tests, feed publishing, remote sync, tag push, and GitHub release updates.
 
 ## Script Roles
