@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   validate:
+    if: github.repository == 'haxxornulled/VapeCache'
     runs-on: windows-latest
     steps:
       - name: Checkout

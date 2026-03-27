@@ -21,14 +21,19 @@ concurrency:
 
 jobs:
   bump_build_sync:
+    if: github.repository == 'haxxornulled/VapeCache'
     runs-on: windows-latest
     env:
       PACKAGE_VERSION: ${{ inputs.packageVersion }}
       COMMIT_MESSAGE: ${{ inputs.commitMessage }}
     steps:
-      - name: Guard Branch (main only)
+      - name: Guard Repo And Branch
         shell: pwsh
         run: |
+          if ("${{ github.repository }}" -ne "haxxornulled/VapeCache") {
+            throw "This workflow only runs from haxxornulled/VapeCache. Current repository: ${{ github.repository }}"
+          }
+
           if ("${{ github.ref }}" -ne "refs/heads/main") {
             throw "This workflow must run from refs/heads/main. Current ref: ${{ github.ref }}"
           }
