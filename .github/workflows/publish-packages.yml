@@ -71,16 +71,16 @@ jobs:
       - name: Publish GitHub Packages
         shell: pwsh
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
+          PACKAGES_PUBLISH_TOKEN: ${{ secrets.PACKAGES_PUBLISH_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          $apiKey = $env:GITHUB_PACKAGES_TOKEN
+          $apiKey = $env:PACKAGES_PUBLISH_TOKEN
           if ([string]::IsNullOrWhiteSpace($apiKey)) {
             $apiKey = $env:GITHUB_TOKEN
           }
 
           if ([string]::IsNullOrWhiteSpace($apiKey)) {
-            throw "No GitHub Packages token available. Set GITHUB_PACKAGES_TOKEN secret."
+            throw "No GitHub Packages token available. Set PACKAGES_PUBLISH_TOKEN secret."
           }
 
           if ([string]::IsNullOrWhiteSpace($env:PACKAGE_VERSION)) {
