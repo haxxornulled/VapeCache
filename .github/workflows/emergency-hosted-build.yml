@@ -1,0 +1,45 @@
+name: Emergency Hosted Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to run against (branch, tag, or SHA)."
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: emergency-hosted-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  emergency-build:
+    if: github.repository == 'haxxornulled/VapeCache-Enterprise'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      DOTNET_INSTALL_DIR: ${{ github.workspace }}/.dotnet
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Emergency Validation Gate (Hosted Runner)
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/release-check.ps1 -Configuration Release -SkipPack -UsePublicSourcesOnly
+
+      - name: Build Solution (Hosted Runner)
+        shell: pwsh
+        run: |
+          dotnet build VapeCache.slnx -c Release --nologo --verbosity minimal

@@ -51,6 +51,7 @@ GitHub Actions options:
 - `.github/workflows/ci.yml`: pull request and `main` branch validation (`release-check` with `-SkipPack -UsePublicSourcesOnly`) on Enterprise self-hosted runner
 - `.github/workflows/bump-build-sync.yml`: manual bump/build/commit/push automation for `main` on Enterprise self-hosted runner
 - `.github/workflows/publish-packages.yml`: release publish workflow (tag-triggered or manual `workflow_dispatch`) on Enterprise self-hosted runner
+- `.github/workflows/emergency-hosted-build.yml`: manual emergency validation/build path on GitHub-hosted `windows-latest` when self-hosted capacity is unavailable
 - Trigger publish via `workflow_dispatch` (optional `packageVersion`) or by pushing a `v*` tag.
 
 Publish workflow scope:
