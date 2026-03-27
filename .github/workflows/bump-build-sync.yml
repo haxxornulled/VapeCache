@@ -24,7 +24,7 @@ jobs:
     if: github.repository == 'haxxornulled/VapeCache-Enterprise'
     runs-on: [self-hosted, windows, x64]
     env:
-      DOTNET_INSTALL_DIR: ${{ runner.temp }}\\dotnet
+      DOTNET_INSTALL_DIR: ${{ github.workspace }}\\.dotnet
       PACKAGE_VERSION: ${{ inputs.packageVersion }}
       COMMIT_MESSAGE: ${{ inputs.commitMessage }}
     steps:
