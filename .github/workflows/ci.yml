@@ -16,7 +16,7 @@ concurrency:
 jobs:
   validate:
     if: github.repository == 'haxxornulled/VapeCache-Enterprise'
-    runs-on: [self-hosted, windows, x64]
+    runs-on: windows-latest
     timeout-minutes: 60
     env:
       DOTNET_INSTALL_DIR: ${{ github.workspace }}/.dotnet
