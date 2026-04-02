@@ -394,43 +394,70 @@ public class GroceryStoreService : IGroceryStoreService, ICartBatchWriter
         return new[]
         {
             // Fresh Produce
-            new Product("prod-001", "Organic Bananas", "Produce", 2.99m, 500, "/img/bananas.jpg"),
-            new Product("prod-002", "Strawberries 1lb", "Produce", 4.99m, 300, "/img/strawberries.jpg"),
-            new Product("prod-003", "Romaine Lettuce", "Produce", 3.49m, 200, "/img/lettuce.jpg"),
-            new Product("prod-004", "Avocados (3-pack)", "Produce", 5.99m, 400, "/img/avocados.jpg"),
-            new Product("prod-005", "Baby Carrots 1lb", "Produce", 1.99m, 600, "/img/carrots.jpg"),
+            CreateProduct("prod-001", "Organic Bananas", "Produce", 2.99m, 500, "/img/bananas.jpg", "Fresh", "Aisle-P01", "Sunrise Farms", "bunch", "ambient", weighted: true),
+            CreateProduct("prod-002", "Strawberries 1lb", "Produce", 4.99m, 300, "/img/strawberries.jpg", "Fresh", "Aisle-P02", "Berry Valley", "1lb clamshell", "chilled"),
+            CreateProduct("prod-003", "Romaine Lettuce", "Produce", 3.49m, 200, "/img/lettuce.jpg", "Fresh", "Aisle-P03", "Green Basket", "head", "chilled"),
+            CreateProduct("prod-004", "Avocados (3-pack)", "Produce", 5.99m, 400, "/img/avocados.jpg", "Fresh", "Aisle-P04", "Orchard Select", "3-pack", "ambient"),
+            CreateProduct("prod-005", "Baby Carrots 1lb", "Produce", 1.99m, 600, "/img/carrots.jpg", "Fresh", "Aisle-P05", "Farm Roots", "1lb bag", "chilled"),
 
             // Dairy
-            new Product("prod-006", "Organic Whole Milk", "Dairy", 4.29m, 250, "/img/milk.jpg"),
-            new Product("prod-007", "Greek Yogurt (6-pack)", "Dairy", 6.99m, 180, "/img/yogurt.jpg"),
-            new Product("prod-008", "Cheddar Cheese 8oz", "Dairy", 4.49m, 220, "/img/cheese.jpg"),
-            new Product("prod-009", "Butter 16oz", "Dairy", 5.99m, 300, "/img/butter.jpg"),
-            new Product("prod-010", "Eggs (Dozen)", "Dairy", 3.99m, 500, "/img/eggs.jpg"),
+            CreateProduct("prod-006", "Organic Whole Milk", "Dairy", 4.29m, 250, "/img/milk.jpg", "Refrigerated", "Aisle-D01", "Cedar Valley", "64oz carton", "refrigerated"),
+            CreateProduct("prod-007", "Greek Yogurt (6-pack)", "Dairy", 6.99m, 180, "/img/yogurt.jpg", "Refrigerated", "Aisle-D02", "Peak Culture", "6-pack", "refrigerated"),
+            CreateProduct("prod-008", "Cheddar Cheese 8oz", "Dairy", 4.49m, 220, "/img/cheese.jpg", "Refrigerated", "Aisle-D03", "North Creek", "8oz block", "refrigerated"),
+            CreateProduct("prod-009", "Butter 16oz", "Dairy", 5.99m, 300, "/img/butter.jpg", "Refrigerated", "Aisle-D04", "Golden Meadow", "16oz box", "refrigerated"),
+            CreateProduct("prod-010", "Eggs (Dozen)", "Dairy", 3.99m, 500, "/img/eggs.jpg", "Refrigerated", "Aisle-D05", "Morning Hen", "12-count", "refrigerated"),
 
             // Bakery
-            new Product("prod-011", "Sourdough Bread", "Bakery", 4.99m, 150, "/img/bread.jpg"),
-            new Product("prod-012", "Croissants (6-pack)", "Bakery", 5.49m, 100, "/img/croissants.jpg"),
-            new Product("prod-013", "Bagels (6-pack)", "Bakery", 3.99m, 200, "/img/bagels.jpg"),
+            CreateProduct("prod-011", "Sourdough Bread", "Bakery", 4.99m, 150, "/img/bread.jpg", "Fresh", "Aisle-B01", "Stone Hearth", "loaf", "ambient"),
+            CreateProduct("prod-012", "Croissants (6-pack)", "Bakery", 5.49m, 100, "/img/croissants.jpg", "Fresh", "Aisle-B02", "Paris Morning", "6-pack", "ambient"),
+            CreateProduct("prod-013", "Bagels (6-pack)", "Bakery", 3.99m, 200, "/img/bagels.jpg", "Fresh", "Aisle-B03", "City Oven", "6-pack", "ambient"),
 
             // Meat & Seafood
-            new Product("prod-014", "Chicken Breast 1lb", "Meat", 7.99m, 180, "/img/chicken.jpg"),
-            new Product("prod-015", "Ground Beef 1lb", "Meat", 6.99m, 220, "/img/beef.jpg"),
-            new Product("prod-016", "Salmon Fillet 8oz", "Seafood", 12.99m, 120, "/img/salmon.jpg"),
+            CreateProduct("prod-014", "Chicken Breast 1lb", "Meat", 7.99m, 180, "/img/chicken.jpg", "Protein", "Aisle-M01", "Prairie Poultry", "1lb tray", "refrigerated", weighted: true),
+            CreateProduct("prod-015", "Ground Beef 1lb", "Meat", 6.99m, 220, "/img/beef.jpg", "Protein", "Aisle-M02", "Ranch Reserve", "1lb tray", "refrigerated", weighted: true),
+            CreateProduct("prod-016", "Salmon Fillet 8oz", "Seafood", 12.99m, 120, "/img/salmon.jpg", "Protein", "Aisle-S01", "Blue Harbor", "8oz fillet", "refrigerated", weighted: true),
 
             // Pantry
-            new Product("prod-017", "Pasta (16oz)", "Pantry", 1.99m, 800, "/img/pasta.jpg"),
-            new Product("prod-018", "Olive Oil 500ml", "Pantry", 9.99m, 150, "/img/oil.jpg"),
-            new Product("prod-019", "Canned Tomatoes", "Pantry", 1.49m, 600, "/img/tomatoes.jpg"),
-            new Product("prod-020", "Rice 2lb", "Pantry", 3.99m, 400, "/img/rice.jpg"),
+            CreateProduct("prod-017", "Pasta (16oz)", "Pantry", 1.99m, 800, "/img/pasta.jpg", "ShelfStable", "Aisle-PA1", "Durum House", "16oz box", "ambient"),
+            CreateProduct("prod-018", "Olive Oil 500ml", "Pantry", 9.99m, 150, "/img/oil.jpg", "ShelfStable", "Aisle-PA2", "Tuscan Crest", "500ml bottle", "ambient"),
+            CreateProduct("prod-019", "Canned Tomatoes", "Pantry", 1.49m, 600, "/img/tomatoes.jpg", "ShelfStable", "Aisle-PA3", "Kitchen Harvest", "14.5oz can", "ambient"),
+            CreateProduct("prod-020", "Rice 2lb", "Pantry", 3.99m, 400, "/img/rice.jpg", "ShelfStable", "Aisle-PA4", "Golden Grain", "2lb bag", "ambient"),
 
             // Beverages
-            new Product("prod-021", "Orange Juice 64oz", "Beverages", 4.99m, 250, "/img/oj.jpg"),
-            new Product("prod-022", "Sparkling Water (12-pack)", "Beverages", 5.99m, 300, "/img/water.jpg"),
-            new Product("prod-023", "Coffee Beans 12oz", "Beverages", 11.99m, 180, "/img/coffee.jpg"),
+            CreateProduct("prod-021", "Orange Juice 64oz", "Beverages", 4.99m, 250, "/img/oj.jpg", "Refrigerated", "Aisle-BV1", "Sun Grove", "64oz bottle", "refrigerated"),
+            CreateProduct("prod-022", "Sparkling Water (12-pack)", "Beverages", 5.99m, 300, "/img/water.jpg", "ShelfStable", "Aisle-BV2", "Clear Current", "12-pack", "ambient"),
+            CreateProduct("prod-023", "Coffee Beans 12oz", "Beverages", 11.99m, 180, "/img/coffee.jpg", "ShelfStable", "Aisle-BV3", "Trailhead Roasters", "12oz bag", "ambient"),
 
             // Frozen
-            new Product("prod-024", "Ice Cream Pint", "Frozen", 5.49m, 200, "/img/icecream.jpg"),
-            new Product("prod-025", "Frozen Pizza", "Frozen", 6.99m, 250, "/img/pizza.jpg"),
+            CreateProduct("prod-024", "Ice Cream Pint", "Frozen", 5.49m, 200, "/img/icecream.jpg", "Frozen", "Aisle-F01", "Creamline", "pint", "frozen"),
+            CreateProduct("prod-025", "Frozen Pizza", "Frozen", 6.99m, 250, "/img/pizza.jpg", "Frozen", "Aisle-F02", "Stone Oven", "16oz box", "frozen"),
+        };
+    }
+
+    private static Product CreateProduct(
+        string id,
+        string name,
+        string category,
+        decimal price,
+        int stockQuantity,
+        string imageUrl,
+        string department,
+        string aisle,
+        string brand,
+        string unitOfMeasure,
+        string temperatureZone,
+        bool weighted = false,
+        bool requiresId = false)
+    {
+        return new Product(id, name, category, price, stockQuantity, imageUrl)
+        {
+            Department = department,
+            Aisle = aisle,
+            Brand = brand,
+            UnitOfMeasure = unitOfMeasure,
+            TemperatureZone = temperatureZone,
+            IsWeightedItem = weighted,
+            RequiresIdCheck = requiresId
         };
     }
 

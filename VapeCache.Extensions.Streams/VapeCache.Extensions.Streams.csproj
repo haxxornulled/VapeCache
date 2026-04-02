@@ -7,14 +7,14 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.Streams</PackageId>
     <Title>VapeCache Extensions for Redis Streams</Title>
-    <Version>1.2.17</Version>
+    <Version>1.2.18</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.Streams</Product>
     <Description>Redis Streams extension package for VapeCache with Redis 8.6 idempotent producer support (IDMP/IDMPAUTO) and per-stream idempotence configuration helpers.</Description>
     <PackageTags>redis;streams;xadd;idempotent;cache;distributed-cache;autofac;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
-    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
     <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
     <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
@@ -41,6 +41,7 @@
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
   </ItemGroup>
 </Project>
+
 
 
 

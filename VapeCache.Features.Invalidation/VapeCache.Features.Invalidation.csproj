@@ -7,14 +7,14 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Features.Invalidation</PackageId>
     <Title>VapeCache Invalidation Features</Title>
-    <Version>1.2.17</Version>
+    <Version>1.2.18</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Features.Invalidation</Product>
     <Description>Optional invalidation policy package for VapeCache. Adds policy-driven tag, zone, and key invalidation orchestration with runtime options support.</Description>
     <PackageTags>cache;redis;invalidation;tags;zones;policy;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
-    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
     <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
     <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
@@ -44,6 +44,7 @@
     <None Include="..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
+
 
 
 

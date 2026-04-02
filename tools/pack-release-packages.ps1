@@ -24,6 +24,7 @@ $projects = Get-ReleasePackageProjects
 $resolvedPackageVersion = Resolve-ReleasePackageVersion -PackageVersion $PackageVersion
 
 Assert-ReleasePackageBranding
+Assert-ReleasePackageDocumentationMetadata
 
 if (Test-Path -LiteralPath $OutputDir)
 {

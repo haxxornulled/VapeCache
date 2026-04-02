@@ -31,6 +31,31 @@ public class RedisRespProtocolTests
     }
 
     [Fact]
+    public void FtCreate_WithTypedSchema_WritesExpectedTokens()
+    {
+        var fields = new[]
+        {
+            VapeCache.Abstractions.Modules.RedisSearchFieldDefinition.Tag("orderId", sortable: true),
+            VapeCache.Abstractions.Modules.RedisSearchFieldDefinition.Numeric("subtotal", sortable: true),
+            VapeCache.Abstractions.Modules.RedisSearchFieldDefinition.Text("searchText", weight: 2.0, alias: "q")
+        };
+
+        var len = RedisRespProtocol.GetFtCreateCommandLength("idx:grocery:receipts", "receipt:search:doc:", fields);
+        var buffer = new byte[len];
+        var written = RedisRespProtocol.WriteFtCreateCommand(buffer, "idx:grocery:receipts", "receipt:search:doc:", fields);
+
+        Assert.Equal(len, written);
+
+        var text = Encoding.ASCII.GetString(buffer);
+        Assert.Contains("$3\r\nTAG\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$7\r\nNUMERIC\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$4\r\nTEXT\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$8\r\nSORTABLE\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$2\r\nAS\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$6\r\nWEIGHT\r\n", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ZRangeByScoreWithLimit_UsesEightParts()
     {
         var len = RedisRespProtocol.GetZRangeByScoreWithScoresCommandLength("scores", "0", "10", descending: false, offset: 1, count: 2);

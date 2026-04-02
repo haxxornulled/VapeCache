@@ -36,3 +36,9 @@ builder.Services.AddOpenTelemetry()
 - `AddVapeCacheEfCoreOpenTelemetry()` auto-enables EF observer callbacks so telemetry events are emitted.
 - Metrics use low-cardinality tags by default.
 - Activity emission is optional (`EmitActivities`, enabled by default).
+
+## Docs
+
+- EF Core second-level cache guide: https://github.com/haxxornulled/VapeCache/blob/main/docs/EFCORE_SECOND_LEVEL_CACHE.md
+- Aspire integration: https://github.com/haxxornulled/VapeCache/blob/main/docs/ASPIRE_INTEGRATION.md
+- API reference: https://github.com/haxxornulled/VapeCache/blob/main/docs/API_REFERENCE.md

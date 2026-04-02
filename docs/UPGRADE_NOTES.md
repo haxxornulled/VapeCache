@@ -2,6 +2,23 @@
 
 These are the release-critical behavior changes to account for before shipping or upgrading hosts.
 
+## New Distributed Cache Bridge
+
+`VapeCache.Extensions.DistributedCache` adds a compatibility bridge for `IDistributedCache` / `IBufferDistributedCache`.
+
+Intended use:
+
+- migration from another distributed-cache provider
+- framework/middleware compatibility paths
+- FusionCache-style distributed L2 interoperability
+
+Recommended guidance:
+
+- treat it as an interoperability layer, not the preferred headline experience
+- keep the existing cache abstraction if that makes adoption easier, then migrate to native VapeCache later when you want the fuller runtime model
+- use a dedicated key prefix when sharing the same backend with native VapeCache consumers
+- market it as "route your distributed cache layer through VapeCache with minimal code changes"
+
 ## Required Startup Binding
 
 If you register the core services directly:

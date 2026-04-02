@@ -10,7 +10,7 @@ public sealed class ComparisonRunnerFormattingTests
     public void PrintComparison_writes_human_readable_summary()
     {
         var vape = new StressTestResult(
-            ProviderName: "VapeCache",
+            ProviderName: "VapeCache Native",
             ShopperCount: 10_000,
             SuccessCount: 10_000,
             ErrorCount: 0,
@@ -30,7 +30,7 @@ public sealed class ComparisonRunnerFormattingTests
             Gen2Collections: 0);
 
         var ser = new StressTestResult(
-            ProviderName: "StackExchange.Redis",
+            ProviderName: "SER",
             ShopperCount: 10_000,
             SuccessCount: 9_999,
             ErrorCount: 1,
@@ -59,7 +59,7 @@ public sealed class ComparisonRunnerFormattingTests
 
             var text = output.ToString();
             Assert.Contains("Throughput (shoppers/sec)", text);
-            Assert.Contains("VapeCache is", text);
+            Assert.Contains("VapeCache Native is", text);
             Assert.Contains("LOWER average latency", text);
         }
         finally

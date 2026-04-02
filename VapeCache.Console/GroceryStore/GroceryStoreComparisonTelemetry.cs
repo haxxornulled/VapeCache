@@ -14,6 +14,12 @@ public readonly record struct GroceryStoreComparisonTelemetrySnapshot
         long FlashSaleParticipantCountReadOps,
         long SessionReadOps,
         long SessionWriteOps,
+        long RecentlyViewedReadOps = 0,
+        long RecentlyViewedWriteOps = 0,
+        long CheckoutEventWriteOps = 0,
+        long ReceiptSearchReadOps = 0,
+        long ReceiptReviewInvalidationWriteOps = 0,
+        long TagInvalidationWriteOps = 0,
         long CommandCoverageReadOps = 0,
         long CommandCoverageWriteOps = 0,
         long CommandCoverageAdminOps = 0,
@@ -30,6 +36,12 @@ public readonly record struct GroceryStoreComparisonTelemetrySnapshot
         this.FlashSaleParticipantCountReadOps = FlashSaleParticipantCountReadOps;
         this.SessionReadOps = SessionReadOps;
         this.SessionWriteOps = SessionWriteOps;
+        this.RecentlyViewedReadOps = RecentlyViewedReadOps;
+        this.RecentlyViewedWriteOps = RecentlyViewedWriteOps;
+        this.CheckoutEventWriteOps = CheckoutEventWriteOps;
+        this.ReceiptSearchReadOps = ReceiptSearchReadOps;
+        this.ReceiptReviewInvalidationWriteOps = ReceiptReviewInvalidationWriteOps;
+        this.TagInvalidationWriteOps = TagInvalidationWriteOps;
         this.CommandCoverageReadOps = CommandCoverageReadOps;
         this.CommandCoverageWriteOps = CommandCoverageWriteOps;
         this.CommandCoverageAdminOps = CommandCoverageAdminOps;
@@ -47,6 +59,12 @@ public readonly record struct GroceryStoreComparisonTelemetrySnapshot
     public long FlashSaleParticipantCountReadOps { get; init; }
     public long SessionReadOps { get; init; }
     public long SessionWriteOps { get; init; }
+    public long RecentlyViewedReadOps { get; init; }
+    public long RecentlyViewedWriteOps { get; init; }
+    public long CheckoutEventWriteOps { get; init; }
+    public long ReceiptSearchReadOps { get; init; }
+    public long ReceiptReviewInvalidationWriteOps { get; init; }
+    public long TagInvalidationWriteOps { get; init; }
     public long CommandCoverageReadOps { get; init; }
     public long CommandCoverageWriteOps { get; init; }
     public long CommandCoverageAdminOps { get; init; }
@@ -59,6 +77,8 @@ public readonly record struct GroceryStoreComparisonTelemetrySnapshot
         FlashSaleMembershipReadOps +
         FlashSaleParticipantCountReadOps +
         SessionReadOps +
+        RecentlyViewedReadOps +
+        ReceiptSearchReadOps +
         CommandCoverageReadOps;
 
     public long WriteOps =>
@@ -67,6 +87,10 @@ public readonly record struct GroceryStoreComparisonTelemetrySnapshot
         CartClearWriteOps +
         FlashSaleJoinWriteOps +
         SessionWriteOps +
+        RecentlyViewedWriteOps +
+        CheckoutEventWriteOps +
+        ReceiptReviewInvalidationWriteOps +
+        TagInvalidationWriteOps +
         CommandCoverageWriteOps;
 
     public long AdminOps => CommandCoverageAdminOps;

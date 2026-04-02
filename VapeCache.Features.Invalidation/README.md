@@ -101,3 +101,9 @@ services.AddHighTrafficEntityInvalidationPolicy<OrderUpdated>(
 services.AddDesktopKeyInvalidationPolicy<OrderUpdated>(
     keysSelector: e => [$"order:{e.OrderId}"]);
 ```
+
+## Docs
+
+- Cache invalidation guide: https://github.com/haxxornulled/VapeCache/blob/main/docs/CACHE_INVALIDATION.md
+- Cache tags and zones: https://github.com/haxxornulled/VapeCache/blob/main/docs/CACHE_TAGS_AND_ZONES.md
+- API reference: https://github.com/haxxornulled/VapeCache/blob/main/docs/API_REFERENCE.md

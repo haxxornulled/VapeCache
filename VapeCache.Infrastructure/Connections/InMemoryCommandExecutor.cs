@@ -1505,6 +1505,22 @@ internal sealed class InMemoryCommandExecutor : IRedisFallbackCommandExecutor
     /// Executes value.
     /// </summary>
     public ValueTask<bool> FtCreateAsync(string index, string prefix, string[] fields, CancellationToken ct)
+    {
+        VapeCache.Abstractions.Modules.RedisSearchFieldDefinition[] schema = new VapeCache.Abstractions.Modules.RedisSearchFieldDefinition[fields.Length];
+        for (var i = 0; i < fields.Length; i++)
+            schema[i] = VapeCache.Abstractions.Modules.RedisSearchFieldDefinition.Text(fields[i]);
+
+        return FtCreateAsync(index, prefix, schema, ct);
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public ValueTask<bool> FtCreateAsync(
+        string index,
+        string prefix,
+        IReadOnlyList<VapeCache.Abstractions.Modules.RedisSearchFieldDefinition> fields,
+        CancellationToken ct)
         => ValueTask.FromResult(true);
 
     /// <summary>

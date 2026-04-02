@@ -7,14 +7,14 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.EntityFrameworkCore</PackageId>
     <Title>VapeCache Extensions for EF Core</Title>
-    <Version>1.2.17</Version>
+    <Version>1.2.18</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.EntityFrameworkCore</Product>
     <Description>EF Core second-level cache interceptor contract package for VapeCache. Provides deterministic query key building, SaveChanges invalidation bridge interceptors, and DI/DbContextOptions wiring.</Description>
     <PackageTags>efcore;entityframework;cache;second-level-cache;interceptor;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
-    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
     <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
     <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
@@ -41,6 +41,7 @@
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
   </ItemGroup>
 </Project>
+
 
 
 

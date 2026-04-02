@@ -105,3 +105,9 @@ Headers/cookie emitted:
 - `X-VapeCache-Node`
 - `X-VapeCache-Failover-State`
 - `VapeCacheAffinity` cookie (configurable)
+
+## Docs
+
+- ASP.NET Core pipeline guide: https://github.com/haxxornulled/VapeCache/blob/main/docs/ASPNETCORE_PIPELINE_CACHING.md
+- ASP.NET Core policy extension: https://github.com/haxxornulled/VapeCache/blob/main/docs/ASPNETCORE_POLICY_EXTENSION.md
+- Configuration: https://github.com/haxxornulled/VapeCache/blob/main/docs/CONFIGURATION.md

@@ -10,8 +10,10 @@ This OSS repository ships production-ready runtime packages for Redis-first cach
 | `VapeCache.Core` | [NuGet](https://www.nuget.org/packages/VapeCache.Core) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.core) |
 | `VapeCache.Abstractions` | [NuGet](https://www.nuget.org/packages/VapeCache.Abstractions) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.abstractions) |
 | `VapeCache.Features.Invalidation` | [NuGet](https://www.nuget.org/packages/VapeCache.Features.Invalidation) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.invalidation) |
+| `VapeCache.Features.Search` | [NuGet](https://www.nuget.org/packages/VapeCache.Features.Search) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.search) |
 | `VapeCache.Extensions.DependencyInjection` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.DependencyInjection) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.dependencyinjection) |
 | `VapeCache.Extensions.AdminAuth` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.AdminAuth) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.adminauth) |
+| `VapeCache.Extensions.DistributedCache` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.DistributedCache) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.distributedcache) |
 | `VapeCache.Extensions.Logging` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.Logging) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.logging) |
 | `VapeCache.Extensions.PubSub` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.PubSub) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.pubsub) |
 | `VapeCache.Extensions.Streams` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.Streams) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.streams) |
@@ -50,6 +52,15 @@ Optional invalidation policies (keys, tags, zones).
 dotnet add package VapeCache.Features.Invalidation
 ```
 
+### VapeCache.Features.Search
+Optional RediSearch projection/search package for HASH-backed operational search workloads. Use this for denormalized search documents, typed `TEXT/TAG/NUMERIC` schemas, query-result cache conventions, and invalidation helpers that plug into `VapeCache.Features.Invalidation`.
+
+```bash
+dotnet add package VapeCache.Features.Search
+```
+
+Recommended framing: keep authoritative state in the right Redis data types, project the searchable slice into HASH documents, index those hashes with RediSearch, then invalidate hot result pages through the invalidation package when receipt/order/search state changes.
+
 ### VapeCache.Extensions.DependencyInjection
 DI facade package for clean architecture wiring. Registers runtime services and provides fluent configuration binding helpers.
 
@@ -65,6 +76,17 @@ dotnet add package VapeCache.Extensions.AdminAuth
 ```
 
 If you do not install this package, you must implement equivalent protections yourself (see [ADMIN_AUTH.md](ADMIN_AUTH.md)).
+
+### VapeCache.Extensions.DistributedCache
+Bridge package for `IDistributedCache` / `IBufferDistributedCache` interoperability and migration.
+
+```bash
+dotnet add package VapeCache.Extensions.DistributedCache
+```
+
+Use this when you want to route existing Microsoft distributed-cache integrations or FusionCache L2 traffic through VapeCache with minimal code changes.
+Recommended framing: keep the current cache abstraction, swap the distributed-cache backing layer to VapeCache, then move to native VapeCache APIs later if you want the fuller runtime surface.
+Compatibility contract: the bridge implements the public Microsoft distributed-cache APIs and preserves caller-visible expiration semantics, but it does not promise backend storage-format parity with other providers.
 
 ### VapeCache.Extensions.Logging
 Optional logging package for Serilog + OpenTelemetry host wiring. Includes production-safe defaults, optional rolling file sink support, and optional JSON formatter routing (`Serilog:Json:*`).
@@ -134,21 +156,22 @@ See [OSS_VS_ENTERPRISE.md](OSS_VS_ENTERPRISE.md) for the canonical boundary.
 
 ## License Summary
 
-VapeCache is licensed under BUSL-1.1 with an Additional Use Grant.
+VapeCache OSS is licensed under MIT.
 
 Allowed:
 - production use
 - commercial application use
 - SaaS use
 - internal business use
+- modification
+- redistribution
 
-Not allowed:
-- offering VapeCache itself as a hosted caching/database service
-- embedding VapeCache as the core of a commercial caching/database infrastructure product
+Important:
+- MIT does not grant trademark rights to the `VapeCache` name, logos, or branding
+- the software is provided `AS IS`, without warranty or liability
+- no support, maintenance, or service commitment is created by the license
 
-Current versions convert to Apache 2.0 on 2029-03-11.
-
-See [LICENSE_FAQ.md](LICENSE_FAQ.md) and [../LICENSE](../LICENSE).
+See [LICENSE_FAQ.md](LICENSE_FAQ.md), [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md), and [../LICENSE](../LICENSE).
 
 ## Release Notes
 

@@ -22,6 +22,7 @@ The OSS package set is:
 - `VapeCache.Features.Invalidation`
 - `VapeCache.Extensions.DependencyInjection`
 - `VapeCache.Extensions.AdminAuth`
+- `VapeCache.Extensions.DistributedCache`
 - `VapeCache.Extensions.Logging`
 - `VapeCache.Extensions.PubSub`
 - `VapeCache.Extensions.AspNetCore`

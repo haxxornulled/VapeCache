@@ -51,7 +51,25 @@ internal sealed partial class RedisSearchService : IRedisSearchService, IDisposa
     /// <summary>
     /// Creates value.
     /// </summary>
-    public async ValueTask<bool> CreateIndexAsync(string index, string prefix, string[] fields, CancellationToken ct = default)
+    public ValueTask<bool> CreateIndexAsync(string index, string prefix, string[] fields, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        RedisSearchFieldDefinition[] schema = new RedisSearchFieldDefinition[fields.Length];
+        for (var i = 0; i < fields.Length; i++)
+            schema[i] = RedisSearchFieldDefinition.Text(fields[i]);
+
+        return CreateIndexAsync(index, prefix, schema, ct);
+    }
+
+    /// <summary>
+    /// Creates value.
+    /// </summary>
+    public async ValueTask<bool> CreateIndexAsync(
+        string index,
+        string prefix,
+        IReadOnlyList<RedisSearchFieldDefinition> fields,
+        CancellationToken ct = default)
     {
         if (!await IsAvailableAsync(ct).ConfigureAwait(false))
         {
@@ -71,6 +89,22 @@ internal sealed partial class RedisSearchService : IRedisSearchService, IDisposa
             return Array.Empty<string>();
 
         return await _redis.FtSearchAsync(index, query, offset, count, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public async ValueTask<long> SearchCountAsync(
+        string index,
+        string query,
+        int? offset = null,
+        int? count = null,
+        CancellationToken ct = default)
+    {
+        if (!await IsAvailableAsync(ct).ConfigureAwait(false))
+            return 0L;
+
+        return await _redis.FtSearchCountAsync(index, query, offset, count, ct).ConfigureAwait(false);
     }
 
     [LoggerMessage(

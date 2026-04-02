@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using Microsoft.Extensions.Logging;
 
 namespace VapeCache.Console.GroceryStore;
@@ -35,17 +36,30 @@ public class GroceryStoreComparisonStressTest
     /// <summary>
     /// Run comprehensive stress test and return performance metrics.
     /// </summary>
-    public async Task<StressTestResult> RunStressTestAsync(
+    public Task<StressTestResult> RunStressTestAsync(
         int shopperCount = 10_000,
         int maxCartSize = 35,
         CancellationToken cancellationToken = default)
+        => RunStressTestAsync(shopperCount, minCartSize: 15, maxCartSize, cancellationToken);
+
+    public async Task<StressTestResult> RunStressTestAsync(
+        int shopperCount,
+        int minCartSize,
+        int maxCartSize,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        maxCartSize = Math.Max(15, maxCartSize);
+        minCartSize = Math.Max(1, minCartSize);
+        maxCartSize = Math.Max(minCartSize, maxCartSize);
         var enableCommandCoverage = ResolvePhaseToggle("VAPECACHE_BENCH_ENABLE_COMMAND_COVERAGE", fallback: true);
         var enableTagInvalidation = ResolvePhaseToggle("VAPECACHE_BENCH_ENABLE_TAG_INVALIDATION", fallback: true);
         _logger.LogInformation("===== {Provider} Grocery Store Stress Test =====", _providerName);
-        _logger.LogInformation("Shoppers: {Count:N0}, Max Cart Size: {MaxCart}", shopperCount, maxCartSize);
+        _logger.LogInformation(
+            "Shoppers: {Count:N0}, Cart Size: {MinCart}..{MaxCart} (avg target {AverageCart:N0})",
+            shopperCount,
+            minCartSize,
+            maxCartSize,
+            (minCartSize + maxCartSize) / 2m);
         _logger.LogInformation(
             "Workload Flags: CommandCoverage={CommandCoverage}, TagInvalidation={TagInvalidation}",
             enableCommandCoverage,
@@ -70,10 +84,13 @@ public class GroceryStoreComparisonStressTest
         var joinFlashSaleMs = new double[shopperCount];
         var isInFlashSaleMs = new double[shopperCount];
         var buildCartItemsMs = new double[shopperCount];
+        var browseHistoryPhaseMs = new double[shopperCount];
         var addToCartMs = new double[shopperCount];
         var cartReadPhaseMs = new double[shopperCount];
         var sessionAndSalePhaseMs = new double[shopperCount];
         var commandCoveragePhaseMs = new double[shopperCount];
+        var checkoutCommitMs = new double[shopperCount];
+        var receiptCheckPhaseMs = new double[shopperCount];
         var tagInvalidationPhaseMs = new double[shopperCount];
         var checkoutLaneWaitMs = new double[shopperCount];
         var clearCartMs = new double[shopperCount];
@@ -94,6 +111,9 @@ public class GroceryStoreComparisonStressTest
         var batchWriter = _service as ICartBatchWriter;
         var tagOperations = _service as IGroceryStoreTagOperations;
         var commandCoverageRunner = _service as IGroceryStoreCommandCoverageRunner;
+        var recentlyViewedOperations = _service as IGroceryStoreRecentlyViewedOperations;
+        var checkoutOperations = _service as IGroceryStoreCheckoutEventOperations;
+        var receiptCheckOperations = _service as IGroceryStoreReceiptCheckOperations;
 
         async Task ProcessShopperAsync(int shopperIndex)
         {
@@ -113,12 +133,16 @@ public class GroceryStoreComparisonStressTest
                 double joinFlashSaleStep = 0;
                 double isInFlashSaleStep = 0;
                 double buildCartItemsStep = 0;
+                double browseHistoryPhaseStep = 0;
                 double addToCartStep = 0;
                 double cartReadPhaseStep = 0;
                 double sessionAndSalePhaseStep = 0;
+                double checkoutCommitStep = 0;
+                double receiptCheckPhaseStep = 0;
                 double tagInvalidationPhaseStep = 0;
                 double checkoutLaneWaitStep = 0;
                 double clearCartStep = 0;
+                var sessionId = $"session-{shopperIndex}";
 
                 // 1. Join flash sale
                 var stepStart = Stopwatch.GetTimestamp();
@@ -132,11 +156,11 @@ public class GroceryStoreComparisonStressTest
                 await _service.IsInFlashSaleAsync(saleId, userId).ConfigureAwait(false);
                 isInFlashSaleStep = ElapsedMs(stepStart);
 
-                // 3. Add random items to cart (15-35 items)
+                // 3. Add a realistically sized grocery basket.
                 stepStart = Stopwatch.GetTimestamp();
                 var cartSize = deterministic
-                    ? DeterministicRange(seed, shopperIndex, salt: 2, minInclusive: 15, maxInclusive: maxCartSize)
-                    : Random.Shared.Next(15, maxCartSize + 1);
+                    ? DeterministicRange(seed, shopperIndex, salt: 2, minInclusive: minCartSize, maxInclusive: maxCartSize)
+                    : Random.Shared.Next(minCartSize, maxCartSize + 1);
                 var items = new CartItem[cartSize];
                 for (int i = 0; i < cartSize; i++)
                 {
@@ -147,14 +171,41 @@ public class GroceryStoreComparisonStressTest
                         ? DeterministicRange(seed, shopperIndex, salt: 1001 + (i * 2), minInclusive: 1, maxInclusive: 3)
                         : Random.Shared.Next(1, 4);
                     var product = products[productIndex];
+                    var extendedPrice = product.Price * quantity;
                     items[i] = new CartItem(
                         product.Id,
                         product.Name,
                         product.Price,
                         quantity,
-                        now);
+                        now)
+                    {
+                        Category = product.Category,
+                        Department = product.Department,
+                        Aisle = product.Aisle,
+                        Brand = product.Brand,
+                        UnitOfMeasure = product.UnitOfMeasure,
+                        TemperatureZone = product.TemperatureZone,
+                        ExtendedPrice = extendedPrice
+                    };
                 }
                 buildCartItemsStep = ElapsedMs(stepStart);
+
+                stepStart = Stopwatch.GetTimestamp();
+                if (recentlyViewedOperations is not null)
+                {
+                    var viewedCount = Math.Min(8, items.Length);
+                    var recentlyViewed = new string[viewedCount];
+                    for (var i = 0; i < viewedCount; i++)
+                        recentlyViewed[i] = items[i].ProductId;
+
+                    await recentlyViewedOperations
+                        .TrackRecentlyViewedAsync(userId, recentlyViewed, now, cancellationToken)
+                        .ConfigureAwait(false);
+                    _ = await recentlyViewedOperations
+                        .GetRecentlyViewedProductIdsAsync(userId, Math.Min(6, viewedCount), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                browseHistoryPhaseStep = ElapsedMs(stepStart);
 
                 stepStart = Stopwatch.GetTimestamp();
                 cancellationToken.ThrowIfCancellationRequested();
@@ -200,11 +251,18 @@ public class GroceryStoreComparisonStressTest
                 cancellationToken.ThrowIfCancellationRequested();
                 var session = new UserSession(
                     userId,
-                    $"session-{shopperIndex}",
+                    sessionId,
                     now,
                     now,
-                    Array.Empty<string>(),
-                    null);
+                    items.Take(Math.Min(6, items.Length)).Select(static item => item.ProductId).ToArray(),
+                    SuperCenterKeySpace.Cart(userId))
+                {
+                    StoreId = $"store-{((shopperIndex % 24) + 1):D3}",
+                    LoyaltyTier = ResolveLoyaltyTier(shopperIndex),
+                    FulfillmentMethod = ResolveFulfillmentMethod(shopperIndex),
+                    CouponCodes = BuildCouponCodes(shopperIndex, saleId),
+                    DietaryPreferences = BuildDietaryPreferences(shopperIndex)
+                };
                 var saveSessionTask = _service.SaveSessionAsync(userId, session);
                 var participantCountTask = _service.GetFlashSaleParticipantCountAsync(saleId);
                 if (saveSessionTask.IsCompletedSuccessfully)
@@ -247,25 +305,14 @@ public class GroceryStoreComparisonStressTest
                     await commandCoverageRunner.ExecuteShopperCommandCoverageAsync(
                         userId,
                         saleId,
-                        userId,
+                        sessionId,
                         now,
                         items,
                         cancellationToken).ConfigureAwait(false);
                 }
                 var commandCoveragePhaseStep = ElapsedMs(stepStart);
 
-                // 10. Invalidate shopper tag scope and verify eviction visibility.
-                stepStart = Stopwatch.GetTimestamp();
-                if (enableTagInvalidation && tagOperations is not null)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    _ = await tagOperations.InvalidateShopperScopeAsync(userId, cancellationToken).ConfigureAwait(false);
-                    _ = await _service.GetSessionAsync(userId).ConfigureAwait(false);
-                    _ = await _service.GetCartCountAsync(userId).ConfigureAwait(false);
-                }
-                tagInvalidationPhaseStep = ElapsedMs(stepStart);
-
-                // 11. Clear cart (checkout) through 128-lane cashier arbitration.
+                // 10/13. Checkout commit through 128-lane cashier arbitration, then receipt-check, clear cart, and invalidate shopper scope.
                 stepStart = Stopwatch.GetTimestamp();
                 cancellationToken.ThrowIfCancellationRequested();
                 var laneId = deterministic
@@ -277,13 +324,91 @@ public class GroceryStoreComparisonStressTest
                 checkoutLaneWaitStep = ElapsedMs(laneWaitStart);
                 try
                 {
+                    if (checkoutOperations is not null && receiptCheckOperations is not null)
+                    {
+                        var checkedOutAt = deterministic
+                            ? now.AddSeconds(30)
+                            : DateTime.UtcNow;
+                        var orderId = $"order-{shopperIndex:D6}";
+                        var subtotal = 0m;
+                        var itemCount = 0;
+                        for (var itemIndex = 0; itemIndex < items.Length; itemIndex++)
+                        {
+                            var item = items[itemIndex];
+                            subtotal += item.ExtendedPrice > 0m ? item.ExtendedPrice : item.Price * item.Quantity;
+                            itemCount += item.Quantity;
+                        }
+
+                        stepStart = Stopwatch.GetTimestamp();
+                        await checkoutOperations.RecordCheckoutAsync(
+                            new GroceryCheckoutEvent(
+                                orderId,
+                                userId,
+                                sessionId,
+                                saleId,
+                                itemCount,
+                                subtotal,
+                                checkedOutAt)
+                            {
+                                StoreId = session.StoreId,
+                                FulfillmentMethod = session.FulfillmentMethod,
+                                ReceiptStatus = SuperCenterReceiptSearch.ClearedStatus,
+                                ReceiptSearchText = BuildReceiptSearchText(
+                                    orderId,
+                                    userId,
+                                    session.StoreId,
+                                    saleId,
+                                    session.FulfillmentMethod,
+                                    items)
+                            },
+                            cancellationToken).ConfigureAwait(false);
+                        checkoutCommitStep = ElapsedMs(stepStart);
+
+                        stepStart = Stopwatch.GetTimestamp();
+                        var flagForManualReview = deterministic
+                            ? DeterministicRange(seed, shopperIndex, salt: 29_011, minInclusive: 1, maxInclusive: 64) == 1
+                            : Random.Shared.Next(64) == 0;
+                        var receiptCheck = await receiptCheckOperations.CheckReceiptAtExitAsync(
+                            new ReceiptExitCheckRequest(
+                                orderId,
+                                userId,
+                                session.StoreId,
+                                checkedOutAt.AddHours(-2),
+                                take: 3,
+                                flagForManualReview: flagForManualReview,
+                                receiptStatus: SuperCenterReceiptSearch.ClearedStatus),
+                            cancellationToken).ConfigureAwait(false);
+                        if (!receiptCheck.Matched)
+                        {
+                            throw new InvalidOperationException(
+                                $"Receipt search missed checkout '{orderId}' for shopper '{userId}'.");
+                        }
+                        receiptCheckPhaseStep = ElapsedMs(stepStart);
+                    }
+
+                    stepStart = Stopwatch.GetTimestamp();
                     await _service.ClearCartAsync(userId).ConfigureAwait(false);
+                    clearCartStep = ElapsedMs(stepStart);
+
+                    var invalidationStart = Stopwatch.GetTimestamp();
+                    if (enableTagInvalidation && tagOperations is not null)
+                    {
+                        _ = await tagOperations.InvalidateShopperScopeAsync(userId, cancellationToken).ConfigureAwait(false);
+                        _ = await _service.GetSessionAsync(userId).ConfigureAwait(false);
+                        _ = await _service.GetCartCountAsync(userId).ConfigureAwait(false);
+                        if (recentlyViewedOperations is not null)
+                        {
+                            _ = await recentlyViewedOperations
+                                .GetRecentlyViewedProductIdsAsync(userId, 6, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+                    }
+                    tagInvalidationPhaseStep = ElapsedMs(invalidationStart);
                 }
                 finally
                 {
                     lane.Release();
                 }
-                clearCartStep = ElapsedMs(stepStart);
 
                 shopperSw.Stop();
                 var slot = Interlocked.Increment(ref successCount) - 1;
@@ -292,10 +417,13 @@ public class GroceryStoreComparisonStressTest
                 joinFlashSaleMs[slot] = joinFlashSaleStep;
                 isInFlashSaleMs[slot] = isInFlashSaleStep;
                 buildCartItemsMs[slot] = buildCartItemsStep;
+                browseHistoryPhaseMs[slot] = browseHistoryPhaseStep;
                 addToCartMs[slot] = addToCartStep;
                 cartReadPhaseMs[slot] = cartReadPhaseStep;
                 sessionAndSalePhaseMs[slot] = sessionAndSalePhaseStep;
                 commandCoveragePhaseMs[slot] = commandCoveragePhaseStep;
+                checkoutCommitMs[slot] = checkoutCommitStep;
+                receiptCheckPhaseMs[slot] = receiptCheckPhaseStep;
                 tagInvalidationPhaseMs[slot] = tagInvalidationPhaseStep;
                 checkoutLaneWaitMs[slot] = checkoutLaneWaitStep;
                 clearCartMs[slot] = clearCartStep;
@@ -371,10 +499,13 @@ public class GroceryStoreComparisonStressTest
             ("JoinFlashSale", joinFlashSaleMs),
             ("IsInFlashSale", isInFlashSaleMs),
             ("BuildCartItems", buildCartItemsMs),
+            ("BrowseHistoryPhase", browseHistoryPhaseMs),
             ("AddToCart", addToCartMs),
             ("CartReadPhase", cartReadPhaseMs),
             ("SessionAndSalePhase", sessionAndSalePhaseMs),
             ("CommandCoveragePhase", commandCoveragePhaseMs),
+            ("CheckoutCommit", checkoutCommitMs),
+            ("ReceiptCheckPhase", receiptCheckPhaseMs),
             ("TagInvalidationPhase", tagInvalidationPhaseMs),
             ("CheckoutLaneWait", checkoutLaneWaitMs),
             ("ClearCart", clearCartMs));
@@ -525,6 +656,47 @@ public class GroceryStoreComparisonStressTest
         return sum / count;
     }
 
+    private static string ResolveLoyaltyTier(int shopperIndex)
+    {
+        return (shopperIndex % 5) switch
+        {
+            0 => "Platinum",
+            1 => "Gold",
+            2 => "Silver",
+            3 => "Member",
+            _ => "Guest"
+        };
+    }
+
+    private static string ResolveFulfillmentMethod(int shopperIndex)
+        => (shopperIndex % 3) switch
+        {
+            0 => "Pickup",
+            1 => "Delivery",
+            _ => "InStore"
+        };
+
+    private static string[] BuildCouponCodes(int shopperIndex, string saleId)
+    {
+        return
+        [
+            $"LOYALTY-{shopperIndex % 17:D2}",
+            $"BASKET-{shopperIndex % 23:D2}",
+            saleId.ToUpperInvariant()
+        ];
+    }
+
+    private static string[] BuildDietaryPreferences(int shopperIndex)
+    {
+        return (shopperIndex % 4) switch
+        {
+            0 => ["organic", "high-protein"],
+            1 => ["family-size"],
+            2 => ["gluten-free", "quick-meals"],
+            _ => ["value", "fresh-produce"]
+        };
+    }
+
     private static int GetMaxDegreeOfParallelism(int? configuredMaxDegree)
     {
         if (configuredMaxDegree is > 0)
@@ -593,6 +765,37 @@ public class GroceryStoreComparisonStressTest
         for (var i = 0; i < steps.Length; i++)
             summaries[i] = SummarizeStep(steps[i].Name, steps[i].Values, count);
         return summaries;
+    }
+
+    private static string BuildReceiptSearchText(
+        string orderId,
+        string shopperId,
+        string storeId,
+        string saleId,
+        string fulfillmentMethod,
+        IReadOnlyList<CartItem> items)
+    {
+        var builder = new StringBuilder(256);
+        builder.Append(orderId)
+            .Append(' ')
+            .Append(shopperId)
+            .Append(' ')
+            .Append(storeId)
+            .Append(' ')
+            .Append(saleId)
+            .Append(' ')
+            .Append(fulfillmentMethod);
+
+        var previewCount = Math.Min(8, items.Count);
+        for (var i = 0; i < previewCount; i++)
+        {
+            builder.Append(' ')
+                .Append(items[i].ProductId)
+                .Append(' ')
+                .Append(items[i].ProductName);
+        }
+
+        return builder.ToString();
     }
 
     private static StepLatencySummary SummarizeStep(string name, double[] values, int count)

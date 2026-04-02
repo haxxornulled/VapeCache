@@ -3,12 +3,19 @@
 This is the source of truth for the public API surface:
 - `VapeCache.Abstractions`
 - `VapeCache.Infrastructure` fluent options extensions
+- `VapeCache.Features.Search` optional typed Redis search helpers
+- `VapeCache.Extensions.DistributedCache` optional distributed-cache bridge
 - `VapeCache.Extensions.PubSub` optional pub/sub registration extensions
 - `VapeCache.Extensions.Aspire` host/wrapper integrations
 
 Use this page for exact signatures and endpoint contracts.
 
 For runtime behavior guarantees and operational semantics across breaker/failover states, see [HYBRID_CACHING_API_SURFACE.md](HYBRID_CACHING_API_SURFACE.md).
+
+VapeCache now supports two runtime registration modes:
+
+- hybrid Redis mode: `AddVapeCache(...)`
+- in-memory-only mode: `AddVapeCacheInMemory(...)`
 
 ## Core Cache APIs
 
@@ -234,6 +241,34 @@ public interface IRedisConnectionStringBuilder
 Use this builder instead of manual string concatenation when creating `redis://`/`rediss://` URIs.
 It enforces host-only input, TLS-option consistency, and safe IPv6 authority formatting.
 
+## Microsoft DI Registration
+
+Namespace: `VapeCache.Extensions.DependencyInjection`
+
+```csharp
+public static class VapeCacheServiceCollectionExtensions
+{
+    VapeCacheDependencyInjectionBuilder AddVapeCache(this IServiceCollection services);
+    VapeCacheDependencyInjectionBuilder AddVapeCache(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        Action<VapeCacheConfigurationBindingOptions>? configureBinding = null);
+
+    VapeCacheDependencyInjectionBuilder AddVapeCacheInMemory(this IServiceCollection services);
+    VapeCacheDependencyInjectionBuilder AddVapeCacheInMemory(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        Action<VapeCacheConfigurationBindingOptions>? configureBinding = null);
+}
+```
+
+Mode guidance:
+
+- `AddVapeCache(...)` is the default hybrid Redis runtime and expects Redis configuration.
+- `AddVapeCacheInMemory(...)` is the explicit local/lightweight runtime and skips Redis registration entirely.
+- In-memory mode still supports `IVapeCache`, stampede protection, tag/zone invalidation, chunked payload helpers, the distributed-cache bridge, and typed collection APIs backed by the in-memory executor.
+- In-memory mode does not activate Redis transport, circuit-breaker failover, pub/sub, or other Redis-only transport features.
+
 ### `IRedisPubSubService` (optional package)
 
 Namespace: `VapeCache.Abstractions.Connections`
@@ -259,6 +294,52 @@ public readonly record struct RedisPubSubMessage(
     ReadOnlyMemory<byte> Payload,
     DateTimeOffset ReceivedAtUtc);
 ```
+
+### `IDistributedCache` / `IBufferDistributedCache` bridge (optional package)
+
+Namespace: `VapeCache.Extensions.DistributedCache`
+
+Install package: `VapeCache.Extensions.DistributedCache`
+
+The adapter registers the standard Microsoft distributed-cache interfaces over the VapeCache runtime:
+
+```csharp
+public static class VapeCacheDistributedCacheServiceCollectionExtensions
+{
+    IServiceCollection AddVapeCacheDistributedCache(
+        this IServiceCollection services,
+        Action<VapeCacheDistributedCacheOptions>? configure = null);
+
+    IServiceCollection AddVapeCacheDistributedCache(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string sectionName = "VapeCacheDistributedCache");
+}
+
+public static class VapeCacheDistributedCacheBuilderExtensions
+{
+    VapeCacheDependencyInjectionBuilder UseDistributedCacheAdapter(
+        this VapeCacheDependencyInjectionBuilder builder,
+        Action<VapeCacheDistributedCacheOptions>? configure = null);
+
+    VapeCacheDependencyInjectionBuilder UseDistributedCacheAdapter(
+        this VapeCacheDependencyInjectionBuilder builder,
+        IConfiguration configuration,
+        string sectionName = "VapeCacheDistributedCache");
+}
+
+public sealed class VapeCacheDistributedCacheOptions
+{
+    string KeyPrefix { get; set; }
+}
+```
+
+Bridge behavior:
+
+- adapter-managed internal envelope format for provider metadata
+- caller payloads round-trip as opaque bytes through the public contract
+- sliding expiration handled by adapter-managed metadata and TTL refresh
+- intended for interoperability and migration, not as a replacement for the native VapeCache API surface
 
 ### Named profiles
 
@@ -352,6 +433,77 @@ Interfaces:
 - `IRedisBloomService`
 - `IRedisTimeSeriesService`
 - `IRedisModuleDetector`
+
+### Search package (`VapeCache.Features.Search`)
+
+Install package: `VapeCache.Features.Search`
+
+```csharp
+public static class SearchServiceCollectionExtensions
+{
+    IServiceCollection AddVapeCacheSearch(
+        this IServiceCollection services,
+        IConfiguration? configuration = null,
+        Action<VapeCacheSearchOptions>? configure = null,
+        string configurationSectionName = "VapeCache:Search");
+}
+
+public sealed class VapeCacheSearchOptions
+{
+    bool Enabled { get; set; }
+    bool RequireModuleAvailability { get; set; }
+    int DefaultResultCount { get; set; }
+}
+
+public sealed class RedisSearchIndexDefinition
+{
+    string IndexName { get; }
+    string DocumentKeyPrefix { get; }
+    IReadOnlyList<RedisSearchFieldDefinition> Fields { get; }
+    string GetDocumentKey(string documentId);
+}
+
+public sealed class RedisSearchQuery
+{
+    string RawQuery { get; }
+    int? Offset { get; }
+    int? Count { get; }
+}
+
+public sealed class RedisSearchQueryBuilder
+{
+    RedisSearchQueryBuilder MatchText(string value, bool usePrefixMatching = true);
+    RedisSearchQueryBuilder Tag(string field, params string[] values);
+    RedisSearchQueryBuilder NumericRange(string field, double? min = null, double? max = null);
+    RedisSearchQueryBuilder Raw(string clause);
+    RedisSearchQuery Build(int? offset = null, int? count = null);
+}
+
+public interface IRedisHashSearchDocumentMapper<TDocument>
+{
+    RedisSearchIndexDefinition Index { get; }
+    string GetDocumentId(TDocument document);
+    IReadOnlyList<RedisSearchHashFieldValue> MapFields(TDocument document);
+}
+
+public interface IRedisHashSearchDocumentStore<TDocument>
+{
+    RedisSearchIndexDefinition Index { get; }
+    ValueTask<bool> EnsureIndexAsync(CancellationToken ct = default);
+    ValueTask<string> UpsertAsync(TDocument document, TimeSpan? ttl = null, CancellationToken ct = default);
+    ValueTask<bool> DeleteAsync(string documentId, CancellationToken ct = default);
+    ValueTask<string[]> SearchIdsAsync(RedisSearchQuery query, CancellationToken ct = default);
+    ValueTask<long> SearchCountAsync(RedisSearchQuery query, CancellationToken ct = default);
+    string GetDocumentKey(string documentId);
+}
+```
+
+Conventions:
+
+- use `TAG` fields for exact-match routing dimensions like `orderId`, `shopperId`, `status`, `storeId`
+- use `NUMERIC` fields for totals, counts, and time ranges
+- keep `TEXT` fields small and intentional
+- cache hot result pages in VapeCache and invalidate them with `SearchInvalidationPlanBuilderExtensions`
 
 High-throughput JSON path (lease-based):
 

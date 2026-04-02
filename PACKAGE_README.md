@@ -14,6 +14,7 @@ Optional integrations:
 
 ```bash
 dotnet add package VapeCache.Extensions.DependencyInjection
+dotnet add package VapeCache.Extensions.DistributedCache
 dotnet add package VapeCache.Extensions.Logging
 dotnet add package VapeCache.Extensions.PubSub
 dotnet add package VapeCache.Extensions.Streams
@@ -33,6 +34,7 @@ dotnet add package VapeCache.Features.Invalidation
 | `VapeCache.Abstractions` | [NuGet](https://www.nuget.org/packages/VapeCache.Abstractions) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.abstractions) |
 | `VapeCache.Features.Invalidation` | [NuGet](https://www.nuget.org/packages/VapeCache.Features.Invalidation) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.invalidation) |
 | `VapeCache.Extensions.DependencyInjection` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.DependencyInjection) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.dependencyinjection) |
+| `VapeCache.Extensions.DistributedCache` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.DistributedCache) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.distributedcache) |
 | `VapeCache.Extensions.Logging` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.Logging) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.logging) |
 | `VapeCache.Extensions.PubSub` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.PubSub) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.pubsub) |
 | `VapeCache.Extensions.Streams` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.Streams) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.streams) |
@@ -47,6 +49,7 @@ dotnet add package VapeCache.Features.Invalidation
 - `VapeCache.Core`: shared primitives used by other VapeCache packages
 - `VapeCache.Abstractions`: public contracts, options, and shared value types
 - `VapeCache.Extensions.DependencyInjection`: one-call DI facade for runtime registration
+- `VapeCache.Extensions.DistributedCache`: `IDistributedCache` / `IBufferDistributedCache` bridge for interoperability and migration
 - `VapeCache.Extensions.Logging`: optional Serilog + OTEL logging package with file sink support and optional JSON formatting (`Serilog:Json:*`)
 - `VapeCache.Extensions.PubSub`: optional Redis pub/sub registration package for publish/subscribe workloads
 - `VapeCache.Extensions.Streams`: optional Redis 8.6 stream package for idempotent producer workflows (`XADD IDMP/IDMPAUTO`, `XCFGSET`)
@@ -60,7 +63,7 @@ dotnet add package VapeCache.Features.Invalidation
 
 - Multiplexed transport is part of OSS.
 - Adaptive autoscaling of multiplexed lanes is Enterprise.
-- Enterprise capabilities focus on operational leverage (autoscaling, durable persistence, reconciliation, control-plane/admin/licensing), not basic OSS usability.
+- Enterprise capabilities focus on operational leverage (autoscaling, durable persistence, reconciliation, control-plane/admin features), not basic OSS usability.
 
 See: https://github.com/haxxornulled/VapeCache/blob/main/docs/OSS_VS_ENTERPRISE.md
 
@@ -79,10 +82,11 @@ https://github.com/haxxornulled/VapeCache
 
 ## License
 
-VapeCache uses BUSL-1.1 with an Additional Use Grant.
+VapeCache OSS uses the MIT License.
 
-- Allowed: production use, commercial application use, SaaS use, internal business use, modification, redistribution
-- Restricted: offering VapeCache as a hosted caching/database service, or embedding it as the core of a commercial caching/database infrastructure product
-- Change date: March 11, 2029 (converts to Apache 2.0)
+- Allowed: production use, commercial use, SaaS use, modification, redistribution
+- Conditions: preserve the copyright notice and MIT license text
+- Limitations: provided `AS IS`, without warranty or liability
+- Brand note: the MIT license does not grant rights to the `VapeCache` name, logos, or branding
 
-See LICENSE in the package for full legal terms and the docs FAQ for quick guidance.
+See LICENSE in the package for full legal terms and the docs FAQ/trademark policy for quick guidance.

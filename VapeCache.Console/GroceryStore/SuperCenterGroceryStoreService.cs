@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using VapeCache.Features.Invalidation;
 
 namespace VapeCache.Console.GroceryStore;
 
@@ -14,12 +15,15 @@ public interface IGroceryStoreTagOperations
 /// with only the storage provider swapped underneath.
 /// </summary>
 internal sealed class SuperCenterGroceryStoreService : IGroceryStoreService, ICartBatchWriter,
-    IGroceryStoreComparisonTelemetrySource, IGroceryStoreTagOperations, IGroceryStoreCommandCoverageRunner
+    IGroceryStoreComparisonTelemetrySource, IGroceryStoreTagOperations, IGroceryStoreCommandCoverageRunner,
+    IGroceryStoreRecentlyViewedOperations, IGroceryStoreCheckoutEventOperations, IGroceryStoreReceiptCheckOperations
 {
     private readonly ISuperCenterStoreProvider _provider;
+    private readonly ICacheInvalidationDispatcher _invalidationDispatcher;
     private readonly ILogger<SuperCenterGroceryStoreService> _logger;
     private readonly ConcurrentDictionary<string, CartItem[]> _cartShadow = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, UserSession> _sessionShadow = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string[]> _recentlyViewedShadow = new(StringComparer.Ordinal);
     private static readonly bool AssumeEmptyCartOnFirstWrite = ResolveAssumeEmptyCartOnFirstWrite();
     private static readonly Product[] Products = GroceryStoreService.GetAllProducts();
     private static readonly IReadOnlyDictionary<string, Product> ProductsById = BuildProductMap(Products);
@@ -34,6 +38,12 @@ internal sealed class SuperCenterGroceryStoreService : IGroceryStoreService, ICa
     private long _flashSaleParticipantCountReadOps;
     private long _sessionReadOps;
     private long _sessionWriteOps;
+    private long _recentlyViewedReadOps;
+    private long _recentlyViewedWriteOps;
+    private long _checkoutEventWriteOps;
+    private long _receiptSearchReadOps;
+    private long _receiptReviewInvalidationWriteOps;
+    private long _tagInvalidationWriteOps;
     private long _commandCoverageReadOps;
     private long _commandCoverageWriteOps;
     private long _commandCoverageAdminOps;
@@ -41,9 +51,11 @@ internal sealed class SuperCenterGroceryStoreService : IGroceryStoreService, ICa
 
     public SuperCenterGroceryStoreService(
         ISuperCenterStoreProvider provider,
+        ICacheInvalidationDispatcher invalidationDispatcher,
         ILogger<SuperCenterGroceryStoreService> logger)
     {
         _provider = provider;
+        _invalidationDispatcher = invalidationDispatcher;
         _logger = logger;
     }
 
@@ -162,11 +174,87 @@ internal sealed class SuperCenterGroceryStoreService : IGroceryStoreService, ICa
         return await _provider.GetSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
     }
 
+    public async ValueTask TrackRecentlyViewedAsync(
+        string shopperId,
+        IReadOnlyList<string> productIds,
+        DateTime viewedAtUtc,
+        CancellationToken ct = default)
+    {
+        if (productIds.Count == 0)
+            return;
+
+        Interlocked.Increment(ref _recentlyViewedWriteOps);
+        await _provider.TrackRecentlyViewedAsync(
+            shopperId,
+            productIds,
+            viewedAtUtc,
+            TimeSpan.FromMinutes(30),
+            ct).ConfigureAwait(false);
+
+        var snapshot = new string[productIds.Count];
+        for (var i = 0; i < productIds.Count; i++)
+            snapshot[i] = productIds[i];
+
+        _recentlyViewedShadow[shopperId] = snapshot;
+    }
+
+    public async ValueTask<string[]> GetRecentlyViewedProductIdsAsync(
+        string shopperId,
+        int take,
+        CancellationToken ct = default)
+    {
+        Interlocked.Increment(ref _recentlyViewedReadOps);
+        if (_recentlyViewedShadow.TryGetValue(shopperId, out var shadow))
+            return shadow.Take(Math.Max(0, take)).ToArray();
+
+        return await _provider.GetRecentlyViewedAsync(shopperId, take, ct).ConfigureAwait(false);
+    }
+
+    public async ValueTask RecordCheckoutAsync(GroceryCheckoutEvent checkoutEvent, CancellationToken ct = default)
+    {
+        Interlocked.Increment(ref _checkoutEventWriteOps);
+        await _provider.RecordCheckoutEventAsync(checkoutEvent, TimeSpan.FromHours(1), ct).ConfigureAwait(false);
+    }
+
+    public async ValueTask<ReceiptExitCheckResult> CheckReceiptAtExitAsync(
+        ReceiptExitCheckRequest request,
+        CancellationToken ct = default)
+    {
+        Interlocked.Increment(ref _receiptSearchReadOps);
+        var lookup = await _provider.SearchReceiptAsync(request, ct).ConfigureAwait(false);
+        long invalidatedTargets = 0;
+        if (request.FlagForManualReview && lookup.Matched)
+        {
+            Interlocked.Increment(ref _receiptReviewInvalidationWriteOps);
+            var result = await _invalidationDispatcher
+                .DispatchAsync(
+                    new ReceiptFlaggedForReview(
+                        request.OrderId,
+                        request.ShopperId,
+                        request.StoreId,
+                        lookup.SearchDocumentKey),
+                    ct)
+                .ConfigureAwait(false);
+            invalidatedTargets = result.InvalidatedTargets;
+        }
+
+        return new ReceiptExitCheckResult(
+            lookup.Matched,
+            lookup.HitCount,
+            invalidatedTargets,
+            request.FlagForManualReview);
+    }
+
     public async ValueTask<long> InvalidateShopperScopeAsync(string shopperId, CancellationToken ct = default)
     {
         _cartShadow.TryRemove(shopperId, out _);
         _sessionShadow.TryRemove(shopperId, out _);
-        return await _provider.InvalidateTagAsync($"shopper:{shopperId}", ct).ConfigureAwait(false);
+        _recentlyViewedShadow.TryRemove(shopperId, out _);
+        Interlocked.Increment(ref _tagInvalidationWriteOps);
+        var result = await _invalidationDispatcher
+            .DispatchAsync(new ShopperScopeInvalidationRequested(shopperId), ct)
+            .ConfigureAwait(false);
+        return result.InvalidatedTargets;
     }
 
     public async ValueTask ExecuteShopperCommandCoverageAsync(
@@ -210,6 +298,12 @@ internal sealed class SuperCenterGroceryStoreService : IGroceryStoreService, ICa
             FlashSaleParticipantCountReadOps: Volatile.Read(ref _flashSaleParticipantCountReadOps),
             SessionReadOps: Volatile.Read(ref _sessionReadOps),
             SessionWriteOps: Volatile.Read(ref _sessionWriteOps),
+            RecentlyViewedReadOps: Volatile.Read(ref _recentlyViewedReadOps),
+            RecentlyViewedWriteOps: Volatile.Read(ref _recentlyViewedWriteOps),
+            CheckoutEventWriteOps: Volatile.Read(ref _checkoutEventWriteOps),
+            ReceiptSearchReadOps: Volatile.Read(ref _receiptSearchReadOps),
+            ReceiptReviewInvalidationWriteOps: Volatile.Read(ref _receiptReviewInvalidationWriteOps),
+            TagInvalidationWriteOps: Volatile.Read(ref _tagInvalidationWriteOps),
             CommandCoverageReadOps: Volatile.Read(ref _commandCoverageReadOps),
             CommandCoverageWriteOps: Volatile.Read(ref _commandCoverageWriteOps),
             CommandCoverageAdminOps: Volatile.Read(ref _commandCoverageAdminOps),

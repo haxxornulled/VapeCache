@@ -3797,7 +3797,22 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
     /// <summary>
     /// Executes value.
     /// </summary>
-    public async ValueTask<bool> FtCreateAsync(string index, string prefix, string[] fields, CancellationToken ct)
+    public ValueTask<bool> FtCreateAsync(string index, string prefix, string[] fields, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        VapeCache.Abstractions.Modules.RedisSearchFieldDefinition[] schema = new VapeCache.Abstractions.Modules.RedisSearchFieldDefinition[fields.Length];
+        for (var i = 0; i < fields.Length; i++)
+            schema[i] = VapeCache.Abstractions.Modules.RedisSearchFieldDefinition.Text(fields[i]);
+
+        return FtCreateAsync(index, prefix, schema, ct);
+    }
+
+    public async ValueTask<bool> FtCreateAsync(
+        string index,
+        string prefix,
+        IReadOnlyList<VapeCache.Abstractions.Modules.RedisSearchFieldDefinition> fields,
+        CancellationToken ct)
     {
         if (_breaker.Enabled && _breakerState.IsOpen)
         {

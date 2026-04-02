@@ -19,6 +19,7 @@ $resolvedPackageVersion = Resolve-ReleasePackageVersion -PackageVersion $Package
 $packages = Get-ReleasePackageVersionInfo
 
 Assert-ReleasePackageBranding
+Assert-ReleasePackageDocumentationMetadata
 
 if ([string]::IsNullOrWhiteSpace($ApiKey))
 {

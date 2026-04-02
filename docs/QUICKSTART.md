@@ -27,6 +27,12 @@ Optional, if you want DI-facade wiring (clean architecture style):
 dotnet add package VapeCache.Extensions.DependencyInjection
 ```
 
+Optional, if you need an `IDistributedCache` / `IBufferDistributedCache` bridge:
+
+```bash
+dotnet add package VapeCache.Extensions.DistributedCache
+```
+
 Optional, if you want centralized Serilog + OTEL logging wiring:
 
 ```bash
@@ -51,6 +57,8 @@ dotnet add package VapeCache.Extensions.AdminAuth
 docker run --name vapecache-redis -p 6379:6379 -d redis:7
 ```
 
+If you want a local/lightweight runtime with no Redis dependency, skip this and use the in-memory-only registration path below.
+
 ## 3. Add `appsettings.json`
 
 ```json
@@ -59,9 +67,6 @@ docker run --name vapecache-redis -p 6379:6379 -d redis:7
     "Host": "localhost",
     "Port": 6379,
     "Database": 0
-  },
-  "CacheStampede": {
-    "Profile": "Balanced"
   }
 }
 ```
@@ -111,6 +116,7 @@ Use this when wiring services directly:
 ```csharp
 using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Extensions.DistributedCache;
 using VapeCache.Extensions.Logging;
 using VapeCache.Extensions.PubSub;
 using VapeCache.Infrastructure.Caching;
@@ -123,6 +129,7 @@ builder.Services.AddOptions<RedisConnectionOptions>()
 builder.Services.AddVapecacheRedisConnections();
 builder.Services.AddVapecacheCaching();
 builder.Services.AddVapeCachePubSub(); // optional: only when pub/sub is required
+builder.Services.AddVapeCacheDistributedCache(); // optional: IDistributedCache / migration bridge
 
 builder.Services.AddOptions<CacheStampedeOptions>()
     .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
@@ -134,6 +141,21 @@ builder.Services.AddOptions<CacheStampedeOptions>()
     })
     .Bind(builder.Configuration.GetSection("CacheStampede"));
 ```
+
+Use this when you want a first-class in-memory-only runtime:
+
+```csharp
+using VapeCache.Abstractions.Caching;
+using VapeCache.Extensions.DependencyInjection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddVapeCacheInMemory(builder.Configuration)
+    .WithCacheStampedeProfile(CacheStampedeProfile.Balanced);
+```
+
+In-memory-only mode still supports the typed `IVapeCache` API, stampede protection, tag/zone invalidation, chunked payload helpers, and the `IDistributedCache` adapter.
+It does not require `RedisConnection` config and is intended for local dev, tests, and lightweight single-node hosts.
 
 Optional production logging baseline:
 
@@ -173,13 +195,17 @@ Alternative with DI facade package:
 
 ```csharp
 using VapeCache.Extensions.DependencyInjection;
+using VapeCache.Extensions.DistributedCache;
 using VapeCache.Extensions.PubSub;
 using VapeCache.Abstractions.Caching;
 
 builder.Services.AddVapeCache(builder.Configuration)
+    .UseDistributedCacheAdapter()
     .UseRedisPubSub(builder.Configuration)
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced);
 ```
+
+If you are evaluating VapeCache behind an existing `IDistributedCache`-based stack or a FusionCache L2 path, see [DISTRIBUTED_CACHE_BRIDGE.md](DISTRIBUTED_CACHE_BRIDGE.md).
 
 Use this when you are on Aspire and want one fluent chain:
 
@@ -291,6 +317,7 @@ With hybrid cache enabled, this stream path automatically reads from in-memory f
 - Redis is not running, or wrong host/port in config.
 - Registered `AddVapecacheCaching()` but forgot `AddVapecacheRedisConnections()`.
 - Forgot to bind `RedisConnection` from configuration (or set `VAPECACHE_REDIS_CONNECTIONSTRING`).
+- Used the Redis/hybrid path when you actually wanted `AddVapeCacheInMemory(...)`.
 - Invalid `CacheStampede` values (out of allowed ranges).
 - Breaker control endpoints exposed publicly without auth.
 - Wrapper/admin endpoints enabled without applying the security contract in `ADMIN_AUTH.md`.

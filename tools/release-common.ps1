@@ -128,50 +128,151 @@ function Resolve-GitHubPackagesKey
     return ""
 }
 
+function Convert-ToReleaseNotesVersion
+{
+    param(
+        [string]$Tag,
+        [string]$Version
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Version))
+    {
+        return $Version.Trim()
+    }
+
+    $normalizedTag = [string]$Tag
+    if ($normalizedTag.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase))
+    {
+        return $normalizedTag.Substring(1)
+    }
+
+    return $normalizedTag
+}
+
+function Convert-ToReleaseMarkdownCell
+{
+    param([AllowNull()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text))
+    {
+        return ""
+    }
+
+    return $Text.Replace("|", "\|").Replace("`r", "").Replace("`n", "<br/>")
+}
+
 function New-ReleaseNotesFile
 {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$Tag,
-        [Parameter(Mandatory = $true)][string]$Version,
+        [string]$Version = "",
         [Parameter(Mandatory = $true)][string]$CommitSha,
+        [string[]]$ValidationLines = @(
+            "- release-check: passed",
+            "- package publish workflow: passed"
+        ),
         [object[]]$NuGetResults = @(),
         [object[]]$GitHubPackagesResults = @()
     )
 
+    $resolvedVersion = Convert-ToReleaseNotesVersion -Tag $Tag -Version $Version
+    $catalog = @(Get-ReleasePackageCatalog | Sort-Object PackageId)
+
+    $packageMatrix = @(
+        "| Package | Summary | NuGet | GitHub Packages | Docs |",
+        "| --- | --- | --- | --- | --- |"
+    )
+
+    foreach ($entry in $catalog)
+    {
+        $summary = Convert-ToReleaseMarkdownCell -Text $entry.Summary
+        $packageMatrix += "| ``$($entry.PackageId)`` | $summary | [NuGet]($($entry.NuGetUrl)) | [GitHub Packages]($($entry.GitHubPackagesUrl)) | [$($entry.DocsLabel)]($($entry.DocsUrl)) |"
+    }
+
+    $releaseHighlights = @(
+        $catalog |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_.ReleaseHighlight) } |
+            ForEach-Object {
+                $highlight = Convert-ToReleaseMarkdownCell -Text $_.ReleaseHighlight
+                "- ``$($_.PackageId)``: $highlight"
+            }
+    )
+
     $nugetSummary = if ($NuGetResults.Count -eq 0)
     {
-        "- NuGet publish not executed in this run."
+        @("- NuGet publish not executed in this run.")
     }
     else
     {
-        ($NuGetResults | ForEach-Object { "- $($_.PackageId): $($_.Status)" }) -join [Environment]::NewLine
+        @(
+            $catalog | ForEach-Object {
+                $packageId = $_.PackageId
+                $match = $NuGetResults | Where-Object { $_.PackageId -eq $packageId } | Select-Object -First 1
+                $status = if ($null -eq $match) { "not-run" } else { $match.Status }
+                "- [$packageId]($($_.NuGetUrl)): $status"
+            }
+        )
     }
 
     $ghSummary = if ($GitHubPackagesResults.Count -eq 0)
     {
-        "- GitHub Packages publish not executed in this run."
+        @("- GitHub Packages publish not executed in this run.")
     }
     else
     {
-        ($GitHubPackagesResults | ForEach-Object { "- $($_.PackageId): $($_.Status)" }) -join [Environment]::NewLine
+        @(
+            $catalog | ForEach-Object {
+                $packageId = $_.PackageId
+                $match = $GitHubPackagesResults | Where-Object { $_.PackageId -eq $packageId } | Select-Object -First 1
+                $status = if ($null -eq $match) { "not-run" } else { $match.Status }
+                "- [$packageId]($($_.GitHubPackagesUrl)): $status"
+            }
+        )
     }
 
-    $content = @"
-## VapeCache $Version
+    $lines = @(
+        "## VapeCache $resolvedVersion",
+        "",
+        "Commit: ``$CommitSha``",
+        "",
+        "Package docs, release notes, and feed links are aligned for this release.",
+        "",
+        "### Package Matrix"
+    )
 
-Commit: \`$CommitSha\`
+    $lines += $packageMatrix
 
-### NuGet Publish Status
-$nugetSummary
+    if ($releaseHighlights.Count -gt 0)
+    {
+        $lines += @(
+            "",
+            "### Compatibility Notes"
+        )
+        $lines += $releaseHighlights
+    }
 
-### GitHub Packages Publish Status
-$ghSummary
+    $lines += @(
+        "",
+        "### NuGet Publish Status"
+    )
+    $lines += $nugetSummary
+    $lines += @(
+        "",
+        "### GitHub Packages Publish Status"
+    )
+    $lines += $ghSummary
 
-### Validation
-- release-check: passed
-- package smoke tests: passed
-"@
+    if ($ValidationLines.Count -gt 0)
+    {
+        $lines += @(
+            "",
+            "### Validation"
+        )
+        $lines += $ValidationLines
+    }
+
+    $content = $lines -join [Environment]::NewLine
 
     $parent = Split-Path -Parent $Path
     if (-not (Test-Path -LiteralPath $parent))

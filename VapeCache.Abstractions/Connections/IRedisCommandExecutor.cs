@@ -336,9 +336,17 @@ public interface IRedisCommandExecutor : IAsyncDisposable
 
     // RediSearch (FT.*)
     /// <summary>
-    /// Executes ft create async.
+    /// Executes ft create async using TEXT fields for each schema entry.
     /// </summary>
     ValueTask<bool> FtCreateAsync(string index, string prefix, string[] fields, CancellationToken ct);
+    /// <summary>
+    /// Executes ft create async with an explicit RediSearch schema.
+    /// </summary>
+    ValueTask<bool> FtCreateAsync(
+        string index,
+        string prefix,
+        IReadOnlyList<VapeCache.Abstractions.Modules.RedisSearchFieldDefinition> fields,
+        CancellationToken ct);
     /// <summary>
     /// Executes ft search async.
     /// </summary>

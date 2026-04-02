@@ -7,14 +7,14 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.AspNetCore</PackageId>
     <Title>VapeCache Extensions for ASP.NET Core</Title>
-    <Version>1.2.17</Version>
+    <Version>1.2.18</Version>
     <Description>ASP.NET Core output cache integration for VapeCache. Registers VapeCache as the backing store for ASP.NET Core output caching.</Description>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.AspNetCore</Product>
     <PackageTags>cache;redis;aspnetcore;output-cache;middleware;dotnet</PackageTags>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
-    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageIcon>vapecache-icon.png</PackageIcon>
     <PackageIconUrl>https://raw.githubusercontent.com/haxxornulled/VapeCache/main/assets/vapecache-icon.png</PackageIconUrl>
     <RepositoryUrl>https://github.com/haxxornulled/VapeCache</RepositoryUrl>
@@ -39,6 +39,7 @@
     <None Include="..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
+
 
 
 

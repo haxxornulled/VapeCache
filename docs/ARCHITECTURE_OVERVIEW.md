@@ -75,6 +75,7 @@ This composes:
 
 Optional capability packages compose on top:
 
+- `VapeCache.Extensions.DistributedCache`
 - `VapeCache.Extensions.AspNetCore`
 - `VapeCache.Extensions.Aspire`
 - `VapeCache.Extensions.PubSub`

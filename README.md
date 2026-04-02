@@ -57,6 +57,12 @@ If you want a DI composition facade for clean architecture wiring:
 dotnet add package VapeCache.Extensions.DependencyInjection
 ```
 
+If you need an `IDistributedCache` / `IBufferDistributedCache` bridge for interoperability or migration:
+
+```bash
+dotnet add package VapeCache.Extensions.DistributedCache
+```
+
 If you want centralized Serilog + OTEL logging wiring with rolling file sink support and optional JSON formatting:
 
 ```bash
@@ -73,6 +79,12 @@ If you need Redis 8.6 stream idempotent producer support:
 
 ```bash
 dotnet add package VapeCache.Extensions.Streams
+```
+
+If you need HASH-backed RediSearch projections for operational lookup/search workloads:
+
+```bash
+dotnet add package VapeCache.Features.Search
 ```
 
 If you need EF Core second-level cache interceptor contracts and invalidation bridge wiring:
@@ -93,6 +105,8 @@ dotnet add package VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry
 docker run --name vapecache-redis -p 6379:6379 -d redis:7
 ```
 
+If you do not have Redis and want a local/lightweight runtime, skip Redis and use `AddVapeCacheInMemory(...)` instead.
+
 3. Configure `appsettings.json`
 
 ```json
@@ -101,9 +115,6 @@ docker run --name vapecache-redis -p 6379:6379 -d redis:7
     "Host": "localhost",
     "Port": 6379,
     "Database": 0
-  },
-  "CacheStampede": {
-    "Profile": "Balanced"
   }
 }
 ```
@@ -132,6 +143,18 @@ builder.Services.AddVapeCacheStreams(); // optional: only when stream idempotent
 builder.Services.AddOptions<CacheStampedeOptions>()
     .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
     .Bind(builder.Configuration.GetSection("CacheStampede"));
+```
+
+Memory-only alternative for local dev or lightweight single-node hosts:
+
+```csharp
+using VapeCache.Abstractions.Caching;
+using VapeCache.Extensions.DependencyInjection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddVapeCacheInMemory(builder.Configuration)
+    .WithCacheStampedeProfile(CacheStampedeProfile.Balanced);
 ```
 
 5. Add one endpoint
@@ -185,6 +208,40 @@ See:
 - [docs/ASPNETCORE_POLICY_EXTENSION.md](docs/ASPNETCORE_POLICY_EXTENSION.md)
 - [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md)
 
+## IDistributedCache Bridge
+
+Already on `IDistributedCache` or using FusionCache with a distributed L2?
+VapeCache ships a bridge package for that migration path.
+
+```csharp
+using VapeCache.Extensions.DistributedCache;
+
+builder.Services.AddVapeCache(builder.Configuration)
+    .UseDistributedCacheAdapter(options =>
+    {
+        options.KeyPrefix = "fusion:l2:";
+    });
+```
+
+This is intentionally a compatibility layer, not the preferred headline integration.
+Native VapeCache remains the recommended path when you want the full runtime surface.
+Recommended framing: keep your current cache abstraction, route the distributed-cache layer through VapeCache, and migrate to native APIs later if you want the fuller runtime model.
+See [docs/DISTRIBUTED_CACHE_BRIDGE.md](docs/DISTRIBUTED_CACHE_BRIDGE.md) for the interop positioning and FusionCache guidance.
+
+## Redis Search Projections
+
+For workloads like grocery receipt verification, the recommended plan is to search denormalized HASH projections, not your full source aggregates.
+
+`VapeCache.Features.Search` gives you:
+
+- typed `TEXT`, `TAG`, and `NUMERIC` RediSearch schemas
+- generic HASH projection storage
+- query-builder helpers for exact-match, text, and numeric range filters
+- search-result cache key/tag conventions that fit `VapeCache.Features.Invalidation`
+
+That lets the front-door receipt check invalidate instantly without flattening the rest of the runtime behind a generic search abstraction.
+See [docs/REDIS_SEARCH.md](docs/REDIS_SEARCH.md).
+
 ## Production Packages (OSS)
 
 | Package | NuGet | GitHub Packages | Purpose | Docs |
@@ -193,7 +250,9 @@ See:
 | `VapeCache.Core` | [VapeCache.Core](https://www.nuget.org/packages/VapeCache.Core) | [vapecache.core](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.core) | Shared primitives package (transitive dependency, usually not installed directly) | [Package Matrix](docs/NUGET_PACKAGES.md) |
 | `VapeCache.Abstractions` | [VapeCache.Abstractions](https://www.nuget.org/packages/VapeCache.Abstractions) | [vapecache.abstractions](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.abstractions) | Public contracts and option/value types | [API Reference](docs/API_REFERENCE.md) |
 | `VapeCache.Features.Invalidation` | [VapeCache.Features.Invalidation](https://www.nuget.org/packages/VapeCache.Features.Invalidation) | [vapecache.features.invalidation](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.invalidation) | Optional key/tag/zone invalidation policies | [Cache Invalidation](docs/CACHE_INVALIDATION.md) |
+| `VapeCache.Features.Search` | [VapeCache.Features.Search](https://www.nuget.org/packages/VapeCache.Features.Search) | [vapecache.features.search](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.search) | Typed HASH-backed RediSearch projections, query helpers, and invalidation conventions for operational search | [Redis Search](docs/REDIS_SEARCH.md) |
 | `VapeCache.Extensions.DependencyInjection` | [VapeCache.Extensions.DependencyInjection](https://www.nuget.org/packages/VapeCache.Extensions.DependencyInjection) | [vapecache.extensions.dependencyinjection](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.dependencyinjection) | One-call IServiceCollection wiring facade for runtime + config binding | [Quickstart](docs/QUICKSTART.md) |
+| `VapeCache.Extensions.DistributedCache` | [VapeCache.Extensions.DistributedCache](https://www.nuget.org/packages/VapeCache.Extensions.DistributedCache) | [vapecache.extensions.distributedcache](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.distributedcache) | `IDistributedCache` / `IBufferDistributedCache` bridge for interoperability and migration | [Package README](VapeCache.Extensions.DistributedCache/README.md) |
 | `VapeCache.Extensions.Logging` | [VapeCache.Extensions.Logging](https://www.nuget.org/packages/VapeCache.Extensions.Logging) | [vapecache.extensions.logging](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.logging) | Optional Serilog + OTEL logging wiring with file/Seq/console sinks and pluggable JSON formatting | [Logging + Telemetry](docs/LOGGING_TELEMETRY_CONFIGURATION.md) |
 | `VapeCache.Extensions.PubSub` | [VapeCache.Extensions.PubSub](https://www.nuget.org/packages/VapeCache.Extensions.PubSub) | [vapecache.extensions.pubsub](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.pubsub) | Optional Redis pub/sub package (publish/subscribe, bounded queues, reconnect/resubscribe) | [API Reference](docs/API_REFERENCE.md) |
 | `VapeCache.Extensions.Streams` | [VapeCache.Extensions.Streams](https://www.nuget.org/packages/VapeCache.Extensions.Streams) | [vapecache.extensions.streams](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.streams) | Optional Redis 8.6 streams package for idempotent producers (`XADD IDMP/IDMPAUTO`, `XCFGSET`) | [Package README](VapeCache.Extensions.Streams/README.md) |
@@ -236,21 +295,14 @@ dotnet test VapeCache.Tests/VapeCache.Tests.csproj -c Release
 
 ## License
 
-VapeCache is licensed under the Business Source License (BUSL-1.1).
+VapeCache OSS is licensed under the MIT License.
 
-You are free to:
+That means you can use, modify, redistribute, and commercialize the code with very few conditions.
+The main obligations are to keep the copyright notice and license text with substantial portions of the software.
 
-- use VapeCache in production
-- run it in SaaS or commercial applications
-- use it for internal business systems
-- modify the source
-- redistribute the source
+Important boundary:
 
-You may NOT:
+- the code is MIT-licensed
+- the `VapeCache` name, logos, package identity, and brand assets are not granted to you under MIT
 
-- offer VapeCache as a hosted caching/database service
-- embed VapeCache as the core of a commercial caching/database infrastructure product
-
-On March 11, 2029, the code will automatically convert to Apache 2.0.
-
-See [LICENSE](LICENSE) for full terms and [docs/LICENSE_FAQ.md](docs/LICENSE_FAQ.md) for quick answers.
+See [LICENSE](LICENSE) for the license text, [docs/LICENSE_FAQ.md](docs/LICENSE_FAQ.md) for quick answers, and [docs/TRADEMARK_POLICY.md](docs/TRADEMARK_POLICY.md) for brand and naming rules.

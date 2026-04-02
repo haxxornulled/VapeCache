@@ -185,3 +185,9 @@ Your profiler can consume `ChannelReader<EfProfilerEvent>` and correlate query a
 - This package is the EF adapter boundary. Core runtime packages remain EF-free.
 - Query-key generation is deterministic and provider-aware.
 - SaveChanges invalidation is zone-based and designed to integrate with existing tag/zone invalidation APIs.
+
+## Docs
+
+- EF Core second-level cache guide: https://github.com/haxxornulled/VapeCache/blob/main/docs/EFCORE_SECOND_LEVEL_CACHE.md
+- API reference: https://github.com/haxxornulled/VapeCache/blob/main/docs/API_REFERENCE.md
+- Configuration: https://github.com/haxxornulled/VapeCache/blob/main/docs/CONFIGURATION.md

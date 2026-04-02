@@ -156,7 +156,7 @@ builder.AddVapeCacheKitchenSink(options =>
 });
 ```
 
-If you expose wrapper/admin endpoints, apply the security contract from [`docs/ADMIN_AUTH.md`](../docs/ADMIN_AUTH.md). Install `VapeCache.Extensions.AdminAuth` for the default path, or implement equivalent auth protections in your own infrastructure layer.
+If you expose wrapper/admin endpoints, apply the security contract from https://github.com/haxxornulled/VapeCache/blob/main/docs/ADMIN_AUTH.md. Install `VapeCache.Extensions.AdminAuth` for the default path, or implement equivalent auth protections in your own infrastructure layer.
 
 This composes:
 - `WithRedisFromAspire(...)`
@@ -392,7 +392,7 @@ They also include lane diagnostics for graphing:
 `/stream` emits `event: vapecache-stats` frames with a JSON payload compatible with Blazor realtime chart components.
 
 Lane query/panel pack for Aspire Metrics explorer:
-- [`docs/ASPIRE_LANE_QUERY_PACK.md`](../docs/ASPIRE_LANE_QUERY_PACK.md)
+- https://github.com/haxxornulled/VapeCache/blob/main/docs/ASPIRE_LANE_QUERY_PACK.md
 
 Example payload:
 ```json
@@ -488,7 +488,7 @@ npm run build
 ```
 
 Enterprise transport/autoscaler architecture and tuning:
-- [`docs/ENTERPRISE_MULTIPLEXER_AUTOSCALER.md`](../docs/ENTERPRISE_MULTIPLEXER_AUTOSCALER.md)
+- https://github.com/haxxornulled/VapeCache/blob/main/docs/ENTERPRISE_MULTIPLEXER_AUTOSCALER.md
 
 ### Custom Wrapper/Exporter Scenario
 
@@ -564,7 +564,9 @@ readinessProbe:
 
 ## License
 
-Apache 2.0
+MIT for the OSS repository code.
+
+Branding, names, and logos remain subject to the repository trademark policy.
 
 ## Blazor Realtime Example
 
@@ -575,6 +577,7 @@ See `docs/BLAZOR_DASHBOARD_EXAMPLE.md` for a full Blazor component and stream cl
 
 ## See Also
 
-- [VapeCache Documentation](https://github.com/haxxornulled/VapeCache/tree/main/docs)
+- [Aspire integration](https://github.com/haxxornulled/VapeCache/blob/main/docs/ASPIRE_INTEGRATION.md)
+- [Aspire admin surface](https://github.com/haxxornulled/VapeCache/blob/main/docs/ASPIRE_INTEGRATION_ADMIN_SURFACE.md)
+- [Admin auth](https://github.com/haxxornulled/VapeCache/blob/main/docs/ADMIN_AUTH.md)
 - [.NET Aspire Documentation](https://learn.microsoft.com/en-us/dotnet/aspire/)
-- [Aspire Dashboard Integration Guide](https://github.com/haxxornulled/VapeCache/blob/main/docs/ASPIRE_CACHE_METRICS.md)

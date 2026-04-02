@@ -27,7 +27,7 @@ Enterprise capabilities are focused on operational leverage:
 - adaptive autoscaling of multiplexed lanes
 - durable spill persistence
 - reconciliation and post-outage write replay
-- control-plane/admin/licensing features
+- control-plane/admin features
 - advanced fleet/load operations behavior
 
 ## Boundary Clarifications

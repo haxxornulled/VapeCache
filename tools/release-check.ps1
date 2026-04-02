@@ -48,6 +48,10 @@ Invoke-ReleaseStep -Name "Release package branding metadata" -Action {
     Assert-ReleasePackageBranding
 }
 
+Invoke-ReleaseStep -Name "Release package documentation metadata" -Action {
+    Assert-ReleasePackageDocumentationMetadata
+}
+
 Invoke-ReleaseStep -Name "Restore" -Action {
     if ($RestoreSource.Count -gt 0) {
         $restoreArgs = @($solutionPath)

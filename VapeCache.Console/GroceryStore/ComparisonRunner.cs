@@ -9,6 +9,8 @@ using System.Runtime.InteropServices;
 using System.Globalization;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Features.Invalidation;
+using VapeCache.Features.Search;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.Connections;
 using StackExchange.Redis;
@@ -16,8 +18,8 @@ using StackExchange.Redis;
 namespace VapeCache.Console.GroceryStore;
 
 /// <summary>
-/// Runs head-to-head comparison between VapeCache and StackExchange.Redis.
-/// Same workload, different providers - let's see who wins!
+/// Runs head-to-head comparison between the shared grocery store and two providers:
+/// VapeCache Native and SER.
 /// </summary>
 public static class ComparisonRunner
 {
@@ -30,8 +32,8 @@ public static class ComparisonRunner
 
     private enum ComparisonProvider
     {
-        VapeCache,
-        StackExchangeRedis
+        VapeCacheNative,
+        Ser
     }
 
     private enum VapeExecutorMode
@@ -39,6 +41,9 @@ public static class ComparisonRunner
         Raw,
         HybridFailover
     }
+
+    private const string VapeCacheNativeProviderName = "VapeCache Native";
+    private const string SerProviderName = "SER";
 
     private readonly record struct HarnessSettings
     {
@@ -82,10 +87,11 @@ public static class ComparisonRunner
         string? redisUsername,
         string redisPassword,
         int shopperCount = 10_000,
-        int maxCartSize = 35)
+        int minCartSize = 30,
+        int maxCartSize = 50)
     {
         System.Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
-        System.Console.WriteLine("║       VapeCache vs StackExchange.Redis Showdown             ║");
+        System.Console.WriteLine("║           VapeCache Native vs SER Showdown                 ║");
         System.Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
         System.Console.WriteLine();
 
@@ -145,10 +151,10 @@ public static class ComparisonRunner
         }
 
         System.Console.WriteLine($"[BenchTrack] {benchTrack}");
-        System.Console.WriteLine("Track Definitions:");
-        System.Console.WriteLine("  ApplesToApples: shared SuperCenter workload + provider swap (VapeCache vs StackExchange.Redis).");
-        System.Console.WriteLine("  OptimizedProductPath: same SuperCenter workload with tuned VapeCache runtime controls.");
-        PrintBenchmarkHeader(redisHost, redisPort, shopperCount, maxCartSize, benchTrack, harness);
+        System.Console.WriteLine("Scenario Definitions:");
+        System.Console.WriteLine("  ApplesToApples: shared SuperCenter store code with provider swap only.");
+        System.Console.WriteLine("  OptimizedProductPath: same SuperCenter store code, with VapeCache native runtime knobs tuned.");
+        PrintBenchmarkHeader(redisHost, redisPort, shopperCount, minCartSize, maxCartSize, benchTrack, harness);
         System.Console.WriteLine();
 
         if (benchTrack == GroceryComparisonTrack.Both)
@@ -167,6 +173,7 @@ public static class ComparisonRunner
                 redisUsername,
                 redisPassword,
                 shopperCount,
+                minCartSize,
                 maxCartSize,
                 GroceryComparisonTrack.ApplesToApples,
                 runId,
@@ -181,6 +188,7 @@ public static class ComparisonRunner
                 redisUsername,
                 redisPassword,
                 shopperCount,
+                minCartSize,
                 maxCartSize,
                 GroceryComparisonTrack.OptimizedProductPath,
                 runId,
@@ -196,6 +204,7 @@ public static class ComparisonRunner
             redisUsername,
             redisPassword,
             shopperCount,
+            minCartSize,
             maxCartSize,
             benchTrack,
             runId,
@@ -216,6 +225,7 @@ public static class ComparisonRunner
         string? redisUsername,
         string redisPassword,
         int shopperCount,
+        int minCartSize,
         int maxCartSize,
         GroceryComparisonTrack track,
         string runId,
@@ -239,10 +249,13 @@ public static class ComparisonRunner
             {
                 foreach (var provider in sequence)
                 {
-                    if (provider == ComparisonProvider.VapeCache)
+                    if (provider == ComparisonProvider.VapeCacheNative)
                     {
                         var prefix = $"cmp:{runId}:{track}:vape:i{iteration:D2}:";
                         iterationPrefixes.Add(prefix);
+                        iterationPrefixes.Add(string.Concat(
+                            SuperCenterReceiptSearch.ComparisonDocumentKeyPrefix("vape"),
+                            prefix));
                         var result = await RunVapeCacheTestAsync(
                             configuration,
                             redisHost,
@@ -250,6 +263,7 @@ public static class ComparisonRunner
                             redisUsername,
                             redisPassword,
                             shopperCount,
+                            minCartSize,
                             maxCartSize,
                             track,
                             prefix,
@@ -263,6 +277,9 @@ public static class ComparisonRunner
                     {
                         var prefix = $"cmp:{runId}:{track}:ser:i{iteration:D2}:";
                         iterationPrefixes.Add(prefix);
+                        iterationPrefixes.Add(string.Concat(
+                            SuperCenterReceiptSearch.ComparisonDocumentKeyPrefix("ser"),
+                            prefix));
                         var result = await RunStackExchangeRedisTestAsync(
                             configuration,
                             redisHost,
@@ -270,6 +287,7 @@ public static class ComparisonRunner
                             redisUsername,
                             redisPassword,
                             shopperCount,
+                            minCartSize,
                             maxCartSize,
                             prefix,
                             deterministicSeed,
@@ -299,22 +317,17 @@ public static class ComparisonRunner
             System.Console.WriteLine();
         }
 
-        var vapeProviderName = track == GroceryComparisonTrack.ApplesToApples
-            ? "VapeCache (ApplesToApples)"
-            : "VapeCache (OptimizedProductPath)";
-        var serProviderName = "StackExchange.Redis";
-
-        var vapeAggregated = AggregateMedianResult(vapeProviderName, shopperCount, measuredVape);
-        var serAggregated = AggregateMedianResult(serProviderName, shopperCount, measuredSer);
+        var vapeAggregated = AggregateMedianResult(VapeCacheNativeProviderName, shopperCount, measuredVape);
+        var serAggregated = AggregateMedianResult(SerProviderName, shopperCount, measuredSer);
         return (vapeAggregated, serAggregated);
     }
 
     private static ComparisonProvider[] GetExecutionOrder(bool alternateOrder, int iteration)
     {
         if (!alternateOrder || (iteration % 2) == 0)
-            return [ComparisonProvider.VapeCache, ComparisonProvider.StackExchangeRedis];
+            return [ComparisonProvider.VapeCacheNative, ComparisonProvider.Ser];
 
-        return [ComparisonProvider.StackExchangeRedis, ComparisonProvider.VapeCache];
+        return [ComparisonProvider.Ser, ComparisonProvider.VapeCacheNative];
     }
 
     private static StressTestResult AggregateMedianResult(
@@ -359,6 +372,7 @@ public static class ComparisonRunner
         string? redisUsername,
         string redisPassword,
         int shopperCount,
+        int minCartSize,
         int maxCartSize,
         GroceryComparisonTrack track,
         string keyPrefix,
@@ -597,6 +611,15 @@ public static class ComparisonRunner
 
         services.AddVapecacheRedisConnections();
         services.AddVapecacheCaching();
+        var receiptSearchRuntime = ReceiptSearchRuntimeDescriptor.ForComparison("vape");
+        services.AddVapeCacheSearch(configure: options =>
+        {
+            options.Enabled = true;
+            options.RequireModuleAvailability = true;
+            options.DefaultResultCount = 3;
+        });
+        services.AddSingleton<IRedisHashSearchDocumentMapper<ReceiptSearchDocument>>(
+            _ => new ReceiptSearchDocumentMapper(receiptSearchRuntime, keyPrefix));
         if (enableDiskSpill)
             services.AddVapeCachePersistence();
 
@@ -627,13 +650,14 @@ public static class ComparisonRunner
             });
         }
 
-        services.AddSingleton<ISuperCenterStoreProvider>(sp =>
-            new VapeCacheSuperCenterProvider(
-                sp.GetRequiredService<IVapeCache>(),
+        AddSharedComparisonStore(
+            services,
+            sp => new VapeCacheSuperCenterProvider(
                 sp.GetRequiredService<IRedisCommandExecutor>(),
-                keyPrefix));
-        services.AddSingleton<SuperCenterGroceryStoreService>();
-        services.AddSingleton<IGroceryStoreService>(sp => sp.GetRequiredService<SuperCenterGroceryStoreService>());
+                keyPrefix,
+                sp.GetRequiredService<IRedisHashSearchDocumentStore<ReceiptSearchDocument>>(),
+                keyPrefix),
+            receiptSearchRuntime);
 
         using var provider = BuildAutofacServiceProvider(services);
 
@@ -648,9 +672,7 @@ public static class ComparisonRunner
         var service = provider.GetRequiredService<IGroceryStoreService>();
         var logger = provider.GetRequiredService<ILogger<GroceryStoreComparisonStressTest>>();
 
-        var providerName = track == GroceryComparisonTrack.ApplesToApples
-            ? "VapeCache (SuperCenter-A2A)"
-            : "VapeCache (SuperCenter-Tuned)";
+        var providerName = VapeCacheNativeProviderName;
         var test = new GroceryStoreComparisonStressTest(
             service,
             logger,
@@ -659,7 +681,7 @@ public static class ComparisonRunner
             harness.MaxDegreeOfParallelism,
             checkoutLaneCount);
         return await RunWithOptionalTimeoutAsync(
-                ct => test.RunStressTestAsync(shopperCount, maxCartSize, ct),
+                ct => test.RunStressTestAsync(shopperCount, minCartSize, maxCartSize, ct),
                 harness.ProviderTimeout,
                 providerName)
             .ConfigureAwait(false);
@@ -694,6 +716,7 @@ public static class ComparisonRunner
         string redisHost,
         int redisPort,
         int shopperCount,
+        int minCartSize,
         int maxCartSize,
         GroceryComparisonTrack track,
         HarnessSettings harness)
@@ -715,7 +738,9 @@ public static class ComparisonRunner
         System.Console.WriteLine($"Redis Endpoint: {redisHost}:{redisPort}");
         System.Console.WriteLine($"Track: {track}");
         System.Console.WriteLine(
-            $"Workload Unit: 1 shopper = JoinFlashSale + IsInFlashSale + BuildCartItems(15..{maxCartSize}) + AddToCart + CartReadPhase + SessionAndSalePhase + CommandCoverageMatrix + TagInvalidation + Checkout");
+            $"Workload Unit: 1 shopper = JoinFlashSale + IsInFlashSale + BuildCartItems({minCartSize}..{maxCartSize}) + BrowseHistory + AddToCart + CartReadPhase + SessionAndSalePhase + CommandCoverageMatrix + CheckoutCommit + ReceiptCheck + CartClear + ShopperScopeInvalidation");
+        System.Console.WriteLine("Redis Shape: Product=HASH, Cart=LIST, FlashSale=SET, Session=HASH, RecentlyViewed=ZSET, Checkout=STREAM, ReceiptProjection=HASH+SEARCH.");
+        System.Console.WriteLine("CommandCoverageMatrix also probes STRING, STREAM, JSON, SEARCH, BLOOM, and TIME-SERIES capabilities when available.");
         System.Console.WriteLine("Workload Shape: 25 products, 5 flash-sales, unique user/session ids per shopper.");
         System.Console.WriteLine(
             $"Harness: warmups={harness.WarmupRuns}, measured-runs={harness.Runs}, alternate-order={harness.AlternateOrder}, deterministic-seed={harness.DeterministicSeed}, cleanup-run-keys={harness.CleanupRunKeys}, timeout={harness.ProviderTimeout.TotalSeconds:N0}s, log-level={harness.BenchmarkLogLevel}, max-degree={(harness.MaxDegreeOfParallelism?.ToString(CultureInfo.InvariantCulture) ?? "auto")}");
@@ -723,7 +748,7 @@ public static class ComparisonRunner
         System.Console.WriteLine(
             $"ENV|Framework={framework}|OS={os}|Arch={arch}|CpuLogical={cpuLogicalCores}|ServerGC={serverGc}|RedisEndpoint={redisHost}:{redisPort}");
         System.Console.WriteLine(
-            $"WORKLOAD|Unit=ShopperFlow|Track={track}|ShopperCount={shopperCount}|CartItemsMin=15|CartItemsMax={maxCartSize}|Products=25|FlashSales=5|Warmups={harness.WarmupRuns}|Runs={harness.Runs}|AlternateOrder={harness.AlternateOrder}|Seed={harness.DeterministicSeed}");
+            $"WORKLOAD|Unit=ShopperFlow|Track={track}|ShopperCount={shopperCount}|CartItemsMin={minCartSize}|CartItemsMax={maxCartSize}|Products=25|FlashSales=5|Warmups={harness.WarmupRuns}|Runs={harness.Runs}|AlternateOrder={harness.AlternateOrder}|Seed={harness.DeterministicSeed}");
     }
 
     private static async Task<StressTestResult> RunStackExchangeRedisTestAsync(
@@ -733,6 +758,7 @@ public static class ComparisonRunner
         string? redisUsername,
         string redisPassword,
         int shopperCount,
+        int minCartSize,
         int maxCartSize,
         string keyPrefix,
         int deterministicSeed,
@@ -765,12 +791,15 @@ public static class ComparisonRunner
         IConnectionMultiplexer? multiplexer = null;
         multiplexer = await ConnectionMultiplexer.ConnectAsync(configOptions).ConfigureAwait(false);
         services.AddSingleton(multiplexer);
-        services.AddSingleton<ISuperCenterStoreProvider>(sp =>
-            new StackExchangeSuperCenterProvider(
+        var receiptSearchRuntime = ReceiptSearchRuntimeDescriptor.ForComparison("ser");
+        AddSharedComparisonStore(
+            services,
+            sp => new StackExchangeSuperCenterProvider(
                 sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase(),
-                keyPrefix));
-        services.AddSingleton<SuperCenterGroceryStoreService>();
-        services.AddSingleton<IGroceryStoreService>(sp => sp.GetRequiredService<SuperCenterGroceryStoreService>());
+                keyPrefix,
+                receiptSearchRuntime,
+                keyPrefix),
+            receiptSearchRuntime);
         System.Console.WriteLine($"[SERConfig] KeyPrefix={keyPrefix}");
         System.Console.WriteLine($"[WorkloadConfig] CheckoutLanes={checkoutLaneCount}");
 
@@ -780,7 +809,7 @@ public static class ComparisonRunner
             var service = provider.GetRequiredService<IGroceryStoreService>();
             var logger = provider.GetRequiredService<ILogger<GroceryStoreComparisonStressTest>>();
 
-            var providerName = "StackExchange.Redis";
+            var providerName = SerProviderName;
             var test = new GroceryStoreComparisonStressTest(
                 service,
                 logger,
@@ -789,7 +818,7 @@ public static class ComparisonRunner
                 harness.MaxDegreeOfParallelism,
                 checkoutLaneCount);
             return await RunWithOptionalTimeoutAsync(
-                    ct => test.RunStressTestAsync(shopperCount, maxCartSize, ct),
+                    ct => test.RunStressTestAsync(shopperCount, minCartSize, maxCartSize, ct),
                     harness.ProviderTimeout,
                     providerName)
                 .ConfigureAwait(false);
@@ -798,6 +827,29 @@ public static class ComparisonRunner
         {
             multiplexer.Dispose();
         }
+    }
+
+    private static void AddSharedComparisonStore(
+        IServiceCollection services,
+        Func<IServiceProvider, ISuperCenterStoreProvider> providerFactory,
+        ReceiptSearchRuntimeDescriptor receiptSearchRuntime)
+    {
+        services.AddVapeCacheInvalidation(configure: options =>
+        {
+            options.Enabled = true;
+            options.EnableTagInvalidation = true;
+            options.EnableZoneInvalidation = false;
+            options.EnableKeyInvalidation = true;
+            options.Profile = CacheInvalidationProfile.HighTrafficSite;
+        });
+        services.AddTagInvalidationPolicy<ShopperScopeInvalidationRequested>(
+            static request => [SuperCenterKeySpace.ShopperTag(request.ShopperId)]);
+        services.AddCacheInvalidationPolicy<ReceiptFlaggedForReview>(
+            _ => new ReceiptFlaggedInvalidationPolicy(receiptSearchRuntime));
+        services.AddSingleton<ISuperCenterStoreProvider>(providerFactory);
+        services.AddSingleton<IVapeCache, SuperCenterInvalidationVapeCacheBridge>();
+        services.AddSingleton<SuperCenterGroceryStoreService>();
+        services.AddSingleton<IGroceryStoreService>(sp => sp.GetRequiredService<SuperCenterGroceryStoreService>());
     }
 
     private static void PrintComparison(StressTestResult vapeCache, StressTestResult stackExchange)
@@ -811,7 +863,7 @@ public static class ComparisonRunner
         var p99LatencyDeltaPercent = PercentDeltaLowerIsBetter(vapeCache.P99LatencyMs, stackExchange.P99LatencyMs);
         var p999LatencyDeltaPercent = PercentDeltaLowerIsBetter(vapeCache.P999LatencyMs, stackExchange.P999LatencyMs);
 
-        System.Console.WriteLine($"Metric                      VapeCache          StackExchange.Redis     Winner");
+        System.Console.WriteLine($"Metric                      VapeCache Native   SER                     Winner");
         System.Console.WriteLine("─────────────────────────────────────────────────────────────────────────────");
 
         PrintMetric("Throughput (shoppers/sec)",
@@ -883,8 +935,8 @@ public static class ComparisonRunner
 
         System.Console.WriteLine();
         System.Console.WriteLine("Workload Integrity (provider call accounting):");
-        System.Console.WriteLine($"  Service Ops / Shopper: VapeCache={vapeOpsPerShopper:N2}, StackExchange.Redis={serOpsPerShopper:N2}");
-        System.Console.WriteLine($"  Cart Item Writes / Shopper: VapeCache={vapeCartItemWritesPerShopper:N2}, StackExchange.Redis={serCartItemWritesPerShopper:N2}");
+        System.Console.WriteLine($"  Service Ops / Shopper: VapeCache Native={vapeOpsPerShopper:N2}, SER={serOpsPerShopper:N2}");
+        System.Console.WriteLine($"  Cart Item Writes / Shopper: VapeCache Native={vapeCartItemWritesPerShopper:N2}, SER={serCartItemWritesPerShopper:N2}");
         if (Math.Abs(vapeOpsPerShopper - serOpsPerShopper) > 0.01m ||
             Math.Abs(vapeCartItemWritesPerShopper - serCartItemWritesPerShopper) > 0.01m)
         {
@@ -895,20 +947,20 @@ public static class ComparisonRunner
         System.Console.WriteLine("═══════════════════════════════════════════════════════════════════════════");
         if (throughputRatio >= 1.0m)
         {
-            System.Console.WriteLine($"🏆 VapeCache is {throughputRatio:F2}x FASTER than StackExchange.Redis");
+            System.Console.WriteLine($"🏆 VapeCache Native is {throughputRatio:F2}x FASTER than SER");
         }
         else
         {
             var slowerRatio = throughputRatio <= 0 ? 0m : 1.0m / throughputRatio;
-            System.Console.WriteLine($"🏆 VapeCache is {slowerRatio:F2}x SLOWER than StackExchange.Redis");
+            System.Console.WriteLine($"🏆 VapeCache Native is {slowerRatio:F2}x SLOWER than SER");
         }
 
         var avgLatencyLabel = avgLatencyDeltaPercent >= 0 ? "LOWER" : "HIGHER";
         var p99LatencyLabel = p99LatencyDeltaPercent >= 0 ? "LOWER" : "HIGHER";
         var p999LatencyLabel = p999LatencyDeltaPercent >= 0 ? "LOWER" : "HIGHER";
-        System.Console.WriteLine($"📉 VapeCache has {Math.Abs(avgLatencyDeltaPercent):F1}% {avgLatencyLabel} average latency");
-        System.Console.WriteLine($"🚀 VapeCache has {Math.Abs(p99LatencyDeltaPercent):F1}% {p99LatencyLabel} p99 latency");
-        System.Console.WriteLine($"🔥 VapeCache has {Math.Abs(p999LatencyDeltaPercent):F1}% {p999LatencyLabel} p999 latency");
+        System.Console.WriteLine($"📉 VapeCache Native has {Math.Abs(avgLatencyDeltaPercent):F1}% {avgLatencyLabel} average latency");
+        System.Console.WriteLine($"🚀 VapeCache Native has {Math.Abs(p99LatencyDeltaPercent):F1}% {p99LatencyLabel} p99 latency");
+        System.Console.WriteLine($"🔥 VapeCache Native has {Math.Abs(p999LatencyDeltaPercent):F1}% {p999LatencyLabel} p999 latency");
         System.Console.WriteLine("═══════════════════════════════════════════════════════════════════════════");
     }
 

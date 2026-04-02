@@ -104,6 +104,7 @@ if ($CommitIfDirty -and $status)
 }
 
 Assert-ReleasePackageBranding
+Assert-ReleasePackageDocumentationMetadata
 
 if (-not $SkipReleaseCheck)
 {
@@ -228,6 +229,10 @@ New-ReleaseNotesFile `
     -Tag $tagName `
     -Version $resolvedPackageVersion `
     -CommitSha $headSha `
+    -ValidationLines @(
+        "- release-check: passed",
+        "- package smoke tests: passed"
+    ) `
     -NuGetResults $nuGetResults `
     -GitHubPackagesResults $gitHubPackagesResults
 

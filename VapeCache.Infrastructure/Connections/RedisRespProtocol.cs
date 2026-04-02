@@ -2157,7 +2157,26 @@ internal static class RedisRespProtocol
     /// </summary>
     public static int GetFtCreateCommandLength(string index, string prefix, string[] fields)
     {
-        var parts = 8 + fields.Length * 2;
+        ArgumentNullException.ThrowIfNull(fields);
+
+        var schema = new VapeCache.Abstractions.Modules.RedisSearchFieldDefinition[fields.Length];
+        for (var i = 0; i < fields.Length; i++)
+            schema[i] = VapeCache.Abstractions.Modules.RedisSearchFieldDefinition.Text(fields[i]);
+
+        return GetFtCreateCommandLength(index, prefix, schema);
+    }
+
+    /// <summary>
+    /// Gets value.
+    /// </summary>
+    public static int GetFtCreateCommandLength(
+        string index,
+        string prefix,
+        IReadOnlyList<VapeCache.Abstractions.Modules.RedisSearchFieldDefinition> fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        var parts = 8;
         var len = GetHeaderLen(parts)
                   + GetBulkStringLen("FT.CREATE") + 2
                   + GetBulkStringLen(index) + 2
@@ -2168,13 +2187,45 @@ internal static class RedisRespProtocol
                   + GetBulkStringLen(prefix) + 2
                   + GetBulkStringLen("SCHEMA") + 2;
 
-        for (var i = 0; i < fields.Length; i++)
+        for (var i = 0; i < fields.Count; i++)
         {
-            len += GetBulkStringLen(fields[i]) + 2
-                   + GetBulkStringLen("TEXT") + 2;
+            var field = fields[i];
+            parts += 2;
+            len += GetBulkStringLen(field.Name) + 2
+                   + GetBulkStringLen(GetFtFieldTypeToken(field.Type)) + 2;
+
+            if (!string.IsNullOrWhiteSpace(field.Alias))
+            {
+                parts += 2;
+                len += GetBulkStringLen("AS") + 2
+                       + GetBulkStringLen(field.Alias!) + 2;
+            }
+
+            if (field.Type == VapeCache.Abstractions.Modules.RedisSearchFieldType.Text && field.Weight.HasValue)
+            {
+                parts += 2;
+                len += GetBulkStringLen("WEIGHT") + 2
+                       + GetBulkStringLen(field.Weight.Value.ToString("0.################", System.Globalization.CultureInfo.InvariantCulture)) + 2;
+            }
+
+            if (field.Type == VapeCache.Abstractions.Modules.RedisSearchFieldType.Tag
+                && !string.IsNullOrEmpty(field.TagSeparator))
+            {
+                parts += 2;
+                len += GetBulkStringLen("SEPARATOR") + 2
+                       + GetBulkStringLen(field.TagSeparator) + 2;
+            }
+
+            if (field.Sortable)
+            {
+                parts += 1;
+                len += GetBulkStringLen("SORTABLE") + 2;
+            }
         }
 
-        return len;
+        return GetHeaderLen(parts)
+               + len
+               - GetHeaderLen(8);
     }
 
     /// <summary>
@@ -2182,7 +2233,46 @@ internal static class RedisRespProtocol
     /// </summary>
     public static int WriteFtCreateCommand(Span<byte> destination, string index, string prefix, string[] fields)
     {
-        var parts = 8 + fields.Length * 2;
+        ArgumentNullException.ThrowIfNull(fields);
+
+        var schema = new VapeCache.Abstractions.Modules.RedisSearchFieldDefinition[fields.Length];
+        for (var i = 0; i < fields.Length; i++)
+            schema[i] = VapeCache.Abstractions.Modules.RedisSearchFieldDefinition.Text(fields[i]);
+
+        return WriteFtCreateCommand(destination, index, prefix, schema);
+    }
+
+    /// <summary>
+    /// Executes value.
+    /// </summary>
+    public static int WriteFtCreateCommand(
+        Span<byte> destination,
+        string index,
+        string prefix,
+        IReadOnlyList<VapeCache.Abstractions.Modules.RedisSearchFieldDefinition> fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        var parts = 8;
+        for (var i = 0; i < fields.Count; i++)
+        {
+            var field = fields[i];
+            parts += 2;
+
+            if (!string.IsNullOrWhiteSpace(field.Alias))
+                parts += 2;
+
+            if (field.Type == VapeCache.Abstractions.Modules.RedisSearchFieldType.Text && field.Weight.HasValue)
+                parts += 2;
+
+            if (field.Type == VapeCache.Abstractions.Modules.RedisSearchFieldType.Tag
+                && !string.IsNullOrEmpty(field.TagSeparator))
+                parts += 2;
+
+            if (field.Sortable)
+                parts += 1;
+        }
+
         var idx = 0;
         idx += WriteArrayHeader(destination.Slice(idx), parts);
         idx += WriteBulkString(destination.Slice(idx), "FT.CREATE");
@@ -2193,14 +2283,49 @@ internal static class RedisRespProtocol
         idx += WriteBulkString(destination.Slice(idx), "1");
         idx += WriteBulkString(destination.Slice(idx), prefix);
         idx += WriteBulkString(destination.Slice(idx), "SCHEMA");
-        for (var i = 0; i < fields.Length; i++)
+        for (var i = 0; i < fields.Count; i++)
         {
-            idx += WriteBulkString(destination.Slice(idx), fields[i]);
-            idx += WriteBulkString(destination.Slice(idx), "TEXT");
+            var field = fields[i];
+            idx += WriteBulkString(destination.Slice(idx), field.Name);
+
+            if (!string.IsNullOrWhiteSpace(field.Alias))
+            {
+                idx += WriteBulkString(destination.Slice(idx), "AS");
+                idx += WriteBulkString(destination.Slice(idx), field.Alias!);
+            }
+
+            idx += WriteBulkString(destination.Slice(idx), GetFtFieldTypeToken(field.Type));
+
+            if (field.Type == VapeCache.Abstractions.Modules.RedisSearchFieldType.Text && field.Weight.HasValue)
+            {
+                idx += WriteBulkString(destination.Slice(idx), "WEIGHT");
+                idx += WriteBulkString(
+                    destination.Slice(idx),
+                    field.Weight.Value.ToString("0.################", System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            if (field.Type == VapeCache.Abstractions.Modules.RedisSearchFieldType.Tag
+                && !string.IsNullOrEmpty(field.TagSeparator))
+            {
+                idx += WriteBulkString(destination.Slice(idx), "SEPARATOR");
+                idx += WriteBulkString(destination.Slice(idx), field.TagSeparator);
+            }
+
+            if (field.Sortable)
+                idx += WriteBulkString(destination.Slice(idx), "SORTABLE");
         }
 
         return idx;
     }
+
+    private static string GetFtFieldTypeToken(VapeCache.Abstractions.Modules.RedisSearchFieldType type)
+        => type switch
+        {
+            VapeCache.Abstractions.Modules.RedisSearchFieldType.Text => "TEXT",
+            VapeCache.Abstractions.Modules.RedisSearchFieldType.Tag => "TAG",
+            VapeCache.Abstractions.Modules.RedisSearchFieldType.Numeric => "NUMERIC",
+            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unsupported RediSearch field type.")
+        };
 
     /// <summary>
     /// Gets value.

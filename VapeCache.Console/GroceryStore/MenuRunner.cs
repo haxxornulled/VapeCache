@@ -33,7 +33,7 @@ public static class MenuRunner
     {
         try { System.Console.Clear(); } catch { /* Ignore - may not have console */ }
         System.Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
-        System.Console.WriteLine("║          VapeCache Grocery Store Performance Test           ║");
+        System.Console.WriteLine("║        VapeCache Native vs SER Grocery Store Test          ║");
         System.Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
         System.Console.WriteLine();
 
@@ -57,9 +57,14 @@ public static class MenuRunner
         int shopperCount = 10_000;
         if (int.TryParse(Environment.GetEnvironmentVariable("VAPECACHE_BENCH_SHOPPERS"), out var envShoppers) && envShoppers > 0)
             shopperCount = envShoppers;
-        var maxCartSize = 35;
+        var minCartSize = 30;
+        if (int.TryParse(Environment.GetEnvironmentVariable("VAPECACHE_MIN_CART_SIZE"), out var envMinCartSize) && envMinCartSize > 0)
+            minCartSize = envMinCartSize;
+        var maxCartSize = 50;
         if (int.TryParse(Environment.GetEnvironmentVariable("VAPECACHE_MAX_CART_SIZE"), out var envMaxCartSize) && envMaxCartSize > 0)
             maxCartSize = envMaxCartSize;
+        if (maxCartSize < minCartSize)
+            maxCartSize = minCartSize;
 
         if (!autoRun)
         {
@@ -76,7 +81,7 @@ public static class MenuRunner
         if (shopperCount > 0)
         {
             System.Console.WriteLine();
-            System.Console.WriteLine($"Starting comparison with {shopperCount:N0} shoppers (max cart size: {maxCartSize})...");
+            System.Console.WriteLine($"Starting comparison with {shopperCount:N0} shoppers (cart size: {minCartSize}..{maxCartSize}, avg target 40)...");
             System.Console.WriteLine("This may take a few minutes. Please wait...");
             System.Console.WriteLine();
 
@@ -89,6 +94,7 @@ public static class MenuRunner
                     redisUsername,
                     redisPassword,
                     shopperCount,
+                    minCartSize,
                     maxCartSize);
             }
             catch (Exception ex)

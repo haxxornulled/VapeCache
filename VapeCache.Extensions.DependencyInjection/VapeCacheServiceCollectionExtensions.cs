@@ -39,4 +39,46 @@ public static class VapeCacheServiceCollectionExtensions
             .AddVapeCache()
             .BindFromConfiguration(configuration, configureBinding);
     }
+
+    /// <summary>
+    /// Registers the in-memory-only VapeCache runtime and returns a fluent builder.
+    /// This mode does not require Redis and is intended for local or lightweight hosts.
+    /// </summary>
+    public static VapeCacheDependencyInjectionBuilder AddVapeCacheInMemory(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddLogging();
+        services.AddVapecacheInMemoryCaching();
+
+        return new VapeCacheDependencyInjectionBuilder(services);
+    }
+
+    /// <summary>
+    /// Registers the in-memory-only VapeCache runtime and binds only memory-relevant option sections.
+    /// Redis/hybrid sections are intentionally ignored in this mode.
+    /// </summary>
+    public static VapeCacheDependencyInjectionBuilder AddVapeCacheInMemory(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        Action<VapeCacheConfigurationBindingOptions>? configureBinding = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return services
+            .AddVapeCacheInMemory()
+            .BindFromConfiguration(configuration, options =>
+            {
+                options.BindRedisConnection = false;
+                options.BindRedisMultiplexer = false;
+                options.BindRedisCircuitBreaker = false;
+                options.BindHybridFailover = false;
+                configureBinding?.Invoke(options);
+                options.BindRedisConnection = false;
+                options.BindRedisMultiplexer = false;
+                options.BindRedisCircuitBreaker = false;
+                options.BindHybridFailover = false;
+            });
+    }
 }

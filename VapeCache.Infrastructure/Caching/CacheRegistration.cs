@@ -157,6 +157,94 @@ public static class CacheRegistration
         return services;
     }
 
+    /// <summary>
+    /// Adds an in-memory-only VapeCache runtime that does not require Redis.
+    /// This is intended for local development, tests, and lightweight single-node hosts.
+    /// </summary>
+    public static IServiceCollection AddVapecacheInMemoryCaching(this IServiceCollection services)
+    {
+        CacheTelemetry.EnsureInitialized();
+
+        services.AddMemoryCache();
+        services.AddOptions<InMemorySpillOptions>();
+        services.AddOptions<MemoryCacheOptions>()
+            .Configure<IOptions<InMemorySpillOptions>>((memoryOptions, spillOptions) =>
+            {
+                var configuredSizeLimit = spillOptions.Value.MemoryCacheSizeLimitBytes;
+                if (configuredSizeLimit > 0)
+                    memoryOptions.SizeLimit = configuredSizeLimit;
+            });
+        services.TryAddSingleton<ICurrentCacheService>(_ =>
+        {
+            var current = new CurrentCacheService();
+            current.SetCurrent("memory");
+            return current;
+        });
+        services.AddSingleton<ICacheBackendState>(sp =>
+        {
+            var backendState = new CacheBackendState(
+                sp.GetRequiredService<ICurrentCacheService>(),
+                breaker: null,
+                failover: null);
+            CacheTelemetry.Initialize(backendState);
+            return backendState;
+        });
+        services.AddSingleton<CacheStatsRegistry>();
+        services.AddSingleton<ICacheStats, CurrentCacheStats>();
+        services.AddSingleton<ICacheIntentRegistry, CacheIntentRegistry>();
+        services.AddSingleton(TimeProvider.System);
+        services.TryAddSingleton<IEnterpriseFeatureGate, DefaultEnterpriseFeatureGate>();
+
+        services.AddSingleton<InMemoryCommandExecutor>();
+        services.TryAddSingleton<IRedisFallbackCommandExecutor>(sp => sp.GetRequiredService<InMemoryCommandExecutor>());
+        services.TryAddSingleton<IRedisCommandExecutor>(sp => sp.GetRequiredService<InMemoryCommandExecutor>());
+
+        services.TryAddSingleton<IInMemorySpillStore, NoopSpillStore>();
+        services.TryAddSingleton<ISpillStoreDiagnostics>(sp =>
+        {
+            var spillStore = sp.GetRequiredService<IInMemorySpillStore>();
+            var diagnostics = spillStore as ISpillStoreDiagnostics ?? FallbackSpillDiagnostics.Instance;
+            CacheTelemetry.InitializeSpillDiagnostics(diagnostics);
+            return diagnostics;
+        });
+
+        services.AddSingleton<InMemoryCacheService>();
+        services.TryAddSingleton<ICacheFallbackService, InMemoryCacheService>();
+        services.AddSingleton<MemoryOnlyCacheService>();
+
+        services.TryAddSingleton<CacheStampedeOptions>();
+        services.AddOptions<CacheStampedeOptions>()
+            .UseCacheStampedeProfile(CacheStampedeProfile.Balanced)
+            .Validate(o => o.MaxKeys > 0, "MaxKeys must be greater than zero.")
+            .Validate(o => o.MaxKeys <= 500_000, "MaxKeys must be less than or equal to 500000.")
+            .Validate(o => o.MaxKeyLength > 0, "MaxKeyLength must be greater than zero.")
+            .Validate(o => o.MaxKeyLength <= 4096, "MaxKeyLength must be less than or equal to 4096.")
+            .Validate(o => o.LockWaitTimeout >= TimeSpan.Zero, "LockWaitTimeout must be greater than or equal to zero.")
+            .Validate(o => o.LockWaitTimeout <= TimeSpan.FromSeconds(30), "LockWaitTimeout must be less than or equal to 30 seconds.")
+            .Validate(o => o.FailureBackoff >= TimeSpan.Zero, "FailureBackoff must be greater than or equal to zero.")
+            .Validate(o => o.FailureBackoff <= TimeSpan.FromSeconds(30), "FailureBackoff must be less than or equal to 30 seconds.")
+            .ValidateOnStart();
+        services.AddOptions<InMemorySpillOptions>()
+            .Validate(o => o.MemoryCacheSizeLimitBytes >= 0, "MemoryCacheSizeLimitBytes must be greater than or equal to zero.")
+            .ValidateOnStart();
+
+        services.AddSingleton<StampedeProtectedCacheService>(sp =>
+            new StampedeProtectedCacheService(
+                sp.GetRequiredService<MemoryOnlyCacheService>(),
+                sp.GetRequiredService<IOptionsMonitor<CacheStampedeOptions>>(),
+                sp.GetRequiredService<CacheStatsRegistry>().GetOrCreate(CacheStatsNames.Memory)));
+        services.AddSingleton<ICacheService>(sp => sp.GetRequiredService<StampedeProtectedCacheService>());
+        services.AddSingleton<ICacheTagService>(sp => sp.GetRequiredService<StampedeProtectedCacheService>());
+
+        services.TryAddSingleton<ICacheCodecProvider, SystemTextJsonCodecProvider>();
+        services.AddSingleton<IVapeCache, VapeCacheClient>();
+        services.AddSingleton<IJsonCache, JsonCacheService>();
+        services.AddSingleton<ICacheChunkStreamService, ChunkedCacheStreamService>();
+        services.AddSingleton<ICacheCollectionFactory, CacheCollectionFactory>();
+
+        return services;
+    }
+
     private sealed class FallbackSpillDiagnostics : ISpillStoreDiagnostics
     {
         public static readonly FallbackSpillDiagnostics Instance = new();

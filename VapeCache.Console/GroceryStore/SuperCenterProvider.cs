@@ -1,11 +1,14 @@
 using System.Buffers;
 using System.Buffers.Text;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using StackExchange.Redis;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Abstractions.Modules;
+using VapeCache.Features.Search;
 
 namespace VapeCache.Console.GroceryStore;
 
@@ -22,6 +25,11 @@ internal interface ISuperCenterStoreProvider
     ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId, CancellationToken ct);
     ValueTask SaveSessionAsync(string sessionId, UserSession session, TimeSpan ttl, CancellationToken ct);
     ValueTask<UserSession?> GetSessionAsync(string sessionId, CancellationToken ct);
+    ValueTask TrackRecentlyViewedAsync(string shopperId, IReadOnlyList<string> productIds, DateTime viewedAtUtc, TimeSpan ttl, CancellationToken ct);
+    ValueTask<string[]> GetRecentlyViewedAsync(string shopperId, int take, CancellationToken ct);
+    ValueTask RecordCheckoutEventAsync(GroceryCheckoutEvent checkoutEvent, TimeSpan ttl, CancellationToken ct);
+    ValueTask<ReceiptSearchLookup> SearchReceiptAsync(ReceiptExitCheckRequest request, CancellationToken ct);
+    ValueTask<bool> RemoveKeyAsync(string key, CancellationToken ct);
     ValueTask<long> InvalidateTagAsync(string tag, CancellationToken ct);
     ValueTask<SuperCenterCommandCoverageSnapshot> ExecuteCommandCoverageAsync(
         SuperCenterCommandCoverageContext context,
@@ -41,80 +49,106 @@ internal sealed class VapeCacheSuperCenterProvider : ISuperCenterStoreProvider
     private static readonly byte[] CoverageJsonSuffix = "}"u8.ToArray();
     private static readonly byte[] StreamProbePayload = "1"u8.ToArray();
     private static readonly string[] CoverageHashFields = ["shopper", "sale", "product"];
-    private static readonly ConcurrentDictionary<string, string> ItemTagCache = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, string> SaleParticipantKeyCache = new(StringComparer.Ordinal);
     [ThreadStatic] private static string[]? _tlsTwoStringArray;
     [ThreadStatic] private static string[]? _tlsThirteenStringArray;
     [ThreadStatic] private static (string, ReadOnlyMemory<byte>)[]? _tlsTwoFieldValueArray;
     [ThreadStatic] private static (string, ReadOnlyMemory<byte>)[]? _tlsThreeFieldValueArray;
-    private readonly IVapeCache _cache;
     private readonly IRedisCommandExecutor _redis;
+    private readonly IRedisHashSearchDocumentStore<ReceiptSearchDocument>? _receiptSearchDocuments;
     private readonly string _keyPrefix;
+    private readonly string _receiptSearchDocumentIdPrefix;
     private readonly SemaphoreSlim _coverageSetupGate = new(1, 1);
     private SuperCenterModuleCapabilities _coverageCapabilities;
     private int _coverageSetupComplete;
 
     public VapeCacheSuperCenterProvider(
-        IVapeCache cache,
         IRedisCommandExecutor redis,
-        string? keyPrefix = null)
+        string? keyPrefix = null,
+        IRedisHashSearchDocumentStore<ReceiptSearchDocument>? receiptSearchDocuments = null,
+        string? receiptSearchDocumentIdPrefix = null)
     {
-        _cache = cache;
         _redis = redis;
+        _receiptSearchDocuments = receiptSearchDocuments;
         _keyPrefix = NormalizeKeyPrefix(keyPrefix);
+        _receiptSearchDocumentIdPrefix = NormalizeKeyPrefix(receiptSearchDocumentIdPrefix ?? keyPrefix);
     }
 
-    public ValueTask<Product?> GetProductAsync(string productId, CancellationToken ct)
-        => _cache.GetAsync<Product>(new CacheKey<Product>(Key($"product:{productId}")), ct);
-
-    public ValueTask CacheProductAsync(Product product, TimeSpan ttl, CancellationToken ct)
+    public async ValueTask<Product?> GetProductAsync(string productId, CancellationToken ct)
     {
-        var tags = new[]
-        {
-            $"product:{product.Id}",
-            $"category:{product.Category.ToLowerInvariant()}"
-        };
+        using var lease = await _redis.HGetLeaseAsync(Key(SuperCenterKeySpace.Product(productId)), "payload", ct).ConfigureAwait(false);
+        if (lease.IsNull)
+            return null;
 
-        var options = new CacheEntryOptions(Ttl: ttl).WithTags(tags);
-        return _cache.SetAsync(new CacheKey<Product>(Key($"product:{product.Id}")), product, options, ct);
+        return JsonSerializer.Deserialize(lease.Span, JsonContext.Product);
+    }
+
+    public async ValueTask CacheProductAsync(Product product, TimeSpan ttl, CancellationToken ct)
+    {
+        var productKey = Key(SuperCenterKeySpace.Product(product.Id));
+        var payload = JsonSerializer.SerializeToUtf8Bytes(product, JsonContext.Product);
+
+        await SetTaggedHashAsync(
+            productKey,
+            [
+                ("payload", payload),
+                ("category", Utf8.GetBytes(product.Category)),
+                ("department", Utf8.GetBytes(product.Department)),
+                ("aisle", Utf8.GetBytes(product.Aisle)),
+                ("price", Utf8.GetBytes(product.Price.ToString(CultureInfo.InvariantCulture))),
+                ("temperatureZone", Utf8.GetBytes(product.TemperatureZone))
+            ],
+            ttl,
+            [
+                $"product:{product.Id}",
+                $"category:{product.Category.ToLowerInvariant()}",
+                CacheTagConventions.ToZoneTag("catalog")
+            ],
+            ct).ConfigureAwait(false);
     }
 
     public async ValueTask<CartItem[]> GetCartAsync(string shopperId, CancellationToken ct)
     {
-        using var lease = await _redis.GetLeaseAsync(Key($"cart:{shopperId}"), ct).ConfigureAwait(false);
-        if (lease.IsNull)
+        var values = await _redis.LRangeAsync(Key(SuperCenterKeySpace.Cart(shopperId)), 0, -1, ct).ConfigureAwait(false);
+        if (values.Length == 0)
             return Array.Empty<CartItem>();
 
-        return JsonSerializer.Deserialize(lease.Span, JsonContext.CartItemArray) ?? Array.Empty<CartItem>();
+        var items = new CartItem[values.Length];
+        for (var i = 0; i < values.Length; i++)
+            items[i] = JsonSerializer.Deserialize(values[i], JsonContext.CartItem)!;
+
+        return items;
     }
 
     public async ValueTask SetCartAsync(string shopperId, CartItem[] items, TimeSpan ttl, CancellationToken ct)
     {
-        var cartKey = Key($"cart:{shopperId}");
-        var cartPayload = JsonSerializer.SerializeToUtf8Bytes(items, JsonContext.CartItemArray);
+        var cartKey = Key(SuperCenterKeySpace.Cart(shopperId));
+        _ = await _redis.UnlinkAsync(cartKey, ct).ConfigureAwait(false);
+        if (items.Length > 0)
+        {
+            var cartPayloads = ArrayPool<ReadOnlyMemory<byte>>.Shared.Rent(items.Length);
+            try
+            {
+                for (var i = 0; i < items.Length; i++)
+                    cartPayloads[i] = JsonSerializer.SerializeToUtf8Bytes(items[i], JsonContext.CartItem);
 
-        await SetTaggedValueAsync(
-            cartKey,
-            cartPayload,
-            ttl,
-            BuildCartTags(shopperId, items),
-            ct).ConfigureAwait(false);
+                _ = await _redis.RPushManyAsync(cartKey, cartPayloads, items.Length, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                ArrayPool<ReadOnlyMemory<byte>>.Shared.Return(cartPayloads, clearArray: true);
+            }
+        }
+
+        _ = await _redis.ExpireAsync(cartKey, ttl, ct).ConfigureAwait(false);
+        await TrackTagsAsync(cartKey, BuildCartTags(shopperId), ct).ConfigureAwait(false);
     }
 
-    public async ValueTask<long> GetCartCountAsync(string shopperId, CancellationToken ct)
-    {
-        using var lease = await _redis.GetLeaseAsync(Key($"cart:{shopperId}"), ct).ConfigureAwait(false);
-        if (lease.IsNull)
-            return 0;
-
-        var cart = JsonSerializer.Deserialize(lease.Span, JsonContext.CartItemArray);
-        return cart?.Length ?? 0;
-    }
+    public ValueTask<long> GetCartCountAsync(string shopperId, CancellationToken ct)
+        => _redis.LLenAsync(Key(SuperCenterKeySpace.Cart(shopperId)), ct);
 
     public async ValueTask RemoveCartAsync(string shopperId, CancellationToken ct)
-    {
-        _ = await _redis.DeleteAsync(Key($"cart:{shopperId}"), ct).ConfigureAwait(false);
-    }
+        => _ = await _redis.UnlinkAsync(Key(SuperCenterKeySpace.Cart(shopperId)), ct).ConfigureAwait(false);
 
     public async ValueTask JoinFlashSaleAsync(string saleId, string shopperId, CancellationToken ct)
         => _ = await ExecuteWithRentedUtf8Async(
@@ -130,25 +164,138 @@ internal sealed class VapeCacheSuperCenterProvider : ISuperCenterStoreProvider
     public async ValueTask SaveSessionAsync(string sessionId, UserSession session, TimeSpan ttl, CancellationToken ct)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(session, JsonContext.UserSession);
-        await SetTaggedValueAsync(
-            Key($"session:{sessionId}"),
-            payload,
+        var sessionKey = Key(SuperCenterKeySpace.Session(sessionId));
+        await SetTaggedHashAsync(
+            sessionKey,
+            [
+                ("payload", payload),
+                ("shopperId", Utf8.GetBytes(session.UserId)),
+                ("storeId", Utf8.GetBytes(session.StoreId)),
+                ("loyaltyTier", Utf8.GetBytes(session.LoyaltyTier)),
+                ("fulfillmentMethod", Utf8.GetBytes(session.FulfillmentMethod)),
+                ("lastActivityTicks", Utf8.GetBytes(session.LastActivityAt.Ticks.ToString(CultureInfo.InvariantCulture)))
+            ],
             ttl,
             [
-                $"shopper:{session.UserId}",
-                $"shopper:{session.UserId}:session"
+                SuperCenterKeySpace.ShopperTag(session.UserId),
+                SuperCenterKeySpace.ShopperTag(session.UserId, "session")
             ],
             ct).ConfigureAwait(false);
     }
 
     public async ValueTask<UserSession?> GetSessionAsync(string sessionId, CancellationToken ct)
     {
-        using var lease = await _redis.GetLeaseAsync(Key($"session:{sessionId}"), ct).ConfigureAwait(false);
+        using var lease = await _redis.HGetLeaseAsync(Key(SuperCenterKeySpace.Session(sessionId)), "payload", ct).ConfigureAwait(false);
         if (lease.IsNull)
             return null;
 
         return JsonSerializer.Deserialize(lease.Span, JsonContext.UserSession);
     }
+
+    public async ValueTask TrackRecentlyViewedAsync(
+        string shopperId,
+        IReadOnlyList<string> productIds,
+        DateTime viewedAtUtc,
+        TimeSpan ttl,
+        CancellationToken ct)
+    {
+        if (productIds.Count == 0)
+            return;
+
+        var key = Key(SuperCenterKeySpace.RecentlyViewed(shopperId));
+        var baseScore = new DateTimeOffset(viewedAtUtc).ToUnixTimeMilliseconds();
+        for (var i = 0; i < productIds.Count; i++)
+        {
+            await ExecuteWithRentedUtf8Async(
+                productIds[i],
+                payload => _redis.ZAddAsync(key, baseScore + i, payload, ct)).ConfigureAwait(false);
+        }
+
+        _ = await _redis.ExpireAsync(key, ttl, ct).ConfigureAwait(false);
+        await TrackTagsAsync(
+            key,
+            [
+                SuperCenterKeySpace.ShopperTag(shopperId),
+                SuperCenterKeySpace.ShopperTag(shopperId, "recent")
+            ],
+            ct).ConfigureAwait(false);
+    }
+
+    public async ValueTask<string[]> GetRecentlyViewedAsync(string shopperId, int take, CancellationToken ct)
+    {
+        if (take <= 0)
+            return Array.Empty<string>();
+
+        var values = await _redis
+            .ZRangeWithScoresAsync(Key(SuperCenterKeySpace.RecentlyViewed(shopperId)), 0, take - 1, descending: true, ct)
+            .ConfigureAwait(false);
+        if (values.Length == 0)
+            return Array.Empty<string>();
+
+        var products = new string[values.Length];
+        for (var i = 0; i < values.Length; i++)
+            products[i] = Utf8.GetString(values[i].Member);
+
+        return products;
+    }
+
+    public async ValueTask RecordCheckoutEventAsync(GroceryCheckoutEvent checkoutEvent, TimeSpan ttl, CancellationToken ct)
+    {
+        using var orderId = RentUtf8(checkoutEvent.OrderId);
+        using var shopperId = RentUtf8(checkoutEvent.ShopperId);
+        using var sessionId = RentUtf8(checkoutEvent.SessionId);
+        using var saleId = RentUtf8(checkoutEvent.SaleId);
+        using var storeId = RentUtf8(checkoutEvent.StoreId);
+        using var fulfillmentMethod = RentUtf8(checkoutEvent.FulfillmentMethod);
+        using var itemCount = RentUtf8(checkoutEvent.ItemCount.ToString(CultureInfo.InvariantCulture));
+        using var subtotal = RentUtf8(checkoutEvent.Subtotal.ToString(CultureInfo.InvariantCulture));
+        using var checkedOutAt = RentUtf8(checkoutEvent.CheckedOutAtUtc.Ticks.ToString(CultureInfo.InvariantCulture));
+        _ = await _redis.XAddIdempotentAckAsync(
+            Key(SuperCenterKeySpace.CheckoutStream(checkoutEvent.ShopperId)),
+            producerId: "grocery-store",
+            idempotentId: checkoutEvent.OrderId,
+            useAutoIdempotentId: false,
+            entryId: "*",
+            fields:
+            [
+                ("orderId", orderId.Memory),
+                ("shopperId", shopperId.Memory),
+                ("sessionId", sessionId.Memory),
+                ("saleId", saleId.Memory),
+                ("storeId", storeId.Memory),
+                ("fulfillmentMethod", fulfillmentMethod.Memory),
+                ("itemCount", itemCount.Memory),
+                ("subtotal", subtotal.Memory),
+                ("checkedOutAtUtc", checkedOutAt.Memory)
+            ],
+            ct).ConfigureAwait(false);
+        _ = await _redis.ExpireAsync(Key(SuperCenterKeySpace.CheckoutStream(checkoutEvent.ShopperId)), ttl, ct).ConfigureAwait(false);
+        if (_receiptSearchDocuments is not null)
+        {
+            _ = await _receiptSearchDocuments.EnsureIndexAsync(ct).ConfigureAwait(false);
+            _ = await _receiptSearchDocuments
+                .UpsertAsync(
+                    SuperCenterReceiptSearch.CreateDocument(checkoutEvent, _receiptSearchDocumentIdPrefix),
+                    ttl,
+                    ct)
+                .ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask<ReceiptSearchLookup> SearchReceiptAsync(ReceiptExitCheckRequest request, CancellationToken ct)
+    {
+        var documentKey = GetReceiptSearchDocumentKey(request.OrderId);
+        if (_receiptSearchDocuments is null)
+            return new ReceiptSearchLookup(false, 0, documentKey);
+
+        var hitCount = await _receiptSearchDocuments
+            .SearchCountAsync(BuildReceiptSearchQuery(request), ct)
+            .ConfigureAwait(false);
+        return new ReceiptSearchLookup(hitCount > 0, hitCount, documentKey);
+    }
+
+    public async ValueTask<bool> RemoveKeyAsync(string key, CancellationToken ct)
+        => await _redis.DeleteAsync(ResolveDeleteKey(key), ct).ConfigureAwait(false);
 
     public async ValueTask<long> InvalidateTagAsync(string tag, CancellationToken ct)
     {
@@ -523,32 +670,44 @@ internal sealed class VapeCacheSuperCenterProvider : ISuperCenterStoreProvider
     private static bool IsUnsupportedCommand(Exception ex)
         => ex.Message.Contains("unknown command", StringComparison.OrdinalIgnoreCase) ||
            ex.Message.Contains("unknown subcommand", StringComparison.OrdinalIgnoreCase) ||
+           ex.Message.Contains("invalid stream id", StringComparison.OrdinalIgnoreCase) ||
            ex.Message.Contains("unsupported", StringComparison.OrdinalIgnoreCase);
 
-    private static string[] BuildCartTags(string shopperId, CartItem[] items)
-    {
-        var tags = new HashSet<string>(StringComparer.Ordinal)
-        {
-            $"shopper:{shopperId}",
-            $"shopper:{shopperId}:cart"
-        };
+    private static string[] BuildCartTags(string shopperId)
+        =>
+        [
+            SuperCenterKeySpace.ShopperTag(shopperId),
+            SuperCenterKeySpace.ShopperTag(shopperId, "cart")
+        ];
 
-        for (var i = 0; i < items.Length; i++)
-            tags.Add(GetItemTag(items[i].ProductId));
-
-        var materialized = new string[tags.Count];
-        tags.CopyTo(materialized);
-        return materialized;
-    }
-
-    private async ValueTask SetTaggedValueAsync(
+    private async ValueTask SetTaggedHashAsync(
         string key,
-        ReadOnlyMemory<byte> payload,
+        (string Field, byte[] Value)[] fields,
         TimeSpan ttl,
         IReadOnlyCollection<string> tags,
         CancellationToken ct)
     {
-        _ = await _redis.SetAsync(key, payload, ttl, ct).ConfigureAwait(false);
+        var entries = new (string Field, ReadOnlyMemory<byte> Value)[fields.Length];
+        try
+        {
+            for (var i = 0; i < fields.Length; i++)
+                entries[i] = (fields[i].Field, fields[i].Value);
+
+            _ = await _redis.HSetManyAsync(key, entries, ct).ConfigureAwait(false);
+            _ = await _redis.ExpireAsync(key, ttl, ct).ConfigureAwait(false);
+            await TrackTagsAsync(key, tags, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            Array.Clear(entries, 0, entries.Length);
+        }
+    }
+
+    private async ValueTask TrackTagsAsync(
+        string key,
+        IReadOnlyCollection<string> tags,
+        CancellationToken ct)
+    {
         if (tags.Count == 0)
             return;
 
@@ -556,9 +715,6 @@ internal sealed class VapeCacheSuperCenterProvider : ISuperCenterStoreProvider
         foreach (var tag in tags)
             _ = await _redis.SAddAsync(Key($"tag:{tag}:keys"), keyBytes.Memory, ct).ConfigureAwait(false);
     }
-
-    private static string GetItemTag(string productId)
-        => ItemTagCache.GetOrAdd(productId, static id => string.Concat("item:", id));
 
     private string GetSaleParticipantKey(string saleId)
         => SaleParticipantKeyCache.GetOrAdd(
@@ -658,6 +814,33 @@ internal sealed class VapeCacheSuperCenterProvider : ISuperCenterStoreProvider
 
         return new RentedUtf8(rented, written);
     }
+
+    private RedisSearchQuery BuildReceiptSearchQuery(ReceiptExitCheckRequest request)
+    {
+        var builder = new RedisSearchQueryBuilder()
+            .Tag("orderId", request.OrderId)
+            .Tag("shopperId", request.ShopperId)
+            .Tag("storeId", request.StoreId)
+            .Tag("receiptStatus", request.ReceiptStatus)
+            .NumericRange(
+                "checkedOutUnixMilliseconds",
+                min: new DateTimeOffset(request.CheckedOutAfterUtc).ToUnixTimeMilliseconds());
+
+        if (!string.IsNullOrWhiteSpace(_receiptSearchDocumentIdPrefix))
+            builder.Tag("runScope", _receiptSearchDocumentIdPrefix);
+
+        return builder.Build(offset: 0, count: Math.Clamp(request.Take, 1, 10));
+    }
+
+    private string GetReceiptSearchDocumentKey(string orderId)
+    {
+        var documentId = string.Concat(_receiptSearchDocumentIdPrefix, orderId);
+        return _receiptSearchDocuments?.GetDocumentKey(documentId)
+            ?? RedisSearchConventions.DocumentKey(SuperCenterReceiptSearch.DefaultDocumentKeyPrefix, documentId);
+    }
+
+    private string ResolveDeleteKey(string key)
+        => SuperCenterReceiptSearch.IsAbsoluteSearchDocumentKey(key) ? key : Key(key);
 
     private string Key(string suffix)
         => _keyPrefix.Length == 0 ? suffix : string.Concat(_keyPrefix, suffix);
@@ -794,21 +977,29 @@ internal sealed class StackExchangeSuperCenterProvider : ISuperCenterStoreProvid
     private static readonly TimeSpan CommandCoverageTtl = TimeSpan.FromMinutes(5);
     private readonly IDatabase _db;
     private readonly string _keyPrefix;
+    private readonly ReceiptSearchRuntimeDescriptor _receiptSearchRuntime;
+    private readonly string _receiptSearchDocumentIdPrefix;
+    private readonly SemaphoreSlim _receiptSearchGate = new(1, 1);
     private readonly SemaphoreSlim _coverageSetupGate = new(1, 1);
     private SuperCenterModuleCapabilities _coverageCapabilities;
     private int _coverageSetupComplete;
+    private int _receiptSearchSetupComplete;
 
     public StackExchangeSuperCenterProvider(
         IDatabase db,
-        string? keyPrefix = null)
+        string? keyPrefix = null,
+        ReceiptSearchRuntimeDescriptor? receiptSearchRuntime = null,
+        string? receiptSearchDocumentIdPrefix = null)
     {
         _db = db;
         _keyPrefix = NormalizeKeyPrefix(keyPrefix);
+        _receiptSearchRuntime = receiptSearchRuntime ?? ReceiptSearchRuntimeDescriptor.Default;
+        _receiptSearchDocumentIdPrefix = NormalizeKeyPrefix(receiptSearchDocumentIdPrefix ?? keyPrefix);
     }
 
     public async ValueTask<Product?> GetProductAsync(string productId, CancellationToken ct)
     {
-        var value = await _db.StringGetAsync(Key($"product:{productId}")).ConfigureAwait(false);
+        var value = await _db.HashGetAsync(Key(SuperCenterKeySpace.Product(productId)), "payload").ConfigureAwait(false);
         if (!value.HasValue)
             return null;
 
@@ -818,74 +1009,181 @@ internal sealed class StackExchangeSuperCenterProvider : ISuperCenterStoreProvid
     public async ValueTask CacheProductAsync(Product product, TimeSpan ttl, CancellationToken ct)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(product, JsonContext.Product);
-        await SetTaggedStringAsync(
-            Key($"product:{product.Id}"),
-            payload,
+        await SetTaggedHashAsync(
+            Key(SuperCenterKeySpace.Product(product.Id)),
+            [
+                new HashEntry("payload", payload),
+                new HashEntry("category", product.Category),
+                new HashEntry("department", product.Department),
+                new HashEntry("aisle", product.Aisle),
+                new HashEntry("price", product.Price.ToString(CultureInfo.InvariantCulture)),
+                new HashEntry("temperatureZone", product.TemperatureZone)
+            ],
             ttl,
             [
                 $"product:{product.Id}",
-                $"category:{product.Category.ToLowerInvariant()}"
+                $"category:{product.Category.ToLowerInvariant()}",
+                CacheTagConventions.ToZoneTag("catalog")
             ]).ConfigureAwait(false);
     }
 
     public async ValueTask<CartItem[]> GetCartAsync(string shopperId, CancellationToken ct)
     {
-        var value = await _db.StringGetAsync(Key($"cart:{shopperId}")).ConfigureAwait(false);
-        if (!value.HasValue)
+        var values = await _db.ListRangeAsync(Key(SuperCenterKeySpace.Cart(shopperId))).ConfigureAwait(false);
+        if (values.Length == 0)
             return Array.Empty<CartItem>();
 
-        return JsonSerializer.Deserialize((byte[])value!, JsonContext.CartItemArray) ?? Array.Empty<CartItem>();
+        var items = new CartItem[values.Length];
+        for (var i = 0; i < values.Length; i++)
+            items[i] = JsonSerializer.Deserialize((byte[])values[i]!, JsonContext.CartItem)!;
+
+        return items;
     }
 
     public async ValueTask SetCartAsync(string shopperId, CartItem[] items, TimeSpan ttl, CancellationToken ct)
     {
-        var payload = JsonSerializer.SerializeToUtf8Bytes(items, JsonContext.CartItemArray);
-        await SetTaggedStringAsync(
-            Key($"cart:{shopperId}"),
-            payload,
-            ttl,
-            BuildCartTags(shopperId, items)).ConfigureAwait(false);
+        var key = Key(SuperCenterKeySpace.Cart(shopperId));
+        _ = await _db.KeyDeleteAsync(key).ConfigureAwait(false);
+        if (items.Length > 0)
+        {
+            var payloads = new RedisValue[items.Length];
+            for (var i = 0; i < items.Length; i++)
+                payloads[i] = JsonSerializer.SerializeToUtf8Bytes(items[i], JsonContext.CartItem);
+
+            _ = await _db.ListRightPushAsync(key, payloads).ConfigureAwait(false);
+        }
+
+        _ = await _db.KeyExpireAsync(key, ttl).ConfigureAwait(false);
+        await TrackTagsAsync(key, BuildCartTags(shopperId)).ConfigureAwait(false);
     }
 
-    public async ValueTask<long> GetCartCountAsync(string shopperId, CancellationToken ct)
-    {
-        var cart = await GetCartAsync(shopperId, ct).ConfigureAwait(false);
-        return cart.Length;
-    }
+    public ValueTask<long> GetCartCountAsync(string shopperId, CancellationToken ct)
+        => new(_db.ListLengthAsync(Key(SuperCenterKeySpace.Cart(shopperId))));
 
     public async ValueTask RemoveCartAsync(string shopperId, CancellationToken ct)
-        => _ = await _db.KeyDeleteAsync(Key($"cart:{shopperId}")).ConfigureAwait(false);
+        => _ = await _db.KeyDeleteAsync(Key(SuperCenterKeySpace.Cart(shopperId))).ConfigureAwait(false);
 
     public async ValueTask JoinFlashSaleAsync(string saleId, string shopperId, CancellationToken ct)
-        => _ = await _db.SetAddAsync(Key($"sale:{saleId}:participants"), shopperId).ConfigureAwait(false);
+        => _ = await _db.SetAddAsync(Key(SuperCenterKeySpace.FlashSaleParticipants(saleId)), shopperId).ConfigureAwait(false);
 
     public ValueTask<bool> IsInFlashSaleAsync(string saleId, string shopperId, CancellationToken ct)
-        => new(_db.SetContainsAsync(Key($"sale:{saleId}:participants"), shopperId));
+        => new(_db.SetContainsAsync(Key(SuperCenterKeySpace.FlashSaleParticipants(saleId)), shopperId));
 
     public ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId, CancellationToken ct)
-        => new(_db.SetLengthAsync(Key($"sale:{saleId}:participants")));
+        => new(_db.SetLengthAsync(Key(SuperCenterKeySpace.FlashSaleParticipants(saleId))));
 
     public async ValueTask SaveSessionAsync(string sessionId, UserSession session, TimeSpan ttl, CancellationToken ct)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(session, JsonContext.UserSession);
-        await SetTaggedStringAsync(
-            Key($"session:{sessionId}"),
-            payload,
+        await SetTaggedHashAsync(
+            Key(SuperCenterKeySpace.Session(sessionId)),
+            [
+                new HashEntry("payload", payload),
+                new HashEntry("shopperId", session.UserId),
+                new HashEntry("storeId", session.StoreId),
+                new HashEntry("loyaltyTier", session.LoyaltyTier),
+                new HashEntry("fulfillmentMethod", session.FulfillmentMethod),
+                new HashEntry("lastActivityTicks", session.LastActivityAt.Ticks.ToString(CultureInfo.InvariantCulture))
+            ],
             ttl,
             [
-                $"shopper:{session.UserId}",
-                $"shopper:{session.UserId}:session"
+                SuperCenterKeySpace.ShopperTag(session.UserId),
+                SuperCenterKeySpace.ShopperTag(session.UserId, "session")
             ]).ConfigureAwait(false);
     }
 
     public async ValueTask<UserSession?> GetSessionAsync(string sessionId, CancellationToken ct)
     {
-        var value = await _db.StringGetAsync(Key($"session:{sessionId}")).ConfigureAwait(false);
+        var value = await _db.HashGetAsync(Key(SuperCenterKeySpace.Session(sessionId)), "payload").ConfigureAwait(false);
         if (!value.HasValue)
             return null;
 
         return JsonSerializer.Deserialize((byte[])value!, JsonContext.UserSession);
     }
+
+    public async ValueTask TrackRecentlyViewedAsync(
+        string shopperId,
+        IReadOnlyList<string> productIds,
+        DateTime viewedAtUtc,
+        TimeSpan ttl,
+        CancellationToken ct)
+    {
+        if (productIds.Count == 0)
+            return;
+
+        var key = Key(SuperCenterKeySpace.RecentlyViewed(shopperId));
+        var baseScore = new DateTimeOffset(viewedAtUtc).ToUnixTimeMilliseconds();
+        for (var i = 0; i < productIds.Count; i++)
+        {
+            _ = await _db.SortedSetAddAsync(key, productIds[i], baseScore + i).ConfigureAwait(false);
+        }
+
+        _ = await _db.KeyExpireAsync(key, ttl).ConfigureAwait(false);
+        await TrackTagsAsync(
+            key,
+            [
+                SuperCenterKeySpace.ShopperTag(shopperId),
+                SuperCenterKeySpace.ShopperTag(shopperId, "recent")
+            ]).ConfigureAwait(false);
+    }
+
+    public async ValueTask<string[]> GetRecentlyViewedAsync(string shopperId, int take, CancellationToken ct)
+    {
+        if (take <= 0)
+            return Array.Empty<string>();
+
+        var values = await _db
+            .SortedSetRangeByRankAsync(Key(SuperCenterKeySpace.RecentlyViewed(shopperId)), 0, take - 1, Order.Descending)
+            .ConfigureAwait(false);
+        if (values.Length == 0)
+            return Array.Empty<string>();
+
+        var products = new string[values.Length];
+        for (var i = 0; i < values.Length; i++)
+            products[i] = values[i].ToString();
+
+        return products;
+    }
+
+    public async ValueTask RecordCheckoutEventAsync(GroceryCheckoutEvent checkoutEvent, TimeSpan ttl, CancellationToken ct)
+    {
+        var key = Key(SuperCenterKeySpace.CheckoutStream(checkoutEvent.ShopperId));
+        _ = await _db.StreamAddAsync(
+            key,
+            [
+                new NameValueEntry("orderId", checkoutEvent.OrderId),
+                new NameValueEntry("shopperId", checkoutEvent.ShopperId),
+                new NameValueEntry("sessionId", checkoutEvent.SessionId),
+                new NameValueEntry("saleId", checkoutEvent.SaleId),
+                new NameValueEntry("storeId", checkoutEvent.StoreId),
+                new NameValueEntry("fulfillmentMethod", checkoutEvent.FulfillmentMethod),
+                new NameValueEntry("itemCount", checkoutEvent.ItemCount.ToString(CultureInfo.InvariantCulture)),
+                new NameValueEntry("subtotal", checkoutEvent.Subtotal.ToString(CultureInfo.InvariantCulture)),
+                new NameValueEntry("checkedOutAtUtc", checkoutEvent.CheckedOutAtUtc.Ticks.ToString(CultureInfo.InvariantCulture))
+            ]).ConfigureAwait(false);
+        _ = await _db.KeyExpireAsync(key, ttl).ConfigureAwait(false);
+        await EnsureReceiptSearchIndexAsync(ct).ConfigureAwait(false);
+        await UpsertReceiptSearchDocumentAsync(checkoutEvent, ttl).ConfigureAwait(false);
+    }
+
+    public async ValueTask<ReceiptSearchLookup> SearchReceiptAsync(ReceiptExitCheckRequest request, CancellationToken ct)
+    {
+        await EnsureReceiptSearchIndexAsync(ct).ConfigureAwait(false);
+
+        var result = await _db.ExecuteAsync(
+            "FT.SEARCH",
+            _receiptSearchRuntime.IndexName,
+            BuildReceiptSearchQuery(request).RawQuery,
+            "LIMIT",
+            0,
+            0).ConfigureAwait(false);
+
+        var hitCount = ParseSearchCount(result);
+        return new ReceiptSearchLookup(hitCount > 0, hitCount, GetReceiptSearchDocumentKey(request.OrderId));
+    }
+
+    public async ValueTask<bool> RemoveKeyAsync(string key, CancellationToken ct)
+        => await _db.KeyDeleteAsync(ResolveDeleteKey(key)).ConfigureAwait(false);
 
     public async ValueTask<long> InvalidateTagAsync(string tag, CancellationToken ct)
     {
@@ -1258,6 +1556,177 @@ internal sealed class StackExchangeSuperCenterProvider : ISuperCenterStoreProvid
         return names.ToArray();
     }
 
+    private async ValueTask EnsureReceiptSearchIndexAsync(CancellationToken ct)
+    {
+        if (Volatile.Read(ref _receiptSearchSetupComplete) != 0)
+            return;
+
+        await _receiptSearchGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (Volatile.Read(ref _receiptSearchSetupComplete) != 0)
+                return;
+
+            var modules = await _db.ExecuteAsync("MODULE", "LIST").ConfigureAwait(false);
+            var names = ParseModuleNames(modules);
+            var searchAvailable = false;
+            for (var i = 0; i < names.Length; i++)
+            {
+                var module = names[i];
+                if (module.Contains("search", StringComparison.OrdinalIgnoreCase) ||
+                    module.Contains("ft", StringComparison.OrdinalIgnoreCase))
+                {
+                    searchAvailable = true;
+                    break;
+                }
+            }
+
+            if (!searchAvailable)
+            {
+                throw new InvalidOperationException(
+                    $"RediSearch is required for grocery receipt search index '{_receiptSearchRuntime.IndexName}'.");
+            }
+
+            try
+            {
+                _ = await _db.ExecuteAsync("FT.CREATE", BuildReceiptSearchCreateIndexArgs()).ConfigureAwait(false);
+            }
+            catch (RedisServerException ex) when (ex.Message.Contains("Index already exists", StringComparison.OrdinalIgnoreCase))
+            {
+            }
+
+            Volatile.Write(ref _receiptSearchSetupComplete, 1);
+        }
+        finally
+        {
+            _receiptSearchGate.Release();
+        }
+    }
+
+    private async ValueTask UpsertReceiptSearchDocumentAsync(GroceryCheckoutEvent checkoutEvent, TimeSpan ttl)
+    {
+        var document = SuperCenterReceiptSearch.CreateDocument(checkoutEvent, _receiptSearchDocumentIdPrefix);
+        var key = GetReceiptSearchDocumentKey(document.OrderId);
+        await _db.HashSetAsync(
+            key,
+            [
+                new HashEntry("orderId", document.OrderId),
+                new HashEntry("shopperId", document.ShopperId),
+                new HashEntry("sessionId", document.SessionId),
+                new HashEntry("saleId", document.SaleId),
+                new HashEntry("storeId", document.StoreId),
+                new HashEntry("receiptStatus", document.ReceiptStatus),
+                new HashEntry("fulfillmentMethod", document.FulfillmentMethod),
+                new HashEntry("runScope", document.RunScope),
+                new HashEntry("itemCount", document.ItemCount.ToString(CultureInfo.InvariantCulture)),
+                new HashEntry("subtotal", document.Subtotal.ToString(CultureInfo.InvariantCulture)),
+                new HashEntry("checkedOutUnixMilliseconds", document.CheckedOutUnixMilliseconds.ToString(CultureInfo.InvariantCulture)),
+                new HashEntry("searchText", document.SearchText)
+            ]).ConfigureAwait(false);
+        _ = await _db.KeyExpireAsync(key, ttl).ConfigureAwait(false);
+    }
+
+    private object[] BuildReceiptSearchCreateIndexArgs()
+    {
+        var fields = new ReceiptSearchDocumentMapper(_receiptSearchRuntime).Index.Fields;
+        var args = new List<object>(8 + (fields.Count * 4))
+        {
+            _receiptSearchRuntime.IndexName,
+            "ON",
+            "HASH",
+            "PREFIX",
+            1,
+            _receiptSearchRuntime.DocumentKeyPrefix,
+            "SCHEMA"
+        };
+
+        for (var i = 0; i < fields.Count; i++)
+        {
+            var field = fields[i];
+            args.Add(field.Name);
+            if (!string.IsNullOrWhiteSpace(field.Alias))
+            {
+                args.Add("AS");
+                args.Add(field.Alias!);
+            }
+
+            switch (field.Type)
+            {
+                case RedisSearchFieldType.Tag:
+                    args.Add("TAG");
+                    if (!string.IsNullOrWhiteSpace(field.TagSeparator))
+                    {
+                        args.Add("SEPARATOR");
+                        args.Add(field.TagSeparator!);
+                    }
+                    break;
+                case RedisSearchFieldType.Numeric:
+                    args.Add("NUMERIC");
+                    break;
+                default:
+                    args.Add("TEXT");
+                    if (field.Weight.HasValue)
+                    {
+                        args.Add("WEIGHT");
+                        args.Add(field.Weight.Value.ToString(CultureInfo.InvariantCulture));
+                    }
+                    break;
+            }
+
+            if (field.Sortable)
+                args.Add("SORTABLE");
+        }
+
+        return [.. args];
+    }
+
+    private RedisSearchQuery BuildReceiptSearchQuery(ReceiptExitCheckRequest request)
+    {
+        var builder = new RedisSearchQueryBuilder()
+            .Tag("orderId", request.OrderId)
+            .Tag("shopperId", request.ShopperId)
+            .Tag("storeId", request.StoreId)
+            .Tag("receiptStatus", request.ReceiptStatus)
+            .NumericRange(
+                "checkedOutUnixMilliseconds",
+                min: new DateTimeOffset(request.CheckedOutAfterUtc).ToUnixTimeMilliseconds());
+
+        if (!string.IsNullOrWhiteSpace(_receiptSearchDocumentIdPrefix))
+            builder.Tag("runScope", _receiptSearchDocumentIdPrefix);
+
+        return builder.Build(offset: 0, count: Math.Clamp(request.Take, 1, 10));
+    }
+
+    private string GetReceiptSearchDocumentKey(string orderId)
+        => string.Concat(_receiptSearchRuntime.DocumentKeyPrefix, _receiptSearchDocumentIdPrefix, orderId);
+
+    private string ResolveDeleteKey(string key)
+        => SuperCenterReceiptSearch.IsAbsoluteSearchDocumentKey(key) ? key : Key(key);
+
+    private static long ParseSearchCount(RedisResult result)
+    {
+        if (result.IsNull)
+            return 0L;
+
+        if (long.TryParse(result.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var direct))
+            return direct;
+
+        try
+        {
+            var values = (RedisResult[])result!;
+            if (values.Length == 0 || values[0].IsNull)
+                return 0L;
+
+            if (long.TryParse(values[0].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                return parsed;
+        }
+        catch (InvalidCastException)
+        {
+        }
+
+        return 0L;
+    }
+
     private async ValueTask<bool> SupportsIdempotentStreamsAsync()
     {
         var probeKey = Key("audit:stream:probe");
@@ -1271,34 +1740,32 @@ internal sealed class StackExchangeSuperCenterProvider : ISuperCenterStoreProvid
         catch (RedisServerException ex) when (
             ex.Message.Contains("unknown command", StringComparison.OrdinalIgnoreCase) ||
             ex.Message.Contains("unknown subcommand", StringComparison.OrdinalIgnoreCase) ||
+            ex.Message.Contains("invalid stream id", StringComparison.OrdinalIgnoreCase) ||
             ex.Message.Contains("unsupported", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
     }
 
-    private async ValueTask SetTaggedStringAsync(string key, byte[] payload, TimeSpan ttl, IReadOnlyCollection<string> tags)
+    private async ValueTask SetTaggedHashAsync(string key, HashEntry[] entries, TimeSpan ttl, IReadOnlyCollection<string> tags)
     {
-        await _db.StringSetAsync(key, payload, ttl).ConfigureAwait(false);
+        await _db.HashSetAsync(key, entries).ConfigureAwait(false);
+        await _db.KeyExpireAsync(key, ttl).ConfigureAwait(false);
+        await TrackTagsAsync(key, tags).ConfigureAwait(false);
+    }
+
+    private async ValueTask TrackTagsAsync(string key, IReadOnlyCollection<string> tags)
+    {
         foreach (var tag in tags)
             await _db.SetAddAsync(Key($"tag:{tag}:keys"), key).ConfigureAwait(false);
     }
 
-    private static string[] BuildCartTags(string shopperId, CartItem[] items)
-    {
-        var tags = new HashSet<string>(StringComparer.Ordinal)
-        {
-            $"shopper:{shopperId}",
-            $"shopper:{shopperId}:cart"
-        };
-
-        for (var i = 0; i < items.Length; i++)
-            tags.Add($"item:{items[i].ProductId}");
-
-        var materialized = new string[tags.Count];
-        tags.CopyTo(materialized);
-        return materialized;
-    }
+    private static string[] BuildCartTags(string shopperId)
+        =>
+        [
+            SuperCenterKeySpace.ShopperTag(shopperId),
+            SuperCenterKeySpace.ShopperTag(shopperId, "cart")
+        ];
 
     private string Key(string suffix)
         => _keyPrefix.Length == 0 ? suffix : string.Concat(_keyPrefix, suffix);

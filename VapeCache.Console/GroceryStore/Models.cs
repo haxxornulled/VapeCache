@@ -21,6 +21,13 @@ public record Product
     public decimal Price { get; init; }
     public int StockQuantity { get; init; }
     public string ImageUrl { get; init; }
+    public string Department { get; init; } = string.Empty;
+    public string Aisle { get; init; } = string.Empty;
+    public string Brand { get; init; } = string.Empty;
+    public string UnitOfMeasure { get; init; } = string.Empty;
+    public string TemperatureZone { get; init; } = string.Empty;
+    public bool IsWeightedItem { get; init; }
+    public bool RequiresIdCheck { get; init; }
 }
 
 /// <summary>
@@ -42,6 +49,13 @@ public record CartItem
     public decimal Price { get; init; }
     public int Quantity { get; init; }
     public DateTime AddedAt { get; init; }
+    public string Category { get; init; } = string.Empty;
+    public string Department { get; init; } = string.Empty;
+    public string Aisle { get; init; } = string.Empty;
+    public string Brand { get; init; } = string.Empty;
+    public string UnitOfMeasure { get; init; } = string.Empty;
+    public string TemperatureZone { get; init; } = string.Empty;
+    public decimal ExtendedPrice { get; init; }
 }
 
 /// <summary>
@@ -71,6 +85,11 @@ public record UserSession
     public DateTime LastActivityAt { get; init; }
     public string[] RecentlyViewedProductIds { get; init; }
     public string? ActiveCartId { get; init; }
+    public string StoreId { get; init; } = string.Empty;
+    public string LoyaltyTier { get; init; } = string.Empty;
+    public string FulfillmentMethod { get; init; } = string.Empty;
+    public string[] CouponCodes { get; init; } = Array.Empty<string>();
+    public string[] DietaryPreferences { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>
@@ -130,4 +149,133 @@ public record InventoryUpdate
     public int NewQuantity { get; init; }
     public string Reason { get; init; }
     public DateTime Timestamp { get; init; }
+}
+
+/// <summary>
+/// Checkout event appended to the Redis-backed order stream.
+/// </summary>
+public record GroceryCheckoutEvent
+{
+    public GroceryCheckoutEvent(
+        string orderId,
+        string shopperId,
+        string sessionId,
+        string saleId,
+        int itemCount,
+        decimal subtotal,
+        DateTime checkedOutAtUtc)
+    {
+        OrderId = orderId;
+        ShopperId = shopperId;
+        SessionId = sessionId;
+        SaleId = saleId;
+        ItemCount = itemCount;
+        Subtotal = subtotal;
+        CheckedOutAtUtc = checkedOutAtUtc;
+    }
+
+    public string OrderId { get; init; }
+    public string ShopperId { get; init; }
+    public string SessionId { get; init; }
+    public string SaleId { get; init; }
+    public int ItemCount { get; init; }
+    public decimal Subtotal { get; init; }
+    public DateTime CheckedOutAtUtc { get; init; }
+    public string StoreId { get; init; } = string.Empty;
+    public string FulfillmentMethod { get; init; } = string.Empty;
+    public string ReceiptStatus { get; init; } = SuperCenterReceiptSearch.ClearedStatus;
+    public string ReceiptSearchText { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// Request issued by the front-door receipt checker.
+/// </summary>
+public readonly record struct ReceiptExitCheckRequest
+{
+    public ReceiptExitCheckRequest(
+        string orderId,
+        string shopperId,
+        string storeId,
+        DateTime checkedOutAfterUtc,
+        int take = 1,
+        bool flagForManualReview = false,
+        string receiptStatus = SuperCenterReceiptSearch.ClearedStatus)
+    {
+        OrderId = orderId;
+        ShopperId = shopperId;
+        StoreId = storeId;
+        CheckedOutAfterUtc = checkedOutAfterUtc;
+        Take = take;
+        FlagForManualReview = flagForManualReview;
+        ReceiptStatus = receiptStatus;
+    }
+
+    public string OrderId { get; init; }
+    public string ShopperId { get; init; }
+    public string StoreId { get; init; }
+    public DateTime CheckedOutAfterUtc { get; init; }
+    public int Take { get; init; }
+    public bool FlagForManualReview { get; init; }
+    public string ReceiptStatus { get; init; }
+}
+
+/// <summary>
+/// Provider-level receipt search result.
+/// </summary>
+public readonly record struct ReceiptSearchLookup(bool Matched, long HitCount, string SearchDocumentKey);
+
+/// <summary>
+/// Shared result returned by the front-door receipt checker flow.
+/// </summary>
+public readonly record struct ReceiptExitCheckResult(
+    bool Matched,
+    long HitCount,
+    long InvalidatedTargets,
+    bool FlaggedForManualReview);
+
+/// <summary>
+/// HASH-backed RediSearch projection for a completed receipt.
+/// </summary>
+public sealed record ReceiptSearchDocument
+{
+    public ReceiptSearchDocument(
+        string orderId,
+        string shopperId,
+        string sessionId,
+        string saleId,
+        string storeId,
+        string receiptStatus,
+        string fulfillmentMethod,
+        string runScope,
+        int itemCount,
+        decimal subtotal,
+        long checkedOutUnixMilliseconds,
+        string searchText)
+    {
+        OrderId = orderId;
+        ShopperId = shopperId;
+        SessionId = sessionId;
+        SaleId = saleId;
+        StoreId = storeId;
+        ReceiptStatus = receiptStatus;
+        FulfillmentMethod = fulfillmentMethod;
+        RunScope = runScope;
+        ItemCount = itemCount;
+        Subtotal = subtotal;
+        CheckedOutUnixMilliseconds = checkedOutUnixMilliseconds;
+        SearchText = searchText;
+    }
+
+    public string OrderId { get; init; }
+    public string ShopperId { get; init; }
+    public string SessionId { get; init; }
+    public string SaleId { get; init; }
+    public string StoreId { get; init; }
+    public string ReceiptStatus { get; init; }
+    public string FulfillmentMethod { get; init; }
+    public string RunScope { get; init; }
+    public int ItemCount { get; init; }
+    public decimal Subtotal { get; init; }
+    public long CheckedOutUnixMilliseconds { get; init; }
+    public string SearchText { get; init; }
 }

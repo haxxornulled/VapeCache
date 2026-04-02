@@ -30,6 +30,7 @@
     <ProjectReference Include="..\VapeCache.Core\VapeCache.Core.csproj" />
     <ProjectReference Include="..\VapeCache.Benchmarks\VapeCache.Benchmarks.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.DependencyInjection\VapeCache.Extensions.DependencyInjection.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.DistributedCache\VapeCache.Extensions.DistributedCache.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.AdminAuth\VapeCache.Extensions.AdminAuth.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.EntityFrameworkCore\VapeCache.Extensions.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry\VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry.csproj" />
@@ -41,5 +42,6 @@
     <ProjectReference Include="..\VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj" />
     <ProjectReference Include="..\VapeCache.Extensions.AspNetCore\VapeCache.Extensions.AspNetCore.csproj" />
     <ProjectReference Include="..\VapeCache.Features.Invalidation\VapeCache.Features.Invalidation.csproj" />
+    <ProjectReference Include="..\VapeCache.Features.Search\VapeCache.Features.Search.csproj" />
   </ItemGroup>
 </Project>

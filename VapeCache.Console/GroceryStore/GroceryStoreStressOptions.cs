@@ -16,8 +16,8 @@ public sealed class GroceryStoreStressOptions
     public int FlashSaleJoinChancePercent { get; init; } = 30;
 
     public int AddToCartChancePercent { get; init; } = 50;
-    public int CartItemsMin { get; init; } = 15;
-    public int CartItemsMax { get; init; } = 35;
+    public int CartItemsMin { get; init; } = 30;
+    public int CartItemsMax { get; init; } = 50;
     public int CartItemQuantityMin { get; init; } = 1;
     public int CartItemQuantityMax { get; init; } = 10;
 

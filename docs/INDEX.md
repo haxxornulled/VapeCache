@@ -9,13 +9,17 @@ This index reflects the OSS runtime surface in this repository.
 - [CONFIGURATION.md](CONFIGURATION.md)
 - [SETTINGS_REFERENCE.md](SETTINGS_REFERENCE.md)
 - [NUGET_PACKAGES.md](NUGET_PACKAGES.md)
+- [DISTRIBUTED_CACHE_BRIDGE.md](DISTRIBUTED_CACHE_BRIDGE.md)
+- [REDIS_SEARCH.md](REDIS_SEARCH.md)
 - [GITHUB_BRANDING.md](GITHUB_BRANDING.md)
 - [LICENSE_FAQ.md](LICENSE_FAQ.md)
+- [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md)
 - [OSS_VS_ENTERPRISE.md](OSS_VS_ENTERPRISE.md)
 
 ## 2. Core Concepts
 
 - [CACHE_INVALIDATION.md](CACHE_INVALIDATION.md)
+- [REDIS_SEARCH.md](REDIS_SEARCH.md)
 - [CACHE_KEY_SPEC.md](CACHE_KEY_SPEC.md)
 - [CACHE_TAGS_AND_ZONES.md](CACHE_TAGS_AND_ZONES.md)
 - [ASPNETCORE_PIPELINE_CACHING.md](ASPNETCORE_PIPELINE_CACHING.md)
@@ -33,6 +37,7 @@ This index reflects the OSS runtime surface in this repository.
 - [EFCORE_SECOND_LEVEL_CACHE.md](EFCORE_SECOND_LEVEL_CACHE.md)
 - [BLAZOR_DASHBOARD_EXAMPLE.md](BLAZOR_DASHBOARD_EXAMPLE.md)
 - [.NET Aspire package README](../VapeCache.Extensions.Aspire/README.md)
+- [Distributed Cache package README](../VapeCache.Extensions.DistributedCache/README.md)
 - [EF Core package README](../VapeCache.Extensions.EntityFrameworkCore/README.md)
 - [EF Core OTEL package README](../VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry/README.md)
 - [Streams package README](../VapeCache.Extensions.Streams/README.md)

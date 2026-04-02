@@ -44,3 +44,9 @@ await streamProducer.ConfigureIdempotenceAsync(
     maxSize: 2048,
     ct: cancellationToken);
 ```
+
+## Docs
+
+- Redis protocol support: https://github.com/haxxornulled/VapeCache/blob/main/docs/REDIS_PROTOCOL_SUPPORT.md
+- Package matrix: https://github.com/haxxornulled/VapeCache/blob/main/docs/NUGET_PACKAGES.md
+- Source repository: https://github.com/haxxornulled/VapeCache

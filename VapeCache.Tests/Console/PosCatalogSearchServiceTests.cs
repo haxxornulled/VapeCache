@@ -141,10 +141,20 @@ public sealed class PosCatalogSearchServiceTests
         public ValueTask<bool> CreateIndexAsync(string index, string prefix, string[] fields, CancellationToken ct = default)
             => ValueTask.FromResult(Available);
 
+        public ValueTask<bool> CreateIndexAsync(
+            string index,
+            string prefix,
+            IReadOnlyList<RedisSearchFieldDefinition> fields,
+            CancellationToken ct = default)
+            => ValueTask.FromResult(Available);
+
         public ValueTask<string[]> SearchAsync(string index, string query, int? offset = null, int? count = null, CancellationToken ct = default)
         {
             LastQuery = query;
             return ValueTask.FromResult(QueryResults.TryGetValue(query, out var ids) ? ids : Array.Empty<string>());
         }
+
+        public ValueTask<long> SearchCountAsync(string index, string query, int? offset = null, int? count = null, CancellationToken ct = default)
+            => ValueTask.FromResult(QueryResults.TryGetValue(query, out var ids) ? (long)ids.Length : 0L);
     }
 }

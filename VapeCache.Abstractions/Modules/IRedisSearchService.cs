@@ -14,7 +14,19 @@ public interface IRedisSearchService
     /// </summary>
     ValueTask<bool> CreateIndexAsync(string index, string prefix, string[] fields, CancellationToken ct = default);
     /// <summary>
+    /// Executes create index async with an explicit RediSearch schema.
+    /// </summary>
+    ValueTask<bool> CreateIndexAsync(
+        string index,
+        string prefix,
+        IReadOnlyList<RedisSearchFieldDefinition> fields,
+        CancellationToken ct = default);
+    /// <summary>
     /// Executes search async.
     /// </summary>
     ValueTask<string[]> SearchAsync(string index, string query, int? offset = null, int? count = null, CancellationToken ct = default);
+    /// <summary>
+    /// Executes search count async.
+    /// </summary>
+    ValueTask<long> SearchCountAsync(string index, string query, int? offset = null, int? count = null, CancellationToken ct = default);
 }
