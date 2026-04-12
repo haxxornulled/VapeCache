@@ -6,7 +6,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Core</PackageId>
     <Title>VapeCache Core</Title>
-    <Version>1.2.18</Version>
+    <Version>1.2.19</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache</Product>
@@ -35,6 +35,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
   </ItemGroup>
 </Project>
+
 
 
 

@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.Logging</PackageId>
     <Title>VapeCache Extensions for Logging</Title>
-    <Version>1.2.18</Version>
+    <Version>1.2.19</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.Logging</Product>
@@ -45,6 +45,7 @@
     <PackageReference Include="Serilog.Sinks.Seq" Version="9.0.0" />
   </ItemGroup>
 </Project>
+
 
 
 

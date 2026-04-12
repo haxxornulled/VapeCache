@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Features.Search</PackageId>
     <Title>VapeCache Search Features</Title>
-    <Version>1.2.18</Version>
+    <Version>1.2.19</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Features.Search</Product>
@@ -43,3 +43,4 @@
     <None Include="..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
+
