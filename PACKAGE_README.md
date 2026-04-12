@@ -2,6 +2,18 @@
 
 VapeCache is a Redis-first caching runtime for ASP.NET Core and .NET services.
 
+The native runtime provides:
+
+- Redis-primary plus in-memory-fallback hybrid caching
+- circuit-breaker based outage tolerance
+- stampede protection
+- tag and zone invalidation
+- OpenTelemetry instrumentation
+- ASP.NET Core and Aspire integration
+
+The production runtime packages do not depend on `StackExchange.Redis`.
+Benchmark and comparison projects in the repository may reference it for head-to-head validation, but the runtime packages do not.
+
 ## Install
 
 Primary runtime package:
@@ -72,6 +84,9 @@ See: https://github.com/haxxornulled/VapeCache/blob/main/docs/OSS_VS_ENTERPRISE.
 - Quick start: https://github.com/haxxornulled/VapeCache/blob/main/docs/QUICKSTART.md
 - Configuration: https://github.com/haxxornulled/VapeCache/blob/main/docs/CONFIGURATION.md
 - Settings reference: https://github.com/haxxornulled/VapeCache/blob/main/docs/SETTINGS_REFERENCE.md
+- Hybrid runtime contract: https://github.com/haxxornulled/VapeCache/blob/main/docs/HYBRID_CACHING_API_SURFACE.md
+- FusionCache positioning: https://github.com/haxxornulled/VapeCache/blob/main/docs/FUSIONCACHE_POSITIONING.md
+- FusionCache gap analysis: https://github.com/haxxornulled/VapeCache/blob/main/docs/FUSIONCACHE_GAP_ANALYSIS.md
 - ASP.NET Core integration: https://github.com/haxxornulled/VapeCache/blob/main/docs/ASPNETCORE_PIPELINE_CACHING.md
 - Aspire integration: https://github.com/haxxornulled/VapeCache/blob/main/docs/ASPIRE_INTEGRATION.md
 - License FAQ: https://github.com/haxxornulled/VapeCache/blob/main/docs/LICENSE_FAQ.md

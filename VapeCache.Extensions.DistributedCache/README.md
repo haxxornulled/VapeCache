@@ -4,11 +4,12 @@ Bridge package for using VapeCache through `IDistributedCache` and `IBufferDistr
 
 ## Positioning
 
-This package is the migration and interoperability path, not the recommended headline experience.
+This package is the migration and interoperability path, not the recommended primary experience.
 
 - Native VapeCache API: recommended
 - `IDistributedCache` adapter: compatibility bridge
 - FusionCache L2 over VapeCache: supported interop scenario
+- Runtime behind the bridge: VapeCache native transport/hybrid runtime (not `StackExchange.Redis` runtime coupling)
 
 For the fuller rationale and positioning, see https://github.com/haxxornulled/VapeCache/blob/main/docs/DISTRIBUTED_CACHE_BRIDGE.md.
 
@@ -75,9 +76,9 @@ Not guaranteed:
 - backend storage-format parity with other `IDistributedCache` providers
 - provider-specific metadata quirks outside the public contract
 - access to native VapeCache features that the Microsoft abstraction does not expose
-- a claim that the adapter is the fullest or best VapeCache integration
+- a claim that the adapter is the fullest representation of the VapeCache runtime
 
-That line is intentional: this package is the bridge that helps teams move to VapeCache without borking the codebase, not the thing that should redefine VapeCache itself.
+That line is intentional: this package is the bridge that helps teams move to VapeCache without destabilizing the codebase, not the primary way to use the full native runtime model.
 
 ## Caveats
 
