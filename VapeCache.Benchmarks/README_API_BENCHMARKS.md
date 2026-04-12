@@ -20,6 +20,7 @@ Benchmark suite for the VapeCache public API using BenchmarkDotNet.
 ```powershell
 dotnet run -c Release --project VapeCache.Benchmarks -- --filter "*RedisClientHeadToHeadBenchmarks*"
 dotnet run -c Release --project VapeCache.Benchmarks/VapeCache.Benchmarks.Runner.csproj -- compare client --job Short
+dotnet run -c Release --project VapeCache.Benchmarks -- --console-verbose --filter "*RedisClientHeadToHeadBenchmarks*"
 ```
 
 ### Organized suite runner
@@ -140,6 +141,9 @@ Look under `BenchmarkDotNet.Artifacts/`.
 - p50/p90/p95 percentile columns
 - markdown/html/csv/json exporters
 - compact console logger for signal-focused output
+- optional full console mode for live diagnostics:
+  - CLI: `--console-verbose`
+  - Env: `VAPECACHE_BENCH_VERBOSE_CONSOLE=true` (or `VAPECACHE_BENCH_COMPACT_CONSOLE=false`)
 - optional env-tuned run controls:
   - `VAPECACHE_BENCH_LAUNCH_COUNT`
   - `VAPECACHE_BENCH_WARMUP_COUNT`

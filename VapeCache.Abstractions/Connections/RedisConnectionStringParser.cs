@@ -36,12 +36,14 @@ public static class RedisConnectionStringParser
         {
             "redis" => false,
             "rediss" => true,
+            "keydb" => false,
+            "keydbs" => true,
             _ => (bool?)null
         };
 
         if (useTls is null)
         {
-            error = $"Unsupported scheme '{uri.Scheme}'. Expected redis:// or rediss://.";
+            error = $"Unsupported scheme '{uri.Scheme}'. Expected redis://, rediss://, keydb://, or keydbs://.";
             return false;
         }
 
@@ -113,7 +115,7 @@ public static class RedisConnectionStringParser
 
                 if (key.Equals("tls", StringComparison.OrdinalIgnoreCase))
                 {
-                    // If someone uses redis://...?...tls=true we respect it.
+                    // If someone uses redis://...?...tls=true or keydb://...?...tls=true we respect it.
                     useTls = ParseBool(value) ?? useTls.Value;
                     continue;
                 }

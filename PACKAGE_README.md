@@ -26,6 +26,7 @@ Optional integrations:
 
 ```bash
 dotnet add package VapeCache.Extensions.DependencyInjection
+dotnet add package VapeCache.Extensions.KeyDB
 dotnet add package VapeCache.Extensions.DistributedCache
 dotnet add package VapeCache.Extensions.Logging
 dotnet add package VapeCache.Extensions.PubSub
@@ -46,6 +47,7 @@ dotnet add package VapeCache.Features.Invalidation
 | `VapeCache.Abstractions` | [NuGet](https://www.nuget.org/packages/VapeCache.Abstractions) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.abstractions) |
 | `VapeCache.Features.Invalidation` | [NuGet](https://www.nuget.org/packages/VapeCache.Features.Invalidation) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.invalidation) |
 | `VapeCache.Extensions.DependencyInjection` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.DependencyInjection) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.dependencyinjection) |
+| `VapeCache.Extensions.KeyDB` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.KeyDB) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.keydb) |
 | `VapeCache.Extensions.DistributedCache` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.DistributedCache) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.distributedcache) |
 | `VapeCache.Extensions.Logging` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.Logging) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.logging) |
 | `VapeCache.Extensions.PubSub` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.PubSub) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.pubsub) |
@@ -61,6 +63,7 @@ dotnet add package VapeCache.Features.Invalidation
 - `VapeCache.Core`: shared primitives used by other VapeCache packages
 - `VapeCache.Abstractions`: public contracts, options, and shared value types
 - `VapeCache.Extensions.DependencyInjection`: one-call DI facade for runtime registration
+- `VapeCache.Extensions.KeyDB`: explicit KeyDB registration facade (`AddVapeCacheKeyDb(...)`) that binds `KeyDbConnection` by default
 - `VapeCache.Extensions.DistributedCache`: `IDistributedCache` / `IBufferDistributedCache` bridge for interoperability and migration
 - `VapeCache.Extensions.Logging`: optional Serilog + OTEL logging package with file sink support and optional JSON formatting (`Serilog:Json:*`)
 - `VapeCache.Extensions.PubSub`: optional Redis pub/sub registration package for publish/subscribe workloads

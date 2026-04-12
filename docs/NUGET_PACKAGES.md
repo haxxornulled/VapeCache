@@ -12,6 +12,7 @@ This OSS repository ships production-ready runtime packages for Redis-first cach
 | `VapeCache.Features.Invalidation` | [NuGet](https://www.nuget.org/packages/VapeCache.Features.Invalidation) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.invalidation) |
 | `VapeCache.Features.Search` | [NuGet](https://www.nuget.org/packages/VapeCache.Features.Search) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.search) |
 | `VapeCache.Extensions.DependencyInjection` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.DependencyInjection) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.dependencyinjection) |
+| `VapeCache.Extensions.KeyDB` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.KeyDB) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.keydb) |
 | `VapeCache.Extensions.AdminAuth` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.AdminAuth) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.adminauth) |
 | `VapeCache.Extensions.DistributedCache` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.DistributedCache) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.distributedcache) |
 | `VapeCache.Extensions.Logging` | [NuGet](https://www.nuget.org/packages/VapeCache.Extensions.Logging) | [GitHub Packages](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.logging) |
@@ -66,6 +67,13 @@ DI facade package for clean architecture wiring. Registers runtime services and 
 
 ```bash
 dotnet add package VapeCache.Extensions.DependencyInjection
+```
+
+### VapeCache.Extensions.KeyDB
+Explicit KeyDB registration facade package. Reuses the shared runtime but binds `KeyDbConnection` by default to keep backend intent explicit.
+
+```bash
+dotnet add package VapeCache.Extensions.KeyDB
 ```
 
 ### VapeCache.Extensions.AdminAuth

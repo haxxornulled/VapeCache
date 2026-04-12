@@ -151,12 +151,16 @@ internal sealed class VapeCacheSuperCenterProvider : ISuperCenterStoreProvider
         => _ = await _redis.UnlinkAsync(Key(SuperCenterKeySpace.Cart(shopperId)), ct).ConfigureAwait(false);
 
     public async ValueTask JoinFlashSaleAsync(string saleId, string shopperId, CancellationToken ct)
-        => _ = await ExecuteWithRentedUtf8Async(
-            shopperId,
-            payload => _redis.SAddAsync(GetSaleParticipantKey(saleId), payload, ct)).ConfigureAwait(false);
+    {
+        using var shopperBytes = RentUtf8(shopperId);
+        _ = await _redis.SAddAsync(GetSaleParticipantKey(saleId), shopperBytes.Memory, ct).ConfigureAwait(false);
+    }
 
-    public ValueTask<bool> IsInFlashSaleAsync(string saleId, string shopperId, CancellationToken ct)
-        => ExecuteWithRentedUtf8Async(shopperId, payload => _redis.SIsMemberAsync(GetSaleParticipantKey(saleId), payload, ct));
+    public async ValueTask<bool> IsInFlashSaleAsync(string saleId, string shopperId, CancellationToken ct)
+    {
+        using var shopperBytes = RentUtf8(shopperId);
+        return await _redis.SIsMemberAsync(GetSaleParticipantKey(saleId), shopperBytes.Memory, ct).ConfigureAwait(false);
+    }
 
     public ValueTask<long> GetFlashSaleParticipantCountAsync(string saleId, CancellationToken ct)
         => _redis.SCardAsync(GetSaleParticipantKey(saleId), ct);
@@ -165,22 +169,36 @@ internal sealed class VapeCacheSuperCenterProvider : ISuperCenterStoreProvider
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(session, JsonContext.UserSession);
         var sessionKey = Key(SuperCenterKeySpace.Session(sessionId));
-        await SetTaggedHashAsync(
-            sessionKey,
-            [
-                ("payload", payload),
-                ("shopperId", Utf8.GetBytes(session.UserId)),
-                ("storeId", Utf8.GetBytes(session.StoreId)),
-                ("loyaltyTier", Utf8.GetBytes(session.LoyaltyTier)),
-                ("fulfillmentMethod", Utf8.GetBytes(session.FulfillmentMethod)),
-                ("lastActivityTicks", Utf8.GetBytes(session.LastActivityAt.Ticks.ToString(CultureInfo.InvariantCulture)))
-            ],
-            ttl,
-            [
-                SuperCenterKeySpace.ShopperTag(session.UserId),
-                SuperCenterKeySpace.ShopperTag(session.UserId, "session")
-            ],
-            ct).ConfigureAwait(false);
+        using var shopperId = RentUtf8(session.UserId);
+        using var storeId = RentUtf8(session.StoreId);
+        using var loyaltyTier = RentUtf8(session.LoyaltyTier);
+        using var fulfillmentMethod = RentUtf8(session.FulfillmentMethod);
+        using var lastActivityTicks = RentUtf8(session.LastActivityAt.Ticks.ToString(CultureInfo.InvariantCulture));
+
+        var entries = new (string Field, ReadOnlyMemory<byte> Value)[6];
+        try
+        {
+            entries[0] = ("payload", payload);
+            entries[1] = ("shopperId", shopperId.Memory);
+            entries[2] = ("storeId", storeId.Memory);
+            entries[3] = ("loyaltyTier", loyaltyTier.Memory);
+            entries[4] = ("fulfillmentMethod", fulfillmentMethod.Memory);
+            entries[5] = ("lastActivityTicks", lastActivityTicks.Memory);
+
+            _ = await _redis.HSetManyAsync(sessionKey, entries, ct).ConfigureAwait(false);
+            _ = await _redis.ExpireAsync(sessionKey, ttl, ct).ConfigureAwait(false);
+            await TrackTagsAsync(
+                sessionKey,
+                [
+                    SuperCenterKeySpace.ShopperTag(session.UserId),
+                    SuperCenterKeySpace.ShopperTag(session.UserId, "session")
+                ],
+                ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            Array.Clear(entries, 0, entries.Length);
+        }
     }
 
     public async ValueTask<UserSession?> GetSessionAsync(string sessionId, CancellationToken ct)
@@ -206,9 +224,8 @@ internal sealed class VapeCacheSuperCenterProvider : ISuperCenterStoreProvider
         var baseScore = new DateTimeOffset(viewedAtUtc).ToUnixTimeMilliseconds();
         for (var i = 0; i < productIds.Count; i++)
         {
-            await ExecuteWithRentedUtf8Async(
-                productIds[i],
-                payload => _redis.ZAddAsync(key, baseScore + i, payload, ct)).ConfigureAwait(false);
+            using var productBytes = RentUtf8(productIds[i]);
+            _ = await _redis.ZAddAsync(key, baseScore + i, productBytes.Memory, ct).ConfigureAwait(false);
         }
 
         _ = await _redis.ExpireAsync(key, ttl, ct).ConfigureAwait(false);
@@ -723,36 +740,6 @@ internal sealed class VapeCacheSuperCenterProvider : ISuperCenterStoreProvider
                 ? string.Concat("sale:", id, ":participants")
                 : string.Concat(prefix, "sale:", id, ":participants"),
             _keyPrefix);
-
-    private static async ValueTask ExecuteWithRentedUtf8Async(string value, Func<ReadOnlyMemory<byte>, ValueTask> action)
-    {
-        var byteCount = Utf8.GetByteCount(value);
-        var rented = ArrayPool<byte>.Shared.Rent(byteCount);
-        try
-        {
-            var written = Utf8.GetBytes(value, rented);
-            await action(rented.AsMemory(0, written)).ConfigureAwait(false);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(rented);
-        }
-    }
-
-    private static async ValueTask<T> ExecuteWithRentedUtf8Async<T>(string value, Func<ReadOnlyMemory<byte>, ValueTask<T>> action)
-    {
-        var byteCount = Utf8.GetByteCount(value);
-        var rented = ArrayPool<byte>.Shared.Rent(byteCount);
-        try
-        {
-            var written = Utf8.GetBytes(value, rented);
-            return await action(rented.AsMemory(0, written)).ConfigureAwait(false);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(rented);
-        }
-    }
 
     private static RentedUtf8 RentUtf8(string value)
     {

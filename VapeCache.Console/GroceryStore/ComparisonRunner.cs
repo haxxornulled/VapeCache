@@ -55,7 +55,9 @@ public static class ComparisonRunner
             bool CleanupRunKeys,
             TimeSpan ProviderTimeout,
             LogLevel BenchmarkLogLevel,
-            int? MaxDegreeOfParallelism)
+            int? MaxDegreeOfParallelism,
+            bool LiveProgressEnabled,
+            TimeSpan LiveProgressInterval)
         {
             this.Runs = Runs;
             this.WarmupRuns = WarmupRuns;
@@ -65,6 +67,8 @@ public static class ComparisonRunner
             this.ProviderTimeout = ProviderTimeout;
             this.BenchmarkLogLevel = BenchmarkLogLevel;
             this.MaxDegreeOfParallelism = MaxDegreeOfParallelism;
+            this.LiveProgressEnabled = LiveProgressEnabled;
+            this.LiveProgressInterval = LiveProgressInterval;
         }
 
         public int Runs { get; init; }
@@ -75,6 +79,8 @@ public static class ComparisonRunner
         public TimeSpan ProviderTimeout { get; init; }
         public LogLevel BenchmarkLogLevel { get; init; }
         public int? MaxDegreeOfParallelism { get; init; }
+        public bool LiveProgressEnabled { get; init; }
+        public TimeSpan LiveProgressInterval { get; init; }
     }
 
     /// <summary>
@@ -141,7 +147,15 @@ public static class ComparisonRunner
                 LogLevel.Warning),
             MaxDegreeOfParallelism: GetNullableIntFromSources(
                 Environment.GetEnvironmentVariable("VAPECACHE_BENCH_MAX_DEGREE"),
-                configuration["GroceryStoreComparison:MaxDegreeOfParallelism"]));
+                configuration["GroceryStoreComparison:MaxDegreeOfParallelism"]),
+            LiveProgressEnabled: GetBoolFromSources(
+                Environment.GetEnvironmentVariable("VAPECACHE_COMPARE_LIVE_PROGRESS"),
+                configuration["GroceryStoreComparison:LiveProgressEnabled"],
+                false),
+            LiveProgressInterval: GetTimeSpanFromSources(
+                Environment.GetEnvironmentVariable("VAPECACHE_COMPARE_LIVE_INTERVAL_SECONDS"),
+                configuration["GroceryStoreComparison:LiveProgressIntervalSeconds"],
+                TimeSpan.FromSeconds(15)));
 
         if (cleanupBenchKeys)
         {
@@ -289,6 +303,7 @@ public static class ComparisonRunner
                             shopperCount,
                             minCartSize,
                             maxCartSize,
+                            track,
                             prefix,
                             deterministicSeed,
                             harness).ConfigureAwait(false);
@@ -679,7 +694,9 @@ public static class ComparisonRunner
             providerName,
             deterministicSeed,
             harness.MaxDegreeOfParallelism,
-            checkoutLaneCount);
+            checkoutLaneCount,
+            harness.LiveProgressEnabled ? harness.LiveProgressInterval : null,
+            CreateLiveProgressSink(track, providerName, harness));
         return await RunWithOptionalTimeoutAsync(
                 ct => test.RunStressTestAsync(shopperCount, minCartSize, maxCartSize, ct),
                 harness.ProviderTimeout,
@@ -743,7 +760,7 @@ public static class ComparisonRunner
         System.Console.WriteLine("CommandCoverageMatrix also probes STRING, STREAM, JSON, SEARCH, BLOOM, and TIME-SERIES capabilities when available.");
         System.Console.WriteLine("Workload Shape: 25 products, 5 flash-sales, unique user/session ids per shopper.");
         System.Console.WriteLine(
-            $"Harness: warmups={harness.WarmupRuns}, measured-runs={harness.Runs}, alternate-order={harness.AlternateOrder}, deterministic-seed={harness.DeterministicSeed}, cleanup-run-keys={harness.CleanupRunKeys}, timeout={harness.ProviderTimeout.TotalSeconds:N0}s, log-level={harness.BenchmarkLogLevel}, max-degree={(harness.MaxDegreeOfParallelism?.ToString(CultureInfo.InvariantCulture) ?? "auto")}");
+            $"Harness: warmups={harness.WarmupRuns}, measured-runs={harness.Runs}, alternate-order={harness.AlternateOrder}, deterministic-seed={harness.DeterministicSeed}, cleanup-run-keys={harness.CleanupRunKeys}, timeout={harness.ProviderTimeout.TotalSeconds:N0}s, log-level={harness.BenchmarkLogLevel}, max-degree={(harness.MaxDegreeOfParallelism?.ToString(CultureInfo.InvariantCulture) ?? "auto")}, live-progress={harness.LiveProgressEnabled}, live-interval={harness.LiveProgressInterval.TotalSeconds:N0}s");
         System.Console.WriteLine("Fairness: same shopper workload, same Redis endpoint/auth, same cart-size bounds, same shopper count.");
         System.Console.WriteLine(
             $"ENV|Framework={framework}|OS={os}|Arch={arch}|CpuLogical={cpuLogicalCores}|ServerGC={serverGc}|RedisEndpoint={redisHost}:{redisPort}");
@@ -760,6 +777,7 @@ public static class ComparisonRunner
         int shopperCount,
         int minCartSize,
         int maxCartSize,
+        GroceryComparisonTrack track,
         string keyPrefix,
         int deterministicSeed,
         HarnessSettings harness)
@@ -816,7 +834,9 @@ public static class ComparisonRunner
                 providerName,
                 deterministicSeed,
                 harness.MaxDegreeOfParallelism,
-                checkoutLaneCount);
+                checkoutLaneCount,
+                harness.LiveProgressEnabled ? harness.LiveProgressInterval : null,
+                CreateLiveProgressSink(track, providerName, harness));
             return await RunWithOptionalTimeoutAsync(
                     ct => test.RunStressTestAsync(shopperCount, minCartSize, maxCartSize, ct),
                     harness.ProviderTimeout,
@@ -970,6 +990,36 @@ public static class ComparisonRunner
         var provider = result.ProviderName.Replace("|", "/", StringComparison.Ordinal);
         System.Console.WriteLine(
             $"RESULT|Track={track}|Provider={provider}|Throughput={result.ThroughputShoppersPerSec:F2}|P50Ms={result.P50LatencyMs:F4}|P95Ms={result.P95LatencyMs:F4}|P99Ms={result.P99LatencyMs:F4}|P999Ms={result.P999LatencyMs:F4}|AllocBytes={result.AllocatedBytes}|AllocBytesPerShopper={allocPerShopper:F2}|Gen0={result.Gen0Collections}|Gen1={result.Gen1Collections}|Gen2={result.Gen2Collections}|Success={result.SuccessCount}|Errors={result.ErrorCount}|ServiceReadOps={result.ServiceReadOps}|ServiceWriteOps={result.ServiceWriteOps}|ServiceAdminOps={result.ServiceAdminOps}|ServiceTotalOps={result.ServiceTotalOps}|ServiceCartItemWrites={result.ServiceCartItemWriteOps}|OptionalSkips={result.ServiceOptionalSkips}");
+    }
+
+    private static Action<GroceryStressProgressSnapshot>? CreateLiveProgressSink(
+        GroceryComparisonTrack track,
+        string providerName,
+        HarnessSettings harness)
+    {
+        if (!harness.LiveProgressEnabled || harness.LiveProgressInterval <= TimeSpan.Zero)
+            return null;
+
+        return snapshot =>
+        {
+            var completionPercent = snapshot.TotalShoppers <= 0
+                ? 0d
+                : (snapshot.CompletedShoppers * 100d) / snapshot.TotalShoppers;
+            var elapsedLabel = snapshot.Elapsed.ToString("hh\\:mm\\:ss", CultureInfo.InvariantCulture);
+
+            System.Console.WriteLine(
+                "LIVE|Track={0}|Provider={1}|Elapsed={2}|Completed={3}/{4}|Done={5:F1}%|InFlight={6}|Success={7}|Errors={8}|Thr={9:F1}",
+                track,
+                providerName.Replace("|", "/", StringComparison.Ordinal),
+                elapsedLabel,
+                snapshot.CompletedShoppers,
+                snapshot.TotalShoppers,
+                completionPercent,
+                snapshot.InFlightShoppers,
+                snapshot.SuccessCount,
+                snapshot.ErrorCount,
+                snapshot.ThroughputPerSecond);
+        };
     }
 
     private static void PrintMetric(string name, decimal vapeCacheValue, decimal stackExchangeValue, bool higher)

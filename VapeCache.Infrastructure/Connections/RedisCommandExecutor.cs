@@ -8098,6 +8098,19 @@ internal sealed partial class RedisCommandExecutor : IRedisCommandExecutor, IRed
         }
     }
 
+    public async ValueTask<byte[][]> ZRangeAsync(string key, long start, long stop, bool descending, CancellationToken ct)
+    {
+        var results = await ZRangeWithScoresAsync(key, start, stop, descending, ct).ConfigureAwait(false);
+        if (results.Length == 0)
+            return Array.Empty<byte[]>();
+
+        var members = new byte[results.Length][];
+        for (var i = 0; i < results.Length; i++)
+            members[i] = results[i].Member;
+
+        return members;
+    }
+
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public async ValueTask<int> ZRangeWithScoresCountAsync(string key, long start, long stop, bool descending, CancellationToken ct)
     {

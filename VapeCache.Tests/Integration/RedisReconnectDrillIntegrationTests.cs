@@ -226,6 +226,14 @@ public sealed class RedisReconnectDrillIntegrationTests
                 binder: null,
                 types: [typeof(ReadOnlyMemory<byte>), typeof(bool), typeof(CancellationToken)],
                 modifiers: null);
+            var useLegacySignature = executeAsync is not null;
+
+            executeAsync ??= lane.GetType().GetMethod(
+                "ExecuteAsync",
+                BindingFlags.Instance | BindingFlags.Public,
+                binder: null,
+                types: [typeof(ReadOnlyMemory<byte>), typeof(CancellationToken)],
+                modifiers: null);
             if (executeAsync is null)
                 continue;
 
@@ -233,7 +241,15 @@ public sealed class RedisReconnectDrillIntegrationTests
             {
                 var name = $"{prefix}:{i.ToString(CultureInfo.InvariantCulture)}";
                 var command = RedisResp.BuildCommand("CLIENT", "SETNAME", name);
-                var valueTask = executeAsync.Invoke(lane, [new ReadOnlyMemory<byte>(command), false, ct]);
+                object? valueTask;
+                if (useLegacySignature)
+                {
+                    valueTask = executeAsync.Invoke(lane, [new ReadOnlyMemory<byte>(command), false, ct]);
+                }
+                else
+                {
+                    valueTask = executeAsync.Invoke(lane, [new ReadOnlyMemory<byte>(command), ct]);
+                }
                 if (valueTask is null)
                     continue;
 

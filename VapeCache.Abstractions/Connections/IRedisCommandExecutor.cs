@@ -273,6 +273,10 @@ public interface IRedisCommandExecutor : IAsyncDisposable
     /// </summary>
     ValueTask<double> ZIncrByAsync(string key, double increment, ReadOnlyMemory<byte> member, CancellationToken ct);
     /// <summary>
+    /// Executes zrange async and returns members only.
+    /// </summary>
+    ValueTask<byte[][]> ZRangeAsync(string key, long start, long stop, bool descending, CancellationToken ct);
+    /// <summary>
     /// Executes zrange with scores async.
     /// </summary>
     ValueTask<(byte[] Member, double Score)[]> ZRangeWithScoresAsync(string key, long start, long stop, bool descending, CancellationToken ct);

@@ -318,11 +318,28 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
     });
 
 // Check if running in comparison mode
-var runComparison = Environment.GetEnvironmentVariable("VAPECACHE_RUN_COMPARISON")?.ToLowerInvariant() == "true"
+var runComparisonLive = args.Contains("--compare-live", StringComparer.OrdinalIgnoreCase);
+var runComparison = runComparisonLive
+    || Environment.GetEnvironmentVariable("VAPECACHE_RUN_COMPARISON")?.ToLowerInvariant() == "true"
     || args.Contains("--compare", StringComparer.OrdinalIgnoreCase);
 
 if (runComparison)
 {
+    if (runComparisonLive)
+    {
+        // Live mode defaults: immediate measured run with ongoing progress output.
+        SetEnvironmentDefault("VAPECACHE_RUN_COMPARISON", "true");
+        SetEnvironmentDefault("VAPECACHE_BENCH_RUNS", "1");
+        SetEnvironmentDefault("VAPECACHE_BENCH_WARMUPS", "0");
+        SetEnvironmentDefault("VAPECACHE_BENCH_LOG_LEVEL", "Information");
+        SetEnvironmentDefault("VAPECACHE_COMPARE_LIVE_PROGRESS", "true");
+        SetEnvironmentDefault("VAPECACHE_COMPARE_LIVE_INTERVAL_SECONDS", "5");
+
+        System.Console.WriteLine("[CompareLive] Enabled with defaults: runs=1 warmups=0 log=Information progress=on interval=5s.");
+        System.Console.WriteLine("[CompareLive] Use env overrides (VAPECACHE_BENCH_*/VAPECACHE_COMPARE_*) to customize.");
+        System.Console.WriteLine();
+    }
+
     // Run comparison mode instead of hosted service mode
     var tempConfig = new ConfigurationBuilder()
         .SetBasePath(AppContext.BaseDirectory)
@@ -408,6 +425,14 @@ static void ConfigureOtlpForSignal(string endpoint, OtlpExporterOptions otlp, st
 
     otlp.Protocol = OtlpExportProtocol.Grpc;
     otlp.Endpoint = endpointUri;
+}
+
+static void SetEnvironmentDefault(string key, string value)
+{
+    if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(key)))
+        return;
+
+    Environment.SetEnvironmentVariable(key, value);
 }
 
 static Uri ResolveSignalEndpoint(Uri endpoint, string signal)

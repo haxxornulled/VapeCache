@@ -17,6 +17,7 @@ function Get-ReleasePackageProjects
         "VapeCache.Features.Search/VapeCache.Features.Search.csproj",
         "VapeCache.Infrastructure/VapeCache.Infrastructure.csproj",
         "VapeCache.Extensions.DependencyInjection/VapeCache.Extensions.DependencyInjection.csproj",
+        "VapeCache.Extensions.KeyDB/VapeCache.Extensions.KeyDB.csproj",
         "VapeCache.Extensions.AdminAuth/VapeCache.Extensions.AdminAuth.csproj",
         "VapeCache.Extensions.DistributedCache/VapeCache.Extensions.DistributedCache.csproj",
         "VapeCache.Extensions.Logging/VapeCache.Extensions.Logging.csproj",
@@ -34,6 +35,7 @@ function Get-ReleaseSmokePackageIds
     @(
         "VapeCache.Runtime",
         "VapeCache.Extensions.DependencyInjection",
+        "VapeCache.Extensions.KeyDB",
         "VapeCache.Extensions.AdminAuth",
         "VapeCache.Extensions.DistributedCache",
         "VapeCache.Extensions.PubSub",
@@ -101,6 +103,14 @@ function Get-ReleasePackageCatalog
             DocsLabel = "Configuration"
             DocsPath = "docs/CONFIGURATION.md"
             ReleaseHighlight = ""
+        }
+        @{
+            Project = "VapeCache.Extensions.KeyDB/VapeCache.Extensions.KeyDB.csproj"
+            PackageId = "VapeCache.Extensions.KeyDB"
+            Summary = "Explicit KeyDB registration facade with default KeyDbConnection section binding."
+            DocsLabel = "Package readme"
+            DocsPath = "VapeCache.Extensions.KeyDB/README.md"
+            ReleaseHighlight = "Backend boundary package: keeps KeyDB intent explicit at registration while reusing the shared Redis-protocol runtime."
         }
         @{
             Project = "VapeCache.Extensions.AdminAuth/VapeCache.Extensions.AdminAuth.csproj"

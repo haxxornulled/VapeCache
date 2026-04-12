@@ -11,6 +11,7 @@
   <Project Path="VapeCache.Extensions.AdminAuth/VapeCache.Extensions.AdminAuth.csproj" />
   <Project Path="VapeCache.Extensions.EntityFrameworkCore/VapeCache.Extensions.EntityFrameworkCore.csproj" />
   <Project Path="VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry/VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry.csproj" />
+  <Project Path="VapeCache.Extensions.KeyDB/VapeCache.Extensions.KeyDB.csproj" />
   <Project Path="VapeCache.Extensions.Logging/VapeCache.Extensions.Logging.csproj" />
   <Project Path="VapeCache.Extensions.PubSub/VapeCache.Extensions.PubSub.csproj" />
   <Project Path="VapeCache.Extensions.Streams/VapeCache.Extensions.Streams.csproj" />

@@ -118,6 +118,7 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -MaxCartSize 40 `
   -MaxDegree 72 `
   -Track both `
+  -WorkloadProfile gold-standard `
   -MuxProfile FullTilt `
   -MuxConnections 8 `
   -MuxInFlight 8192 `
@@ -127,6 +128,33 @@ powershell -ExecutionPolicy Bypass -File tools/run-grocery-head-to-head.ps1 `
   -FailBelowRatio 1.0
 ```
 `run-grocery-head-to-head.ps1` builds `Release` binaries before running trials unless `-SkipBuild` is provided.
+
+Workload profiles:
+- `gold-standard`: full command-coverage + tag invalidation + checkout/receipt flow enabled (requires module parity such as RediSearch).
+- `moduleless-safe`: disables command-coverage and checkout/receipt flow so plain Redis/KeyDB can run cleanly while preserving multithreaded load and live progress.
+
+### Live Comparison Runner (Non-Isolated, Verbose)
+
+When you want direct, non-buffered output (no child-process capture harness), use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-grocery-live.ps1 `
+  -Track both `
+  -ShopperCount 20000 `
+  -Runs 1 `
+  -WarmupRuns 0 `
+  -WorkloadProfile moduleless-safe `
+  -LiveProgressIntervalSeconds 5 `
+  -BenchLogLevel Information
+```
+
+This runs `VapeCache.Console` in `Release` with `--compare-live` and prints live progress lines like:
+
+```text
+LIVE|Track=ApplesToApples|Provider=VapeCache Native|Elapsed=00:00:10|Completed=5234/20000|Done=26.2%|InFlight=64|Success=5221|Errors=13|Thr=522.1
+```
+
+Use this mode while tuning runtime behavior or debugging regressions where immediate visibility matters more than strict benchmark harness isolation.
 
 ### Claim-Safe Reporting Modes
 

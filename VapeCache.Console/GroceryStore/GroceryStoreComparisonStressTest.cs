@@ -16,6 +16,8 @@ public class GroceryStoreComparisonStressTest
     private readonly int? _deterministicSeed;
     private readonly int? _maxDegreeOfParallelism;
     private readonly int _checkoutLaneCount;
+    private readonly TimeSpan _progressInterval;
+    private readonly Action<GroceryStressProgressSnapshot>? _progressSink;
 
     public GroceryStoreComparisonStressTest(
         IGroceryStoreService service,
@@ -23,7 +25,9 @@ public class GroceryStoreComparisonStressTest
         string providerName,
         int? deterministicSeed = null,
         int? maxDegreeOfParallelism = null,
-        int checkoutLaneCount = 128)
+        int checkoutLaneCount = 128,
+        TimeSpan? progressInterval = null,
+        Action<GroceryStressProgressSnapshot>? progressSink = null)
     {
         _service = service;
         _logger = logger;
@@ -31,6 +35,8 @@ public class GroceryStoreComparisonStressTest
         _deterministicSeed = deterministicSeed;
         _maxDegreeOfParallelism = maxDegreeOfParallelism;
         _checkoutLaneCount = Math.Max(1, checkoutLaneCount);
+        _progressInterval = progressInterval.GetValueOrDefault(TimeSpan.Zero);
+        _progressSink = progressSink;
     }
 
     /// <summary>
@@ -53,6 +59,7 @@ public class GroceryStoreComparisonStressTest
         maxCartSize = Math.Max(minCartSize, maxCartSize);
         var enableCommandCoverage = ResolvePhaseToggle("VAPECACHE_BENCH_ENABLE_COMMAND_COVERAGE", fallback: true);
         var enableTagInvalidation = ResolvePhaseToggle("VAPECACHE_BENCH_ENABLE_TAG_INVALIDATION", fallback: true);
+        var enableCheckoutReceiptFlow = ResolvePhaseToggle("VAPECACHE_BENCH_ENABLE_CHECKOUT_RECEIPT_FLOW", fallback: true);
         _logger.LogInformation("===== {Provider} Grocery Store Stress Test =====", _providerName);
         _logger.LogInformation(
             "Shoppers: {Count:N0}, Cart Size: {MinCart}..{MaxCart} (avg target {AverageCart:N0})",
@@ -61,9 +68,10 @@ public class GroceryStoreComparisonStressTest
             maxCartSize,
             (minCartSize + maxCartSize) / 2m);
         _logger.LogInformation(
-            "Workload Flags: CommandCoverage={CommandCoverage}, TagInvalidation={TagInvalidation}",
+            "Workload Flags: CommandCoverage={CommandCoverage}, TagInvalidation={TagInvalidation}, CheckoutReceiptFlow={CheckoutReceiptFlow}",
             enableCommandCoverage,
-            enableTagInvalidation);
+            enableTagInvalidation,
+            enableCheckoutReceiptFlow);
 
         var sw = Stopwatch.StartNew();
         var products = GroceryStoreService.GetAllProducts();
@@ -114,6 +122,51 @@ public class GroceryStoreComparisonStressTest
         var recentlyViewedOperations = _service as IGroceryStoreRecentlyViewedOperations;
         var checkoutOperations = _service as IGroceryStoreCheckoutEventOperations;
         var receiptCheckOperations = _service as IGroceryStoreReceiptCheckOperations;
+        var nextShopper = -1;
+
+        CancellationTokenSource? progressCts = null;
+        Task? progressTask = null;
+        if (_progressSink is not null && _progressInterval > TimeSpan.Zero)
+        {
+            void EmitProgressSnapshot()
+            {
+                var success = Volatile.Read(ref successCount);
+                var errors = Volatile.Read(ref errorCount);
+                var started = Math.Clamp(Volatile.Read(ref nextShopper) + 1, 0, shopperCount);
+                var completed = Math.Min(shopperCount, success + errors);
+                var inFlight = Math.Max(0, started - completed);
+                var elapsed = shopperStart.Elapsed;
+                var throughput = elapsed.TotalSeconds > 0
+                    ? success / elapsed.TotalSeconds
+                    : 0d;
+
+                _progressSink(new GroceryStressProgressSnapshot(
+                    _providerName,
+                    shopperCount,
+                    started,
+                    completed,
+                    success,
+                    errors,
+                    inFlight,
+                    elapsed,
+                    throughput));
+            }
+
+            progressCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var progressToken = progressCts.Token;
+            progressTask = Task.Run(async () =>
+            {
+                EmitProgressSnapshot();
+                while (!progressToken.IsCancellationRequested)
+                {
+                    await Task.Delay(_progressInterval, progressToken).ConfigureAwait(false);
+                    if (progressToken.IsCancellationRequested)
+                        break;
+
+                    EmitProgressSnapshot();
+                }
+            }, progressToken);
+        }
 
         async Task ProcessShopperAsync(int shopperIndex)
         {
@@ -324,7 +377,7 @@ public class GroceryStoreComparisonStressTest
                 checkoutLaneWaitStep = ElapsedMs(laneWaitStart);
                 try
                 {
-                    if (checkoutOperations is not null && receiptCheckOperations is not null)
+                    if (enableCheckoutReceiptFlow && checkoutOperations is not null)
                     {
                         var checkedOutAt = deterministic
                             ? now.AddSeconds(30)
@@ -364,26 +417,30 @@ public class GroceryStoreComparisonStressTest
                             cancellationToken).ConfigureAwait(false);
                         checkoutCommitStep = ElapsedMs(stepStart);
 
-                        stepStart = Stopwatch.GetTimestamp();
-                        var flagForManualReview = deterministic
-                            ? DeterministicRange(seed, shopperIndex, salt: 29_011, minInclusive: 1, maxInclusive: 64) == 1
-                            : Random.Shared.Next(64) == 0;
-                        var receiptCheck = await receiptCheckOperations.CheckReceiptAtExitAsync(
-                            new ReceiptExitCheckRequest(
-                                orderId,
-                                userId,
-                                session.StoreId,
-                                checkedOutAt.AddHours(-2),
-                                take: 3,
-                                flagForManualReview: flagForManualReview,
-                                receiptStatus: SuperCenterReceiptSearch.ClearedStatus),
-                            cancellationToken).ConfigureAwait(false);
-                        if (!receiptCheck.Matched)
+                        if (receiptCheckOperations is not null)
                         {
-                            throw new InvalidOperationException(
-                                $"Receipt search missed checkout '{orderId}' for shopper '{userId}'.");
+                            stepStart = Stopwatch.GetTimestamp();
+                            var flagForManualReview = deterministic
+                                ? DeterministicRange(seed, shopperIndex, salt: 29_011, minInclusive: 1, maxInclusive: 64) == 1
+                                : Random.Shared.Next(64) == 0;
+                            var receiptCheck = await receiptCheckOperations.CheckReceiptAtExitAsync(
+                                new ReceiptExitCheckRequest(
+                                    orderId,
+                                    userId,
+                                    session.StoreId,
+                                    checkedOutAt.AddHours(-2),
+                                    take: 3,
+                                    flagForManualReview: flagForManualReview,
+                                    receiptStatus: SuperCenterReceiptSearch.ClearedStatus),
+                                cancellationToken).ConfigureAwait(false);
+                            if (!receiptCheck.Matched)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Receipt search missed checkout '{orderId}' for shopper '{userId}'.");
+                            }
+
+                            receiptCheckPhaseStep = ElapsedMs(stepStart);
                         }
-                        receiptCheckPhaseStep = ElapsedMs(stepStart);
                     }
 
                     stepStart = Stopwatch.GetTimestamp();
@@ -445,29 +502,53 @@ public class GroceryStoreComparisonStressTest
             }
         }
 
-        var nextShopper = -1;
-        var workers = new Task[maxDegree];
-        for (var worker = 0; worker < workers.Length; worker++)
+        try
         {
-            workers[worker] = Task.Run(async () =>
+            var workers = new Task[maxDegree];
+            for (var worker = 0; worker < workers.Length; worker++)
             {
-                while (true)
+                workers[worker] = Task.Run(async () =>
                 {
-                    if (cancellationToken.IsCancellationRequested)
-                        break;
+                    while (true)
+                    {
+                        if (cancellationToken.IsCancellationRequested)
+                            break;
 
-                    var shopperIndex = Interlocked.Increment(ref nextShopper);
-                    if (shopperIndex >= shopperCount)
-                        break;
+                        var shopperIndex = Interlocked.Increment(ref nextShopper);
+                        if (shopperIndex >= shopperCount)
+                            break;
 
-                    await ProcessShopperAsync(shopperIndex).ConfigureAwait(false);
+                        await ProcessShopperAsync(shopperIndex).ConfigureAwait(false);
+                    }
+                }, cancellationToken);
+            }
+
+            await Task.WhenAll(workers).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (progressCts is not null)
+            {
+                progressCts.Cancel();
+                if (progressTask is not null)
+                {
+                    try
+                    {
+                        await progressTask.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Expected on cancellation.
+                    }
                 }
-            }, cancellationToken);
+
+                progressCts.Dispose();
+            }
+
+            for (var laneIndex = 0; laneIndex < checkoutLanes.Length; laneIndex++)
+                checkoutLanes[laneIndex].Dispose();
         }
 
-        await Task.WhenAll(workers).ConfigureAwait(false);
-        for (var laneIndex = 0; laneIndex < checkoutLanes.Length; laneIndex++)
-            checkoutLanes[laneIndex].Dispose();
         cancellationToken.ThrowIfCancellationRequested();
 
         shopperStart.Stop();
@@ -811,6 +892,17 @@ public class GroceryStoreComparisonStressTest
             Percentile(sorted, count, 0.999));
     }
 }
+
+public readonly record struct GroceryStressProgressSnapshot(
+    string ProviderName,
+    int TotalShoppers,
+    int StartedShoppers,
+    int CompletedShoppers,
+    int SuccessCount,
+    int ErrorCount,
+    int InFlightShoppers,
+    TimeSpan Elapsed,
+    double ThroughputPerSecond);
 
 public readonly record struct StepLatencySummary
 {

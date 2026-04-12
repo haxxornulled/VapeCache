@@ -4,10 +4,10 @@
 
 # VapeCache
 
-VapeCache is a Redis-first caching runtime for ASP.NET Core and .NET services.
+VapeCache is a Redis-protocol-first caching runtime for ASP.NET Core and .NET services.
 It is designed for predictable behavior under load, Redis trouble, and high-throughput API traffic.
 
-- Redis transport tuned for cache workloads
+- Redis/KeyDB-compatible transport tuned for cache workloads
 - Circuit-breaker and in-memory fallback for outage tolerance
 - Stampede controls for hot keys
 - OpenTelemetry metrics + traces
@@ -97,6 +97,12 @@ If you want a DI composition facade for clean architecture wiring:
 dotnet add package VapeCache.Extensions.DependencyInjection
 ```
 
+If you want an explicit KeyDB package boundary and default `KeyDbConnection` section binding:
+
+```bash
+dotnet add package VapeCache.Extensions.KeyDB
+```
+
 If you need an `IDistributedCache` / `IBufferDistributedCache` bridge for interoperability or migration:
 
 ```bash
@@ -139,10 +145,16 @@ If you need EF Core cache OpenTelemetry signals (Aspire/OTEL ready):
 dotnet add package VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry
 ```
 
-2. Run Redis
+2. Run Redis (or KeyDB)
 
 ```bash
 docker run --name vapecache-redis -p 6379:6379 -d redis:7
+```
+
+KeyDB local alternative:
+
+```bash
+docker run --name vapecache-keydb -p 6379:6379 -d eqalpha/keydb:latest
 ```
 
 If you do not have Redis and want a local/lightweight runtime, skip Redis and use `AddVapeCacheInMemory(...)` instead.
@@ -335,6 +347,7 @@ See [docs/REDIS_SEARCH.md](docs/REDIS_SEARCH.md).
 | `VapeCache.Features.Invalidation` | [VapeCache.Features.Invalidation](https://www.nuget.org/packages/VapeCache.Features.Invalidation) | [vapecache.features.invalidation](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.invalidation) | Optional key/tag/zone invalidation policies | [Cache Invalidation](docs/CACHE_INVALIDATION.md) |
 | `VapeCache.Features.Search` | [VapeCache.Features.Search](https://www.nuget.org/packages/VapeCache.Features.Search) | [vapecache.features.search](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.features.search) | Typed HASH-backed RediSearch projections, query helpers, and invalidation conventions for operational search | [Redis Search](docs/REDIS_SEARCH.md) |
 | `VapeCache.Extensions.DependencyInjection` | [VapeCache.Extensions.DependencyInjection](https://www.nuget.org/packages/VapeCache.Extensions.DependencyInjection) | [vapecache.extensions.dependencyinjection](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.dependencyinjection) | One-call IServiceCollection wiring facade for runtime + config binding | [Quickstart](docs/QUICKSTART.md) |
+| `VapeCache.Extensions.KeyDB` | [VapeCache.Extensions.KeyDB](https://www.nuget.org/packages/VapeCache.Extensions.KeyDB) | [vapecache.extensions.keydb](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.keydb) | Explicit KeyDB registration facade with default `KeyDbConnection` binding | [Package README](VapeCache.Extensions.KeyDB/README.md) |
 | `VapeCache.Extensions.DistributedCache` | [VapeCache.Extensions.DistributedCache](https://www.nuget.org/packages/VapeCache.Extensions.DistributedCache) | [vapecache.extensions.distributedcache](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.distributedcache) | `IDistributedCache` / `IBufferDistributedCache` bridge for interoperability and migration | [Package README](VapeCache.Extensions.DistributedCache/README.md) |
 | `VapeCache.Extensions.Logging` | [VapeCache.Extensions.Logging](https://www.nuget.org/packages/VapeCache.Extensions.Logging) | [vapecache.extensions.logging](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.logging) | Optional Serilog + OTEL logging wiring with file/Seq/console sinks and pluggable JSON formatting | [Logging + Telemetry](docs/LOGGING_TELEMETRY_CONFIGURATION.md) |
 | `VapeCache.Extensions.PubSub` | [VapeCache.Extensions.PubSub](https://www.nuget.org/packages/VapeCache.Extensions.PubSub) | [vapecache.extensions.pubsub](https://github.com/users/haxxornulled/packages/nuget/package/vapecache.extensions.pubsub) | Optional Redis pub/sub package (publish/subscribe, bounded queues, reconnect/resubscribe) | [API Reference](docs/API_REFERENCE.md) |

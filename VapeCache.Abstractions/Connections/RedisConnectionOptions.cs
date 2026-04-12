@@ -27,7 +27,7 @@ public sealed record RedisConnectionOptions
     /// </summary>
     public int Database { get; init; }
 
-    // Optional: provide a full redis:// or rediss:// connection string.
+    // Optional: provide a full redis://, rediss://, keydb://, or keydbs:// connection string.
     // This is ideal for KeyVault/secret stores. When set, parsed values override Host/Port/User/Password/Database/TLS settings.
     /// <summary>
     /// Gets or sets the connection string.

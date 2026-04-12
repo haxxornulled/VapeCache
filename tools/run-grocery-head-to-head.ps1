@@ -62,10 +62,14 @@ param(
     [int]$MaxRunRetries = 0,
     [int]$RetryDelaySeconds = 5,
     [int]$ChildRunTimeoutSeconds = 900,
+    [int]$ProgressHeartbeatSeconds = 15,
+    [switch]$StreamChildOutput,
     [ValidateSet("Trace", "Debug", "Information", "Warning", "Error", "Critical", "None")]
     [string]$BenchLogLevel = "Debug",
     [ValidateSet("true", "false")]
     [string]$GroceryVerbose = "true",
+    [ValidateSet("gold-standard", "moduleless-safe")]
+    [string]$WorkloadProfile = "gold-standard",
     [double]$FailBelowRatio = 1.0,
     [switch]$DisableTrackDefaults,
     [switch]$EnforceMetricGates,
@@ -160,6 +164,10 @@ if ($RetryDelaySeconds -lt 0) {
 
 if ($ChildRunTimeoutSeconds -le 0) {
     throw "ChildRunTimeoutSeconds must be greater than zero."
+}
+
+if ($ProgressHeartbeatSeconds -lt 0) {
+    throw "ProgressHeartbeatSeconds cannot be negative."
 }
 
 if ($PauseBetweenTrialsMs -lt 0) {
@@ -524,6 +532,20 @@ $env:VAPECACHE_BENCH_VAPE_EXECUTOR_MODE = $VapeExecutorMode
 $env:VAPECACHE_BENCH_CLEANUP_RUN_KEYS = $CleanupRunKeys.ToLowerInvariant()
 $env:VAPECACHE_BENCH_LOG_LEVEL = $BenchLogLevel
 $env:VAPECACHE_GROCERYSTORE_VERBOSE = $GroceryVerbose.ToLowerInvariant()
+
+switch ($WorkloadProfile) {
+    "gold-standard" {
+        $env:VAPECACHE_BENCH_ENABLE_COMMAND_COVERAGE = "true"
+        $env:VAPECACHE_BENCH_ENABLE_TAG_INVALIDATION = "true"
+        $env:VAPECACHE_BENCH_ENABLE_CHECKOUT_RECEIPT_FLOW = "true"
+    }
+    "moduleless-safe" {
+        $env:VAPECACHE_BENCH_ENABLE_COMMAND_COVERAGE = "false"
+        $env:VAPECACHE_BENCH_ENABLE_TAG_INVALIDATION = "true"
+        $env:VAPECACHE_BENCH_ENABLE_CHECKOUT_RECEIPT_FLOW = "false"
+    }
+}
+
 $env:VAPECACHE_BENCH_ENABLE_DISK_SPILL = $EnableDiskSpill.ToLowerInvariant()
 $env:VAPECACHE_BENCH_SPILL_THRESHOLD_BYTES = "$SpillThresholdBytes"
 $env:VAPECACHE_BENCH_SPILL_PRIME_RECORDS = "$SpillPrimeRecords"
@@ -554,10 +576,14 @@ Write-Host "Grocery head-to-head benchmark"
 Write-Host "Trials: $Trials"
 Write-Host "Parse retries per run: $MaxRunRetries (delay ${RetryDelaySeconds}s)"
 Write-Host "Child timeout per run: ${ChildRunTimeoutSeconds}s"
+$heartbeatLabel = if ($ProgressHeartbeatSeconds -gt 0) { "${ProgressHeartbeatSeconds}s" } else { "off" }
+Write-Host "Observability: Heartbeat=$heartbeatLabel StreamChildOutput=$($StreamChildOutput.IsPresent)"
 Write-Host "Shoppers: $ShopperCount"
 Write-Host "Max cart size: $MaxCartSize"
 Write-Host "Track: $Track"
+# Mystery Inc. mode: split tracks help us compare clues before saying "Ruh-roh" about regressions.
 Write-Host "Vape executor mode: $VapeExecutorMode"
+Write-Host "Workload profile: $WorkloadProfile"
 if ($Track -eq "both") {
     Write-Host "Both-track isolation: enabled"
 }
@@ -606,6 +632,7 @@ if ($ShopperCount -ge 500000 -and $CleanupRunKeys -eq "false") {
     Write-Warning "For stability soak campaigns, prefer -CleanupRunKeys true."
 }
 Write-Host "Hybrid: FastPath=$($env:VAPECACHE_BENCH_HYBRID_FAST_PATH) AdmissionGate=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_GATE) AdmissionLimit=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_LIMIT) AdmissionWaitMs=$($env:VAPECACHE_BENCH_HYBRID_ADMISSION_WAIT_MS) MirrorWrites=$($env:VAPECACHE_BENCH_HYBRID_MIRROR_WRITES) WarmReadFallback=$($env:VAPECACHE_BENCH_HYBRID_WARM_READ_FALLBACK) RemoveStaleFallbackOnMiss=$($env:VAPECACHE_BENCH_HYBRID_REMOVE_STALE_FALLBACK_ON_MISS)"
+Write-Host "Phases: CommandCoverage=$($env:VAPECACHE_BENCH_ENABLE_COMMAND_COVERAGE) TagInvalidation=$($env:VAPECACHE_BENCH_ENABLE_TAG_INVALIDATION) CheckoutReceiptFlow=$($env:VAPECACHE_BENCH_ENABLE_CHECKOUT_RECEIPT_FLOW)"
 Write-Host "Spill: EnableDiskSpill=$($env:VAPECACHE_BENCH_ENABLE_DISK_SPILL) ThresholdBytes=$($env:VAPECACHE_BENCH_SPILL_THRESHOLD_BYTES) PrimeRecords=$($env:VAPECACHE_BENCH_SPILL_PRIME_RECORDS) PrimePayloadBytes=$($env:VAPECACHE_BENCH_SPILL_PRIME_PAYLOAD_BYTES) Directory=$(if ([string]::IsNullOrWhiteSpace($env:VAPECACHE_BENCH_SPILL_DIRECTORY)) { "<default>" } else { $env:VAPECACHE_BENCH_SPILL_DIRECTORY })"
 Write-Host "Logging: BenchLogLevel=$($env:VAPECACHE_BENCH_LOG_LEVEL) GroceryVerbose=$($env:VAPECACHE_GROCERYSTORE_VERBOSE)"
 Write-Host "DOTNET_GCServer: $(if ([string]::IsNullOrWhiteSpace($env:DOTNET_GCServer)) { "default" } else { $env:DOTNET_GCServer })"
@@ -949,6 +976,26 @@ function Stop-DotnetProcesses([int[]]$ProcessIds, [string]$Reason) {
     }
 }
 
+function Get-NewFileLines([string]$Path, [int]$AlreadyRead) {
+    $result = [pscustomobject]@{
+        Lines = @()
+        NextIndex = $AlreadyRead
+    }
+
+    if (-not (Test-Path $Path)) {
+        return $result
+    }
+
+    $allLines = @(Get-Content -Path $Path -ErrorAction SilentlyContinue)
+    if ($null -eq $allLines -or $allLines.Count -le $AlreadyRead) {
+        return $result
+    }
+
+    $result.Lines = @($allLines[$AlreadyRead..($allLines.Count - 1)])
+    $result.NextIndex = $allLines.Count
+    return $result
+}
+
 function Invoke-BenchmarkRun([string]$RunTrack) {
     $beforeSnapshot = Get-DotnetProcessSnapshot
     $hadTrack = Test-Path Env:VAPECACHE_BENCH_TRACK
@@ -1007,6 +1054,8 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
     $stdoutPath = [System.IO.Path]::GetTempFileName()
     $stderrPath = [System.IO.Path]::GetTempFileName()
     $runOutput = @()
+    $stdoutReadIndex = 0
+    $stderrReadIndex = 0
     $child = $null
     try {
         Write-Host ("  [TrackConfig] {0}: MaxDegree={1} Profile={2} Connections={3} InFlight={4} Coalesce={5} Adaptive={6} SocketReader={7} DedicatedWorkers={8} TimeoutMs={9} SpillSignals={10} SpillFiles={11} SpillShards={12} SpillImbalance={13} SpillWindowSec={14} HybridAdmissionLimit={15}" -f $RunTrack, $(if ($null -ne $maxDegree) { $maxDegree } else { "auto" }), $settings.Profile, $settings.Connections, $settings.InFlight, $settings.Coalesce, $settings.Adaptive, $settings.SocketReader, $settings.DedicatedWorkers, $settings.ResponseTimeoutMs, $settings.EnableSpillPressureSignals, $settings.SpillFilesThreshold, $settings.SpillActiveShardsThreshold, $settings.SpillImbalanceRatioThreshold, $settings.SpillSustainedWindowSeconds, $effectiveHybridLimit)
@@ -1014,8 +1063,60 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
         $child = Start-Process -FilePath "dotnet" -ArgumentList $arguments -NoNewWindow -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
         Write-Host ("  [ChildProcess] PID={0} Track={1}" -f $child.Id, $RunTrack)
         $PSNativeCommandUseErrorActionPreference = $false
-        $timeoutMs = [Math]::Max(1000, $ChildRunTimeoutSeconds * 1000)
-        if (-not $child.WaitForExit($timeoutMs)) {
+
+        $startedAt = Get-Date
+        $deadline = $startedAt.AddSeconds($ChildRunTimeoutSeconds)
+        $nextHeartbeatAt = if ($ProgressHeartbeatSeconds -gt 0) { $startedAt.AddSeconds($ProgressHeartbeatSeconds) } else { [DateTime]::MaxValue }
+        $timedOut = $false
+
+        while (-not $child.HasExited) {
+            [void]$child.WaitForExit(1000)
+            if ($child.HasExited) {
+                break
+            }
+
+            if ($StreamChildOutput) {
+                $stdoutDelta = Get-NewFileLines -Path $stdoutPath -AlreadyRead $stdoutReadIndex
+                foreach ($line in $stdoutDelta.Lines) {
+                    Write-Host ("  [ChildStdout:{0}] {1}" -f $RunTrack, $line)
+                }
+                $stdoutReadIndex = $stdoutDelta.NextIndex
+
+                $stderrDelta = Get-NewFileLines -Path $stderrPath -AlreadyRead $stderrReadIndex
+                foreach ($line in $stderrDelta.Lines) {
+                    Write-Warning ("  [ChildStderr:{0}] {1}" -f $RunTrack, $line)
+                }
+                $stderrReadIndex = $stderrDelta.NextIndex
+            }
+
+            $now = Get-Date
+            if ($now -ge $nextHeartbeatAt) {
+                $elapsed = $now - $startedAt
+                $elapsedLabel = $elapsed.ToString('hh\:mm\:ss')
+                $cpuSeconds = "n/a"
+                $workingSetMb = "n/a"
+                try {
+                    $live = Get-Process -Id $child.Id -ErrorAction Stop
+                    $cpuSeconds = ("{0:N1}" -f [double]$live.CPU)
+                    $workingSetMb = ("{0:N1}" -f ($live.WorkingSet64 / 1MB))
+                }
+                catch {
+                    # Child may have exited between checks.
+                }
+
+                Write-Host ("  [Progress] Track={0} PID={1} Elapsed={2} CPU(s)={3} WS(MB)={4} OutLines={5} ErrLines={6}" -f $RunTrack, $child.Id, $elapsedLabel, $cpuSeconds, $workingSetMb, $stdoutReadIndex, $stderrReadIndex)
+                if ($ProgressHeartbeatSeconds -gt 0) {
+                    $nextHeartbeatAt = $now.AddSeconds($ProgressHeartbeatSeconds)
+                }
+            }
+
+            if ($now -ge $deadline) {
+                $timedOut = $true
+                break
+            }
+        }
+
+        if ($timedOut) {
             $timeoutSnapshot = Get-DotnetProcessSnapshot
             $descendants = Get-DotnetDescendantProcessIds -Snapshot $timeoutSnapshot -RootProcessId $child.Id
             $newVapeProcesses = Get-NewVapeCacheDotnetProcessIds -BeforeSnapshot $beforeSnapshot -AfterSnapshot $timeoutSnapshot
@@ -1023,6 +1124,26 @@ function Invoke-BenchmarkRun([string]$RunTrack) {
             Stop-DotnetProcesses -ProcessIds $cleanupCandidates -Reason ("timeout after {0}s for track {1}" -f $ChildRunTimeoutSeconds, $RunTrack)
             throw "Benchmark child process timed out after ${ChildRunTimeoutSeconds}s for track '$RunTrack'."
         }
+
+        # Drain any remaining buffered output once the child exits.
+        if ($StreamChildOutput) {
+            $stdoutDelta = Get-NewFileLines -Path $stdoutPath -AlreadyRead $stdoutReadIndex
+            foreach ($line in $stdoutDelta.Lines) {
+                Write-Host ("  [ChildStdout:{0}] {1}" -f $RunTrack, $line)
+            }
+            $stdoutReadIndex = $stdoutDelta.NextIndex
+
+            $stderrDelta = Get-NewFileLines -Path $stderrPath -AlreadyRead $stderrReadIndex
+            foreach ($line in $stderrDelta.Lines) {
+                Write-Warning ("  [ChildStderr:{0}] {1}" -f $RunTrack, $line)
+            }
+            $stderrReadIndex = $stderrDelta.NextIndex
+        }
+
+        $completedAt = Get-Date
+        $runElapsed = $completedAt - $startedAt
+        $runElapsedLabel = $runElapsed.ToString('hh\:mm\:ss')
+        Write-Host ("  [ChildComplete] Track={0} PID={1} ExitCode={2} Elapsed={3}" -f $RunTrack, $child.Id, $child.ExitCode, $runElapsedLabel)
 
         if (Test-Path $stdoutPath) {
             $runOutput += @(Get-Content -Path $stdoutPath)

@@ -16,6 +16,30 @@ public sealed class RedisConnectionStringParserTests
     }
 
     [Fact]
+    public void Parses_basic_keydb_uri()
+    {
+        var ok = RedisConnectionStringParser.TryParse("keydb://localhost:6380/2", out var parsed, out var err);
+        Assert.True(ok, err);
+        Assert.Equal("localhost", parsed.Host);
+        Assert.Equal(6380, parsed.Port);
+        Assert.Equal(2, parsed.Database);
+        Assert.False(parsed.UseTls);
+    }
+
+    [Fact]
+    public void Parses_keydbs_uri_with_tls_and_credentials()
+    {
+        var ok = RedisConnectionStringParser.TryParse("keydbs://u:p%40ss%21%21@cache.local:6379/0?sni=sni.host", out var parsed, out var err);
+        Assert.True(ok, err);
+        Assert.Equal("cache.local", parsed.Host);
+        Assert.Equal(6379, parsed.Port);
+        Assert.Equal("u", parsed.Username);
+        Assert.Equal("p@ss!!", parsed.Password);
+        Assert.True(parsed.UseTls);
+        Assert.Equal("sni.host", parsed.TlsHost);
+    }
+
+    [Fact]
     public void Defaults_port_and_database()
     {
         var ok = RedisConnectionStringParser.TryParse("redis://localhost", out var parsed, out var err);

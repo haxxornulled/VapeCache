@@ -59,6 +59,15 @@ public static class BenchmarkConsole
 
     private static void RunBenchmarks(string[] args)
     {
+        var sanitizedArgs = args
+            .Where(static arg => !string.Equals(arg, "--console-verbose", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        var forceVerboseConsole =
+            string.Equals(Environment.GetEnvironmentVariable("VAPECACHE_BENCH_VERBOSE_CONSOLE"), "true", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Environment.GetEnvironmentVariable("VAPECACHE_BENCH_COMPACT_CONSOLE"), "false", StringComparison.OrdinalIgnoreCase) ||
+            args.Any(static arg => string.Equals(arg, "--console-verbose", StringComparison.OrdinalIgnoreCase));
+
         var isDiscoveryOrHelpMode = args.Any(static arg =>
             string.Equals(arg, "--list", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(arg, "-l", StringComparison.OrdinalIgnoreCase) ||
@@ -66,8 +75,8 @@ public static class BenchmarkConsole
             string.Equals(arg, "-h", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(arg, "--info", StringComparison.OrdinalIgnoreCase));
 
-        var config = new EnterpriseBenchmarkConfig(compactConsole: !isDiscoveryOrHelpMode);
-        BenchmarkSwitcher.FromAssembly(typeof(BenchmarkConsole).Assembly).Run(args, config);
+        var config = new EnterpriseBenchmarkConfig(compactConsole: !isDiscoveryOrHelpMode && !forceVerboseConsole);
+        BenchmarkSwitcher.FromAssembly(typeof(BenchmarkConsole).Assembly).Run(sanitizedArgs, config);
     }
 
     private static void ApplyEnvironmentDefaults(IReadOnlyList<KeyValuePair<string, string>> defaults)

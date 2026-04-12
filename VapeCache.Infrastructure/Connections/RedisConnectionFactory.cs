@@ -624,7 +624,7 @@ internal sealed partial class RedisConnectionFactory : IRedisConnectionFactory
             {
                 throw new InvalidOperationException(
                     $"Invalid Redis connection string: {error ?? "Unknown parsing error"}. " +
-                    $"Expected format: redis://[[user]:password@]host[:port][/database] or rediss:// for TLS. " +
+                    $"Expected format: redis://[[user]:password@]host[:port][/database], rediss:// for TLS, keydb://, or keydbs://. " +
                     $"Provided: {o.ConnectionString}");
             }
 
