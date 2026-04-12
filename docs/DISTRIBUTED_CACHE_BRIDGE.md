@@ -7,6 +7,7 @@ Short version:
 - Native VapeCache is the recommended integration.
 - The distributed-cache adapter is the migration bridge.
 - FusionCache-over-VapeCache is a supported compatibility scenario, not the product headline.
+- The production VapeCache runtime behind this bridge does not depend on `StackExchange.Redis`.
 
 ## Why This Package Exists
 
@@ -48,6 +49,12 @@ It is strong enough to be useful and safe, without pretending the Microsoft abst
 Recommended message:
 
 Already on FusionCache or `IDistributedCache`? Route your distributed cache layer through VapeCache with minimal code changes.
+
+That message is more complete when paired with the native-runtime distinction:
+
+- the bridge lets teams keep their current abstraction
+- the backing runtime is still VapeCache's own Redis transport and hybrid failover model
+- moving to native `IVapeCache` APIs later unlocks the fuller runtime surface
 
 Avoid positioning the adapter as the fullest or best way to use VapeCache.
 It is strategically useful for adoption, but it deliberately compresses the runtime behind a generic contract.
@@ -130,6 +137,12 @@ Recommended guidance for that audience:
 - use a dedicated `KeyPrefix` such as `fusion:l2:`
 - present this as an interoperability layer, not a VapeCache-native integration
 - move to native VapeCache APIs later if the team wants the fuller runtime model
+
+What teams should understand in that topology:
+
+- FusionCache stays in charge of app-facing orchestration
+- VapeCache becomes the Redis/distributed runtime underneath
+- this is a valid complement story, not a downgrade
 
 ## Recommendation
 

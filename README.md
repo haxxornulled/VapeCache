@@ -13,6 +13,46 @@ It is designed for predictable behavior under load, Redis trouble, and high-thro
 - OpenTelemetry metrics + traces
 - ASP.NET Core and Aspire integrations
 
+## What The Hybrid Runtime Actually Does
+
+When you register the native runtime with `AddVapecacheCaching()`, VapeCache is not just acting like a thin Redis wrapper.
+The hybrid runtime is a production cache execution model with Redis as the primary backend and node-local memory as the failover path.
+
+Native hybrid behavior includes:
+
+- typed cache-aside APIs through `IVapeCache`
+- named cache scopes with logical clear boundaries
+- Redis-primary reads and writes with in-memory fallback routing during outages
+- circuit-breaker state and manual failover controls for drills and incident handling
+- stampede protection on hot keys
+- write mirroring and read warming so fallback memory stays useful when Redis is healthy
+- tag and zone version invalidation
+- ASP.NET Core output-cache storage integration
+- OpenTelemetry metrics and tracing for the runtime path
+
+If you want the detailed contract, see [docs/HYBRID_CACHING_API_SURFACE.md](docs/HYBRID_CACHING_API_SURFACE.md).
+
+## FusionCache Positioning
+
+VapeCache overlaps with FusionCache in important places, but the products are not trying to be the exact same thing.
+
+- FusionCache is focused on application-facing cache orchestration.
+- VapeCache is focused on a Redis-first runtime with cache APIs, transport control, failover behavior, and framework integrations.
+- If you want FusionCache-style L2 interoperability, VapeCache ships an `IDistributedCache` / `IBufferDistributedCache` bridge for that migration path.
+- If you want the full VapeCache model, use the native runtime APIs instead of stopping at the distributed-cache bridge.
+
+The practical message is: VapeCache is not "just another FusionCache". It is a Redis-first runtime choice for teams that care about the whole runtime path (transport, failover, observability, and framework integration), not only the call-site cache abstraction.
+
+See [docs/FUSIONCACHE_POSITIONING.md](docs/FUSIONCACHE_POSITIONING.md).
+
+## No StackExchange.Redis Runtime Dependency
+
+The production VapeCache runtime packages in this repo do not depend on `StackExchange.Redis`.
+`VapeCache.Runtime` ships its own Redis transport/runtime implementation and composes with `Microsoft.Extensions.*`, `Polly`, and VapeCache packages.
+
+`StackExchange.Redis` does appear in benchmark, console, and comparison projects in this repository because those projects are used for head-to-head validation and migration/comparison work.
+That distinction matters: comparison tooling depends on it, the runtime does not.
+
 ## Performance Transparency
 
 Performance data and methodology are tracked in-repo with reproducible benchmark artifacts and disclosure rules.
@@ -177,6 +217,13 @@ app.MapGet("/products/{id:int}", async (int id, IVapeCache cache, CancellationTo
 app.Run();
 ```
 
+Named cache scopes are also available:
+
+```csharp
+var catalogCache = app.Services.GetRequiredService<IVapeCache>().NamedCache("catalog");
+await catalogCache.ClearAsync();
+```
+
 6. Go deeper: [docs/QUICKSTART.md](docs/QUICKSTART.md)
 
 ## ASP.NET Core Policy Ergonomics
@@ -207,6 +254,7 @@ public IActionResult GetProduct(int id) => Ok(new { id });
 See:
 - [docs/ASPNETCORE_POLICY_EXTENSION.md](docs/ASPNETCORE_POLICY_EXTENSION.md)
 - [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md)
+- [docs/HYBRID_CACHING_API_SURFACE.md](docs/HYBRID_CACHING_API_SURFACE.md)
 
 ## IDistributedCache Bridge
 
@@ -227,6 +275,41 @@ This is intentionally a compatibility layer, not the preferred headline integrat
 Native VapeCache remains the recommended path when you want the full runtime surface.
 Recommended framing: keep your current cache abstraction, route the distributed-cache layer through VapeCache, and migrate to native APIs later if you want the fuller runtime model.
 See [docs/DISTRIBUTED_CACHE_BRIDGE.md](docs/DISTRIBUTED_CACHE_BRIDGE.md) for the interop positioning and FusionCache guidance.
+
+## Microsoft HybridCache
+
+VapeCache can also back `Microsoft.Extensions.Caching.Hybrid.HybridCache`.
+
+```csharp
+using VapeCache.Extensions.DependencyInjection;
+
+builder.Services.AddVapeCache(builder.Configuration)
+    .AddMicrosoftHybridCache(options =>
+    {
+        options.KeyPrefix = "ms-hc:";
+    });
+```
+
+This gives you the Microsoft `HybridCache` API over the native VapeCache runtime, including tag invalidation and logical clear-all via `RemoveByTagAsync("*")`.
+See [docs/MICROSOFT_HYBRIDCACHE.md](docs/MICROSOFT_HYBRIDCACHE.md).
+
+## Named Caches And Clear
+
+`IVapeCache` supports named cache scopes and logical clear operations.
+
+```csharp
+var root = app.Services.GetRequiredService<IVapeCache>();
+var products = root.NamedCache("products");
+
+await products.SetAsync(CacheKey<string>.From("42"), "espresso");
+await products.ClearAsync();
+```
+
+Named caches:
+
+- prefix keys for that scope
+- attach a reserved scope tag
+- support logical clear via tag invalidation instead of backend scans
 
 ## Redis Search Projections
 
@@ -278,7 +361,9 @@ Multiplexing itself is OSS; adaptive autoscaling is Enterprise.
 ## Documentation
 
 - Start here: [docs/INDEX.md](docs/INDEX.md)
-- Getting started: [docs/QUICKSTART.md](docs/QUICKSTART.md), [docs/CONFIGURATION.md](docs/CONFIGURATION.md), [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md), [docs/NUGET_PACKAGES.md](docs/NUGET_PACKAGES.md), [docs/GITHUB_BRANDING.md](docs/GITHUB_BRANDING.md)
+- Getting started: [docs/QUICKSTART.md](docs/QUICKSTART.md), [docs/CONFIGURATION.md](docs/CONFIGURATION.md), [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md), [docs/NUGET_PACKAGES.md](docs/NUGET_PACKAGES.md), [docs/DISTRIBUTED_CACHE_BRIDGE.md](docs/DISTRIBUTED_CACHE_BRIDGE.md), [docs/FUSIONCACHE_POSITIONING.md](docs/FUSIONCACHE_POSITIONING.md), [docs/GITHUB_BRANDING.md](docs/GITHUB_BRANDING.md)
+- FusionCache comparison: [docs/FUSIONCACHE_GAP_ANALYSIS.md](docs/FUSIONCACHE_GAP_ANALYSIS.md)
+- Microsoft HybridCache: [docs/MICROSOFT_HYBRIDCACHE.md](docs/MICROSOFT_HYBRIDCACHE.md)
 - Core runtime: [docs/API_REFERENCE.md](docs/API_REFERENCE.md), [docs/CACHE_INVALIDATION.md](docs/CACHE_INVALIDATION.md), [docs/CACHE_TAGS_AND_ZONES.md](docs/CACHE_TAGS_AND_ZONES.md)
 - ASP.NET Core: [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md), [docs/ASPNETCORE_POLICY_EXTENSION.md](docs/ASPNETCORE_POLICY_EXTENSION.md)
 - Integrations: [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md), [docs/LOGGING_TELEMETRY_CONFIGURATION.md](docs/LOGGING_TELEMETRY_CONFIGURATION.md)
