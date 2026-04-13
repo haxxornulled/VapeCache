@@ -2,6 +2,8 @@
 
 Generated from source (*Options.cs) on 2026-03-08 16:16:10 UTC.
 
+> Historical note: this generated reference still contains sections from the removed `VapeCache.Console` host. Those sections are archival and do not represent active OSS surfaces in the current repository. For current host guidance, prefer [CONFIGURATION.md](CONFIGURATION.md), [CONFIGURATION_BEST_PRACTICES.md](CONFIGURATION_BEST_PRACTICES.md), and [DEMO_HOST_BLUEPRINT.md](DEMO_HOST_BLUEPRINT.md).
+
 This reference is source-of-truth for every options setting and default currently implemented.
 
 ## Serilog JSON Settings (VapeCache.Extensions.Logging)

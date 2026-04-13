@@ -42,7 +42,9 @@ internal sealed class RedisMultiplexedBufferCaches
                 return poolBuf;
             }
 
-            return new byte[512];
+            var fresh = new byte[512];
+            InFlightHeaderBuffers.Remove(fresh);
+            return fresh;
         }
 
         if (_tlsHeaderCache is { } largeBuf && largeBuf.Length >= minLength)
@@ -63,7 +65,9 @@ internal sealed class RedisMultiplexedBufferCaches
             ArrayPool<byte>.Shared.Return(largePoolBuf);
         }
 
-        return ArrayPool<byte>.Shared.Rent(Math.Max(2048, minLength));
+        var rented = ArrayPool<byte>.Shared.Rent(Math.Max(2048, minLength));
+        InFlightHeaderBuffers.Remove(rented);
+        return rented;
     }
 
     /// <summary>
@@ -174,7 +178,9 @@ internal sealed class RedisMultiplexedBufferCaches
                 return poolArr;
             }
 
-            return new ReadOnlyMemory<byte>[16];
+            var fresh = new ReadOnlyMemory<byte>[16];
+            InFlightPayloadArrays.Remove(fresh);
+            return fresh;
         }
 
         if (_tlsPayloadArrayCache is { } largeArr && largeArr.Length >= minLength)
@@ -195,7 +201,9 @@ internal sealed class RedisMultiplexedBufferCaches
             ArrayPool<ReadOnlyMemory<byte>>.Shared.Return(largePoolArr, clearArray: true);
         }
 
-        return ArrayPool<ReadOnlyMemory<byte>>.Shared.Rent(Math.Max(64, minLength));
+        var rented = ArrayPool<ReadOnlyMemory<byte>>.Shared.Rent(Math.Max(64, minLength));
+        InFlightPayloadArrays.Remove(rented);
+        return rented;
     }
 
     /// <summary>
@@ -231,6 +239,31 @@ internal sealed class RedisMultiplexedBufferCaches
 
         InFlightPayloadArrays.Set(payloads, OwnershipReleasedByMux);
         ReturnPayloadArrayCore(payloads);
+    }
+
+    internal static void ResetForTests()
+    {
+        _tlsHeaderCache = null;
+        _tlsSmallHeaderCache = null;
+        _tlsPayloadArrayCache = null;
+        _tlsSmallPayloadArrayCache = null;
+
+        while (SharedHeaderCache.TryTake(out var header))
+            ArrayPool<byte>.Shared.Return(header);
+
+        while (SharedSmallHeaderCache.TryTake(out _))
+        {
+        }
+
+        while (SharedPayloadArrayCache.TryTake(out var payloads))
+            ArrayPool<ReadOnlyMemory<byte>>.Shared.Return(payloads, clearArray: true);
+
+        while (SharedSmallPayloadArrayCache.TryTake(out _))
+        {
+        }
+
+        InFlightHeaderBuffers.Clear();
+        InFlightPayloadArrays.Clear();
     }
 
     private static void ReturnPayloadArrayCore(ReadOnlyMemory<byte>[] payloads)
@@ -346,6 +379,17 @@ internal sealed class RedisMultiplexedBufferCaches
             lock (stripe.Gate)
             {
                 stripe.Map.Remove(item);
+            }
+        }
+
+        public void Clear()
+        {
+            foreach (var stripe in _stripes)
+            {
+                lock (stripe.Gate)
+                {
+                    stripe.Map.Clear();
+                }
             }
         }
 

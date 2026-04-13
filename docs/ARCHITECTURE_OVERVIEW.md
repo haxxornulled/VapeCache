@@ -30,7 +30,7 @@ Canonical dependency rule: dependencies point inward.
   - Redis transport, pool, protocol, hybrid runtime, telemetry implementation
   - implements `Abstractions`
 - outer adapters
-  - `VapeCache.Extensions.*`, `VapeCache.Console`, `VapeCache.UI`, tests, benchmarks
+  - `VapeCache.Extensions.*`, `VapeCache.UI`, tests, benchmarks
 
 Enforcement tests: `VapeCache.Tests/Architecture/CleanArchitectureDependencyTests.cs`.
 
@@ -40,7 +40,6 @@ Enforcement tests: `VapeCache.Tests/Architecture/CleanArchitectureDependencyTest
 flowchart TB
     subgraph Outer["Adapters / Hosts"]
         EXT["VapeCache.Extensions.*"]
-        CONSOLE["VapeCache.Console"]
         UI["VapeCache.UI"]
         TESTS["Tests/Benchmarks"]
     end
@@ -51,7 +50,6 @@ flowchart TB
     CORE["VapeCache.Core"]
 
     EXT --> ABS
-    CONSOLE --> ABS
     UI --> ABS
     TESTS --> ABS
     TESTS --> INF

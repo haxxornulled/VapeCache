@@ -12,9 +12,6 @@ if (!string.IsNullOrWhiteSpace(sharedRedisConnectionString))
 var useContainerRedis =
     bool.TryParse(Environment.GetEnvironmentVariable("VAPECACHE_USE_CONTAINER_REDIS"), out var parsedUseContainerRedis) &&
     parsedUseContainerRedis;
-var includeConsoleLoad =
-    !bool.TryParse(Environment.GetEnvironmentVariable("VAPECACHE_INCLUDE_CONSOLE_LOAD"), out var parsedIncludeConsoleLoad) ||
-    parsedIncludeConsoleLoad;
 
 if (useContainerRedis)
 {
@@ -25,13 +22,6 @@ if (useContainerRedis)
         .WaitFor(redis)
         .WithExternalHttpEndpoints();
     ConfigureVapeCacheUiExperience(ui);
-
-    if (includeConsoleLoad)
-    {
-        builder.AddProject<Projects.VapeCache_Console>("vapecache-load")
-            .WithReference(redis)
-            .WaitFor(redis);
-    }
 }
 else
 {
@@ -41,12 +31,6 @@ else
         .WithReference(redis)
         .WithExternalHttpEndpoints();
     ConfigureVapeCacheUiExperience(ui);
-
-    if (includeConsoleLoad)
-    {
-        builder.AddProject<Projects.VapeCache_Console>("vapecache-load")
-            .WithReference(redis);
-    }
 }
 
 builder.Build().Run();

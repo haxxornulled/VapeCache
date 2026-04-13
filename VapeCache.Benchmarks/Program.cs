@@ -1,4 +1,13 @@
-using VapeCache.Benchmarks;
+using BenchmarkDotNet.Running;
 
-return await BenchmarkConsole.RunAsync(args);
+namespace VapeCache.Benchmarks;
 
+public static class Program
+{
+    public static void Main(string[] args)
+    {
+        BenchmarkSwitcher
+            .FromAssembly(typeof(Program).Assembly)
+            .Run(BenchmarkCommandLine.BuildEffectiveArgs(args), VapeCacheBenchmarkConfig.Instance);
+    }
+}

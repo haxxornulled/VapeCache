@@ -1,0 +1,22 @@
+services:
+  redis:
+    image: redis:8.6
+    container_name: vapecache-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  keydb:
+    image: eqalpha/keydb:latest
+    container_name: vapecache-keydb
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "keydb-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

@@ -4,6 +4,11 @@ namespace VapeCache.Tests.Connections;
 
 public sealed class RedisMultiplexedBufferCachesTests
 {
+    public RedisMultiplexedBufferCachesTests()
+    {
+        RedisMultiplexedBufferCaches.ResetForTests();
+    }
+
     [Fact]
     public void RentHeaderBuffer_ReturnsAtLeastRequestedLength_WhenTlsCacheHasSmallerBuffer()
     {
@@ -34,13 +39,18 @@ public sealed class RedisMultiplexedBufferCachesTests
 
         var other = RedisMultiplexedBufferCaches.RentHeaderBuffer(4096);
         Assert.False(ReferenceEquals(header, other));
-        RedisMultiplexedBufferCaches.ReturnHeaderBufferFromCaller(other);
 
         RedisMultiplexedBufferCaches.ReturnHeaderBufferFromMux(header);
 
         var rerented = RedisMultiplexedBufferCaches.RentHeaderBuffer(4096);
         Assert.True(ReferenceEquals(header, rerented));
         RedisMultiplexedBufferCaches.ReturnHeaderBufferFromCaller(rerented);
+
+        RedisMultiplexedBufferCaches.ReturnHeaderBufferFromCaller(other);
+
+        var third = RedisMultiplexedBufferCaches.RentHeaderBuffer(4096);
+        Assert.True(ReferenceEquals(header, third));
+        RedisMultiplexedBufferCaches.ReturnHeaderBufferFromCaller(third);
     }
 
     [Fact]
@@ -53,12 +63,17 @@ public sealed class RedisMultiplexedBufferCachesTests
 
         var other = RedisMultiplexedBufferCaches.RentPayloadArray(96);
         Assert.False(ReferenceEquals(payloads, other));
-        RedisMultiplexedBufferCaches.ReturnPayloadArrayFromCaller(other);
 
         RedisMultiplexedBufferCaches.ReturnPayloadArrayFromMux(payloads);
 
         var rerented = RedisMultiplexedBufferCaches.RentPayloadArray(96);
-        Assert.True(rerented.Length >= 96);
+        Assert.True(ReferenceEquals(payloads, rerented));
         RedisMultiplexedBufferCaches.ReturnPayloadArrayFromCaller(rerented);
+
+        RedisMultiplexedBufferCaches.ReturnPayloadArrayFromCaller(other);
+
+        var third = RedisMultiplexedBufferCaches.RentPayloadArray(96);
+        Assert.True(ReferenceEquals(payloads, third));
+        RedisMultiplexedBufferCaches.ReturnPayloadArrayFromCaller(third);
     }
 }

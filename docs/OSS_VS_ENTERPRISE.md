@@ -2,6 +2,11 @@
 
 This document defines the product boundary for the public VapeCache repository.
 
+Public home:
+
+- Website: `https://vapecache.net`
+- OSS repository: `https://github.com/haxxornulled/VapeCache`
+
 The goal is simple:
 - OSS must remain production-usable for normal application workloads.
 - Enterprise adds operational leverage for higher-load and multi-environment fleet operation.
@@ -41,3 +46,15 @@ Enterprise capabilities are focused on operational leverage:
 If you are building and shipping a typical .NET API or service with Redis-backed caching, OSS is intended to be enough.
 
 Enterprise is for teams that need stronger operational controls across sustained high load, outages, recovery workflows, and fleet-level governance.
+
+## Demo Host Direction
+
+The historical console host is no longer part of the active OSS surface.
+
+Going forward, the right replacement is not another ad hoc demo app. It should be a deliberate demo host that proves:
+
+- which OSS packages are production-ready
+- which integration seams are wired end to end
+- which features are intentionally Enterprise-only
+
+See [DEMO_HOST_BLUEPRINT.md](DEMO_HOST_BLUEPRINT.md) for the current design direction.

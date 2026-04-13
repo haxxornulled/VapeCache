@@ -1,5 +1,7 @@
 # Logging and Telemetry Configuration
 
+> Current host guidance: apply these settings in your own ASP.NET Core host, in `VapeCache.UI`, or in the future public demo host described in [DEMO_HOST_BLUEPRINT.md](DEMO_HOST_BLUEPRINT.md). The retired `VapeCache.Console` host is not part of today’s OSS runtime surface.
+
 This guide is the source of truth for configuring:
 
 - Serilog console logging
@@ -11,8 +13,7 @@ This guide is the source of truth for configuring:
 It reflects the current runtime behavior in:
 
 - `VapeCache.Infrastructure/DependencyInjection/VapeCacheSerilogExtensions.cs`
-- `VapeCache.Console/Program.cs`
-- `VapeCache.Console/appsettings.json`
+- host-owned `Program.cs` / `appsettings.json` wiring
 
 ## Design Goals
 
@@ -23,7 +24,7 @@ It reflects the current runtime behavior in:
 
 ## Effective Defaults
 
-Current default behavior from `VapeCache.Console/appsettings.json`:
+Recommended baseline behavior for a current host:
 
 - Console logging: enabled (`Serilog:WriteTo` includes `Console`)
 - Seq sink: disabled (`Serilog:Seq:Enabled=false`)
@@ -96,7 +97,7 @@ If none is set, metrics/traces OTLP exporters are not registered.
     ],
     "Enrich": [ "FromLogContext", "WithSpan" ],
     "Properties": {
-      "Application": "VapeCache.Console"
+      "Application": "VapeCache.Host"
     }
   }
 }
@@ -286,7 +287,7 @@ Quick run example (PowerShell):
 ```powershell
 $env:VAPECACHE_GROCERYSTORE_VERBOSE = "true"
 $env:VAPECACHE_BENCH_LOG_LEVEL = "Debug"
-dotnet run --project VapeCache.Console/VapeCache.Console.csproj -c Release
+dotnet run --project .\VapeCache.UI\VapeCache.UI.csproj -c Release
 ```
 
 ## Validation Checklist
@@ -294,7 +295,7 @@ dotnet run --project VapeCache.Console/VapeCache.Console.csproj -c Release
 1. Build:
 
 ```bash
-dotnet build VapeCache.Console/VapeCache.Console.csproj -c Release
+dotnet build VapeCache.UI/VapeCache.UI.csproj -c Release
 ```
 
 2. Validate Seq fallback:
@@ -302,7 +303,7 @@ dotnet build VapeCache.Console/VapeCache.Console.csproj -c Release
 ```powershell
 $env:Serilog__Seq__Enabled = "true"
 $env:Serilog__Seq__ServerUrl = "http://127.0.0.1:65534"
-dotnet run --project VapeCache.Console/VapeCache.Console.csproj -c Release
+dotnet run --project .\VapeCache.UI\VapeCache.UI.csproj -c Release
 ```
 
 Expected: console logs appear even though Seq is unreachable.
@@ -311,7 +312,7 @@ Expected: console logs appear even though Seq is unreachable.
 
 ```powershell
 $env:OpenTelemetry__Otlp__Endpoint = "http://localhost:4318"
-dotnet run --project VapeCache.Console/VapeCache.Console.csproj -c Release
+dotnet run --project .\VapeCache.UI\VapeCache.UI.csproj -c Release
 ```
 
 Expected: metrics/traces exporters are registered.

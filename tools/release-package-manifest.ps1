@@ -8,6 +8,11 @@ function Get-ReleaseRepositoryUrl
     "https://github.com/haxxornulled/VapeCache"
 }
 
+function Get-ReleaseProjectUrl
+{
+    "https://vapecache.net"
+}
+
 function Get-ReleasePackageProjects
 {
     @(
@@ -225,6 +230,7 @@ function Get-ReleasePackageMetadata
 {
     $repoRoot = Get-ReleaseRepoRoot
     $expectedRepositoryUrl = Get-ReleaseRepositoryUrl
+    $expectedProjectUrl = Get-ReleaseProjectUrl
 
     foreach ($project in Get-ReleasePackageProjects)
     {
@@ -268,9 +274,9 @@ function Get-ReleasePackageMetadata
             throw "PackageProjectUrl not found in $project"
         }
 
-        if ($packageProjectUrl -ne $expectedRepositoryUrl)
+        if ($packageProjectUrl -ne $expectedProjectUrl)
         {
-            throw "PackageProjectUrl mismatch in $project. Expected '$expectedRepositoryUrl' but found '$packageProjectUrl'."
+            throw "PackageProjectUrl mismatch in $project. Expected '$expectedProjectUrl' but found '$packageProjectUrl'."
         }
 
         [pscustomobject]@{

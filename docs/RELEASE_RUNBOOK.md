@@ -21,7 +21,8 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 
 ## Remote Expectations
 
-- package metadata must continue to point to `https://github.com/haxxornulled/VapeCache`
+- package `RepositoryUrl` metadata must continue to point to `https://github.com/haxxornulled/VapeCache`
+- package `PackageProjectUrl` metadata should point to `https://vapecache.net`
 - local clone should keep the public OSS remote available as `oss`
 - if `origin` targets a private mirror, release tags and release notes still need to land in `oss`
 
@@ -149,7 +150,8 @@ If release tag/repo state is stale or misaligned:
 
 - correct the public `oss` remote first
 - push only the intended release commit/tag
-- re-verify package metadata points at `haxxornulled/VapeCache`
+- re-verify package `RepositoryUrl` points at `haxxornulled/VapeCache`
+- re-verify package `PackageProjectUrl` points at `https://vapecache.net`
 
 ## Bus-Factor Controls
 

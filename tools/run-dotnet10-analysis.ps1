@@ -3,8 +3,7 @@ param(
     [string]$Configuration = "Release",
     [switch]$TreatWarningsAsErrors,
     [switch]$RunTests = $true,
-    [switch]$VerifyFormatting,
-    [switch]$StopBenchmarkRunners
+    [switch]$VerifyFormatting
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,38 +32,6 @@ function Invoke-DotNetOrThrow {
     & dotnet @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "$Description failed (dotnet exit code: $LASTEXITCODE)."
-    }
-}
-
-function Get-RepoBenchmarkRunners {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$RepoRoot
-    )
-
-    $benchRoot = Join-Path $RepoRoot "VapeCache.Benchmarks"
-    Get-Process -Name "VapeCache.Benchmarks.Runner" -ErrorAction SilentlyContinue |
-        Where-Object {
-            try {
-                $_.Path -and $_.Path.StartsWith($benchRoot, [StringComparison]::OrdinalIgnoreCase)
-            }
-            catch {
-                $false
-            }
-        }
-}
-
-$activeBenchmarks = @(Get-RepoBenchmarkRunners -RepoRoot $repoRoot)
-if ($activeBenchmarks.Count -gt 0) {
-    $ids = ($activeBenchmarks | ForEach-Object { $_.Id }) -join ", "
-    if ($StopBenchmarkRunners) {
-        Write-Host "Stopping active VapeCache.Benchmarks.Runner processes: $ids"
-        $activeBenchmarks | ForEach-Object {
-            Stop-Process -Id $_.Id -Force -ErrorAction Stop
-        }
-    }
-    else {
-        throw "Detected running VapeCache.Benchmarks.Runner process(es) [$ids] from this repo. Stop them or rerun with -StopBenchmarkRunners."
     }
 }
 

@@ -7,6 +7,9 @@
 VapeCache is a Redis-protocol-first caching runtime for ASP.NET Core and .NET services.
 It is designed for predictable behavior under load, Redis trouble, and high-throughput API traffic.
 
+- Website: `https://vapecache.net`
+- Source: `https://github.com/haxxornulled/VapeCache`
+
 - Redis/KeyDB-compatible transport tuned for cache workloads
 - Circuit-breaker and in-memory fallback for outage tolerance
 - Stampede controls for hot keys
@@ -50,8 +53,8 @@ See [docs/FUSIONCACHE_POSITIONING.md](docs/FUSIONCACHE_POSITIONING.md).
 The production VapeCache runtime packages in this repo do not depend on `StackExchange.Redis`.
 `VapeCache.Runtime` ships its own Redis transport/runtime implementation and composes with `Microsoft.Extensions.*`, `Polly`, and VapeCache packages.
 
-`StackExchange.Redis` does appear in benchmark, console, and comparison projects in this repository because those projects are used for head-to-head validation and migration/comparison work.
-That distinction matters: comparison tooling depends on it, the runtime does not.
+`StackExchange.Redis` does appear in benchmark and test surfaces in this repository for interoperability validation.
+That distinction matters: comparison and validation tooling may depend on it, the runtime does not.
 
 ## Performance Transparency
 
@@ -371,6 +374,7 @@ See [docs/REDIS_SEARCH.md](docs/REDIS_SEARCH.md).
 
 Full package install matrix: [docs/NUGET_PACKAGES.md](docs/NUGET_PACKAGES.md)
 GitHub profile/About/topic/social branding: [docs/GITHUB_BRANDING.md](docs/GITHUB_BRANDING.md)
+Public website and doc home: `https://vapecache.net`
 
 ## Out Of OSS Scope
 
@@ -392,6 +396,7 @@ Multiplexing itself is OSS; adaptive autoscaling is Enterprise.
 - Core runtime: [docs/API_REFERENCE.md](docs/API_REFERENCE.md), [docs/CACHE_INVALIDATION.md](docs/CACHE_INVALIDATION.md), [docs/CACHE_TAGS_AND_ZONES.md](docs/CACHE_TAGS_AND_ZONES.md)
 - ASP.NET Core: [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md), [docs/ASPNETCORE_POLICY_EXTENSION.md](docs/ASPNETCORE_POLICY_EXTENSION.md)
 - Integrations: [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md), [docs/LOGGING_TELEMETRY_CONFIGURATION.md](docs/LOGGING_TELEMETRY_CONFIGURATION.md)
+- Demo strategy: [docs/DEMO_HOST_BLUEPRINT.md](docs/DEMO_HOST_BLUEPRINT.md), [docs/TRANSPORT_MUX_AUTOSCALER_DEEP_DIVE.md](docs/TRANSPORT_MUX_AUTOSCALER_DEEP_DIVE.md)
 - Ops and releases: [docs/PRODUCTION_GUARDRAILS.md](docs/PRODUCTION_GUARDRAILS.md), [docs/STABILITY_POLICY.md](docs/STABILITY_POLICY.md), [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md), [docs/RELEASE_RUNBOOK.md](docs/RELEASE_RUNBOOK.md)
 - Process model: [docs/PROCESS_MODEL.md](docs/PROCESS_MODEL.md)
 - OSS and licensing: [docs/OSS_VS_ENTERPRISE.md](docs/OSS_VS_ENTERPRISE.md), [docs/LICENSE_FAQ.md](docs/LICENSE_FAQ.md)

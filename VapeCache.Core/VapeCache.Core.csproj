@@ -21,7 +21,7 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RepositoryBranch>main</RepositoryBranch>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/haxxornulled/VapeCache</PackageProjectUrl>
+    <PackageProjectUrl>https://vapecache.net</PackageProjectUrl>
     <PackageReleaseNotes>See GitHub releases and docs/UPGRADE_NOTES.md for release-specific notes.</PackageReleaseNotes>
     <Copyright>Copyright (c) 2026 DFWFORSALE INC</Copyright>
   </PropertyGroup>

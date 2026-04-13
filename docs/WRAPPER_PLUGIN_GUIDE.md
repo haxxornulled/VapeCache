@@ -1,108 +1,24 @@
-# Wrapper and Plugin Guide
+# Wrapper Plugin Guide Status
 
-This guide shows how to build wrapper-facing APIs around VapeCache without bloating the core library.
+The historical wrapper/plugin demo content depended on the removed `VapeCache.Console` host and its plugin extension sample.
 
-## Design Rules
+That surface is not part of the current OSS repository state.
 
-- Keep `VapeCache` core transport-agnostic.
-- Put HTTP endpoint shape in extension packages.
-- Put host-specific behavior behind plugin interfaces.
-- Use `IOptionsMonitor<T>` for runtime tuning where practical.
+## Why This File Still Exists
 
-## 1) Map Wrapper Endpoints
-
-`VapeCache.Extensions.Aspire` now provides endpoint mapping helpers:
-
-```csharp
-builder.AddVapeCache()
-    .WithHealthChecks()
-    .WithAspireTelemetry(options => options.UseSeq("http://localhost:5341"))
-    .WithAutoMappedEndpoints(options =>
-    {
-        options.Enabled = true;
-        options.Prefix = "/vapecache";
-        options.IncludeBreakerControlEndpoints = true;
-        options.RequireAuthorizationOnAdminEndpoints = true;
-        options.AdminAuthorizationPolicy = "VapeCacheAdmin";
-    });
-
-var app = builder.Build();
-app.MapHealthChecks("/health");
-```
-
-Mapped routes:
-
-- `GET /vapecache/status`
-- `GET /vapecache/stats`
-- `GET /vapecache/stream` (SSE realtime channel, `event: vapecache-stats`)
-- `POST /vapecache/admin/breaker/force-open` (optional when enabled)
-- `POST /vapecache/admin/breaker/clear` (optional when enabled)
-
-`/status` and `/stats` include stampede protection counters:
-- `stampedeKeyRejected`
-- `stampedeLockWaitTimeout`
-- `stampedeFailureBackoffRejected`
-
-## 2) Build Plugins in the Console Host
-
-Reference implementation:
+This archival note prevents older links from landing on invalid instructions that refer to deleted code such as:
 
 - `VapeCache.Console/Plugins/IVapeCachePlugin.cs`
 - `VapeCache.Console/Plugins/PluginDemoHostedService.cs`
 - `VapeCache.Console/Plugins/SampleCatalogPlugin.cs`
 
-Minimal plugin:
+## Current Guidance
 
-```csharp
-public sealed class InventoryPlugin : IVapeCachePlugin
-{
-    public string Name => "inventory";
+For active OSS extension points, use:
 
-    public async ValueTask ExecuteAsync(
-        ICacheService cache,
-        ICurrentCacheService current,
-        CancellationToken cancellationToken)
-    {
-        await cache.SetAsync(
-            "plugin:inventory:heartbeat",
-            "ok"u8.ToArray(),
-            new CacheEntryOptions(TimeSpan.FromMinutes(5)),
-            cancellationToken);
-    }
-}
-```
+- [API_REFERENCE.md](API_REFERENCE.md)
+- [ASPIRE_INTEGRATION.md](ASPIRE_INTEGRATION.md)
+- [CONFIGURATION.md](CONFIGURATION.md)
+- [DEMO_HOST_BLUEPRINT.md](DEMO_HOST_BLUEPRINT.md)
 
-Registration:
-
-```csharp
-services.AddSingleton<IVapeCachePlugin, InventoryPlugin>();
-services.AddHostedService<PluginDemoHostedService>();
-```
-
-## 3) GroceryStore Dogfood Run
-
-Use the built-in dogfood runner:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-grocery-dogfood.ps1 `
-  -ConnectionString "redis://localhost:6379/0" `
-  -ConcurrentShoppers 200 `
-  -TotalShoppers 5000 `
-  -TargetDurationSeconds 30 `
-  -EnablePluginDemo
-```
-
-This runs the same typed collection APIs (`LIST`, `SET`, `HASH`, simple cache) that production wrappers rely on.
-
-## 4) Security Notes
-
-- Keep breaker-control routes on a separate internal admin prefix with authN/authZ.
-- Use read-only status routes for public diagnostics.
-- Do not expose force-open/clear routes without explicit protection.
-
-## 5) Related Docs
-
-- `VapeCache.Extensions.Aspire/README.md`
-- `docs/GROCERY_STORE_DEMO.md`
-- `docs/BENCHMARKING.md`
-- `VapeCache.Console/PLUGINS.md`
+If plugin samples return in the future, restore code and tests first, then replace this archival note with current documentation.

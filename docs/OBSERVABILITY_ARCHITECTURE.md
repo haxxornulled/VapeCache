@@ -1,5 +1,7 @@
 # VapeCache Observability Architecture
 
+> Current host guidance: map these patterns to your own host application, to `VapeCache.UI`, or to the planned proof/demo surface in [DEMO_HOST_BLUEPRINT.md](DEMO_HOST_BLUEPRINT.md). The retired `VapeCache.Console` host is not part of the active OSS runtime surface.
+>
 > Configuration authority: use [LOGGING_TELEMETRY_CONFIGURATION.md](LOGGING_TELEMETRY_CONFIGURATION.md) for current Serilog/Seq/OTLP keys, precedence, and fail-safe behavior.
 
 ## Executive Summary
@@ -59,7 +61,7 @@ VapeCache has **production-grade observability built-in**, but with **zero lock-
 - `RedisMultiplexerOptions.EnableCommandInstrumentation` (default: `true`)
 - Disabling telemetry reduces overhead to ~0% (but loses observability)
 
-### Example Host: VapeCache.Console
+### Example Host: ASP.NET Core / VapeCache.UI
 
 ✅ **Serilog Integration with Resilient Defaults**
 - Console sink configured by default for local visibility
@@ -74,7 +76,7 @@ VapeCache has **production-grade observability built-in**, but with **zero lock-
 
 ## Integration Options
 
-### Option 1: SEQ (Current VapeCache.Console Setup)
+### Option 1: SEQ (Current Host Setup Pattern)
 
 **When to Use**: You want a simple, self-hosted structured logging platform.
 
@@ -84,7 +86,7 @@ VapeCache has **production-grade observability built-in**, but with **zero lock-
 docker run -d --name seq -e ACCEPT_EULA=Y -p 5341:80 datalust/seq:latest
 
 # Enable Seq in config or environment, then run:
-dotnet run --project VapeCache.Console
+dotnet run --project .\VapeCache.UI\VapeCache.UI.csproj
 ```
 
 **What You Get:**
@@ -411,7 +413,7 @@ ALERT RedisBreakerOpen
 | **Structured Logging** | ✅ Production-ready | All events use ILogger<T> with structured properties |
 | **OpenTelemetry Metrics** | ✅ Production-ready | 20+ metrics covering Redis, pool, cache |
 | **OpenTelemetry Tracing** | ✅ Production-ready | Distributed tracing with Activity spans |
-| **SEQ Integration** | ✅ Works today | VapeCache.Console has example config |
+| **SEQ Integration** | ✅ Works today | Use the host-owned config pattern in `VapeCache.UI` or your own host |
 | **.NET Aspire Integration** | ✅ Works today | VapeCache.Extensions.Aspire package |
 | **Prometheus Integration** | ✅ Works today | Standard OpenTelemetry exporter wiring |
 | **Application Insights** | ✅ Works today | Standard OpenTelemetry integration |

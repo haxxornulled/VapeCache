@@ -12,6 +12,8 @@ internal sealed class BenchmarkOptionsMonitor<T> : IOptionsMonitor<T>
     }
 
     public T CurrentValue => _value;
+
     public T Get(string? name) => _value;
+
     public IDisposable? OnChange(Action<T, string?> listener) => null;
 }

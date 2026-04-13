@@ -1,5 +1,5 @@
 param(
-    [string]$Project = "VapeCache.Console\VapeCache.Console.csproj",
+    [string]$Project = "VapeCache.UI\VapeCache.UI.csproj",
     [string]$Arguments = "",
     [ValidateSet("counters", "trace", "both")]
     [string]$Mode = "both",

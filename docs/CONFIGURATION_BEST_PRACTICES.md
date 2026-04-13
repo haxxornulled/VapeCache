@@ -1,5 +1,7 @@
 # VapeCache Configuration Best Practices
 
+> Current host guidance: apply these patterns in your own ASP.NET Core host, in `VapeCache.UI`, or in the planned public demo host described in [DEMO_HOST_BLUEPRINT.md](DEMO_HOST_BLUEPRINT.md). The retired `VapeCache.Console` host is not part of the active OSS surface.
+
 ## Core Principle: Host Owns Configuration
 
 **Libraries should NEVER touch `IConfiguration` directly.** The host project (Program.cs) owns configuration and binds it to `IOptions<T>`. Libraries receive configured options via dependency injection.
@@ -27,28 +29,18 @@ internal sealed class RedisConnectionFactory(
 }
 ```
 
-### VapeCache.Console (Host)
+### Host Application
 ```csharp
 // ✅ CORRECT: Host owns IConfiguration and binds to options
-var builder = Host.CreateDefaultBuilder(args)
-    .ConfigureAppConfiguration((context, config) =>
-    {
-        // Host controls configuration sources
-        config.AddJsonFile("appsettings.json");
-        config.AddEnvironmentVariables();
-    })
-    .ConfigureServices((context, services) =>
-    {
-        // Host binds configuration to options
-        services
-            .AddOptions<RedisConnectionOptions>()
-            .Bind(context.Configuration.GetSection("RedisConnection"))
-            .ValidateOnStart();
+var builder = WebApplication.CreateBuilder(args);
 
-        // Library registers services (no IConfiguration access)
-        services.AddVapecacheRedisConnections();
-        services.AddVapecacheCaching();
-    });
+builder.Services
+    .AddOptions<RedisConnectionOptions>()
+    .Bind(builder.Configuration.GetSection("RedisConnection"))
+    .ValidateOnStart();
+
+builder.Services.AddVapecacheRedisConnections();
+builder.Services.AddVapecacheCaching();
 ```
 
 ## Why This Matters

@@ -1,52 +1,53 @@
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Engines;
-using VapeCache.Benchmarks;
 using VapeCache.Infrastructure.Connections;
 
 namespace VapeCache.Benchmarks.Benchmarks;
 
-[Config(typeof(EnterpriseBenchmarkConfig))]
+[BenchmarkCategory("Micro")]
+[MemoryDiagnoser]
 public class RespParserLiteBenchmarks
 {
+    private readonly Consumer _consumer = new();
+    private ReadOnlyMemory<byte> _frame;
+
     public enum FrameKind
     {
-        Ok,
-        IntegerValue,
-        Error,
-        BulkSmall,
-        Bulk4K,
-        ArrayGet
+        SimpleString,
+        IntegerFrame,
+        BulkString,
+        ArrayHeader
     }
 
-    [Params(FrameKind.Ok, FrameKind.IntegerValue, FrameKind.Error, FrameKind.BulkSmall, FrameKind.Bulk4K, FrameKind.ArrayGet)]
-    public FrameKind Frame { get; set; }
-
-    private ReadOnlyMemory<byte> _buffer;
-    private readonly Consumer _consumer = new();
+    [ParamsAllValues]
+    public FrameKind Kind { get; set; }
 
     [GlobalSetup]
     public void Setup()
     {
-        _buffer = Frame switch
+        _frame = Kind switch
         {
-            FrameKind.Ok => "+OK\r\n"u8.ToArray(),
-            FrameKind.IntegerValue => ":123456789\r\n"u8.ToArray(),
-            FrameKind.Error => "-ERR msg\r\n"u8.ToArray(),
-            FrameKind.BulkSmall => "$3\r\nfoo\r\n"u8.ToArray(),
-            FrameKind.Bulk4K => BuildBulkStringBytes(4096),
-            FrameKind.ArrayGet => "*2\r\n$3\r\nGET\r\n$32\r\n0123456789abcdef0123456789abcdef\r\n"u8.ToArray(),
-            _ => throw new ArgumentOutOfRangeException()
+            FrameKind.SimpleString => "+PONG\r\n"u8.ToArray(),
+            FrameKind.IntegerFrame => ":123456\r\n"u8.ToArray(),
+            FrameKind.BulkString => "$11\r\nhello world\r\n"u8.ToArray(),
+            FrameKind.ArrayHeader => "*3\r\n"u8.ToArray(),
+            _ => throw new ArgumentOutOfRangeException(nameof(Kind), Kind, null)
         };
     }
 
     [Benchmark]
-    public void TryParse()
+    public bool TryParse()
     {
-        RespParserLite.TryParse(_buffer, out var consumed, out _);
-        _consumer.Consume(consumed);
-    }
+        var parsed = RespParserLite.TryParse(_frame, out var consumed, out var value);
 
-    private static byte[] BuildBulkStringBytes(int payloadLength)
-        => System.Text.Encoding.ASCII.GetBytes($"${payloadLength}\r\n{new string('x', payloadLength)}\r\n");
+        _consumer.Consume(consumed);
+        _consumer.Consume((int)value.Kind);
+        _consumer.Consume(value.Integer);
+        _consumer.Consume(value.ArrayLength);
+
+        if (!value.Data.IsEmpty)
+            _consumer.Consume(value.Data.Length);
+
+        return parsed;
+    }
 }

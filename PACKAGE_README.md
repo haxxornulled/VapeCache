@@ -2,6 +2,9 @@
 
 VapeCache is a Redis-first caching runtime for ASP.NET Core and .NET services.
 
+- Website: `https://vapecache.net`
+- Source repository: `https://github.com/haxxornulled/VapeCache`
+
 The native runtime provides:
 
 - Redis-primary plus in-memory-fallback hybrid caching
@@ -96,7 +99,8 @@ See: https://github.com/haxxornulled/VapeCache/blob/main/docs/OSS_VS_ENTERPRISE.
 
 ## Source
 
-https://github.com/haxxornulled/VapeCache
+- Website: https://vapecache.net
+- Source repository: https://github.com/haxxornulled/VapeCache
 
 ## License
 

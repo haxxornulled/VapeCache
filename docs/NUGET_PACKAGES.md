@@ -2,6 +2,11 @@
 
 This OSS repository ships production-ready runtime packages for Redis-first caching on .NET.
 
+Home on the web:
+
+- Website: `https://vapecache.net`
+- Source repository: `https://github.com/haxxornulled/VapeCache`
+
 ## Published Registries (NuGet + GitHub Packages)
 
 | Package | NuGet | GitHub Packages |
