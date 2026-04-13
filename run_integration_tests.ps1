@@ -78,6 +78,10 @@ function Get-ContainerName {
     return "vapecache-redis"
 }
 
+function Get-RedisImage {
+    return "redis:8.6"
+}
+
 function Start-RedisContainer {
     Write-Header "Starting Redis Docker Container"
 
@@ -93,7 +97,7 @@ function Start-RedisContainer {
     }
     else {
         Write-Host "Creating container: $containerName" -ForegroundColor Yellow
-        docker run --name $containerName -d -p "$Port`:6379" redis:7-alpine | Out-Null
+        docker run --name $containerName -d -p "$Port`:6379" (Get-RedisImage) | Out-Null
     }
 
     Write-Host "Waiting for Redis readiness..." -ForegroundColor Yellow

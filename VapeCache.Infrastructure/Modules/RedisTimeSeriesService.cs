@@ -10,7 +10,6 @@ internal sealed partial class RedisTimeSeriesService : IRedisTimeSeriesService, 
     private readonly IRedisFallbackCommandExecutor _fallback;
     private readonly IRedisModuleDetector _modules;
     private readonly ILogger<RedisTimeSeriesService> _logger;
-    private readonly SemaphoreSlim _gate = new(1, 1);
     private bool? _available;
 
     public RedisTimeSeriesService(
@@ -33,21 +32,10 @@ internal sealed partial class RedisTimeSeriesService : IRedisTimeSeriesService, 
         if (_available == true)
             return true;
 
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            if (_available == true)
-                return true;
-
-            var available = await _modules.IsModuleInstalledAsync("timeseries", ct).ConfigureAwait(false);
-            if (available)
-                _available = true;
-            return available;
-        }
-        finally
-        {
-            _gate.Release();
-        }
+        var available = await _modules.IsModuleInstalledAsync("timeseries", ct).ConfigureAwait(false);
+        if (available)
+            _available = true;
+        return available;
     }
 
     /// <summary>
@@ -89,5 +77,7 @@ internal sealed partial class RedisTimeSeriesService : IRedisTimeSeriesService, 
         Message = "RedisTimeSeries unavailable; using in-memory fallback for {Key}.")]
     private static partial void LogFallbackToMemory(ILogger logger, string key);
 
-    public void Dispose() => _gate.Dispose();
+    public void Dispose()
+    {
+    }
 }

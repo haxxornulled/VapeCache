@@ -64,6 +64,15 @@ Performance data and methodology are tracked in-repo with reproducible benchmark
 OSS scope in this repository: production-ready runtime packages for core caching, invalidation, ASP.NET Core integration, and Aspire integration.
 For OSS/Enterprise boundaries, see [docs/OSS_VS_ENTERPRISE.md](docs/OSS_VS_ENTERPRISE.md).
 
+## Dependency Ownership
+
+Keep Redis versioning boring:
+
+- The Redis version line used by the Aspire host is owned by `Aspire.Hosting.Redis`.
+- The Aspire package version is owned in `Directory.Build.props` via `VapeCacheAspireVersion`.
+- Manual Docker examples and test scripts should follow the same Redis major/minor line that Aspire defaults to.
+- Use exact patch pinning only as a deliberate temporary freeze, not as the normal repo default.
+
 ## Maturity and Evidence
 
 Current project status: `Production-Capable`.
@@ -148,8 +157,11 @@ dotnet add package VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry
 2. Run Redis (or KeyDB)
 
 ```bash
-docker run --name vapecache-redis -p 6379:6379 -d redis:7
+docker run --name vapecache-redis -p 6379:6379 -d redis:8.6
 ```
+
+Manual Docker examples intentionally track the same Redis `8.6` line that the Aspire host gets from `Aspire.Hosting.Redis`.
+If we move supported Redis forward, update the Aspire package first and keep the manual examples on that same line.
 
 KeyDB local alternative:
 

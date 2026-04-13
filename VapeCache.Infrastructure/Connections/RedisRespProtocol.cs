@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Buffers.Text;
 using System.Runtime.CompilerServices;
 using System.Text;
 
@@ -7,6 +6,11 @@ namespace VapeCache.Infrastructure.Connections;
 
 internal static class RedisRespProtocol
 {
+    private const int InitialReadLineBufferSize = 256;
+    private const int RetainedReadLineBufferLimit = 4096;
+    private const int ReadScratchExactBufferSize = 8;
+    private const int ReadScratchDrainBufferSize = 256;
+
     private static readonly byte[] OkLine = "+OK\r\n"u8.ToArray();
     private static readonly byte[] PongLine = "+PONG\r\n"u8.ToArray();
     private static readonly byte[] PublishCommandToken = "PUBLISH"u8.ToArray();
@@ -88,6 +92,9 @@ internal static class RedisRespProtocol
     private static readonly byte[] HSetBulkString = "$4\r\nHSET\r\n"u8.ToArray();
     private static readonly byte[] PxBulkString = "$2\r\nPX\r\n"u8.ToArray();
     private static readonly byte[] CrLf = "\r\n"u8.ToArray();
+    private static readonly byte[] IntMinValueAscii = "-2147483648"u8.ToArray();
+    private static readonly byte[] LongMinValueAscii = "-9223372036854775808"u8.ToArray();
+    [ThreadStatic] private static ProtocolReadScratch? _tlsReadScratch;
 
     /// <summary>
     /// Gets value.
@@ -842,30 +849,37 @@ internal static class RedisRespProtocol
     /// </summary>
     public static async Task<string> ReadLineAsync(Stream stream, CancellationToken ct)
     {
-        var buf = ArrayPool<byte>.Shared.Rent(256);
-        var count = 0;
+        var scratch = RentReadScratch();
         try
         {
-            while (true)
-            {
-                if (count == buf.Length)
-                {
-                    var bigger = ArrayPool<byte>.Shared.Rent(buf.Length * 2);
-                    Buffer.BlockCopy(buf, 0, bigger, 0, count);
-                    ArrayPool<byte>.Shared.Return(buf);
-                    buf = bigger;
-                }
-
-                var read = await stream.ReadAsync(buf.AsMemory(count, 1), ct).ConfigureAwait(false);
-                if (read == 0) throw new EndOfStreamException();
-                count++;
-                if (count >= 2 && buf[count - 2] == (byte)'\r' && buf[count - 1] == (byte)'\n')
-                    return Encoding.UTF8.GetString(buf, 0, count - 2);
-            }
+            return await ReadLineAsync(stream, ct, scratch).ConfigureAwait(false);
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(buf);
+            ReturnReadScratch(scratch);
+        }
+    }
+
+    private static async Task<string> ReadLineAsync(Stream stream, CancellationToken ct, ProtocolReadScratch scratch)
+    {
+        var buf = scratch.LineBuffer;
+        var count = 0;
+        while (true)
+        {
+            if (count == buf.Length)
+            {
+                var bigger = ArrayPool<byte>.Shared.Rent(buf.Length * 2);
+                Buffer.BlockCopy(buf, 0, bigger, 0, count);
+                ArrayPool<byte>.Shared.Return(buf);
+                buf = bigger;
+                scratch.LineBuffer = buf;
+            }
+
+            var read = await stream.ReadAsync(buf.AsMemory(count, 1), ct).ConfigureAwait(false);
+            if (read == 0) throw new EndOfStreamException();
+            count++;
+            if (count >= 2 && buf[count - 2] == (byte)'\r' && buf[count - 1] == (byte)'\n')
+                return Encoding.UTF8.GetString(buf, 0, count - 2);
         }
     }
 
@@ -874,7 +888,15 @@ internal static class RedisRespProtocol
     /// </summary>
     public static async Task ExpectOkAsync(Stream stream, CancellationToken ct)
     {
-        await ExpectExactAsync(stream, OkLine, ct).ConfigureAwait(false);
+        var scratch = RentReadScratch();
+        try
+        {
+            await ExpectExactAsync(stream, OkLine, ct, scratch).ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnReadScratch(scratch);
+        }
     }
 
     /// <summary>
@@ -882,33 +904,28 @@ internal static class RedisRespProtocol
     /// </summary>
     public static async Task<string> ReadBulkStringAsync(Stream stream, CancellationToken ct)
     {
-        var header = await ReadLineAsync(stream, ct).ConfigureAwait(false);
-        if (header.StartsWith('-')) throw new InvalidOperationException($"Redis error: {header}");
-        if (!header.StartsWith('$')) throw new InvalidOperationException($"Unexpected Redis response: {header}");
-
-        if (!int.TryParse(header.AsSpan(1), out var len) || len < 0)
-            throw new InvalidOperationException($"Unexpected Redis bulk string length: {header}");
-
-        var buf = new byte[len];
-        var read = 0;
-        while (read < len)
+        var scratch = RentReadScratch();
+        try
         {
-            var n = await stream.ReadAsync(buf.AsMemory(read, len - read), ct).ConfigureAwait(false);
-            if (n == 0) throw new EndOfStreamException();
-            read += n;
-        }
+            var header = await ReadLineAsync(stream, ct, scratch).ConfigureAwait(false);
+            if (header.StartsWith('-')) throw new InvalidOperationException($"Redis error: {header}");
+            if (!header.StartsWith('$')) throw new InvalidOperationException($"Unexpected Redis response: {header}");
 
-        // consume CRLF
-        var crlf = new byte[2];
-        var crlfRead = 0;
-        while (crlfRead < 2)
+            if (!int.TryParse(header.AsSpan(1), out var len) || len < 0)
+                throw new InvalidOperationException($"Unexpected Redis bulk string length: {header}");
+
+            var buf = GC.AllocateUninitializedArray<byte>(len);
+            await ReadExactAsync(stream, buf.AsMemory(0, len), ct).ConfigureAwait(false);
+
+            // consume CRLF
+            await ReadExactAsync(stream, scratch.ExactBuffer.AsMemory(0, 2), ct).ConfigureAwait(false);
+
+            return Encoding.UTF8.GetString(buf);
+        }
+        finally
         {
-            var n = await stream.ReadAsync(crlf.AsMemory(crlfRead, 2 - crlfRead), ct).ConfigureAwait(false);
-            if (n == 0) throw new EndOfStreamException();
-            crlfRead += n;
+            ReturnReadScratch(scratch);
         }
-
-        return Encoding.UTF8.GetString(buf);
     }
 
     /// <summary>
@@ -916,7 +933,15 @@ internal static class RedisRespProtocol
     /// </summary>
     public static async Task ExpectPongAsync(Stream stream, CancellationToken ct)
     {
-        await ExpectExactAsync(stream, PongLine, ct).ConfigureAwait(false);
+        var scratch = RentReadScratch();
+        try
+        {
+            await ExpectExactAsync(stream, PongLine, ct, scratch).ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnReadScratch(scratch);
+        }
     }
 
     // HELLO response can be RESP2/RESP3 and may include maps/attributes.
@@ -925,13 +950,21 @@ internal static class RedisRespProtocol
     /// </summary>
     public static async Task SkipHelloResponseAsync(Stream stream, CancellationToken ct)
     {
-        await SkipRespValueAsync(stream, ct).ConfigureAwait(false);
+        var scratch = RentReadScratch();
+        try
+        {
+            await SkipRespValueAsync(stream, ct, scratch).ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnReadScratch(scratch);
+        }
     }
 
     // Recursively skip any RESP2/RESP3 value.
-    private static async Task SkipRespValueAsync(Stream stream, CancellationToken ct)
+    private static async Task SkipRespValueAsync(Stream stream, CancellationToken ct, ProtocolReadScratch scratch)
     {
-        var line = await ReadLineAsync(stream, ct).ConfigureAwait(false);
+        var line = await ReadLineAsync(stream, ct, scratch).ConfigureAwait(false);
         if (line.Length == 0)
             throw new InvalidOperationException("Unexpected empty Redis response line.");
 
@@ -944,10 +977,7 @@ internal static class RedisRespProtocol
                 throw new InvalidOperationException($"Invalid blob error length: {line}");
 
             if (errorLen >= 0)
-            {
-                var skipError = new byte[errorLen + 2];
-                await ReadExactAsync(stream, skipError, ct).ConfigureAwait(false);
-            }
+                await SkipBytesAsync(stream, errorLen + 2, ct, scratch).ConfigureAwait(false);
 
             throw new InvalidOperationException("Redis blob error response.");
         }
@@ -961,7 +991,7 @@ internal static class RedisRespProtocol
                 return;
 
             for (int i = 0; i < count; i++)
-                await SkipRespValueAsync(stream, ct).ConfigureAwait(false);
+                await SkipRespValueAsync(stream, ct, scratch).ConfigureAwait(false);
         }
         else if (prefix == '%' || prefix == '|') // Map/Attribute
         {
@@ -972,11 +1002,11 @@ internal static class RedisRespProtocol
                 return;
 
             for (int i = 0; i < pairCount * 2; i++)
-                await SkipRespValueAsync(stream, ct).ConfigureAwait(false);
+                await SkipRespValueAsync(stream, ct, scratch).ConfigureAwait(false);
 
             // RESP3 attributes wrap a following value; consume that as well.
             if (prefix == '|')
-                await SkipRespValueAsync(stream, ct).ConfigureAwait(false);
+                await SkipRespValueAsync(stream, ct, scratch).ConfigureAwait(false);
         }
         else if (prefix == '$' || prefix == '=') // Bulk / Verbatim string
         {
@@ -984,10 +1014,7 @@ internal static class RedisRespProtocol
                 throw new InvalidOperationException($"Invalid bulk/verbatim length: {line}");
 
             if (len >= 0)
-            {
-                var skip = new byte[len + 2];
-                await ReadExactAsync(stream, skip, ct).ConfigureAwait(false);
-            }
+                await SkipBytesAsync(stream, len + 2, ct, scratch).ConfigureAwait(false);
         }
         else if (prefix == '+' || prefix == ':' || prefix == '_' || prefix == '#' || prefix == ',' || prefix == '(')
         {
@@ -1004,20 +1031,19 @@ internal static class RedisRespProtocol
     /// </summary>
     public static async Task<bool> TryExpectOkAsync(Stream stream, CancellationToken ct)
     {
-        byte[]? rented = null;
+        var scratch = RentReadScratch();
         try
         {
-            rented = ArrayPool<byte>.Shared.Rent(OkLine.Length);
-            var buf = rented.AsMemory(0, OkLine.Length);
+            var buf = scratch.ExactBuffer.AsMemory(0, OkLine.Length);
             await ReadExactAsync(stream, buf, ct).ConfigureAwait(false);
 
-            var span = rented.AsSpan(0, OkLine.Length);
+            var span = scratch.ExactBuffer.AsSpan(0, OkLine.Length);
             if (span.SequenceEqual(OkLine)) return true;
 
             // If it's an error line, drain the rest of the line so the connection stays in sync.
             if (span.Length > 0 && span[0] == (byte)'-')
             {
-                await DrainLineAsync(stream, ct).ConfigureAwait(false);
+                await DrainLineAsync(stream, ct, scratch).ConfigureAwait(false);
                 return false;
             }
 
@@ -1025,37 +1051,26 @@ internal static class RedisRespProtocol
         }
         finally
         {
-            if (rented is not null)
-                ArrayPool<byte>.Shared.Return(rented);
+            ReturnReadScratch(scratch);
         }
     }
 
-    private static async Task ExpectExactAsync(Stream stream, byte[] expected, CancellationToken ct)
+    private static async Task ExpectExactAsync(Stream stream, byte[] expected, CancellationToken ct, ProtocolReadScratch scratch)
     {
-        byte[]? rented = null;
-        try
+        var buf = scratch.ExactBuffer.AsMemory(0, expected.Length);
+        await ReadExactAsync(stream, buf, ct).ConfigureAwait(false);
+
+        var span = scratch.ExactBuffer.AsSpan(0, expected.Length);
+        if (span.SequenceEqual(expected)) return;
+
+        // If response begins with '-', drain to end-of-line for better errors (connection will be dropped anyway).
+        if (span.Length > 0 && span[0] == (byte)'-')
         {
-            rented = ArrayPool<byte>.Shared.Rent(expected.Length);
-            var buf = rented.AsMemory(0, expected.Length);
-            await ReadExactAsync(stream, buf, ct).ConfigureAwait(false);
-
-            var span = rented.AsSpan(0, expected.Length);
-            if (span.SequenceEqual(expected)) return;
-
-            // If response begins with '-', drain to end-of-line for better errors (connection will be dropped anyway).
-            if (span.Length > 0 && span[0] == (byte)'-')
-            {
-                await DrainLineAsync(stream, ct).ConfigureAwait(false);
-                throw new InvalidOperationException("Redis error response.");
-            }
-
-            throw new InvalidOperationException("Unexpected Redis response.");
+            await DrainLineAsync(stream, ct, scratch).ConfigureAwait(false);
+            throw new InvalidOperationException("Redis error response.");
         }
-        finally
-        {
-            if (rented is not null)
-                ArrayPool<byte>.Shared.Return(rented);
-        }
+
+        throw new InvalidOperationException("Unexpected Redis response.");
     }
 
     private static async Task ReadExactAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
@@ -1069,27 +1084,98 @@ internal static class RedisRespProtocol
         }
     }
 
-    private static async Task DrainLineAsync(Stream stream, CancellationToken ct)
+    private static async Task DrainLineAsync(Stream stream, CancellationToken ct, ProtocolReadScratch scratch)
     {
-        byte[]? rented = null;
-        try
+        while (true)
         {
-            rented = ArrayPool<byte>.Shared.Rent(256);
-            while (true)
+            var n = await stream.ReadAsync(scratch.DrainBuffer.AsMemory(0, scratch.DrainBuffer.Length), ct).ConfigureAwait(false);
+            if (n == 0) return;
+            for (var i = 0; i < n; i++)
             {
-                var n = await stream.ReadAsync(rented.AsMemory(0, rented.Length), ct).ConfigureAwait(false);
-                if (n == 0) return;
-                for (var i = 0; i < n; i++)
-                {
-                    if (rented[i] == (byte)'\n')
-                        return;
-                }
+                if (scratch.DrainBuffer[i] == (byte)'\n')
+                    return;
             }
         }
-        finally
+    }
+
+    private static async Task SkipBytesAsync(Stream stream, int count, CancellationToken ct, ProtocolReadScratch scratch)
+    {
+        while (count > 0)
         {
-            if (rented is not null)
-                ArrayPool<byte>.Shared.Return(rented);
+            var chunk = Math.Min(count, scratch.DrainBuffer.Length);
+            await ReadExactAsync(stream, scratch.DrainBuffer.AsMemory(0, chunk), ct).ConfigureAwait(false);
+            count -= chunk;
+        }
+    }
+
+    private static ProtocolReadScratch RentReadScratch()
+    {
+        var scratch = _tlsReadScratch;
+        if (scratch is not null)
+        {
+            _tlsReadScratch = null;
+            return scratch;
+        }
+
+        return new ProtocolReadScratch(
+            ArrayPool<byte>.Shared.Rent(InitialReadLineBufferSize),
+            ArrayPool<byte>.Shared.Rent(ReadScratchExactBufferSize),
+            ArrayPool<byte>.Shared.Rent(ReadScratchDrainBufferSize));
+    }
+
+    private static void ReturnReadScratch(ProtocolReadScratch scratch)
+    {
+        scratch.TrimLineBuffer();
+        if (_tlsReadScratch is null)
+        {
+            _tlsReadScratch = scratch;
+            return;
+        }
+
+        scratch.Dispose();
+    }
+
+    private sealed class ProtocolReadScratch : IDisposable
+    {
+        public ProtocolReadScratch(byte[] lineBuffer, byte[] exactBuffer, byte[] drainBuffer)
+        {
+            LineBuffer = lineBuffer;
+            ExactBuffer = exactBuffer;
+            DrainBuffer = drainBuffer;
+        }
+
+        public byte[] LineBuffer { get; set; }
+        public byte[] ExactBuffer { get; private set; }
+        public byte[] DrainBuffer { get; private set; }
+
+        public void TrimLineBuffer()
+        {
+            if (LineBuffer.Length <= RetainedReadLineBufferLimit)
+                return;
+
+            ArrayPool<byte>.Shared.Return(LineBuffer);
+            LineBuffer = ArrayPool<byte>.Shared.Rent(InitialReadLineBufferSize);
+        }
+
+        public void Dispose()
+        {
+            if (LineBuffer.Length > 0)
+            {
+                ArrayPool<byte>.Shared.Return(LineBuffer);
+                LineBuffer = Array.Empty<byte>();
+            }
+
+            if (ExactBuffer.Length > 0)
+            {
+                ArrayPool<byte>.Shared.Return(ExactBuffer);
+                ExactBuffer = Array.Empty<byte>();
+            }
+
+            if (DrainBuffer.Length > 0)
+            {
+                ArrayPool<byte>.Shared.Return(DrainBuffer);
+                DrainBuffer = Array.Empty<byte>();
+            }
         }
     }
 
@@ -1148,7 +1234,7 @@ internal static class RedisRespProtocol
 
     private static int GetPrefixedSingleKeyCommandLength(ReadOnlySpan<byte> prefix, string key)
     {
-        var keyByteCount = Encoding.UTF8.GetByteCount(key);
+        var keyByteCount = GetUtf8ByteCount(key);
         return prefix.Length + GetIntLength(keyByteCount) + 2 + keyByteCount + 2;
     }
 
@@ -1158,7 +1244,7 @@ internal static class RedisRespProtocol
 
     private static int GetBulkStringLen(string value)
     {
-        var byteCount = Encoding.UTF8.GetByteCount(value);
+        var byteCount = GetUtf8ByteCount(value);
         return GetBulkLen(byteCount) + byteCount;
     }
 
@@ -1283,12 +1369,11 @@ internal static class RedisRespProtocol
     {
         prefix.CopyTo(destination);
         var idx = prefix.Length;
-        var keyByteCount = Encoding.UTF8.GetByteCount(key);
+        var keyByteCount = GetUtf8ByteCount(key);
         idx += WriteIntAscii(destination.Slice(idx), keyByteCount);
         destination[idx++] = (byte)'\r';
         destination[idx++] = (byte)'\n';
-        Encoding.UTF8.GetBytes(key, destination.Slice(idx, keyByteCount));
-        idx += keyByteCount;
+        idx += WriteUtf8Bytes(destination.Slice(idx, keyByteCount), key, keyByteCount);
         destination[idx++] = (byte)'\r';
         destination[idx++] = (byte)'\n';
         return idx;
@@ -1306,15 +1391,14 @@ internal static class RedisRespProtocol
 
     private static int WriteBulkString(Span<byte> destination, string value)
     {
-        var byteCount = Encoding.UTF8.GetByteCount(value);
+        var byteCount = GetUtf8ByteCount(value);
         destination[0] = (byte)'$';
         var idx = 1;
         idx += WriteIntAscii(destination.Slice(idx), byteCount);
         destination[idx++] = (byte)'\r';
         destination[idx++] = (byte)'\n';
 
-        Encoding.UTF8.GetBytes(value, destination.Slice(idx, byteCount));
-        idx += byteCount;
+        idx += WriteUtf8Bytes(destination.Slice(idx, byteCount), value, byteCount);
 
         destination[idx++] = (byte)'\r';
         destination[idx++] = (byte)'\n';
@@ -1368,17 +1452,13 @@ internal static class RedisRespProtocol
     {
         destination[0] = (byte)'$';
         var idx = 1;
-
-        Span<byte> tmp = stackalloc byte[32];
-        if (!Utf8Formatter.TryFormat(value, tmp, out var written))
-            throw new InvalidOperationException("Failed to format int.");
+        var written = GetIntLength(value);
 
         idx += WriteIntAscii(destination.Slice(idx), written);
         destination[idx++] = (byte)'\r';
         destination[idx++] = (byte)'\n';
 
-        tmp.Slice(0, written).CopyTo(destination.Slice(idx));
-        idx += written;
+        idx += WriteIntAscii(destination.Slice(idx), value);
 
         destination[idx++] = (byte)'\r';
         destination[idx++] = (byte)'\n';
@@ -1389,17 +1469,13 @@ internal static class RedisRespProtocol
     {
         destination[0] = (byte)'$';
         var idx = 1;
-
-        Span<byte> tmp = stackalloc byte[32];
-        if (!Utf8Formatter.TryFormat(value, tmp, out var written))
-            throw new InvalidOperationException("Failed to format long.");
+        var written = GetIntLength(value);
 
         idx += WriteIntAscii(destination.Slice(idx), written);
         destination[idx++] = (byte)'\r';
         destination[idx++] = (byte)'\n';
 
-        tmp.Slice(0, written).CopyTo(destination.Slice(idx));
-        idx += written;
+        idx += WriteLongAscii(destination.Slice(idx), value);
 
         destination[idx++] = (byte)'\r';
         destination[idx++] = (byte)'\n';
@@ -1407,31 +1483,86 @@ internal static class RedisRespProtocol
     }
 
     private static int WriteBulkInt64(Span<byte> destination, long value)
-    {
-        destination[0] = (byte)'$';
-        var idx = 1;
-
-        Span<byte> tmp = stackalloc byte[32];
-        if (!Utf8Formatter.TryFormat(value, tmp, out var written))
-            throw new InvalidOperationException("Failed to format long.");
-
-        idx += WriteIntAscii(destination.Slice(idx), written);
-        destination[idx++] = (byte)'\r';
-        destination[idx++] = (byte)'\n';
-
-        tmp.Slice(0, written).CopyTo(destination.Slice(idx));
-        idx += written;
-
-        destination[idx++] = (byte)'\r';
-        destination[idx++] = (byte)'\n';
-        return idx;
-    }
+        => WriteBulkLong(destination, value);
 
     private static int WriteIntAscii(Span<byte> destination, int value)
     {
-        if (!Utf8Formatter.TryFormat(value, destination, out var written))
-            throw new InvalidOperationException("Failed to format int.");
+        if (value == int.MinValue)
+        {
+            IntMinValueAscii.CopyTo(destination);
+            return IntMinValueAscii.Length;
+        }
+
+        var negative = value < 0;
+        var unsigned = (uint)(negative ? -value : value);
+        var written = negative ? 1 + GetIntLength((int)unsigned) : GetIntLength((int)unsigned);
+        var idx = written;
+
+        do
+        {
+            var next = unsigned / 10;
+            destination[--idx] = (byte)('0' + (unsigned - (next * 10)));
+            unsigned = next;
+        }
+        while (unsigned != 0);
+
+        if (negative)
+            destination[0] = (byte)'-';
+
         return written;
+    }
+
+    private static int WriteLongAscii(Span<byte> destination, long value)
+    {
+        if (value == long.MinValue)
+        {
+            LongMinValueAscii.CopyTo(destination);
+            return LongMinValueAscii.Length;
+        }
+
+        var negative = value < 0;
+        var unsigned = (ulong)(negative ? -value : value);
+        var written = negative ? 1 + GetIntLength((long)unsigned) : GetIntLength((long)unsigned);
+        var idx = written;
+
+        do
+        {
+            var next = unsigned / 10;
+            destination[--idx] = (byte)('0' + (unsigned - (next * 10)));
+            unsigned = next;
+        }
+        while (unsigned != 0);
+
+        if (negative)
+            destination[0] = (byte)'-';
+
+        return written;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int GetUtf8ByteCount(string value)
+    {
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] > 0x7F)
+                return Encoding.UTF8.GetByteCount(value);
+        }
+
+        return value.Length;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int WriteUtf8Bytes(Span<byte> destination, string value, int byteCount)
+    {
+        if (byteCount == value.Length)
+        {
+            for (var i = 0; i < value.Length; i++)
+                destination[i] = (byte)value[i];
+
+            return value.Length;
+        }
+
+        return Encoding.UTF8.GetBytes(value, destination);
     }
 
     // ======================

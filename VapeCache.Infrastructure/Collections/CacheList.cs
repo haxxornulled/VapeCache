@@ -1,7 +1,7 @@
-using System.Buffers;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Infrastructure.Caching;
 
 namespace VapeCache.Infrastructure.Collections;
 
@@ -27,7 +27,7 @@ internal sealed class CacheList<T> : ICacheList<T>
     /// </summary>
     public async ValueTask<long> PushFrontAsync(T item, CancellationToken ct = default)
     {
-        var buffer = new ArrayBufferWriter<byte>();
+        using var buffer = new PooledByteBufferWriter();
         _codec.Serialize(buffer, item);
         return await _executor.LPushAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
@@ -37,7 +37,7 @@ internal sealed class CacheList<T> : ICacheList<T>
     /// </summary>
     public async ValueTask<long> PushBackAsync(T item, CancellationToken ct = default)
     {
-        var buffer = new ArrayBufferWriter<byte>();
+        using var buffer = new PooledByteBufferWriter();
         _codec.Serialize(buffer, item);
         return await _executor.RPushAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
@@ -47,9 +47,9 @@ internal sealed class CacheList<T> : ICacheList<T>
     /// </summary>
     public async ValueTask<T?> PopFrontAsync(CancellationToken ct = default)
     {
-        var bytes = await _executor.LPopAsync(Key, ct).ConfigureAwait(false);
-        if (bytes is null) return default;
-        return _codec.Deserialize(bytes);
+        using var lease = await _executor.LPopLeaseAsync(Key, ct).ConfigureAwait(false);
+        if (lease.IsNull) return default;
+        return _codec.Deserialize(lease.Span);
     }
 
     /// <summary>
@@ -57,9 +57,9 @@ internal sealed class CacheList<T> : ICacheList<T>
     /// </summary>
     public async ValueTask<T?> PopBackAsync(CancellationToken ct = default)
     {
-        var bytes = await _executor.RPopAsync(Key, ct).ConfigureAwait(false);
-        if (bytes is null) return default;
-        return _codec.Deserialize(bytes);
+        using var lease = await _executor.RPopLeaseAsync(Key, ct).ConfigureAwait(false);
+        if (lease.IsNull) return default;
+        return _codec.Deserialize(lease.Span);
     }
 
     /// <summary>
@@ -67,13 +67,13 @@ internal sealed class CacheList<T> : ICacheList<T>
     /// </summary>
     public bool TryPopFrontAsync(CancellationToken ct, out ValueTask<T?> task)
     {
-        if (!_executor.TryLPopAsync(Key, ct, out var bytesTask))
+        if (!_executor.TryLPopLeaseAsync(Key, ct, out var leaseTask))
         {
             task = default;
             return false;
         }
 
-        task = MapPopAsync(bytesTask, _codec);
+        task = MapPopAsync(leaseTask, _codec);
         return true;
     }
 
@@ -82,13 +82,13 @@ internal sealed class CacheList<T> : ICacheList<T>
     /// </summary>
     public bool TryPopBackAsync(CancellationToken ct, out ValueTask<T?> task)
     {
-        if (!_executor.TryRPopAsync(Key, ct, out var bytesTask))
+        if (!_executor.TryRPopLeaseAsync(Key, ct, out var leaseTask))
         {
             task = default;
             return false;
         }
 
-        task = MapPopAsync(bytesTask, _codec);
+        task = MapPopAsync(leaseTask, _codec);
         return true;
     }
 
@@ -145,21 +145,21 @@ internal sealed class CacheList<T> : ICacheList<T>
         }
     }
 
-    private static ValueTask<T?> MapPopAsync(ValueTask<byte[]?> bytesTask, ICacheCodec<T> codec)
+    private static ValueTask<T?> MapPopAsync(ValueTask<RedisValueLease> leaseTask, ICacheCodec<T> codec)
     {
-        if (bytesTask.IsCompletedSuccessfully)
+        if (leaseTask.IsCompletedSuccessfully)
         {
-            var bytes = bytesTask.Result;
-            return new ValueTask<T?>(bytes is null ? default : codec.Deserialize(bytes));
+            using var lease = leaseTask.Result;
+            return new ValueTask<T?>(lease.IsNull ? default : codec.Deserialize(lease.Span));
         }
 
-        return AwaitMapPopAsync(bytesTask, codec);
+        return AwaitMapPopAsync(leaseTask, codec);
 
-        static async ValueTask<T?> AwaitMapPopAsync(ValueTask<byte[]?> task, ICacheCodec<T> codec)
+        static async ValueTask<T?> AwaitMapPopAsync(ValueTask<RedisValueLease> task, ICacheCodec<T> codec)
         {
-            var bytes = await task.ConfigureAwait(false);
-            if (bytes is null) return default;
-            return codec.Deserialize(bytes);
+            using var lease = await task.ConfigureAwait(false);
+            if (lease.IsNull) return default;
+            return codec.Deserialize(lease.Span);
         }
     }
 }

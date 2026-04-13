@@ -47,6 +47,7 @@ public sealed class OptionsDefaultsTests
         var o = new GroceryStoreStressOptions();
 
         Assert.True(o.Enabled);
+        Assert.True(string.IsNullOrWhiteSpace(o.WorkloadProfile));
         Assert.True(o.ConcurrentShoppers > 0);
         Assert.True(o.TotalShoppers > 0);
         Assert.True(o.TargetDurationSeconds > 0);

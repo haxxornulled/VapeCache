@@ -3,6 +3,7 @@ namespace VapeCache.Console.GroceryStore;
 public sealed class GroceryStoreStressOptions
 {
     public bool Enabled { get; init; } = true;
+    public string? WorkloadProfile { get; init; }
     public int ConcurrentShoppers { get; init; } = 2000;
     public int TotalShoppers { get; init; } = 100000;
     public int TargetDurationSeconds { get; init; } = 180;

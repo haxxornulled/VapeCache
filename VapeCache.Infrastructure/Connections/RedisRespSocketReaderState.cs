@@ -14,6 +14,7 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
 {
     private readonly Socket _socket;
     private byte[] _buffer;
+    private byte[]? _lineScratch;
     private int _pos;
     private int _len;
     private int _disposed;
@@ -254,7 +255,14 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
             byte[]? rented = null;
             try
             {
-                rented = ArrayPool<byte>.Shared.Rent(512);
+                rented = _lineScratch;
+                if (rented is null || rented.Length < 512)
+                {
+                    rented = ArrayPool<byte>.Shared.Rent(512);
+                    ReturnLineScratchIfNeeded();
+                    _lineScratch = rented;
+                }
+
                 var total = 0;
 
                 while (true)
@@ -266,6 +274,7 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
                         {
                             var bigger = ArrayPool<byte>.Shared.Rent(Math.Max(rented.Length * 2, total + remaining));
                             Buffer.BlockCopy(rented, 0, bigger, 0, total);
+                            _lineScratch = bigger;
                             ArrayPool<byte>.Shared.Return(rented);
                             rented = bigger;
                         }
@@ -305,7 +314,7 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
             }
             finally
             {
-                if (rented is not null)
+                if (rented is not null && !ReferenceEquals(rented, _lineScratch))
                     ArrayPool<byte>.Shared.Return(rented);
             }
         }
@@ -630,7 +639,18 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
         }
     }
 
-    private async ValueTask<bool> TryReadBulkDoubleAsync(int len, CancellationToken ct)
+    private ValueTask<bool> TryReadBulkDoubleAsync(int len, CancellationToken ct)
+    {
+        if (TryConsumeBufferedBulkPayload(len, out var payloadOffset))
+        {
+            var parsed = Utf8Parser.TryParse(_buffer.AsSpan(payloadOffset, len), out double _, out var consumed) && consumed == len;
+            return ValueTask.FromResult(parsed);
+        }
+
+        return TryReadBulkDoubleSlowAsync(len, ct);
+    }
+
+    private async ValueTask<bool> TryReadBulkDoubleSlowAsync(int len, CancellationToken ct)
     {
         byte[]? rented = null;
         try
@@ -652,7 +672,18 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
         }
     }
 
-    private async ValueTask<(bool Success, long Value)> TryReadBulkLongAsync(int len, CancellationToken ct)
+    private ValueTask<(bool Success, long Value)> TryReadBulkLongAsync(int len, CancellationToken ct)
+    {
+        if (TryConsumeBufferedBulkPayload(len, out var payloadOffset))
+        {
+            var parsed = Utf8Parser.TryParse(_buffer.AsSpan(payloadOffset, len), out long parsedValue, out var consumed) && consumed == len;
+            return ValueTask.FromResult((parsed, parsed ? parsedValue : 0L));
+        }
+
+        return TryReadBulkLongSlowAsync(len, ct);
+    }
+
+    private async ValueTask<(bool Success, long Value)> TryReadBulkLongSlowAsync(int len, CancellationToken ct)
     {
         byte[]? rented = null;
         try
@@ -681,8 +712,32 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
             throw new InvalidOperationException($"Bulk string size {len} bytes exceeds maximum allowed size of {_maxBulkStringBytes} bytes. Possible DoS attack or misconfigured server.");
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TryConsumeBufferedBulkPayload(int len, out int payloadOffset)
+    {
+        payloadOffset = _pos;
+        if (_len - _pos < len + 2)
+            return false;
+
+        var terminatorOffset = _pos + len;
+        if (_buffer[terminatorOffset] != (byte)'\r' || _buffer[terminatorOffset + 1] != (byte)'\n')
+            throw new InvalidOperationException("Invalid bulk string terminator.");
+
+        _pos = terminatorOffset + 2;
+        return true;
+    }
+
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
-    private async ValueTask SkipBulkPayloadAsync(int len, CancellationToken ct)
+    private ValueTask SkipBulkPayloadAsync(int len, CancellationToken ct)
+    {
+        if (TryConsumeBufferedBulkPayload(len, out _))
+            return ValueTask.CompletedTask;
+
+        return SkipBulkPayloadSlowAsync(len, ct);
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
+    private async ValueTask SkipBulkPayloadSlowAsync(int len, CancellationToken ct)
     {
         await SkipBytesAsync(len, ct).ConfigureAwait(false);
 
@@ -1065,7 +1120,15 @@ internal sealed class RedisRespSocketReaderState : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return ValueTask.CompletedTask;
         ArrayPool<byte>.Shared.Return(_buffer);
         _buffer = Array.Empty<byte>();
+        ReturnLineScratchIfNeeded();
         return ValueTask.CompletedTask;
+    }
+
+    private void ReturnLineScratchIfNeeded()
+    {
+        var lineScratch = Interlocked.Exchange(ref _lineScratch, null);
+        if (lineScratch is not null && lineScratch.Length != 0)
+            ArrayPool<byte>.Shared.Return(lineScratch);
     }
 }
     // Minimal awaitable wrapper for SocketAsyncEventArgs to avoid per-receive allocations.

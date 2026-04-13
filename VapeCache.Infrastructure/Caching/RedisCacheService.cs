@@ -140,7 +140,7 @@ internal sealed class RedisCacheService : ICacheService
 
     public async ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
     {
-        var buffer = new ArrayBufferWriter<byte>(256);
+        using var buffer = new PooledByteBufferWriter(256);
         serialize(buffer, value);
         await SetAsync(key, buffer.WrittenMemory, options, ct).ConfigureAwait(false);
     }
@@ -153,9 +153,9 @@ internal sealed class RedisCacheService : ICacheService
         CacheEntryOptions options,
         CancellationToken ct)
     {
-        var bytes = await GetAsync(key, ct).ConfigureAwait(false);
-        if (bytes is not null)
-            return deserialize(bytes);
+        var cached = await GetAsync(key, deserialize, ct).ConfigureAwait(false);
+        if (cached is not null)
+            return cached;
 
         var created = await factory(ct).ConfigureAwait(false);
         await SetAsync(key, created, serialize, options, ct).ConfigureAwait(false);

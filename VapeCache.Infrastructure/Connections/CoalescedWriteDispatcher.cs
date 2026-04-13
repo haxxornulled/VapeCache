@@ -8,6 +8,7 @@ namespace VapeCache.Infrastructure.Connections;
 
 internal delegate bool TryDequeuePendingRequestDelegate(out PendingRequest request);
 internal delegate int GetWriteQueueDepthDelegate();
+internal delegate bool TryEnqueuePendingOperationDelegate(PendingOperation operation);
 internal delegate ValueTask EnqueuePendingOperationDelegate(PendingOperation operation, CancellationToken ct);
 internal delegate long NextPendingSequenceDelegate();
 internal delegate void ReturnHeaderBufferDelegate(byte[] buffer);
@@ -25,6 +26,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
     private readonly CoalescedWriteBatch _coalesceBatch = new();
     private readonly SocketSendSegmentWindow _socketSendWindow = new();
     private readonly SocketIoAwaitableEventArgs _sendArgs = new();
+    private readonly ArraySegment<byte>[] _socketSendSegmentScratch = new ArraySegment<byte>[MaxVectoredSegmentsPerSend];
     private readonly ReadOnlyMemory<byte>[][] _coalesceSegmentsPool8 = new ReadOnlyMemory<byte>[8][];
     private int _coalesceSegmentsPool8Count;
     private readonly long[][] _commitOffsetsPool8 = new long[8][];
@@ -36,6 +38,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
 
     private readonly TryDequeuePendingRequestDelegate _tryDequeueWrite;
     private readonly GetWriteQueueDepthDelegate _getWriteQueueDepth;
+    private readonly TryEnqueuePendingOperationDelegate? _tryEnqueuePendingOperation;
     private readonly EnqueuePendingOperationDelegate _enqueuePendingOperation;
     private readonly NextPendingSequenceDelegate _nextPendingSequence;
     private readonly ReturnHeaderBufferDelegate _returnHeaderBuffer;
@@ -70,10 +73,62 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         int coalescingExitQueueDepth = 3,
         int coalescedWriteMaxOperations = 128,
         int coalescingSpinBudget = 8)
+        : this(
+            coalescedWriteMaxBytes,
+            coalescedWriteMaxSegments,
+            coalescedWriteSmallCopyThresholdBytes,
+            enableAdaptiveCoalescing,
+            adaptiveCoalescingLowDepth,
+            adaptiveCoalescingHighDepth,
+            adaptiveCoalescingMinWriteBytes,
+            adaptiveCoalescingMinSegments,
+            adaptiveCoalescingMinSmallCopyThresholdBytes,
+            crlfMemory,
+            tryDequeueWrite,
+            getWriteQueueDepth,
+            tryEnqueuePendingOperation: null,
+            enqueuePendingOperation,
+            nextPendingSequence,
+            returnHeaderBuffer,
+            returnPayloadArray,
+            abortPendingRequest,
+            recordBytesSent,
+            coalescingEnterQueueDepth,
+            coalescingExitQueueDepth,
+            coalescedWriteMaxOperations,
+            coalescingSpinBudget)
+    {
+    }
+
+    public CoalescedWriteDispatcher(
+        int coalescedWriteMaxBytes,
+        int coalescedWriteMaxSegments,
+        int coalescedWriteSmallCopyThresholdBytes,
+        bool enableAdaptiveCoalescing,
+        int adaptiveCoalescingLowDepth,
+        int adaptiveCoalescingHighDepth,
+        int adaptiveCoalescingMinWriteBytes,
+        int adaptiveCoalescingMinSegments,
+        int adaptiveCoalescingMinSmallCopyThresholdBytes,
+        ReadOnlyMemory<byte> crlfMemory,
+        TryDequeuePendingRequestDelegate tryDequeueWrite,
+        GetWriteQueueDepthDelegate getWriteQueueDepth,
+        TryEnqueuePendingOperationDelegate? tryEnqueuePendingOperation,
+        EnqueuePendingOperationDelegate enqueuePendingOperation,
+        NextPendingSequenceDelegate nextPendingSequence,
+        ReturnHeaderBufferDelegate returnHeaderBuffer,
+        ReturnPayloadArrayDelegate returnPayloadArray,
+        AbortPendingRequestDelegate abortPendingRequest,
+        Action<int>? recordBytesSent = null,
+        int coalescingEnterQueueDepth = 8,
+        int coalescingExitQueueDepth = 3,
+        int coalescedWriteMaxOperations = 128,
+        int coalescingSpinBudget = 8)
     {
         _crlfMemory = crlfMemory;
         _tryDequeueWrite = tryDequeueWrite;
         _getWriteQueueDepth = getWriteQueueDepth;
+        _tryEnqueuePendingOperation = tryEnqueuePendingOperation;
         _enqueuePendingOperation = enqueuePendingOperation;
         _nextPendingSequence = nextPendingSequence;
         _returnHeaderBuffer = returnHeaderBuffer;
@@ -148,6 +203,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             requestCommitOffsets,
             requestCount,
             generation,
+            _tryEnqueuePendingOperation,
             _enqueuePendingOperation,
             _nextPendingSequence,
             _recordBytesSent);
@@ -410,7 +466,10 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         if (segments.Count == 0)
             return new(success: true, commitTracker);
 
-        var sendSegments = _socketSendSegmentArrayPool.Rent(segments.Count);
+        var useScratch = segments.Count <= MaxVectoredSegmentsPerSend;
+        var sendSegments = useScratch
+            ? _socketSendSegmentScratch
+            : _socketSendSegmentArrayPool.Rent(segments.Count);
         var sendCount = 0;
         for (var i = 0; i < segments.Count; i++)
         {
@@ -421,7 +480,8 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             if (!MemoryMarshal.TryGetArray(seg, out ArraySegment<byte> arraySegment))
             {
                 Array.Clear(sendSegments, 0, sendCount);
-                _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
+                if (!useScratch)
+                    _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
                 return new(success: false, commitTracker);
             }
 
@@ -430,7 +490,8 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
 
         if (sendCount == 0)
         {
-            _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
+            if (!useScratch)
+                _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
             return new(success: true, commitTracker);
         }
 
@@ -473,7 +534,8 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         {
             _socketSendWindow.Reset();
             Array.Clear(sendSegments, 0, sendCount);
-            _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
+            if (!useScratch)
+                _socketSendSegmentArrayPool.Return(sendSegments, clearArray: false);
         }
     }
 
@@ -495,6 +557,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
         private readonly long[] _requestCommitOffsets;
         private readonly int _requestCount;
         private readonly long _generation;
+        private readonly TryEnqueuePendingOperationDelegate? _tryEnqueuePendingOperation;
         private readonly EnqueuePendingOperationDelegate _enqueuePendingOperation;
         private readonly NextPendingSequenceDelegate _nextPendingSequence;
         private readonly Action<int>? _recordBytesSent;
@@ -506,6 +569,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             long[] requestCommitOffsets,
             int requestCount,
             long generation,
+            TryEnqueuePendingOperationDelegate? tryEnqueuePendingOperation,
             EnqueuePendingOperationDelegate enqueuePendingOperation,
             NextPendingSequenceDelegate nextPendingSequence,
             Action<int>? recordBytesSent)
@@ -514,6 +578,7 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
             _requestCommitOffsets = requestCommitOffsets;
             _requestCount = requestCount;
             _generation = generation;
+            _tryEnqueuePendingOperation = tryEnqueuePendingOperation;
             _enqueuePendingOperation = enqueuePendingOperation;
             _nextPendingSequence = nextPendingSequence;
             _recordBytesSent = recordBytesSent;
@@ -538,6 +603,12 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
                 var op = _requests[_enqueuedCount].Op;
                 op.AssignGeneration(_generation);
                 op.AssignSequenceId(_nextPendingSequence());
+                if (_tryEnqueuePendingOperation?.Invoke(op) == true)
+                {
+                    _enqueuedCount++;
+                    continue;
+                }
+
                 var enqueue = _enqueuePendingOperation(op, ct);
                 if (!enqueue.IsCompletedSuccessfully)
                     return CommitSlowAsync(enqueue, ct);
@@ -558,6 +629,12 @@ internal sealed class CoalescedWriteDispatcher : IDisposable
                 var op = _requests[_enqueuedCount].Op;
                 op.AssignGeneration(_generation);
                 op.AssignSequenceId(_nextPendingSequence());
+                if (_tryEnqueuePendingOperation?.Invoke(op) == true)
+                {
+                    _enqueuedCount++;
+                    continue;
+                }
+
                 await _enqueuePendingOperation(op, ct).ConfigureAwait(false);
                 _enqueuedCount++;
             }

@@ -1,7 +1,7 @@
-using System.Buffers;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Infrastructure.Caching;
 
 namespace VapeCache.Infrastructure.Collections;
 
@@ -27,7 +27,7 @@ internal sealed class CacheSet<T> : ICacheSet<T>
     /// </summary>
     public async ValueTask<long> AddAsync(T item, CancellationToken ct = default)
     {
-        var buffer = new ArrayBufferWriter<byte>();
+        using var buffer = new PooledByteBufferWriter();
         _codec.Serialize(buffer, item);
         return await _executor.SAddAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
@@ -37,7 +37,7 @@ internal sealed class CacheSet<T> : ICacheSet<T>
     /// </summary>
     public async ValueTask<long> RemoveAsync(T item, CancellationToken ct = default)
     {
-        var buffer = new ArrayBufferWriter<byte>();
+        using var buffer = new PooledByteBufferWriter();
         _codec.Serialize(buffer, item);
         return await _executor.SRemAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
@@ -47,7 +47,7 @@ internal sealed class CacheSet<T> : ICacheSet<T>
     /// </summary>
     public async ValueTask<bool> ContainsAsync(T item, CancellationToken ct = default)
     {
-        var buffer = new ArrayBufferWriter<byte>();
+        using var buffer = new PooledByteBufferWriter();
         _codec.Serialize(buffer, item);
         return await _executor.SIsMemberAsync(Key, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }

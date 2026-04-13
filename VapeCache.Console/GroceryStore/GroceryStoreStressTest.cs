@@ -531,14 +531,7 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
 
     private static StressWorkload Normalize(GroceryStoreStressOptions options)
     {
-        var browseMinProducts = Math.Max(0, options.BrowseMinProducts);
-        var browseMaxProducts = Math.Max(browseMinProducts, options.BrowseMaxProducts);
-
-        var cartItemsMin = Math.Max(0, options.CartItemsMin);
-        var cartItemsMax = Math.Max(cartItemsMin, options.CartItemsMax);
-
-        var cartQuantityMin = Math.Max(1, options.CartItemQuantityMin);
-        var cartQuantityMax = Math.Max(cartQuantityMin, options.CartItemQuantityMax);
+        var behavior = ResolveBehaviorProfile(options.WorkloadProfile, options);
         var hotProductId = string.IsNullOrWhiteSpace(options.HotProductId) ? null : options.HotProductId.Trim();
 
         return new StressWorkload(
@@ -547,23 +540,124 @@ public class GroceryStoreStressTest : BackgroundService, IHostedLifecycleService
             TargetDuration: TimeSpan.FromSeconds(Math.Max(1, options.TargetDurationSeconds)),
             StartupDelay: TimeSpan.FromSeconds(Math.Max(0, options.StartupDelaySeconds)),
             CountdownDelay: TimeSpan.FromSeconds(Math.Max(0, options.CountdownSeconds)),
-            BrowseChancePercent: Math.Clamp(options.BrowseChancePercent, 0, 100),
-            BrowseMinProducts: browseMinProducts,
-            BrowseMaxProducts: browseMaxProducts,
-            FlashSaleJoinChancePercent: Math.Clamp(options.FlashSaleJoinChancePercent, 0, 100),
-            AddToCartChancePercent: Math.Clamp(options.AddToCartChancePercent, 0, 100),
-            CartItemsMin: cartItemsMin,
-            CartItemsMax: cartItemsMax,
-            CartItemQuantityMin: cartQuantityMin,
-            CartItemQuantityMax: cartQuantityMax,
-            ViewCartChancePercent: Math.Clamp(options.ViewCartChancePercent, 0, 100),
-            CheckoutChancePercent: Math.Clamp(options.CheckoutChancePercent, 0, 100),
-            RemoveFromCartChancePercent: Math.Clamp(options.RemoveFromCartChancePercent, 0, 100),
-            StatsInterval: TimeSpan.FromSeconds(Math.Max(1, options.StatsIntervalSeconds)),
+            BrowseChancePercent: behavior.BrowseChancePercent,
+            BrowseMinProducts: behavior.BrowseMinProducts,
+            BrowseMaxProducts: behavior.BrowseMaxProducts,
+            FlashSaleJoinChancePercent: behavior.FlashSaleJoinChancePercent,
+            AddToCartChancePercent: behavior.AddToCartChancePercent,
+            CartItemsMin: behavior.CartItemsMin,
+            CartItemsMax: behavior.CartItemsMax,
+            CartItemQuantityMin: behavior.CartItemQuantityMin,
+            CartItemQuantityMax: behavior.CartItemQuantityMax,
+            ViewCartChancePercent: behavior.ViewCartChancePercent,
+            CheckoutChancePercent: behavior.CheckoutChancePercent,
+            RemoveFromCartChancePercent: behavior.RemoveFromCartChancePercent,
+            StatsInterval: TimeSpan.FromSeconds(behavior.StatsIntervalSeconds),
             HotProductId: hotProductId,
             HotProductBiasPercent: Math.Clamp(options.HotProductBiasPercent, 0, 100),
             ForceHotProductFlashSale: options.ForceHotProductFlashSale,
             StopHostOnCompletion: options.StopHostOnCompletion);
+    }
+
+    private static GroceryBehaviorProfile ResolveBehaviorProfile(string? profileName, GroceryStoreStressOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(profileName))
+            return GroceryBehaviorProfile.FromOptions(options);
+
+        return profileName.Trim().ToLowerInvariant() switch
+        {
+            "default" => GroceryBehaviorProfile.FromOptions(options),
+            "dogfood" => GroceryBehaviorProfile.Dogfood,
+            "showcase" => GroceryBehaviorProfile.Showcase,
+            "stampede" => GroceryBehaviorProfile.Stampede,
+            _ => GroceryBehaviorProfile.FromOptions(options)
+        };
+    }
+
+    private readonly record struct GroceryBehaviorProfile(
+        int BrowseChancePercent,
+        int BrowseMinProducts,
+        int BrowseMaxProducts,
+        int FlashSaleJoinChancePercent,
+        int AddToCartChancePercent,
+        int CartItemsMin,
+        int CartItemsMax,
+        int CartItemQuantityMin,
+        int CartItemQuantityMax,
+        int ViewCartChancePercent,
+        int CheckoutChancePercent,
+        int RemoveFromCartChancePercent,
+        int StatsIntervalSeconds)
+    {
+        public static GroceryBehaviorProfile FromOptions(GroceryStoreStressOptions options)
+        {
+            var browseMinProducts = Math.Max(0, options.BrowseMinProducts);
+            var browseMaxProducts = Math.Max(browseMinProducts, options.BrowseMaxProducts);
+            var cartItemsMin = Math.Max(0, options.CartItemsMin);
+            var cartItemsMax = Math.Max(cartItemsMin, options.CartItemsMax);
+            var cartQuantityMin = Math.Max(1, options.CartItemQuantityMin);
+            var cartQuantityMax = Math.Max(cartQuantityMin, options.CartItemQuantityMax);
+
+            return new GroceryBehaviorProfile(
+                BrowseChancePercent: Math.Clamp(options.BrowseChancePercent, 0, 100),
+                BrowseMinProducts: browseMinProducts,
+                BrowseMaxProducts: browseMaxProducts,
+                FlashSaleJoinChancePercent: Math.Clamp(options.FlashSaleJoinChancePercent, 0, 100),
+                AddToCartChancePercent: Math.Clamp(options.AddToCartChancePercent, 0, 100),
+                CartItemsMin: cartItemsMin,
+                CartItemsMax: cartItemsMax,
+                CartItemQuantityMin: cartQuantityMin,
+                CartItemQuantityMax: cartQuantityMax,
+                ViewCartChancePercent: Math.Clamp(options.ViewCartChancePercent, 0, 100),
+                CheckoutChancePercent: Math.Clamp(options.CheckoutChancePercent, 0, 100),
+                RemoveFromCartChancePercent: Math.Clamp(options.RemoveFromCartChancePercent, 0, 100),
+                StatsIntervalSeconds: Math.Max(1, options.StatsIntervalSeconds));
+        }
+
+        public static GroceryBehaviorProfile Dogfood => new(
+            BrowseChancePercent: 65,
+            BrowseMinProducts: 8,
+            BrowseMaxProducts: 16,
+            FlashSaleJoinChancePercent: 25,
+            AddToCartChancePercent: 45,
+            CartItemsMin: 8,
+            CartItemsMax: 16,
+            CartItemQuantityMin: 1,
+            CartItemQuantityMax: 6,
+            ViewCartChancePercent: 25,
+            CheckoutChancePercent: 15,
+            RemoveFromCartChancePercent: 8,
+            StatsIntervalSeconds: 10);
+
+        public static GroceryBehaviorProfile Showcase => new(
+            BrowseChancePercent: 70,
+            BrowseMinProducts: 10,
+            BrowseMaxProducts: 25,
+            FlashSaleJoinChancePercent: 30,
+            AddToCartChancePercent: 50,
+            CartItemsMin: 30,
+            CartItemsMax: 50,
+            CartItemQuantityMin: 1,
+            CartItemQuantityMax: 10,
+            ViewCartChancePercent: 30,
+            CheckoutChancePercent: 20,
+            RemoveFromCartChancePercent: 10,
+            StatsIntervalSeconds: 10);
+
+        public static GroceryBehaviorProfile Stampede => new(
+            BrowseChancePercent: 100,
+            BrowseMinProducts: 1,
+            BrowseMaxProducts: 1,
+            FlashSaleJoinChancePercent: 0,
+            AddToCartChancePercent: 100,
+            CartItemsMin: 70,
+            CartItemsMax: 70,
+            CartItemQuantityMin: 1,
+            CartItemQuantityMax: 1,
+            ViewCartChancePercent: 0,
+            CheckoutChancePercent: 0,
+            RemoveFromCartChancePercent: 0,
+            StatsIntervalSeconds: 10);
     }
 
     private readonly record struct StressWorkload

@@ -10,7 +10,6 @@ internal sealed partial class RedisSearchService : IRedisSearchService, IDisposa
     private readonly IRedisCommandExecutor _redis;
     private readonly IRedisModuleDetector _modules;
     private readonly ILogger<RedisSearchService> _logger;
-    private readonly SemaphoreSlim _gate = new(1, 1);
     private bool? _available;
 
     public RedisSearchService(IRedisCommandExecutor redis, IRedisModuleDetector modules, ILogger<RedisSearchService> logger)
@@ -28,24 +27,13 @@ internal sealed partial class RedisSearchService : IRedisSearchService, IDisposa
         if (_available == true)
             return true;
 
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            if (_available == true)
-                return true;
-
-            var modules = await _modules.GetInstalledModulesAsync(ct).ConfigureAwait(false);
-            var available = modules.Any(m =>
-                string.Equals(m, "search", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(m, "ft", StringComparison.OrdinalIgnoreCase));
-            if (available)
-                _available = true;
-            return available;
-        }
-        finally
-        {
-            _gate.Release();
-        }
+        var modules = await _modules.GetInstalledModulesAsync(ct).ConfigureAwait(false);
+        var available = modules.Any(m =>
+            string.Equals(m, "search", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(m, "ft", StringComparison.OrdinalIgnoreCase));
+        if (available)
+            _available = true;
+        return available;
     }
 
     /// <summary>
@@ -113,5 +101,7 @@ internal sealed partial class RedisSearchService : IRedisSearchService, IDisposa
         Message = "RediSearch module not available; FT.CREATE for {Index} ignored.")]
     private static partial void LogRedisSearchUnavailable(ILogger logger, string index);
 
-    public void Dispose() => _gate.Dispose();
+    public void Dispose()
+    {
+    }
 }

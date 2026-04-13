@@ -54,8 +54,11 @@ dotnet add package VapeCache.Extensions.AdminAuth
 ## 2. Run Redis
 
 ```bash
-docker run --name vapecache-redis -p 6379:6379 -d redis:7
+docker run --name vapecache-redis -p 6379:6379 -d redis:8.6
 ```
+
+Version ownership rule:
+The Aspire host owns the Redis version line through `Aspire.Hosting.Redis`, and manual Docker examples should stay on that same major/minor line.
 
 If you want a local/lightweight runtime with no Redis dependency, skip this and use the in-memory-only registration path below.
 

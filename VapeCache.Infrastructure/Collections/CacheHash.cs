@@ -1,7 +1,7 @@
-using System.Buffers;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Infrastructure.Caching;
 
 namespace VapeCache.Infrastructure.Collections;
 
@@ -27,7 +27,7 @@ internal sealed class CacheHash<T> : ICacheHash<T>
     /// </summary>
     public async ValueTask<long> SetAsync(string field, T value, CancellationToken ct = default)
     {
-        var buffer = new ArrayBufferWriter<byte>();
+        using var buffer = new PooledByteBufferWriter();
         _codec.Serialize(buffer, value);
         return await _executor.HSetAsync(Key, field, buffer.WrittenMemory, ct).ConfigureAwait(false);
     }
@@ -37,9 +37,9 @@ internal sealed class CacheHash<T> : ICacheHash<T>
     /// </summary>
     public async ValueTask<T?> GetAsync(string field, CancellationToken ct = default)
     {
-        var bytes = await _executor.HGetAsync(Key, field, ct).ConfigureAwait(false);
-        if (bytes is null) return default;
-        return _codec.Deserialize(bytes);
+        using var lease = await _executor.HGetLeaseAsync(Key, field, ct).ConfigureAwait(false);
+        if (lease.IsNull) return default;
+        return _codec.Deserialize(lease.Span);
     }
 
     /// <summary>

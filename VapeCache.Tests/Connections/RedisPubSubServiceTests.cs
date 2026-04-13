@@ -108,6 +108,55 @@ public sealed class RedisPubSubServiceTests
     }
 
     [Fact]
+    public async Task SubscribeAsync_DropsOldestWhenQueueIsFull_AndDropOldestEnabled()
+    {
+        var stream = new ScriptedResponseStream();
+        stream.Enqueue("*3\r\n$9\r\nsubscribe\r\n$6\r\norders\r\n:1\r\n");
+        stream.Enqueue("*3\r\n$7\r\nmessage\r\n$6\r\norders\r\n$3\r\none\r\n");
+
+        var connection = new ScriptedConnection(stream);
+        await using var factory = new QueueConnectionFactory(connection);
+        var options = new TestOptionsMonitor<RedisPubSubOptions>(new RedisPubSubOptions
+        {
+            DeliveryQueueCapacity = 1,
+            DropOldestOnBackpressure = true
+        });
+
+        await using var sut = new RedisPubSubService(factory, options, NullLogger<RedisPubSubService>.Instance);
+        var firstHandledGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handled = new ConcurrentQueue<string>();
+
+        await using var sub = await sut.SubscribeAsync(
+            "orders",
+            async (message, _) =>
+            {
+                var payload = System.Text.Encoding.UTF8.GetString(message.Payload.Span);
+                handled.Enqueue(payload);
+                if (payload == "one")
+                {
+                    firstHandledGate.TrySetResult();
+                    await releaseGate.Task.ConfigureAwait(false);
+                }
+            },
+            CancellationToken.None);
+
+        var reachedFirst = await Task.WhenAny(firstHandledGate.Task, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.Same(firstHandledGate.Task, reachedFirst);
+
+        stream.Enqueue("*3\r\n$7\r\nmessage\r\n$6\r\norders\r\n$3\r\ntwo\r\n");
+        stream.Enqueue("*3\r\n$7\r\nmessage\r\n$6\r\norders\r\n$5\r\nthree\r\n");
+        await Task.Delay(150);
+        releaseGate.TrySetResult();
+
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (DateTime.UtcNow < deadline && handled.Count < 2)
+            await Task.Delay(10);
+
+        Assert.Equal(["one", "three"], handled.ToArray());
+    }
+
+    [Fact]
     public async Task SubscribeAsync_FirstSubscription_SendsSingleSubscribeCommand()
     {
         var stream = new ScriptedResponseStream();

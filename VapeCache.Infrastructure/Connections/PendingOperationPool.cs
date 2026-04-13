@@ -1,20 +1,20 @@
 using System.Diagnostics;
-using System.Collections.Concurrent;
 using System.Threading.Tasks.Sources;
 
 namespace VapeCache.Infrastructure.Connections;
 
 internal sealed class PendingOperationPool
 {
-    private readonly ConcurrentBag<PendingOperation> _pool = new();
+    private readonly System.Threading.Lock _poolGate = new();
     private readonly CancellationToken _shutdownToken;
-    private readonly SemaphoreSlim _inFlight;
+    private readonly IInFlightGate _inFlight;
     private readonly Action<long>? _recordLatencyStopwatchTicks;
     private readonly Func<bool>? _shouldRecordLatency;
+    private PendingOperation? _head;
 
     public PendingOperationPool(
         CancellationToken shutdownToken,
-        SemaphoreSlim inFlight,
+        IInFlightGate inFlight,
         Action<long>? recordLatencyStopwatchTicks = null,
         Func<bool>? shouldRecordLatency = null)
     {
@@ -24,12 +24,36 @@ internal sealed class PendingOperationPool
         _shouldRecordLatency = shouldRecordLatency;
     }
 
+    public PendingOperationPool(
+        CancellationToken shutdownToken,
+        SemaphoreSlim inFlight,
+        Action<long>? recordLatencyStopwatchTicks = null,
+        Func<bool>? shouldRecordLatency = null)
+        : this(
+            shutdownToken,
+            new SemaphoreInFlightGateAdapter(inFlight),
+            recordLatencyStopwatchTicks,
+            shouldRecordLatency)
+    {
+    }
+
     /// <summary>
     /// Executes value.
     /// </summary>
     public PendingOperation Rent()
     {
-        if (_pool.TryTake(out var op))
+        PendingOperation? op;
+        lock (_poolGate)
+        {
+            op = _head;
+            if (op is not null)
+            {
+                _head = op.NextPooled;
+                op.NextPooled = null;
+            }
+        }
+
+        if (op is not null)
         {
             op.Reset();
             return op;
@@ -43,12 +67,31 @@ internal sealed class PendingOperationPool
             _shouldRecordLatency);
     }
 
-    private void Return(PendingOperation operation) => _pool.Add(operation);
+    private void Return(PendingOperation operation)
+    {
+        lock (_poolGate)
+        {
+            operation.NextPooled = _head;
+            _head = operation;
+        }
+    }
 
     /// <summary>
     /// Attempts to value.
     /// </summary>
-    public bool TryTake(out PendingOperation? operation) => _pool.TryTake(out operation);
+    public bool TryTake(out PendingOperation? operation)
+    {
+        lock (_poolGate)
+        {
+            operation = _head;
+            if (operation is null)
+                return false;
+
+            _head = operation.NextPooled;
+            operation.NextPooled = null;
+            return true;
+        }
+    }
 }
 
 internal enum OperationClass : byte
@@ -66,7 +109,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
 
     private ManualResetValueTaskSourceCore<RedisRespReader.RespValue> _core;
     private readonly CancellationToken _shutdownToken;
-    private readonly SemaphoreSlim _inFlight;
+    private readonly IInFlightGate _inFlight;
     private readonly Action<PendingOperation> _returnToPool;
     private CancellationTokenRegistration _ctr;
     private CancellationTokenRegistration _shutdownCtr;
@@ -84,10 +127,11 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
     private long _sequenceId;
     private long _generation;
     private long _startedStopwatchTicks;
+    internal PendingOperation? NextPooled { get; set; }
 
     public PendingOperation(
         CancellationToken shutdownToken,
-        SemaphoreSlim inFlight,
+        IInFlightGate inFlight,
         Action<PendingOperation> returnToPool,
         Action<long>? recordLatencyStopwatchTicks,
         Func<bool>? shouldRecordLatency)
@@ -101,6 +145,21 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         {
             RunContinuationsAsynchronously = true
         };
+    }
+
+    public PendingOperation(
+        CancellationToken shutdownToken,
+        SemaphoreSlim inFlight,
+        Action<PendingOperation> returnToPool,
+        Action<long>? recordLatencyStopwatchTicks,
+        Func<bool>? shouldRecordLatency)
+        : this(
+            shutdownToken,
+            new SemaphoreInFlightGateAdapter(inFlight),
+            returnToPool,
+            recordLatencyStopwatchTicks,
+            shouldRecordLatency)
+    {
     }
 
     public bool PoolBulk { get; private set; }
@@ -134,6 +193,7 @@ internal sealed class PendingOperation : IValueTaskSource<RedisRespReader.RespVa
         Volatile.Write(ref _sequenceId, 0);
         Volatile.Write(ref _generation, 0);
         Volatile.Write(ref _startedStopwatchTicks, 0);
+        NextPooled = null;
     }
 
     /// <summary>

@@ -497,6 +497,7 @@ Configuration options for Redis reconciliation (syncing in-memory writes back to
 | Setting | Type | Default | Description |
 |---|---|---|---|
 | Enabled | bool | true | (No XML summary.) |
+| WorkloadProfile | string? | null | Named GroceryStore shopper-behavior profile. Supported values: `default`, `dogfood`, `showcase`, `stampede`. |
 | ConcurrentShoppers | int | 2000 | (No XML summary.) |
 | TotalShoppers | int | 100000 | (No XML summary.) |
 | TargetDurationSeconds | int | 180 | (No XML summary.) |
@@ -507,8 +508,8 @@ Configuration options for Redis reconciliation (syncing in-memory writes back to
 | BrowseMaxProducts | int | 25 | (No XML summary.) |
 | FlashSaleJoinChancePercent | int | 30 | (No XML summary.) |
 | AddToCartChancePercent | int | 50 | (No XML summary.) |
-| CartItemsMin | int | 15 | (No XML summary.) |
-| CartItemsMax | int | 35 | (No XML summary.) |
+| CartItemsMin | int | 30 | (No XML summary.) |
+| CartItemsMax | int | 50 | (No XML summary.) |
 | CartItemQuantityMin | int | 1 | (No XML summary.) |
 | CartItemQuantityMax | int | 10 | (No XML summary.) |
 | ViewCartChancePercent | int | 30 | (No XML summary.) |

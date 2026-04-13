@@ -5,6 +5,7 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <LangVersion>14.0</LangVersion>
     <VapeCacheAnalyzerAudience>runtime</VapeCacheAnalyzerAudience>
+    <VapeCacheAspireVersion>13.2.1</VapeCacheAspireVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="

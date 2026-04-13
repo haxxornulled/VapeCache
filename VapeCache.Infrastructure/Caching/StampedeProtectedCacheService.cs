@@ -17,11 +17,28 @@ internal sealed class StampedeProtectedCacheService : ICacheService, ICacheTagSe
 
     private sealed class LockEntry : IDisposable
     {
-        public readonly SemaphoreSlim Semaphore = new(1, 1);
+        private readonly AsyncSignal _completion = new();
+        private int _inFlight;
         public int RefCount;
         public int Disposed; // 0 = active, 1 = disposed (prevents race on disposal)
 
-        public void Dispose() => Semaphore.Dispose();
+        public long CompletionVersion => _completion.Version;
+
+        public bool TryBeginSingleFlight()
+            => Interlocked.CompareExchange(ref _inFlight, 1, 0) == 0;
+
+        public bool IsInFlight => Volatile.Read(ref _inFlight) == 1;
+
+        public ValueTask WaitForCompletionAsync(long observedVersion, CancellationToken ct)
+            => _completion.WaitAsync(observedVersion, ct);
+
+        public void CompleteSingleFlight()
+        {
+            Volatile.Write(ref _inFlight, 0);
+            _completion.Set();
+        }
+
+        public void Dispose() => _completion.Dispose();
     }
 
     private readonly ICacheService _inner;
@@ -111,6 +128,7 @@ internal sealed class StampedeProtectedCacheService : ICacheService, ICacheTagSe
         if (!stampedeOptions.Enabled)
             return await _inner.GetOrSetAsync(key, factory, serialize, deserialize, options, ct).ConfigureAwait(false);
 
+        ct.ThrowIfCancellationRequested();
         ValidateKey(key, stampedeOptions);
         ThrowIfInFailureBackoff(key, stampedeOptions);
 
@@ -163,12 +181,52 @@ internal sealed class StampedeProtectedCacheService : ICacheService, ICacheTagSe
 
         try
         {
-            var lockTaken = false;
             using var waitCts = CreateWaitTokenSource(stampedeOptions, ct);
-            try
+            while (true)
             {
-                await entry.Semaphore.WaitAsync(waitCts?.Token ?? ct).ConfigureAwait(false);
-                lockTaken = true;
+                if (entry.TryBeginSingleFlight())
+                {
+                    try
+                    {
+                        bytes = await _inner.GetAsync(key, ct).ConfigureAwait(false);
+                        if (bytes is not null)
+                        {
+                            _failures.TryRemove(key, out _);
+                            return deserialize(bytes);
+                        }
+
+                        var created = await factory(ct).ConfigureAwait(false);
+                        await _inner.SetAsync(key, created, serialize, options, ct).ConfigureAwait(false);
+                        _failures.TryRemove(key, out _);
+                        return created;
+                    }
+                    catch
+                    {
+                        RegisterFailure(key, stampedeOptions);
+                        throw;
+                    }
+                    finally
+                    {
+                        entry.CompleteSingleFlight();
+                    }
+                }
+
+                var observedVersion = entry.CompletionVersion;
+                if (!entry.IsInFlight)
+                    continue;
+
+                try
+                {
+                    await entry.WaitForCompletionAsync(observedVersion, waitCts?.Token ?? ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    CacheTelemetry.StampedeLockWaitTimeout.Add(1);
+                    _stats?.IncStampedeLockWaitTimeout();
+                    throw new TimeoutException($"Stampede lock wait timed out for key '{key}'.");
+                }
+
+                ThrowIfInFailureBackoff(key, stampedeOptions);
 
                 bytes = await _inner.GetAsync(key, ct).ConfigureAwait(false);
                 if (bytes is not null)
@@ -176,28 +234,6 @@ internal sealed class StampedeProtectedCacheService : ICacheService, ICacheTagSe
                     _failures.TryRemove(key, out _);
                     return deserialize(bytes);
                 }
-
-                var created = await factory(ct).ConfigureAwait(false);
-                await _inner.SetAsync(key, created, serialize, options, ct).ConfigureAwait(false);
-                _failures.TryRemove(key, out _);
-                return created;
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                CacheTelemetry.StampedeLockWaitTimeout.Add(1);
-                _stats?.IncStampedeLockWaitTimeout();
-                throw new TimeoutException($"Stampede lock wait timed out for key '{key}'.");
-            }
-            catch
-            {
-                if (lockTaken)
-                    RegisterFailure(key, stampedeOptions);
-                throw;
-            }
-            finally
-            {
-                if (lockTaken)
-                    entry.Semaphore.Release();
             }
         }
         finally
@@ -299,5 +335,59 @@ internal sealed class StampedeProtectedCacheService : ICacheService, ICacheTagSe
 
         throw new NotSupportedException(
             $"Inner cache service '{_inner.GetType().Name}' does not implement tag/zone invalidation.");
+    }
+
+    private sealed class AsyncSignal : IDisposable
+    {
+        private volatile TaskCompletionSource<bool>? _waiters;
+        private long _version;
+        private int _disposed;
+
+        public long Version => Volatile.Read(ref _version);
+
+        public void Set()
+        {
+            if (Volatile.Read(ref _disposed) == 1)
+                return;
+
+            Interlocked.Increment(ref _version);
+            Interlocked.Exchange(ref _waiters, null)?.TrySetResult(true);
+        }
+
+        public ValueTask WaitAsync(long observedVersion, CancellationToken ct)
+        {
+            if (Volatile.Read(ref _disposed) == 1 || Volatile.Read(ref _version) != observedVersion)
+                return ValueTask.CompletedTask;
+
+            while (true)
+            {
+                var current = _waiters;
+                if (Volatile.Read(ref _disposed) == 1 || Volatile.Read(ref _version) != observedVersion)
+                    return ValueTask.CompletedTask;
+
+                if (current is null)
+                {
+                    var created = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    var prior = Interlocked.CompareExchange(ref _waiters, created, null);
+                    current = prior ?? created;
+                    if (prior is not null)
+                        continue;
+                }
+
+                if (Volatile.Read(ref _disposed) == 1 || Volatile.Read(ref _version) != observedVersion)
+                    return ValueTask.CompletedTask;
+
+                return new ValueTask(current.Task.WaitAsync(ct));
+            }
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+                return;
+
+            Interlocked.Increment(ref _version);
+            Interlocked.Exchange(ref _waiters, null)?.TrySetResult(true);
+        }
     }
 }

@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace VapeCache.Infrastructure.Connections;
@@ -14,18 +14,13 @@ internal sealed class RedisMultiplexedBufferCaches
     [ThreadStatic] private static ReadOnlyMemory<byte>[]? _tlsPayloadArrayCache;
     [ThreadStatic] private static ReadOnlyMemory<byte>[]? _tlsSmallPayloadArrayCache;
 
-    private static readonly ConcurrentBag<byte[]> SharedHeaderCache = new();
-    private static readonly ConcurrentBag<byte[]> SharedSmallHeaderCache = new();
-    private static readonly ConcurrentBag<ReadOnlyMemory<byte>[]> SharedPayloadArrayCache = new();
-    private static readonly ConcurrentBag<ReadOnlyMemory<byte>[]> SharedSmallPayloadArrayCache = new();
-    private static readonly ConcurrentDictionary<byte[], byte> InFlightHeaderBuffers = new();
-    private static readonly ConcurrentDictionary<ReadOnlyMemory<byte>[], byte> InFlightPayloadArrays = new();
-
     private const int MaxSharedCacheSize = 64;
-    private static int _sharedHeaderCount;
-    private static int _sharedSmallHeaderCount;
-    private static int _sharedPayloadArrayCount;
-    private static int _sharedSmallPayloadArrayCount;
+    private static readonly SharedBufferCache<byte[]> SharedHeaderCache = new(MaxSharedCacheSize);
+    private static readonly SharedBufferCache<byte[]> SharedSmallHeaderCache = new(MaxSharedCacheSize);
+    private static readonly SharedBufferCache<ReadOnlyMemory<byte>[]> SharedPayloadArrayCache = new(MaxSharedCacheSize);
+    private static readonly SharedBufferCache<ReadOnlyMemory<byte>[]> SharedSmallPayloadArrayCache = new(MaxSharedCacheSize);
+    private static readonly OwnershipTable<byte[]> InFlightHeaderBuffers = new();
+    private static readonly OwnershipTable<ReadOnlyMemory<byte>[]> InFlightPayloadArrays = new();
 
     /// <summary>
     /// Executes value.
@@ -37,13 +32,13 @@ internal sealed class RedisMultiplexedBufferCaches
             if (_tlsSmallHeaderCache is { } buf && buf.Length >= minLength)
             {
                 _tlsSmallHeaderCache = null;
-                InFlightHeaderBuffers.TryRemove(buf, out _);
+                InFlightHeaderBuffers.Remove(buf);
                 return buf;
             }
 
-            if (TryTakeShared(SharedSmallHeaderCache, ref _sharedSmallHeaderCount, out var poolBuf) && poolBuf.Length >= minLength)
+            if (SharedSmallHeaderCache.TryTake(out var poolBuf) && poolBuf.Length >= minLength)
             {
-                InFlightHeaderBuffers.TryRemove(poolBuf, out _);
+                InFlightHeaderBuffers.Remove(poolBuf);
                 return poolBuf;
             }
 
@@ -53,15 +48,15 @@ internal sealed class RedisMultiplexedBufferCaches
         if (_tlsHeaderCache is { } largeBuf && largeBuf.Length >= minLength)
         {
             _tlsHeaderCache = null;
-            InFlightHeaderBuffers.TryRemove(largeBuf, out _);
+            InFlightHeaderBuffers.Remove(largeBuf);
             return largeBuf;
         }
 
-        while (TryTakeShared(SharedHeaderCache, ref _sharedHeaderCount, out var largePoolBuf))
+        while (SharedHeaderCache.TryTake(out var largePoolBuf))
         {
             if (largePoolBuf.Length >= minLength)
             {
-                InFlightHeaderBuffers.TryRemove(largePoolBuf, out _);
+                InFlightHeaderBuffers.Remove(largePoolBuf);
                 return largePoolBuf;
             }
 
@@ -80,7 +75,7 @@ internal sealed class RedisMultiplexedBufferCaches
         if (buffer is null)
             return;
 
-        InFlightHeaderBuffers[buffer] = OwnershipInFlight;
+        InFlightHeaderBuffers.Set(buffer, OwnershipInFlight);
     }
 
     /// <summary>
@@ -99,7 +94,7 @@ internal sealed class RedisMultiplexedBufferCaches
         if (InFlightHeaderBuffers.TryGetValue(buffer, out var ownership))
         {
             if (ownership == OwnershipReleasedByMux)
-                InFlightHeaderBuffers.TryRemove(buffer, out _);
+                InFlightHeaderBuffers.Remove(buffer);
             return;
         }
 
@@ -114,7 +109,7 @@ internal sealed class RedisMultiplexedBufferCaches
         if (buffer is null)
             return;
 
-        InFlightHeaderBuffers[buffer] = OwnershipReleasedByMux;
+        InFlightHeaderBuffers.Set(buffer, OwnershipReleasedByMux);
         ReturnHeaderBufferCore(buffer);
     }
 
@@ -128,7 +123,7 @@ internal sealed class RedisMultiplexedBufferCaches
                 return;
             }
 
-            if (TryAddShared(SharedSmallHeaderCache, ref _sharedSmallHeaderCount, buffer))
+            if (SharedSmallHeaderCache.TryAdd(buffer))
                 return;
             return;
         }
@@ -139,7 +134,7 @@ internal sealed class RedisMultiplexedBufferCaches
             return;
         }
 
-        if (TryAddShared(SharedHeaderCache, ref _sharedHeaderCount, buffer))
+        if (SharedHeaderCache.TryAdd(buffer))
         {
             return;
         }
@@ -156,7 +151,7 @@ internal sealed class RedisMultiplexedBufferCaches
         if (payloads is null)
             return;
 
-        InFlightPayloadArrays[payloads] = OwnershipInFlight;
+        InFlightPayloadArrays.Set(payloads, OwnershipInFlight);
     }
 
     /// <summary>
@@ -169,13 +164,13 @@ internal sealed class RedisMultiplexedBufferCaches
             if (_tlsSmallPayloadArrayCache is { } arr && arr.Length >= minLength)
             {
                 _tlsSmallPayloadArrayCache = null;
-                InFlightPayloadArrays.TryRemove(arr, out _);
+                InFlightPayloadArrays.Remove(arr);
                 return arr;
             }
 
-            if (TryTakeShared(SharedSmallPayloadArrayCache, ref _sharedSmallPayloadArrayCount, out var poolArr) && poolArr.Length >= minLength)
+            if (SharedSmallPayloadArrayCache.TryTake(out var poolArr) && poolArr.Length >= minLength)
             {
-                InFlightPayloadArrays.TryRemove(poolArr, out _);
+                InFlightPayloadArrays.Remove(poolArr);
                 return poolArr;
             }
 
@@ -185,15 +180,15 @@ internal sealed class RedisMultiplexedBufferCaches
         if (_tlsPayloadArrayCache is { } largeArr && largeArr.Length >= minLength)
         {
             _tlsPayloadArrayCache = null;
-            InFlightPayloadArrays.TryRemove(largeArr, out _);
+            InFlightPayloadArrays.Remove(largeArr);
             return largeArr;
         }
 
-        while (TryTakeShared(SharedPayloadArrayCache, ref _sharedPayloadArrayCount, out var largePoolArr))
+        while (SharedPayloadArrayCache.TryTake(out var largePoolArr))
         {
             if (largePoolArr.Length >= minLength)
             {
-                InFlightPayloadArrays.TryRemove(largePoolArr, out _);
+                InFlightPayloadArrays.Remove(largePoolArr);
                 return largePoolArr;
             }
 
@@ -219,7 +214,7 @@ internal sealed class RedisMultiplexedBufferCaches
         if (InFlightPayloadArrays.TryGetValue(payloads, out var ownership))
         {
             if (ownership == OwnershipReleasedByMux)
-                InFlightPayloadArrays.TryRemove(payloads, out _);
+                InFlightPayloadArrays.Remove(payloads);
             return;
         }
 
@@ -234,7 +229,7 @@ internal sealed class RedisMultiplexedBufferCaches
         if (payloads is null)
             return;
 
-        InFlightPayloadArrays[payloads] = OwnershipReleasedByMux;
+        InFlightPayloadArrays.Set(payloads, OwnershipReleasedByMux);
         ReturnPayloadArrayCore(payloads);
     }
 
@@ -249,7 +244,7 @@ internal sealed class RedisMultiplexedBufferCaches
                 return;
             }
 
-            if (TryAddShared(SharedSmallPayloadArrayCache, ref _sharedSmallPayloadArrayCount, payloads))
+            if (SharedSmallPayloadArrayCache.TryAdd(payloads))
                 return;
             return;
         }
@@ -260,7 +255,7 @@ internal sealed class RedisMultiplexedBufferCaches
             return;
         }
 
-        if (TryAddShared(SharedPayloadArrayCache, ref _sharedPayloadArrayCount, payloads))
+        if (SharedPayloadArrayCache.TryAdd(payloads))
         {
             return;
         }
@@ -268,33 +263,100 @@ internal sealed class RedisMultiplexedBufferCaches
         ArrayPool<ReadOnlyMemory<byte>>.Shared.Return(payloads, clearArray: true);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool TryTakeShared<T>(ConcurrentBag<T> bag, ref int count, out T item)
+    private sealed class SharedBufferCache<T> where T : class
     {
-        if (bag.TryTake(out item!))
+        private readonly System.Threading.Lock _gate = new();
+        private readonly T?[] _items;
+        private int _count;
+
+        public SharedBufferCache(int capacity)
         {
-            Interlocked.Decrement(ref count);
-            return true;
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
+            _items = new T[capacity];
         }
 
-        item = default!;
-        return false;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryTake(out T item)
+        {
+            lock (_gate)
+            {
+                if (_count == 0)
+                {
+                    item = default!;
+                    return false;
+                }
+
+                var next = --_count;
+                item = _items[next]!;
+                _items[next] = default;
+                return true;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryAdd(T item)
+        {
+            lock (_gate)
+            {
+                if (_count == _items.Length)
+                    return false;
+
+                _items[_count++] = item;
+                return true;
+            }
+        }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool TryAddShared<T>(ConcurrentBag<T> bag, ref int count, T item)
+    private sealed class OwnershipTable<T> where T : class
     {
-        while (true)
+        private const int StripeCount = 32;
+        private readonly Stripe[] _stripes;
+
+        public OwnershipTable()
         {
-            var snapshot = Volatile.Read(ref count);
-            if (snapshot >= MaxSharedCacheSize)
-                return false;
+            _stripes = new Stripe[StripeCount];
+            for (var i = 0; i < _stripes.Length; i++)
+                _stripes[i] = new Stripe();
+        }
 
-            if (Interlocked.CompareExchange(ref count, snapshot + 1, snapshot) != snapshot)
-                continue;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Set(T item, byte state)
+        {
+            var stripe = GetStripe(item);
+            lock (stripe.Gate)
+            {
+                stripe.Map[item] = state;
+            }
+        }
 
-            bag.Add(item);
-            return true;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryGetValue(T item, out byte state)
+        {
+            var stripe = GetStripe(item);
+            lock (stripe.Gate)
+            {
+                return stripe.Map.TryGetValue(item, out state);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Remove(T item)
+        {
+            var stripe = GetStripe(item);
+            lock (stripe.Gate)
+            {
+                stripe.Map.Remove(item);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private Stripe GetStripe(T item)
+            => _stripes[RuntimeHelpers.GetHashCode(item) & (StripeCount - 1)];
+
+        private sealed class Stripe
+        {
+            public readonly System.Threading.Lock Gate = new();
+            public readonly Dictionary<T, byte> Map = new(ReferenceEqualityComparer.Instance);
         }
     }
 }

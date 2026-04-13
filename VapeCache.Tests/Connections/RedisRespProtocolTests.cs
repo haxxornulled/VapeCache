@@ -68,6 +68,23 @@ public class RedisRespProtocolTests
     }
 
     [Fact]
+    public void ZRangeWithScores_NegativeBounds_LengthMatchesWriter()
+    {
+        var len = RedisRespProtocol.GetZRangeWithScoresCommandLength("scores", -25, -1, descending: true);
+        var buffer = new byte[len];
+        var written = RedisRespProtocol.WriteZRangeWithScoresCommand(buffer, "scores", -25, -1, descending: true);
+
+        Assert.Equal(len, written);
+
+        var text = Encoding.ASCII.GetString(buffer);
+        Assert.StartsWith("*5\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$9\r\nZREVRANGE\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$3\r\n-25\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$2\r\n-1\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$10\r\nWITHSCORES\r\n", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RPushMany_LengthMatchesWriter()
     {
         var values = new ReadOnlyMemory<byte>[]
@@ -178,6 +195,23 @@ public class RedisRespProtocolTests
         AssertSingleKeyCommand(key, "$4\r\nPTTL\r\n", RedisRespProtocol.GetPTtlCommandLength, RedisRespProtocol.WritePTtlCommand);
         AssertSingleKeyCommand(key, "$3\r\nDEL\r\n", RedisRespProtocol.GetDelCommandLength, RedisRespProtocol.WriteDelCommand);
         AssertSingleKeyCommand(key, "$6\r\nUNLINK\r\n", RedisRespProtocol.GetUnlinkCommandLength, RedisRespProtocol.WriteUnlinkCommand);
+    }
+
+    [Fact]
+    public void PrefixedSingleKeyCommands_NonAsciiKey_LengthMatchesWriter()
+    {
+        const string key = "cafe:\u00E9clair:\u2603";
+
+        var len = RedisRespProtocol.GetGetCommandLength(key);
+        var buffer = new byte[len];
+        var written = RedisRespProtocol.WriteGetCommand(buffer, key);
+
+        Assert.Equal(len, written);
+
+        var text = Encoding.UTF8.GetString(buffer);
+        Assert.StartsWith("*2\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("$3\r\nGET\r\n", text, StringComparison.Ordinal);
+        Assert.Contains($"${Encoding.UTF8.GetByteCount(key)}\r\n{key}\r\n", text, StringComparison.Ordinal);
     }
 
     [Fact]

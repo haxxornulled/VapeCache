@@ -57,7 +57,7 @@ public sealed class RedisModuleDetectorTests
         var attempts = 0;
         var mock = new Mock<IRedisCommandExecutor>(MockBehavior.Strict);
         mock.Setup(m => m.ModuleListAsync(It.IsAny<CancellationToken>()))
-            .Returns(() =>
+            .Returns((CancellationToken _) =>
             {
                 attempts++;
                 return attempts == 1
@@ -81,12 +81,49 @@ public sealed class RedisModuleDetectorTests
     {
         var mock = new Mock<IRedisCommandExecutor>(MockBehavior.Strict);
         mock.Setup(m => m.ModuleListAsync(It.IsAny<CancellationToken>()))
-            .Returns((CancellationToken ct) => ValueTask.FromException<string[]>(new OperationCanceledException(ct)));
+            .Returns((CancellationToken ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                return ValueTask.FromException<string[]>(new OperationCanceledException(ct));
+            });
 
         var sut = new RedisModuleDetector(mock.Object);
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sut.GetInstalledModulesAsync(cts.Token).AsTask());
+    }
+
+    [Fact]
+    public async Task GetInstalledModulesAsync_coalesces_concurrent_calls()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = 0;
+
+        var mock = new Mock<IRedisCommandExecutor>(MockBehavior.Strict);
+        mock.Setup(m => m.ModuleListAsync(It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                Interlocked.Increment(ref attempts);
+                started.TrySetResult();
+                await release.Task.ConfigureAwait(false);
+                return ["ReJSON", "search"];
+            });
+
+        var sut = new RedisModuleDetector(mock.Object);
+        var first = sut.GetInstalledModulesAsync().AsTask();
+        await started.Task;
+
+        var concurrent = Enumerable.Range(0, 15)
+            .Select(_ => sut.GetInstalledModulesAsync().AsTask())
+            .ToArray();
+
+        release.TrySetResult();
+
+        var all = await Task.WhenAll([first, ..concurrent]);
+        Assert.All(all, modules => Assert.Equal(["ReJSON", "search"], modules));
+        Assert.Equal(1, attempts);
+        mock.Verify(m => m.ModuleListAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 }

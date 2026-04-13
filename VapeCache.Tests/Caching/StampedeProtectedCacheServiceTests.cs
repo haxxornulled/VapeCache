@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Tests.Infrastructure;
@@ -231,7 +232,7 @@ public sealed class StampedeProtectedCacheServiceTests
 
     private sealed class FakeCache : ICacheService
     {
-        private readonly Dictionary<string, byte[]> _store = new(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, byte[]> _store = new(StringComparer.Ordinal);
         public string Name => "fake";
 
         public ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
@@ -248,7 +249,7 @@ public sealed class StampedeProtectedCacheServiceTests
 
         public ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
         {
-            var ok = _store.Remove(key);
+            var ok = _store.TryRemove(key, out _);
             return ValueTask.FromResult(ok);
         }
 

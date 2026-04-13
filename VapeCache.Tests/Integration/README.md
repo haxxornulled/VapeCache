@@ -8,12 +8,15 @@ Integration tests that require a live Redis instance.
 
 **Using Docker (Recommended):**
 ```bash
-# Start Redis 7.x
-docker run --name vapecache-redis -d -p 6379:6379 redis:7-alpine
+# Start Redis 8.6
+docker run --name vapecache-redis -d -p 6379:6379 redis:8.6
 
 # Verify it's running
 docker ps | grep vapecache-redis
 ```
+
+The integration suite intentionally uses the same Redis `8.6` line as the Aspire host default from `Aspire.Hosting.Redis`.
+That keeps local Docker runs, test runs, and AppHost container runs on one supported version line instead of drifting.
 
 **Using Windows Subsystem for Linux (WSL):**
 ```bash
@@ -135,7 +138,7 @@ jobs:
 
     services:
       redis:
-        image: redis:7-alpine
+        image: redis:8.6
         ports:
           - 6379:6379
         options: >-
@@ -165,7 +168,7 @@ steps:
   displayName: 'Start Redis Container'
   inputs:
     command: 'run'
-    arguments: '--name vapecache-redis -d -p 6379:6379 redis:7-alpine'
+    arguments: '--name vapecache-redis -d -p 6379:6379 redis:8.6'
 
 - task: DotNetCoreCLI@2
   displayName: 'Run Integration Tests'

@@ -517,10 +517,15 @@ public sealed class RedisCommandExecutorAutoscalerTests
         Assert.NotNull(lane);
         var inflightField = lane!.GetType().GetField("_inFlight", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(inflightField);
-        var inflight = (SemaphoreSlim?)inflightField!.GetValue(lane);
+        var inflight = inflightField!.GetValue(lane);
         Assert.NotNull(inflight);
 
-        Assert.True(inflight!.Wait(0));
+        var waitMethod = inflight!.GetType().GetMethod("Wait", new[] { typeof(int) });
+        var releaseMethod = inflight.GetType().GetMethod("Release", Type.EmptyTypes);
+        Assert.NotNull(waitMethod);
+        Assert.NotNull(releaseMethod);
+
+        Assert.True((bool)waitMethod!.Invoke(inflight, new object[] { 0 })!);
         var sw = Stopwatch.StartNew();
         try
         {
@@ -530,7 +535,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
         finally
         {
             sw.Stop();
-            inflight.Release();
+            _ = releaseMethod!.Invoke(inflight, Array.Empty<object>());
         }
 
         Assert.True(sw.ElapsedMilliseconds >= 70, $"Expected drain wait near timeout, got {sw.ElapsedMilliseconds}ms.");

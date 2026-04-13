@@ -130,6 +130,12 @@ var hostBuilder = Host.CreateDefaultBuilder(args)
             .ValidateOnStart();
         services.AddOptions<VapeCache.Console.GroceryStore.GroceryStoreStressOptions>()
             .Bind(context.Configuration.GetSection("GroceryStoreStress"))
+            .Validate(static o => string.IsNullOrWhiteSpace(o.WorkloadProfile) || o.WorkloadProfile is "default" or "dogfood" or "showcase" or "stampede" ||
+                string.Equals(o.WorkloadProfile, "default", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(o.WorkloadProfile, "dogfood", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(o.WorkloadProfile, "showcase", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(o.WorkloadProfile, "stampede", StringComparison.OrdinalIgnoreCase),
+                "GroceryStoreStress:WorkloadProfile must be one of: default, dogfood, showcase, stampede.")
             .Validate(static o => o.ConcurrentShoppers > 0, "GroceryStoreStress:ConcurrentShoppers must be > 0.")
             .Validate(static o => o.TotalShoppers > 0, "GroceryStoreStress:TotalShoppers must be > 0.")
             .Validate(static o => o.TargetDurationSeconds > 0, "GroceryStoreStress:TargetDurationSeconds must be > 0.")

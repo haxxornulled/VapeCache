@@ -26,7 +26,7 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
     private readonly ILogger<HybridCommandExecutor> _logger;
     private readonly IOptionsMonitor<RedisCircuitBreakerOptions> _breakerOptions;
     private readonly bool _enableHealthyFastPath;
-    private readonly SemaphoreSlim? _primaryAdmissionGate;
+    private readonly AsyncInFlightGate? _primaryAdmissionGate;
     private readonly TimeSpan _primaryAdmissionWaitTimeout;
     private RedisCircuitBreakerOptions _breaker => _breakerOptions.CurrentValue;
     private int _halfOpenProbes;
@@ -57,7 +57,7 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
             ? TimeSpan.Zero
             : TimeSpan.FromMilliseconds(configuredAdmissionWaitMs);
         if (enableAdmissionGate && configuredAdmissionLimit > 0)
-            _primaryAdmissionGate = new SemaphoreSlim(configuredAdmissionLimit, configuredAdmissionLimit);
+            _primaryAdmissionGate = new AsyncInFlightGate(configuredAdmissionLimit, configuredAdmissionLimit);
     }
 
     /// <summary>
@@ -111,13 +111,13 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
 
     private readonly struct AdmissionScope : IDisposable
     {
-        private readonly SemaphoreSlim? _gate;
+        private readonly AsyncInFlightGate? _gate;
         private readonly bool _ownsSlot;
 
         public bool Allowed { get; }
         public CancellationToken Token { get; }
 
-        private AdmissionScope(bool allowed, bool ownsSlot, SemaphoreSlim? gate, CancellationToken token)
+        private AdmissionScope(bool allowed, bool ownsSlot, AsyncInFlightGate? gate, CancellationToken token)
         {
             Allowed = allowed;
             _ownsSlot = ownsSlot;
@@ -128,7 +128,7 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
         public static AdmissionScope NotRequired(CancellationToken token)
             => new(allowed: true, ownsSlot: false, gate: null, token: token);
 
-        public static AdmissionScope Acquired(SemaphoreSlim gate, CancellationToken token)
+        public static AdmissionScope Acquired(AsyncInFlightGate gate, CancellationToken token)
             => new(allowed: true, ownsSlot: true, gate: gate, token: token);
 
         public static AdmissionScope Rejected(CancellationToken token)
@@ -191,12 +191,19 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
 
         return AwaitGateAsync(gate, ct);
 
-        async ValueTask<AdmissionScope> AwaitGateAsync(SemaphoreSlim admissionGate, CancellationToken token)
+        async ValueTask<AdmissionScope> AwaitGateAsync(AsyncInFlightGate admissionGate, CancellationToken token)
         {
-            var acquired = await admissionGate.WaitAsync(_primaryAdmissionWaitTimeout, token).ConfigureAwait(false);
-            return acquired
-                ? AdmissionScope.Acquired(admissionGate, token)
-                : AdmissionScope.Rejected(token);
+            using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            waitCts.CancelAfter(_primaryAdmissionWaitTimeout);
+            try
+            {
+                await admissionGate.WaitAsync(waitCts.Token).ConfigureAwait(false);
+                return AdmissionScope.Acquired(admissionGate, token);
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                return AdmissionScope.Rejected(token);
+            }
         }
     }
 
@@ -4852,5 +4859,6 @@ internal sealed partial class HybridCommandExecutor : IRedisCommandExecutor, IRe
     {
         await _redis.DisposeAsync().ConfigureAwait(false);
         await _fallback.DisposeAsync().ConfigureAwait(false);
+        _primaryAdmissionGate?.Dispose();
     }
 }

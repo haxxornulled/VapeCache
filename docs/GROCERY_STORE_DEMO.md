@@ -14,8 +14,11 @@ This comprehensive stress test simulates a high-traffic grocery store using **al
 
 ### Stress Test Parameters
 - **Config-driven workload** via `GroceryStoreStress` options
+- **Named shopper-behavior profiles:** `default`, `dogfood`, `showcase`, `stampede`
 - **Default (appsettings.json):** 100,000 shoppers, 2,000 concurrency, 180s target duration
 - **Development (appsettings.Development.json):** 5,000 shoppers, 200 concurrency, 30s target duration
+- **Default cart pressure:** 30-50 items per add-to-cart pass
+- **Development cart pressure:** 8-16 items per add-to-cart pass
 - **Real-world shopping patterns** (browse → cart → checkout)
 - **Flash sales** with limited inventory
 - **Live metrics** reported every 10 seconds
@@ -51,7 +54,7 @@ Each simulated shopper performs realistic actions:
 ```
 70% - Browse 10-25 products (cache hits/misses)
 30% - Join a flash sale (SET operations)
-50% - Add 15-35 items to cart (LIST operations)
+50% - Add 30-50 items to cart by default (LIST operations)
 30% - View cart (LRANGE)
 20% - Checkout/clear cart (single key delete)
 10% - Remove item from cart (RPOP)
@@ -62,7 +65,7 @@ Each simulated shopper performs realistic actions:
 ### Prerequisites
 1. **Redis** (optional - works with in-memory fallback)
    ```bash
-   docker run -p 6379:6379 redis:latest
+   docker run -p 6379:6379 redis:8.6
    ```
 
 2. **.NET 10**
@@ -220,6 +223,11 @@ powershell -ExecutionPolicy Bypass -File VapeCache.Console/run-grocery-dogfood.p
   -Profile FullTilt `
   -EnablePluginDemo
 ```
+
+Named workload profiles:
+- `dogfood`: lower cart pressure and smaller browse ranges for fast developer feedback
+- `showcase`: fuller shopping mix for a more dramatic demo run
+- `stampede`: hot-key heavy behavior intended for concentrated pressure drills
 
 ### Hot-Key Stampede Run (300k / 70 Items)
 

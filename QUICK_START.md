@@ -26,7 +26,7 @@ dotnet add package VapeCache.Extensions.PubSub
 ## Run Redis
 
 ```bash
-docker run --name vapecache-redis -p 6379:6379 -d redis:7
+docker run --name vapecache-redis -p 6379:6379 -d redis:8.6
 ```
 
 ## Configure

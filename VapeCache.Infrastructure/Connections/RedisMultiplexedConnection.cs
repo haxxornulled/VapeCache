@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Threading.Tasks.Sources;
 using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
@@ -35,7 +36,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     private readonly MpscRingQueue<PendingRequest> _writes;
     private readonly SpscRingQueue<PendingOperation> _pending;
 
-    private readonly SemaphoreSlim _inFlight;
+    private readonly AsyncInFlightGate _inFlight;
     private readonly SemaphoreSlim _connectGate = new(1, 1);
     private readonly PendingOperationPool _operationPool;
     private readonly ResponseReaderLoop _responseReaderLoop;
@@ -131,7 +132,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         _responseTimeout = responseTimeout <= TimeSpan.Zero || responseTimeout == Timeout.InfiniteTimeSpan
             ? TimeSpan.Zero
             : responseTimeout;
-        _inFlight = new SemaphoreSlim(_maxInFlight, _maxInFlight);
+        _inFlight = new AsyncInFlightGate(_maxInFlight, _maxInFlight);
         _operationPool = new PendingOperationPool(_cts.Token, _inFlight, recordLatencyStopwatchTicks, shouldRecordLatency);
         _responseReaderLoop = new ResponseReaderLoop(
             _useSocketReader,
@@ -158,6 +159,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             CrlfMemory,
             _writes.TryDequeue,
             () => _writes.Count,
+            _pending.TryEnqueue,
             _pending.EnqueueAsync,
             NextPendingResponseSequence,
             ReturnHeaderBufferFromMux,
@@ -763,9 +765,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             var usedCoalescedPath = false;
             try
             {
-                req = _useDedicatedLaneWorkers
-                    ? _writes.Dequeue(_cts.Token)
-                    : await _writes.DequeueAsync(_cts.Token).ConfigureAwait(false);
+                req = await _writes.DequeueAsync(_cts.Token).ConfigureAwait(false);
                 hasReq = true;
                 await EnsureConnectedAsync(_cts.Token).ConfigureAwait(false);
                 var conn = _conn!;
@@ -842,9 +842,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             PendingOperation? next = null;
             try
             {
-                next = _useDedicatedLaneWorkers
-                    ? _pending.Dequeue(_cts.Token)
-                    : await _pending.DequeueAsync(_cts.Token).ConfigureAwait(false);
+                next = await _pending.DequeueAsync(_cts.Token).ConfigureAwait(false);
                 var drained = 0;
                 do
                 {
@@ -966,7 +964,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
 
         req.Op.AssignGeneration(generation);
         req.Op.AssignSequenceId(NextPendingResponseSequence());
-        await _pending.EnqueueAsync(req.Op, ct).ConfigureAwait(false);
+        if (!_pending.TryEnqueue(req.Op))
+            await _pending.EnqueueAsync(req.Op, ct).ConfigureAwait(false);
     }
 
     private async Task FailTransportAsync(Exception ex, bool countTransportReset = true)
@@ -1320,8 +1319,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         private readonly T[] _buffer;
         private readonly long[] _sequence;
         private readonly int _mask;
-        private readonly SemaphoreSlim _slots;
-        private readonly SemaphoreSlim _items;
+        private readonly MultiWaiterSignal _slotsAvailable = new();
+        private readonly MultiWaiterSignal _itemsAvailable = new();
         private long _head;
         private long _tail;
 
@@ -1339,8 +1338,6 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             _mask = capacity - 1;
             _head = 0;
             _tail = 0;
-            _slots = new SemaphoreSlim(capacity, capacity);
-            _items = new SemaphoreSlim(0, capacity);
         }
 
         public int Capacity => _buffer.Length;
@@ -1353,16 +1350,15 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         /// </summary>
         public bool TryEnqueue(in T item)
         {
-            if (!_slots.Wait(0))
+            if (IsFull)
                 return false;
 
             if (TryEnqueueCore(in item))
             {
-                _items.Release();
+                _itemsAvailable.Set();
                 return true;
             }
 
-            _slots.Release();
             return false;
         }
 
@@ -1372,48 +1368,41 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         public ValueTask EnqueueAsync(T item, CancellationToken ct)
         {
             var spinner = new SpinWait();
-            while (spinner.Count < 10)
+            while (true)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_slots.Wait(0, ct))
+                if (!IsFull && TryEnqueueCore(in item))
                 {
-                    EnqueueAfterSlot(item);
+                    _itemsAvailable.Set();
                     return ValueTask.CompletedTask;
                 }
+
+                if (spinner.Count >= 10)
+                    break;
+
                 spinner.SpinOnce();
             }
 
-            var wait = _slots.WaitAsync(ct);
-            if (wait.IsCompletedSuccessfully)
-            {
-                EnqueueAfterSlot(item);
-                return ValueTask.CompletedTask;
-            }
-            return EnqueueAsyncSlow(item, wait);
+            return EnqueueAsyncSlow(item, ct);
         }
 
-        private async ValueTask EnqueueAsyncSlow(T item, Task slotWait)
+        private async ValueTask EnqueueAsyncSlow(T item, CancellationToken ct)
         {
-            var slotAcquired = false;
-            try
+            while (true)
             {
-                await slotWait.ConfigureAwait(false);
-                slotAcquired = true;
-                EnqueueAfterSlot(item);
-            }
-            catch
-            {
-                if (slotAcquired)
-                    _slots.Release();
-                throw;
-            }
-        }
+                ct.ThrowIfCancellationRequested();
+                if (!IsFull && TryEnqueueCore(in item))
+                {
+                    _itemsAvailable.Set();
+                    return;
+                }
 
-        private void EnqueueAfterSlot(in T item)
-        {
-            if (!TryEnqueueCore(in item))
-                throw new InvalidOperationException("Ring enqueue failed unexpectedly.");
-            _items.Release();
+                var observedVersion = _slotsAvailable.Version;
+                if (Count < Capacity)
+                    continue;
+
+                await _slotsAvailable.WaitAsync(observedVersion, ct).ConfigureAwait(false);
+            }
         }
 
         /// <summary>
@@ -1421,21 +1410,17 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         /// Used to test synchronous completion handling in unit tests.
         /// </summary>
         private ValueTask EnqueueAsyncNoSpinForTests(T item, CancellationToken ct)
-        {
-            var wait = _slots.WaitAsync(ct);
-            if (wait.IsCompletedSuccessfully)
-            {
-                EnqueueAfterSlot(item);
-                return ValueTask.CompletedTask;
-            }
-            return EnqueueAsyncSlow(item, wait);
-        }
+            => EnqueueAsyncSlow(item, ct);
 
         private bool TryEnqueueCore(in T item)
         {
             while (true)
             {
                 var pos = Volatile.Read(ref _head);
+                var tail = Volatile.Read(ref _tail);
+                if (pos - tail >= _buffer.Length)
+                    return false;
+
                 var idx = (int)(pos & _mask);
                 var seq = Volatile.Read(ref _sequence[idx]);
                 var dif = seq - pos;
@@ -1460,14 +1445,7 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         /// </summary>
         public bool TryDequeue(out T? item)
         {
-            if (!_items.Wait(0))
-            {
-                item = default;
-                return false;
-            }
-
-            item = DequeueAfterWait();
-            return true;
+            return TryDequeueCore(out item);
         }
 
         /// <summary>
@@ -1476,51 +1454,40 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         public ValueTask<T> DequeueAsync(CancellationToken ct)
         {
             var spinner = new SpinWait();
-            while (spinner.Count < 10)
-            {
-                ct.ThrowIfCancellationRequested();
-                if (_items.Wait(0, ct))
-                    return new ValueTask<T>(DequeueAfterWait());
-                spinner.SpinOnce();
-            }
-
-            var wait = _items.WaitAsync(ct);
-            return wait.IsCompletedSuccessfully
-                ? new ValueTask<T>(DequeueAfterWait())
-                : DequeueAsyncSlow(wait);
-        }
-
-        public T Dequeue(CancellationToken ct)
-        {
-            _items.Wait(ct);
-            return DequeueAfterWait();
-        }
-
-        private async ValueTask<T> DequeueAsyncSlow(Task wait)
-        {
-            await wait.ConfigureAwait(false);
-            return DequeueAfterWait();
-        }
-
-        private T DequeueAfterWait()
-        {
-            var spinner = new SpinWait();
             while (true)
             {
-                if (TryDequeueCore(out var item, allowBailout: false))
-                {
-                    _slots.Release();
-                    return item!;
-                }
+                ct.ThrowIfCancellationRequested();
+                if (TryDequeueCore(out var item))
+                    return new ValueTask<T>(item!);
+
+                if (spinner.Count >= 10)
+                    break;
 
                 spinner.SpinOnce();
             }
+
+            return DequeueAsyncSlow(ct);
         }
 
-        private bool TryDequeueCore(out T? item, bool allowBailout = true)
+        private async ValueTask<T> DequeueAsyncSlow(CancellationToken ct)
+        {
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (TryDequeueCore(out var item))
+                    return item!;
+
+                var observedVersion = _itemsAvailable.Version;
+                if (!IsEmpty)
+                    continue;
+
+                await _itemsAvailable.WaitAsync(observedVersion, ct).ConfigureAwait(false);
+            }
+        }
+
+        private bool TryDequeueCore(out T? item)
         {
             var pos = Volatile.Read(ref _tail);
-            var spins = 0;
             while (true)
             {
                 var idx = (int)(pos & _mask);
@@ -1534,25 +1501,15 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
                         item = _buffer[idx];
                         _buffer[idx] = default!;
                         Volatile.Write(ref _sequence[idx], pos + _buffer.Length);
+                        _slotsAvailable.Set();
                         return true;
                     }
-                    // Another thread claimed it, reload position and retry
                     pos = Volatile.Read(ref _tail);
                     continue;
                 }
 
                 if (dif < 0)
                 {
-                    item = default;
-                    return false;
-                }
-
-                // In non-guaranteed paths we allow a bounded bailout; after a successful _items.Wait
-                // the caller must continue until a slot is observable.
-                spins++;
-                if (allowBailout && spins > 100)
-                {
-                    // Too many spins, likely a race condition - bail out
                     item = default;
                     return false;
                 }
@@ -1566,26 +1523,16 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         /// </summary>
         public bool TryPeek(out T? item)
         {
-            if (!_items.Wait(0))
+            var pos = Volatile.Read(ref _tail);
+            var idx = (int)(pos & _mask);
+            var seq = Volatile.Read(ref _sequence[idx]);
+            if (seq - (pos + 1) != 0)
             {
                 item = default;
                 return false;
             }
-
-            var pos = Volatile.Read(ref _tail);
-            var idx = (int)(pos & _mask);
-            var seq = Volatile.Read(ref _sequence[idx]);
-            var dif = seq - (pos + 1);
-            if (dif == 0)
-            {
-                item = _buffer[idx];
-                _items.Release();
-                return true;
-            }
-
-            _items.Release();
-            item = default;
-            return false;
+            item = _buffer[idx];
+            return true;
         }
 
         /// <summary>
@@ -1601,8 +1548,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         /// </summary>
         public void Dispose()
         {
-            _slots?.Dispose();
-            _items?.Dispose();
+            _slotsAvailable.Dispose();
+            _itemsAvailable.Dispose();
         }
     }
 
@@ -1611,8 +1558,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
     {
         private readonly T[] _buffer;
         private readonly int _mask;
-        private readonly SemaphoreSlim _slots;
-        private readonly SemaphoreSlim _items;
+        private readonly SingleWaiterSignal _slotsAvailable = new();
+        private readonly SingleWaiterSignal _itemsAvailable = new();
         private int _head;
         private int _tail;
 
@@ -1626,8 +1573,6 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             _mask = capacity - 1;
             _head = 0;
             _tail = 0;
-            _slots = new SemaphoreSlim(capacity, capacity);
-            _items = new SemaphoreSlim(0, capacity);
         }
 
         public int Capacity => _buffer.Length;
@@ -1649,13 +1594,13 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         /// </summary>
         public bool TryEnqueue(T item)
         {
-            if (!_slots.Wait(0))
+            if (Count >= Capacity)
                 return false;
 
             var idx = _head & _mask;
             _buffer[idx] = item;
-            _head++;
-            _items.Release();
+            Volatile.Write(ref _head, _head + 1);
+            _itemsAvailable.Set();
             return true;
         }
 
@@ -1665,49 +1610,33 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         public ValueTask EnqueueAsync(T item, CancellationToken ct)
         {
             var spinner = new SpinWait();
-            while (spinner.Count < 10)
+            while (true)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_slots.Wait(0, ct))
+                if (TryEnqueue(item))
                 {
-                    EnqueueAfterSlot(item);
                     return ValueTask.CompletedTask;
                 }
+
+                if (spinner.Count >= 10)
+                    break;
+
                 spinner.SpinOnce();
             }
 
-            var wait = _slots.WaitAsync(ct);
-            if (wait.IsCompletedSuccessfully)
-            {
-                EnqueueAfterSlot(item);
-                return ValueTask.CompletedTask;
-            }
-            return EnqueueAsyncSlow(item, wait);
+            return EnqueueAsyncSlow(item, ct);
         }
 
-        private async ValueTask EnqueueAsyncSlow(T item, Task wait)
+        private async ValueTask EnqueueAsyncSlow(T item, CancellationToken ct)
         {
-            var slotAcquired = false;
-            try
+            while (true)
             {
-                await wait.ConfigureAwait(false);
-                slotAcquired = true;
-                EnqueueAfterSlot(item);
-            }
-            catch
-            {
-                if (slotAcquired)
-                    _slots.Release();
-                throw;
-            }
-        }
+                ct.ThrowIfCancellationRequested();
+                if (TryEnqueue(item))
+                    return;
 
-        private void EnqueueAfterSlot(T item)
-        {
-            var idx = _head & _mask;
-            _buffer[idx] = item;
-            _head++;
-            _items.Release();
+                await _slotsAvailable.WaitAsync(ct).ConfigureAwait(false);
+            }
         }
 
         /// <summary>
@@ -1715,22 +1644,14 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         /// Used to test synchronous completion handling in unit tests.
         /// </summary>
         private ValueTask EnqueueAsyncNoSpinForTests(T item, CancellationToken ct)
-        {
-            var wait = _slots.WaitAsync(ct);
-            if (wait.IsCompletedSuccessfully)
-            {
-                EnqueueAfterSlot(item);
-                return ValueTask.CompletedTask;
-            }
-            return EnqueueAsyncSlow(item, wait);
-        }
+            => EnqueueAsyncSlow(item, ct);
 
         /// <summary>
         /// Attempts to value.
         /// </summary>
         public bool TryDequeue(out T? item)
         {
-            if (!_items.Wait(0))
+            if (Count <= 0)
             {
                 item = default;
                 return false;
@@ -1739,8 +1660,8 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             var idx = _tail & _mask;
             item = _buffer[idx];
             _buffer[idx] = default!;
-            _tail++;
-            _slots.Release();
+            Volatile.Write(ref _tail, _tail + 1);
+            _slotsAvailable.Set();
             return true;
         }
 
@@ -1750,40 +1671,31 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         public ValueTask<T> DequeueAsync(CancellationToken ct)
         {
             var spinner = new SpinWait();
-            while (spinner.Count < 10)
+            while (true)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_items.Wait(0, ct))
-                    return new ValueTask<T>(DequeueAfterWait());
+                if (TryDequeue(out var item))
+                    return new ValueTask<T>(item!);
+
+                if (spinner.Count >= 10)
+                    break;
+
                 spinner.SpinOnce();
             }
 
-            var wait = _items.WaitAsync(ct);
-            return wait.IsCompletedSuccessfully
-                ? new ValueTask<T>(DequeueAfterWait())
-                : DequeueAsyncSlow(wait);
+            return DequeueAsyncSlow(ct);
         }
 
-        public T Dequeue(CancellationToken ct)
+        private async ValueTask<T> DequeueAsyncSlow(CancellationToken ct)
         {
-            _items.Wait(ct);
-            return DequeueAfterWait();
-        }
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (TryDequeue(out var item))
+                    return item!;
 
-        private async ValueTask<T> DequeueAsyncSlow(Task wait)
-        {
-            await wait.ConfigureAwait(false);
-            return DequeueAfterWait();
-        }
-
-        private T DequeueAfterWait()
-        {
-            var idx = _tail & _mask;
-            var item = _buffer[idx];
-            _buffer[idx] = default!;
-            _tail++;
-            _slots.Release();
-            return item!;
+                await _itemsAvailable.WaitAsync(ct).ConfigureAwait(false);
+            }
         }
 
         /// <summary>
@@ -1799,8 +1711,151 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
         /// </summary>
         public void Dispose()
         {
-            _slots?.Dispose();
-            _items?.Dispose();
+            _slotsAvailable.Dispose();
+            _itemsAvailable.Dispose();
+        }
+    }
+
+    private sealed class SingleWaiterSignal : IValueTaskSource<bool>, IDisposable
+    {
+        private ManualResetValueTaskSourceCore<bool> _core;
+        private CancellationTokenRegistration _ctr;
+        private CancellationToken _waitingToken;
+        private int _state; // 0 = idle, 1 = waiting, 2 = signaled
+
+        public SingleWaiterSignal()
+        {
+            _core = new ManualResetValueTaskSourceCore<bool>
+            {
+                RunContinuationsAsynchronously = true
+            };
+        }
+
+        public void Set()
+        {
+            while (true)
+            {
+                var state = Volatile.Read(ref _state);
+                switch (state)
+                {
+                    case 0:
+                        if (Interlocked.CompareExchange(ref _state, 2, 0) == 0)
+                            return;
+                        break;
+                    case 1:
+                        if (Interlocked.CompareExchange(ref _state, 0, 1) == 1)
+                        {
+                            _ctr.Dispose();
+                            _core.SetResult(true);
+                            return;
+                        }
+                        break;
+                    case 2:
+                        return;
+                }
+            }
+        }
+
+        public ValueTask<bool> WaitAsync(CancellationToken ct)
+        {
+            if (TryConsumeSignal())
+                return ValueTask.FromResult(true);
+
+            ct.ThrowIfCancellationRequested();
+
+            _core.Reset();
+            _waitingToken = ct;
+            _ctr = ct.CanBeCanceled
+                ? ct.Register(static state => ((SingleWaiterSignal)state!).CancelWait(), this)
+                : default;
+
+            var priorState = Interlocked.CompareExchange(ref _state, 1, 0);
+            if (priorState == 2)
+            {
+                Volatile.Write(ref _state, 0);
+                _ctr.Dispose();
+                return ValueTask.FromResult(true);
+            }
+
+            if (priorState != 0)
+                throw new InvalidOperationException("Concurrent waiters are not supported.");
+
+            return new ValueTask<bool>(this, _core.Version);
+        }
+
+        public void Dispose()
+        {
+            _ctr.Dispose();
+        }
+
+        private bool TryConsumeSignal()
+            => Interlocked.CompareExchange(ref _state, 0, 2) == 2;
+
+        private void CancelWait()
+        {
+            if (Interlocked.CompareExchange(ref _state, 0, 1) != 1)
+                return;
+
+            _core.SetException(new OperationCanceledException(_waitingToken));
+        }
+
+        bool IValueTaskSource<bool>.GetResult(short token)
+        {
+            _ctr.Dispose();
+            return _core.GetResult(token);
+        }
+
+        ValueTaskSourceStatus IValueTaskSource<bool>.GetStatus(short token)
+            => _core.GetStatus(token);
+
+        void IValueTaskSource<bool>.OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags)
+            => _core.OnCompleted(continuation, state, token, flags);
+    }
+
+    private sealed class MultiWaiterSignal : IDisposable
+    {
+        private volatile TaskCompletionSource<bool>? _waiters;
+        private long _version;
+
+        public long Version => Volatile.Read(ref _version);
+
+        public void Set()
+        {
+            Interlocked.Increment(ref _version);
+            var waiters = Interlocked.Exchange(ref _waiters, null);
+            waiters?.TrySetResult(true);
+        }
+
+        public ValueTask WaitAsync(long observedVersion, CancellationToken ct)
+        {
+            if (Volatile.Read(ref _version) != observedVersion)
+                return ValueTask.CompletedTask;
+
+            while (true)
+            {
+                var current = _waiters;
+                if (Volatile.Read(ref _version) != observedVersion)
+                    return ValueTask.CompletedTask;
+
+                if (current is null)
+                {
+                    var created = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    var prior = Interlocked.CompareExchange(ref _waiters, created, null);
+                    current = prior ?? created;
+                    if (prior is not null)
+                        continue;
+                }
+
+                if (Volatile.Read(ref _version) != observedVersion)
+                    return ValueTask.CompletedTask;
+
+                return new ValueTask(current.Task.WaitAsync(ct));
+            }
+        }
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _waiters, null)?.TrySetCanceled();
         }
     }
 }

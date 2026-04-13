@@ -15,7 +15,6 @@ internal sealed partial class JsonCacheService : IJsonCache, IDisposable
     private readonly IRedisModuleDetector _modules;
     private readonly ILogger<JsonCacheService> _logger;
     private readonly JsonSerializerOptions _options;
-    private readonly SemaphoreSlim _moduleGate = new(1, 1);
     private bool? _redisJsonAvailable;
 
     public JsonCacheService(
@@ -40,21 +39,10 @@ internal sealed partial class JsonCacheService : IJsonCache, IDisposable
         if (_redisJsonAvailable == true)
             return true;
 
-        await _moduleGate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            if (_redisJsonAvailable == true)
-                return true;
-
-            var available = await _modules.HasRedisJsonAsync(ct).ConfigureAwait(false);
-            if (available)
-                _redisJsonAvailable = true;
-            return available;
-        }
-        finally
-        {
-            _moduleGate.Release();
-        }
+        var available = await _modules.HasRedisJsonAsync(ct).ConfigureAwait(false);
+        if (available)
+            _redisJsonAvailable = true;
+        return available;
     }
 
     public async ValueTask<T?> GetAsync<T>(string key, string? path = null, CancellationToken ct = default)
@@ -152,5 +140,7 @@ internal sealed partial class JsonCacheService : IJsonCache, IDisposable
         Message = "RedisJSON unavailable; JSON path '{Path}' ignored for key {Key}.")]
     private static partial void LogJsonPathIgnored(ILogger logger, string? path, string key);
 
-    public void Dispose() => _moduleGate.Dispose();
+    public void Dispose()
+    {
+    }
 }
