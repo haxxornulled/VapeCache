@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -500,10 +501,19 @@ internal sealed partial class HybridCacheService : ICacheService
                 current.SetCurrent(redis.Name);
                 if (resolvedRedisPayload.HasValue)
                 {
-                    await TryWarmFallbackFromReadAsync(key, resolvedRedisPayload.Payload, ct).ConfigureAwait(false);
-                    _stats.IncHit();
-                    CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
-                    return deserialize(resolvedRedisPayload.Payload.Span);
+                    try
+                    {
+                        var value = deserialize(resolvedRedisPayload.Payload.Span);
+                        await TryWarmFallbackFromReadAsync(key, resolvedRedisPayload.Payload, ct).ConfigureAwait(false);
+                        _stats.IncHit();
+                        CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
+                        return value;
+                    }
+                    catch (Exception ex) when (IsPayloadDecodeException(ex))
+                    {
+                        LogCorruptedPayloadDetected(logger, ex, key);
+                        await TryRemoveCorruptedEntryAsync(key, ct).ConfigureAwait(false);
+                    }
                 }
 
                 await TryRemoveStaleFallbackOnMissAsync(key, ct).ConfigureAwait(false);
@@ -523,9 +533,28 @@ internal sealed partial class HybridCacheService : ICacheService
 
             var bytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
             bytes = await ResolveTaggedPayloadAsync(key, bytes, ct).ConfigureAwait(false);
-            if (bytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
-            else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
-            return bytes is null ? default : deserialize(bytes);
+            if (bytes is null)
+            {
+                _stats.IncMiss();
+                CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
+                return default;
+            }
+
+            try
+            {
+                var value = deserialize(bytes);
+                _stats.IncHit();
+                CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
+                return value;
+            }
+            catch (Exception ex) when (IsPayloadDecodeException(ex))
+            {
+                LogCorruptedPayloadDetected(logger, ex, key);
+                await TryRemoveCorruptedEntryAsync(key, ct).ConfigureAwait(false);
+                _stats.IncMiss();
+                CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
+                return default;
+            }
         }
         finally
         {
@@ -535,11 +564,11 @@ internal sealed partial class HybridCacheService : ICacheService
         }
     }
 
-    public ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
+    public async ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
     {
         using var buffer = new PooledByteBufferWriter(256);
         serialize(buffer, value);
-        return SetAsync(key, buffer.WrittenMemory, options, ct);
+        await SetAsync(key, buffer.WrittenMemory, options, ct).ConfigureAwait(false);
     }
 
     public async ValueTask<T> GetOrSetAsync<T>(
@@ -1004,6 +1033,47 @@ internal sealed partial class HybridCacheService : ICacheService
         await TryRemoveFallbackEntryAsync(key, ct).ConfigureAwait(false);
     }
 
+    private async ValueTask TryRemoveCorruptedEntryAsync(string key, CancellationToken ct)
+    {
+        await TryRemoveFallbackEntryAsync(key, ct).ConfigureAwait(false);
+
+        var breaker = _breaker;
+        if (breaker.Enabled && !IsRedisAllowedNow())
+        {
+            _reconciliation?.TrackDelete(key);
+            return;
+        }
+
+        var probeTaken = false;
+        try
+        {
+            if (!TryEnterHalfOpenProbe(breaker, out probeTaken))
+            {
+                _reconciliation?.TrackDelete(key);
+                return;
+            }
+
+            using var probeCts = CreateProbeCts(breaker, probeTaken, ct);
+            await redis.RemoveAsync(key, probeCts?.Token ?? ct).ConfigureAwait(false);
+            MarkRedisSuccess();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            MarkRedisFailure();
+            LogRedisCorruptedPayloadCleanupFailed(logger, ex, key);
+            _reconciliation?.TrackDelete(key);
+        }
+        finally
+        {
+            if (probeTaken)
+                Interlocked.Decrement(ref _halfOpenProbeInFlight);
+        }
+    }
+
     private async ValueTask TryRemoveFallbackEntryAsync(string key, CancellationToken ct)
     {
         try
@@ -1022,6 +1092,20 @@ internal sealed partial class HybridCacheService : ICacheService
 
     private static bool ShouldMirrorPayload(HybridFailoverOptions options, int payloadBytes)
         => options.MaxMirrorPayloadBytes <= 0 || payloadBytes <= options.MaxMirrorPayloadBytes;
+
+    private static bool IsPayloadDecodeException(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException!)
+        {
+            if (current is JsonException or FormatException or DecoderFallbackException)
+                return true;
+
+            if (current.InnerException is null)
+                break;
+        }
+
+        return false;
+    }
 
     private static bool TryReadInt32(ReadOnlySpan<byte> buffer, ref int offset, out int value)
     {
@@ -1171,6 +1255,18 @@ internal sealed partial class HybridCacheService : ICacheService
         Level = LogLevel.Information,
         Message = "Redis reconciliation finished in {Duration}ms.")]
     private static partial void LogReconciliationFinished(ILogger logger, double duration);
+
+    [LoggerMessage(
+        EventId = 7018,
+        Level = LogLevel.Warning,
+        Message = "Corrupted cache payload detected for key {Key}; purging entry.")]
+    private static partial void LogCorruptedPayloadDetected(ILogger logger, Exception exception, string key);
+
+    [LoggerMessage(
+        EventId = 7019,
+        Level = LogLevel.Debug,
+        Message = "Redis cleanup for corrupted payload failed for key {Key}; queued for reconciliation.")]
+    private static partial void LogRedisCorruptedPayloadCleanupFailed(ILogger logger, Exception exception, string key);
 
     private sealed class DefaultHybridFailoverOptionsMonitor : IOptionsMonitor<HybridFailoverOptions>
     {

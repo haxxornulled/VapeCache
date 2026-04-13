@@ -62,12 +62,12 @@ internal sealed class MemoryOnlyCacheService : ICacheService, ICacheTagService
         return bytes is null ? default : deserialize(bytes);
     }
 
-    public ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
+    public async ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         using var buffer = new PooledByteBufferWriter(256);
         serialize(buffer, value);
-        return SetAsync(key, buffer.WrittenMemory, options, ct);
+        await SetAsync(key, buffer.WrittenMemory, options, ct).ConfigureAwait(false);
     }
 
     public async ValueTask<T> GetOrSetAsync<T>(
