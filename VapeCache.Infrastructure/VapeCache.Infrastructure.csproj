@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Runtime</PackageId>
     <Title>VapeCache</Title>
-    <Version>1.2.19</Version>
+    <Version>1.2.20</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache</Product>
@@ -50,6 +50,7 @@
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
   </ItemGroup>
 </Project>
+
 
 
 

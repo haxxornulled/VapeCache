@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Features.Invalidation</PackageId>
     <Title>VapeCache Invalidation Features</Title>
-    <Version>1.2.19</Version>
+    <Version>1.2.20</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Features.Invalidation</Product>
@@ -44,6 +44,7 @@
     <None Include="..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
+
 
 
 

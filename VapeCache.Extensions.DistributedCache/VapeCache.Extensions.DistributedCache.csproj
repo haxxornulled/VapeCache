@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.DistributedCache</PackageId>
     <Title>VapeCache Extensions for Microsoft Distributed Cache</Title>
-    <Version>1.2.19</Version>
+    <Version>1.2.20</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.DistributedCache</Product>
@@ -41,5 +41,6 @@
     <ProjectReference Include="..\VapeCache.Extensions.DependencyInjection\VapeCache.Extensions.DependencyInjection.csproj" />
   </ItemGroup>
 </Project>
+
 
 
