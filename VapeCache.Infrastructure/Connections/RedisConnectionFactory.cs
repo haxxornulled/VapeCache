@@ -13,24 +13,13 @@ using VapeCache.Abstractions.Connections;
 
 namespace VapeCache.Infrastructure.Connections;
 
-internal sealed partial class RedisConnectionFactory : IRedisConnectionFactory
+internal sealed partial class RedisConnectionFactory(
+    IOptionsMonitor<RedisConnectionOptions> options,
+    IRedisConnectionStringBuilder connectionStringBuilder,
+    ILogger<RedisConnectionFactory> logger,
+    IEnumerable<IRedisConnectionObserver> observers) : IRedisConnectionFactory
 {
-    private readonly IOptionsMonitor<RedisConnectionOptions> options;
-    private readonly IRedisConnectionStringBuilder connectionStringBuilder;
-    private readonly ILogger<RedisConnectionFactory> logger;
-    public RedisConnectionFactory(
-        IOptionsMonitor<RedisConnectionOptions> options,
-        IRedisConnectionStringBuilder connectionStringBuilder,
-        ILogger<RedisConnectionFactory> logger,
-        IEnumerable<IRedisConnectionObserver> observers)
-    {
-        this.options = options;
-        this.connectionStringBuilder = connectionStringBuilder;
-        this.logger = logger;
-        _observers = observers as IRedisConnectionObserver[] ?? observers.ToArray();
-    }
-
-    public RedisConnectionFactory(
+    internal RedisConnectionFactory(
         IOptionsMonitor<RedisConnectionOptions> options,
         ILogger<RedisConnectionFactory> logger,
         IEnumerable<IRedisConnectionObserver> observers)
@@ -41,7 +30,7 @@ internal sealed partial class RedisConnectionFactory : IRedisConnectionFactory
     private int _disposed;
     private static long _ids;
     private int _loggedConnectionStringResolution;
-    private readonly IRedisConnectionObserver[] _observers;
+    private readonly IRedisConnectionObserver[] _observers = observers as IRedisConnectionObserver[] ?? observers.ToArray();
 
     /// <summary>
     /// Creates value.
@@ -624,7 +613,7 @@ internal sealed partial class RedisConnectionFactory : IRedisConnectionFactory
             {
                 throw new InvalidOperationException(
                     $"Invalid Redis connection string: {error ?? "Unknown parsing error"}. " +
-                    $"Expected format: redis://[[user]:password@]host[:port][/database], rediss:// for TLS, keydb://, or keydbs://. " +
+                    $"Expected format: redis://[[user]:password@]host[:port][/database] or rediss:// for TLS. " +
                     $"Provided: {o.ConnectionString}");
             }
 

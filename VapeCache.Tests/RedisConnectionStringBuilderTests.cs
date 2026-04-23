@@ -84,10 +84,12 @@ public sealed class RedisConnectionStringBuilderTests
     {
         var builder = new RedisConnectionStringBuilder();
 
-        Assert.Throws<ArgumentException>(() => builder.Build(new RedisConnectionOptions
+        var ex = Assert.Throws<ArgumentException>(() => builder.Build(new RedisConnectionOptions
         {
             Host = "cache.local:6380"
         }));
+
+        Assert.Contains("Host should not include a port", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -95,10 +97,12 @@ public sealed class RedisConnectionStringBuilderTests
     {
         var builder = new RedisConnectionStringBuilder();
 
-        Assert.Throws<ArgumentException>(() => builder.Build(new RedisConnectionOptions
+        var ex = Assert.Throws<ArgumentException>(() => builder.Build(new RedisConnectionOptions
         {
             Host = "redis://cache.local"
         }));
+
+        Assert.Contains("Host should not include a URI scheme", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -106,12 +110,14 @@ public sealed class RedisConnectionStringBuilderTests
     {
         var builder = new RedisConnectionStringBuilder();
 
-        Assert.Throws<ArgumentException>(() => builder.Build(new RedisConnectionOptions
+        var ex = Assert.Throws<ArgumentException>(() => builder.Build(new RedisConnectionOptions
         {
             Host = "cache.local",
             TlsHost = "sni.cache.local",
             UseTls = false
         }));
+
+        Assert.Contains("TlsHost requires UseTls=true", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -119,12 +125,14 @@ public sealed class RedisConnectionStringBuilderTests
     {
         var builder = new RedisConnectionStringBuilder();
 
-        Assert.Throws<ArgumentException>(() => builder.Build(new RedisConnectionOptions
+        var ex = Assert.Throws<ArgumentException>(() => builder.Build(new RedisConnectionOptions
         {
             Host = "cache.local",
             AllowInvalidCert = true,
             UseTls = false
         }));
+
+        Assert.Contains("AllowInvalidCert requires UseTls=true", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -132,11 +140,13 @@ public sealed class RedisConnectionStringBuilderTests
     {
         var builder = new RedisConnectionStringBuilder();
 
-        Assert.Throws<ArgumentException>(() => builder.Build(new RedisConnectionOptions
+        var ex = Assert.Throws<ArgumentException>(() => builder.Build(new RedisConnectionOptions
         {
             Host = "cache.local",
             Username = "svc-redis"
         }));
+
+        Assert.Contains("Username requires a non-empty Password", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

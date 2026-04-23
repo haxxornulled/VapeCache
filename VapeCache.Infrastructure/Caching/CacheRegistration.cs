@@ -1,8 +1,8 @@
+using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Collections;
@@ -64,18 +64,13 @@ public static class CacheRegistration
         services.AddSingleton<CacheStatsRegistry>();
         services.AddSingleton<ICacheStats, CurrentCacheStats>();
         services.AddSingleton<ICacheIntentRegistry, CacheIntentRegistry>();
-        services.AddSingleton(TimeProvider.System);
-        services.TryAddSingleton<IEnterpriseFeatureGate, DefaultEnterpriseFeatureGate>();
+        services.AddSingleton<TimeProvider>(_ => TimeProvider.System);
 
         // Core executors (registered as non-interface for internal use)
-        services.AddSingleton<RedisCommandExecutor>(sp =>
-            new RedisCommandExecutor(
-                sp.GetRequiredService<IRedisConnectionFactory>(),
-                sp.GetRequiredService<IOptionsMonitor<RedisMultiplexerOptions>>(),
-                sp.GetRequiredService<IOptionsMonitor<RedisConnectionOptions>>(),
-                sp.GetService<ILogger<RedisCommandExecutor>>(),
-                sp.GetService<IEnterpriseFeatureGate>(),
-                sp.GetService<ISpillStoreDiagnostics>()));
+        services.AddSingleton(sp => new RedisCommandExecutor(
+            sp.GetRequiredService<IRedisConnectionFactory>(),
+            sp.GetRequiredService<IOptionsMonitor<RedisMultiplexerOptions>>(),
+            sp.GetRequiredService<IOptionsMonitor<RedisConnectionOptions>>()));
         services.AddSingleton<InMemoryCommandExecutor>();
         services.TryAddSingleton<IRedisFallbackCommandExecutor, InMemoryCommandExecutor>();
 
@@ -91,12 +86,11 @@ public static class CacheRegistration
         // Cache services
         // IMPORTANT: RedisCacheService gets the RAW RedisCommandExecutor (no hybrid wrapper)
         // to avoid circular dependency with HybridCacheService
-        services.AddSingleton<RedisCacheService>(sp =>
-            new RedisCacheService(
-                sp.GetRequiredService<RedisCommandExecutor>(),
-                sp.GetRequiredService<ICurrentCacheService>(),
-                sp.GetRequiredService<CacheStatsRegistry>(),
-                sp.GetService<ICacheIntentRegistry>()));
+        services.AddSingleton(sp => new RedisCacheService(
+            sp.GetRequiredService<RedisCommandExecutor>(),
+            sp.GetRequiredService<ICurrentCacheService>(),
+            sp.GetRequiredService<CacheStatsRegistry>(),
+            sp.GetRequiredService<ICacheIntentRegistry>()));
         services.AddSingleton<InMemoryCacheService>();
         services.TryAddSingleton<ICacheFallbackService, InMemoryCacheService>();
         services.AddSingleton<HybridCacheService>();
@@ -105,7 +99,6 @@ public static class CacheRegistration
 
         // Hybrid command executor - automatically switches between Redis and in-memory based on circuit breaker state
         services.AddSingleton<IRedisCommandExecutor, HybridCommandExecutor>();
-        services.AddSingleton<IRedisPubSubService, RedisPubSubService>();
         services.AddSingleton<IRedisMultiplexerDiagnostics>(sp => sp.GetRequiredService<RedisCommandExecutor>());
 
         services.TryAddSingleton<CacheStampedeOptions>();
@@ -136,16 +129,16 @@ public static class CacheRegistration
             .Validate(o => o.MemoryCacheSizeLimitBytes >= 0, "MemoryCacheSizeLimitBytes must be greater than or equal to zero.")
             .ValidateOnStart();
         // Default cache service is the hybrid implementation with stampede protection applied directly.
-        services.AddSingleton<StampedeProtectedCacheService>(sp =>
-            new StampedeProtectedCacheService(
-                sp.GetRequiredService<HybridCacheService>(),
-                sp.GetRequiredService<IOptionsMonitor<CacheStampedeOptions>>(),
-                sp.GetRequiredService<CacheStatsRegistry>()));
+        services.AddSingleton<StampedeProtectedCacheService>(sp => new StampedeProtectedCacheService(
+            sp.GetRequiredService<HybridCacheService>(),
+            sp.GetRequiredService<IOptionsMonitor<CacheStampedeOptions>>(),
+            sp.GetRequiredService<CacheStatsRegistry>().GetOrCreate(CacheStatsNames.Hybrid)));
         services.AddSingleton<ICacheService>(sp => sp.GetRequiredService<StampedeProtectedCacheService>());
         services.AddSingleton<ICacheTagService>(sp => sp.GetRequiredService<StampedeProtectedCacheService>());
 
         // Ergonomic typed caching API with codec-based serialization
-        services.TryAddSingleton<ICacheCodecProvider, SystemTextJsonCodecProvider>();
+        services.TryAddSingleton<ICacheCodecProvider>(sp =>
+            new SystemTextJsonCodecProvider(new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         services.AddSingleton<IVapeCache, VapeCacheClient>();
         services.AddSingleton<IJsonCache, JsonCacheService>();
         services.AddSingleton<ICacheChunkStreamService, ChunkedCacheStreamService>();
@@ -202,7 +195,8 @@ public static class CacheRegistration
         services.TryAddSingleton<IEnterpriseFeatureGate, DefaultEnterpriseFeatureGate>();
 
         services.AddSingleton<InMemoryCommandExecutor>();
-        services.TryAddSingleton<IRedisFallbackCommandExecutor>(sp => sp.GetRequiredService<InMemoryCommandExecutor>());
+        services.TryAddSingleton<IRedisFallbackCommandExecutor>(sp =>
+            sp.GetRequiredService<InMemoryCommandExecutor>());
         services.TryAddSingleton<IRedisCommandExecutor>(sp => sp.GetRequiredService<InMemoryCommandExecutor>());
 
         services.TryAddSingleton<IInMemorySpillStore, NoopSpillStore>();

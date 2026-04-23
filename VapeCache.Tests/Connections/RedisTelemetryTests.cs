@@ -158,15 +158,5 @@ public sealed class RedisTelemetryTests
         Assert.False(hasForbidden, $"Metric '{metricName}' unexpectedly contained {tagKey}={forbiddenValue}.");
     }
 
-    private sealed record MeasurementSnapshot
-    {
-        public MeasurementSnapshot(double Value, IReadOnlyDictionary<string, string> Tags)
-        {
-            this.Value = Value;
-            this.Tags = Tags;
-        }
-
-        public double Value { get; init; }
-        public IReadOnlyDictionary<string, string> Tags { get; init; }
-    }
+    private sealed record MeasurementSnapshot(double Value, IReadOnlyDictionary<string, string> Tags);
 }

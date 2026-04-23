@@ -113,35 +113,6 @@ public sealed class RedisRegistrationValidationTests
     }
 
     [Fact]
-    public async Task ServiceRegistrations_FailHostStartup_WhenAutoscalerThresholdRelationshipsAreInvalid()
-    {
-        using var provider = BuildServiceProvider(new Dictionary<string, string?>
-        {
-            ["RedisConnection:Host"] = "redis.internal",
-            ["RedisMultiplexer:ScaleUpInflightUtilization"] = "0.40",
-            ["RedisMultiplexer:ScaleDownInflightUtilization"] = "0.60",
-            ["RedisMultiplexer:ScaleUpP99LatencyMsThreshold"] = "30",
-            ["RedisMultiplexer:ScaleDownP95LatencyMsThreshold"] = "40",
-            ["RedisMultiplexer:ScaleUpWindow"] = "00:00:30",
-            ["RedisMultiplexer:ScaleDownWindow"] = "00:00:10",
-            ["RedisMultiplexer:ScaleUpCooldown"] = "00:00:20",
-            ["RedisMultiplexer:ScaleDownCooldown"] = "00:00:05",
-            ["RedisMultiplexer:ScaleUpTimeoutRatePerSecThreshold"] = "4",
-            ["RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold"] = "2"
-        });
-        var validator = GetStartupValidator(provider, "RedisMultiplexerOptionsStartupHostedService");
-
-        var ex = await Assert.ThrowsAnyAsync<Exception>(() => validator.StartAsync(CancellationToken.None));
-        var validation = AssertOptionsValidationFailure(ex);
-
-        Assert.Contains("RedisMultiplexer:ScaleDownInflightUtilization must be < RedisMultiplexer:ScaleUpInflightUtilization.", validation.Failures);
-        Assert.Contains("RedisMultiplexer:ScaleDownP95LatencyMsThreshold must be <= RedisMultiplexer:ScaleUpP99LatencyMsThreshold.", validation.Failures);
-        Assert.Contains("RedisMultiplexer:ScaleDownWindow must be >= RedisMultiplexer:ScaleUpWindow.", validation.Failures);
-        Assert.Contains("RedisMultiplexer:ScaleDownCooldown must be >= RedisMultiplexer:ScaleUpCooldown.", validation.Failures);
-        Assert.Contains("RedisMultiplexer:EmergencyScaleUpTimeoutRatePerSecThreshold must be >= RedisMultiplexer:ScaleUpTimeoutRatePerSecThreshold.", validation.Failures);
-    }
-
-    [Fact]
     public async Task ServiceRegistrations_Start_WhenPubSubAndBlockingLanesAreConfiguredWithinBudget()
     {
         using var provider = BuildServiceProvider(new Dictionary<string, string?>
@@ -190,18 +161,27 @@ public sealed class RedisRegistrationValidationTests
     }
 
     [Fact]
-    public void AutofacCachingModule_EnterpriseFeatureGate_CanBeOverridden()
+    public void AutofacConnectionsModule_PreservesExistingConnectionStringBuilderRegistration()
     {
         var builder = new ContainerBuilder();
-        builder.RegisterModule(new VapeCacheCachingModule());
-        builder.RegisterVapeCacheEnterpriseFeatureGate<TestEnterpriseFeatureGate>();
+        var options = new TestOptionsMonitor<RedisConnectionOptions>(new RedisConnectionOptions
+        {
+            Host = "redis.internal"
+        });
+
+        builder.RegisterInstance(options)
+            .As<IOptionsMonitor<RedisConnectionOptions>>()
+            .SingleInstance();
+        builder.RegisterInstance(new TestRedisConnectionStringBuilder())
+            .As<IRedisConnectionStringBuilder>()
+            .SingleInstance();
+        builder.RegisterModule(new VapeCacheConnectionsModule());
 
         using var container = builder.Build();
-        var gate = container.Resolve<IEnterpriseFeatureGate>();
+        var resolved = container.Resolve<IRedisConnectionStringBuilder>();
 
-        Assert.IsType<TestEnterpriseFeatureGate>(gate);
-        Assert.True(gate.IsAutoscalerLicensed);
-        Assert.True(gate.IsDurableSpillLicensed);
+        Assert.IsType<TestRedisConnectionStringBuilder>(resolved);
+        Assert.Equal("custom://redis.internal", resolved.Build(new RedisConnectionOptions { Host = "redis.internal" }));
     }
 
     [Fact]
@@ -267,10 +247,9 @@ public sealed class RedisRegistrationValidationTests
     private static IHostedService GetStartupValidator(IServiceProvider provider, string typeName)
         => provider.GetServices<IHostedService>().Single(service => service.GetType().Name == typeName);
 
-    private sealed class TestEnterpriseFeatureGate : IEnterpriseFeatureGate
+    private sealed class TestRedisConnectionStringBuilder : IRedisConnectionStringBuilder
     {
-        public bool IsAutoscalerLicensed => true;
-        public bool IsDurableSpillLicensed => true;
-        public bool IsReconciliationLicensed => true;
+        public string Build(RedisConnectionOptions options)
+            => $"custom://{options.Host}";
     }
 }

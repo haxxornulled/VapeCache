@@ -159,7 +159,6 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             CrlfMemory,
             _writes.TryDequeue,
             () => _writes.Count,
-            _pending.TryEnqueue,
             _pending.EnqueueAsync,
             NextPendingResponseSequence,
             ReturnHeaderBufferFromMux,
@@ -168,7 +167,6 @@ internal sealed class RedisMultiplexedConnection : IAsyncDisposable
             RecordLaneBytesSent,
             coalescingEnterQueueDepth,
             coalescingExitQueueDepth,
-            coalescedWriteMaxOperations,
             coalescingSpinBudget);
 
         _connectionId = Interlocked.Increment(ref _nextConnectionId);
