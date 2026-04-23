@@ -188,13 +188,13 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
         return deserialize(bytes);
     }
 
-    public async ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
+    public ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         _current.SetCurrent(Name);
-        using var buffer = new PooledByteBufferWriter(256);
+        var buffer = new ArrayBufferWriter<byte>(256);
         serialize(buffer, value);
-        await SetAsync(key, buffer.WrittenMemory, options, ct).ConfigureAwait(false);
+        return SetAsync(key, buffer.WrittenMemory, options, ct);
     }
 
     public async ValueTask<T> GetOrSetAsync<T>(
@@ -205,9 +205,9 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
         CacheEntryOptions options,
         CancellationToken ct)
     {
-        var cached = await GetAsync(key, deserialize, ct).ConfigureAwait(false);
-        if (cached is not null)
-            return cached;
+        var bytes = await GetAsync(key, ct).ConfigureAwait(false);
+        if (bytes is not null)
+            return deserialize(bytes);
 
         var created = await factory(ct).ConfigureAwait(false);
         await SetAsync(key, created, serialize, options, ct).ConfigureAwait(false);

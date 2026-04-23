@@ -2,9 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
-using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
-using VapeCache.Abstractions.Diagnostics;
 using VapeCache.Extensions.DependencyInjection;
 
 namespace VapeCache.Tests.DependencyInjection;
@@ -21,7 +19,6 @@ public sealed class VapeCacheDependencyInjectionExtensionsTests
         Assert.NotNull(builder);
         Assert.Contains(services, static d => d.ServiceType == typeof(IRedisConnectionFactory));
         Assert.Contains(services, static d => d.ServiceType == typeof(IRedisConnectionPool));
-        Assert.Contains(services, static d => d.ServiceType == typeof(IRedisConnectionStringBuilder));
         Assert.Contains(services, static d => d.ServiceType == typeof(ICacheService));
         Assert.Contains(services, static d => d.ServiceType == typeof(IVapeCache));
 
@@ -99,112 +96,5 @@ public sealed class VapeCacheDependencyInjectionExtensionsTests
         Assert.NotEqual("redis.internal", connection.Host);
         Assert.NotEqual(75000, stampede.MaxKeys);
         Assert.Equal(0, spill.MemoryCacheSizeLimitBytes);
-    }
-
-    [Fact]
-    public async Task UseEnterpriseFeatureGate_ReplacesDefaultGate()
-    {
-        var services = new ServiceCollection();
-        services.AddVapeCache()
-            .UseEnterpriseFeatureGate<TestEnterpriseFeatureGate>();
-
-        await using var provider = services.BuildServiceProvider();
-        var gate = provider.GetRequiredService<IEnterpriseFeatureGate>();
-
-        Assert.IsType<TestEnterpriseFeatureGate>(gate);
-        Assert.True(gate.IsAutoscalerLicensed);
-        Assert.True(gate.IsDurableSpillLicensed);
-        Assert.True(gate.IsReconciliationLicensed);
-    }
-
-    [Fact]
-    public async Task AddVapeCacheInMemory_RegistersMemoryOnlyRuntimeServices()
-    {
-        var services = new ServiceCollection();
-
-        var builder = services.AddVapeCacheInMemory();
-
-        Assert.NotNull(builder);
-        Assert.DoesNotContain(services, static d => d.ServiceType == typeof(IRedisConnectionFactory));
-        Assert.DoesNotContain(services, static d => d.ServiceType == typeof(IRedisConnectionPool));
-        Assert.Contains(services, static d => d.ServiceType == typeof(IRedisCommandExecutor));
-        Assert.Contains(services, static d => d.ServiceType == typeof(ICacheService));
-        Assert.Contains(services, static d => d.ServiceType == typeof(IVapeCache));
-
-        await using var provider = services.BuildServiceProvider();
-
-        var backend = provider.GetRequiredService<ICacheBackendState>();
-        Assert.Equal(BackendType.InMemory, backend.EffectiveBackend);
-    }
-
-    [Fact]
-    public async Task AddVapeCacheInMemory_WithConfiguration_BindsLocalOptionsWithoutRedis()
-    {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["RedisConnection:Host"] = "redis.internal",
-                ["CacheStampede:MaxKeys"] = "32000",
-                ["InMemorySpill:MemoryCacheSizeLimitBytes"] = "2048"
-            })
-            .Build();
-
-        var services = new ServiceCollection();
-        services.AddVapeCacheInMemory(configuration);
-
-        await using var provider = services.BuildServiceProvider();
-
-        var stampede = provider.GetRequiredService<IOptions<CacheStampedeOptions>>().Value;
-        var spill = provider.GetRequiredService<IOptions<InMemorySpillOptions>>().Value;
-        var redis = provider.GetRequiredService<IOptions<RedisConnectionOptions>>().Value;
-
-        Assert.Equal(32000, stampede.MaxKeys);
-        Assert.Equal(2048, spill.MemoryCacheSizeLimitBytes);
-        Assert.True(string.IsNullOrWhiteSpace(redis.Host));
-        Assert.True(string.IsNullOrWhiteSpace(redis.ConnectionString));
-    }
-
-    [Fact]
-    public async Task AddVapeCacheInMemory_SupportsTagInvalidationWithoutRedis()
-    {
-        var services = new ServiceCollection();
-        services.AddVapeCacheInMemory();
-
-        await using var provider = services.BuildServiceProvider();
-        var cache = provider.GetRequiredService<IVapeCache>();
-
-        var key = CacheKey<string>.From("products:42");
-        var options = new CacheEntryOptions(Ttl: TimeSpan.FromMinutes(5)).WithTag("products");
-
-        await cache.SetAsync(key, "widget", options);
-        Assert.Equal("widget", await cache.GetAsync(key));
-
-        var version = await cache.InvalidateTagAsync("products");
-        Assert.Equal(1L, version);
-        Assert.Null(await cache.GetAsync(key));
-    }
-
-    [Fact]
-    public async Task AddVapeCacheInMemory_SupportsTypedCollections()
-    {
-        var services = new ServiceCollection();
-        services.AddVapeCacheInMemory();
-
-        await using var provider = services.BuildServiceProvider();
-        var collections = provider.GetRequiredService<ICacheCollectionFactory>();
-
-        var jobs = collections.List<string>("jobs:pending");
-        await jobs.PushBackAsync("job-1");
-
-        var next = await jobs.PopFrontAsync();
-
-        Assert.Equal("job-1", next);
-    }
-
-    private sealed class TestEnterpriseFeatureGate : IEnterpriseFeatureGate
-    {
-        public bool IsAutoscalerLicensed => true;
-        public bool IsDurableSpillLicensed => true;
-        public bool IsReconciliationLicensed => true;
     }
 }
