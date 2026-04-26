@@ -26,12 +26,10 @@ internal sealed class CacheBackendState : ICacheBackendState
             if (_failover?.IsForcedOpen == true || _breaker?.IsOpen == true)
                 return BackendType.InMemory;
 
-            if (_breaker is not null || _failover is not null)
-                return BackendType.Redis;
+            if (BackendTypeResolver.TryParseName(_current.CurrentName, out var parsed))
+                return parsed;
 
-            return BackendTypeResolver.TryParseName(_current.CurrentName, out var parsed)
-                ? parsed
-                : BackendType.Redis;
+            return BackendType.Redis;
         }
     }
 }

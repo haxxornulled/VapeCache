@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 
 namespace VapeCache.Extensions.Aspire.Hosting;
 
-internal sealed partial class RedisExporterMetricsHostedService : BackgroundService
+internal sealed partial class RedisExporterMetricsHostedService : HostedLifecycleLoopService
 {
     public const string HttpClientName = "VapeCache.RedisExporterMetrics";
 

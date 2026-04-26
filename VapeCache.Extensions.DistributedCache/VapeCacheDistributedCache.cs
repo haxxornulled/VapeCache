@@ -24,6 +24,7 @@ public sealed class VapeCacheDistributedCache : IDistributedCache, IBufferDistri
     private readonly ICacheService _cache;
     private readonly TimeProvider _timeProvider;
     private readonly string _keyPrefix;
+    private readonly ICacheOperationOriginAccessor? _originAccessor;
 
     /// <summary>
     /// Creates a new adapter instance.
@@ -31,16 +32,19 @@ public sealed class VapeCacheDistributedCache : IDistributedCache, IBufferDistri
     public VapeCacheDistributedCache(
         ICacheService cache,
         TimeProvider timeProvider,
-        IOptions<VapeCacheDistributedCacheOptions>? options = null)
+        IOptions<VapeCacheDistributedCacheOptions>? options = null,
+        ICacheOperationOriginAccessor? originAccessor = null)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _keyPrefix = options?.Value.KeyPrefix ?? string.Empty;
+        _originAccessor = originAccessor;
     }
 
     /// <inheritdoc />
     public byte[]? Get(string key)
     {
+        using var _ = BeginOriginScope();
         var result = GetSync(GetCoreAsync(key, refreshSliding: true, CancellationToken.None));
         return result.HasValue ? result.ToArray() : null;
     }
@@ -48,6 +52,7 @@ public sealed class VapeCacheDistributedCache : IDistributedCache, IBufferDistri
     /// <inheritdoc />
     public async Task<byte[]?> GetAsync(string key, CancellationToken token = default)
     {
+        using var _ = BeginOriginScope();
         var result = await GetCoreAsync(key, refreshSliding: true, token).ConfigureAwait(false);
         return result.HasValue ? result.ToArray() : null;
     }
@@ -56,35 +61,50 @@ public sealed class VapeCacheDistributedCache : IDistributedCache, IBufferDistri
     public void Set(string key, byte[] value, DistributedCacheEntryOptions options)
     {
         ArgumentNullException.ThrowIfNull(value);
+        using var _ = BeginOriginScope();
         WaitSync(SetCoreAsync(key, value, options, CancellationToken.None));
     }
 
     /// <inheritdoc />
-    public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
+    public async Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
     {
         ArgumentNullException.ThrowIfNull(value);
-        return SetCoreAsync(key, value, options, token).AsTask();
+        using var _ = BeginOriginScope();
+        await SetCoreAsync(key, value, options, token).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public void Refresh(string key)
-        => WaitSync(RefreshCoreAsync(key, CancellationToken.None));
+    {
+        using var _ = BeginOriginScope();
+        WaitSync(RefreshCoreAsync(key, CancellationToken.None));
+    }
 
     /// <inheritdoc />
-    public Task RefreshAsync(string key, CancellationToken token = default)
-        => RefreshCoreAsync(key, token).AsTask();
+    public async Task RefreshAsync(string key, CancellationToken token = default)
+    {
+        using var _ = BeginOriginScope();
+        await RefreshCoreAsync(key, token).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public void Remove(string key)
-        => WaitSync(RemoveCoreAsync(key, CancellationToken.None));
+    {
+        using var _ = BeginOriginScope();
+        WaitSync(RemoveCoreAsync(key, CancellationToken.None));
+    }
 
     /// <inheritdoc />
-    public Task RemoveAsync(string key, CancellationToken token = default)
-        => RemoveCoreAsync(key, token).AsTask();
+    public async Task RemoveAsync(string key, CancellationToken token = default)
+    {
+        using var _ = BeginOriginScope();
+        await RemoveCoreAsync(key, token).ConfigureAwait(false);
+    }
 
     bool IBufferDistributedCache.TryGet(string key, IBufferWriter<byte> destination)
     {
         ArgumentNullException.ThrowIfNull(destination);
+        using var _ = BeginOriginScope();
 
         var result = GetSync(GetCoreAsync(key, refreshSliding: true, CancellationToken.None));
         if (!result.HasValue)
@@ -100,6 +120,7 @@ public sealed class VapeCacheDistributedCache : IDistributedCache, IBufferDistri
         CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(destination);
+        using var _ = BeginOriginScope();
 
         var result = await GetCoreAsync(key, refreshSliding: true, token).ConfigureAwait(false);
         if (!result.HasValue)
@@ -110,14 +131,23 @@ public sealed class VapeCacheDistributedCache : IDistributedCache, IBufferDistri
     }
 
     void IBufferDistributedCache.Set(string key, ReadOnlySequence<byte> value, DistributedCacheEntryOptions options)
-        => WaitSync(SetSequenceCoreAsync(key, value, options, CancellationToken.None));
+    {
+        using var _ = BeginOriginScope();
+        WaitSync(SetSequenceCoreAsync(key, value, options, CancellationToken.None));
+    }
 
-    ValueTask IBufferDistributedCache.SetAsync(
+    async ValueTask IBufferDistributedCache.SetAsync(
         string key,
         ReadOnlySequence<byte> value,
         DistributedCacheEntryOptions options,
         CancellationToken token)
-        => SetSequenceCoreAsync(key, value, options, token);
+    {
+        using var _ = BeginOriginScope();
+        await SetSequenceCoreAsync(key, value, options, token).ConfigureAwait(false);
+    }
+
+    private IDisposable? BeginOriginScope()
+        => _originAccessor?.BeginScope(CacheOperationOrigin.DistributedCacheBridge);
 
     private async ValueTask<CacheReadResult> GetCoreAsync(
         string key,

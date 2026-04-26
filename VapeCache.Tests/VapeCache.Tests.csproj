@@ -44,5 +44,6 @@
     <ProjectReference Include="..\VapeCache.Extensions.AspNetCore\VapeCache.Extensions.AspNetCore.csproj" />
     <ProjectReference Include="..\VapeCache.Features.Invalidation\VapeCache.Features.Invalidation.csproj" />
     <ProjectReference Include="..\VapeCache.Features.Search\VapeCache.Features.Search.csproj" />
+    <ProjectReference Include="..\VapeCache.UI\VapeCache.UI.csproj" />
   </ItemGroup>
 </Project>

@@ -80,6 +80,28 @@ Equivalent environment variable:
 setx VAPECACHE_REDIS_CONNECTIONSTRING "redis://localhost:6379/0"
 ```
 
+Local development secret store (`VapeCache.AppHost` and direct `VapeCache.UI` runs share the same user-secrets ID):
+
+```bash
+dotnet user-secrets --project .\VapeCache.AppHost set "ConnectionStrings:redis" "redis://localhost:6379/0"
+dotnet user-secrets --project .\VapeCache.AppHost set "Authentication:JwtBearer:SigningKey" "your-32+-byte-secret"
+dotnet user-secrets --project .\VapeCache.AppHost set "Serilog:Seq:ApiKey" "your-seq-key"
+```
+
+Repeatable helper for key-by-key or appsettings-shaped updates:
+
+```powershell
+pwsh -File .\tools\manage-user-secrets.ps1 SetKey -Key "Serilog:Seq:ApiKey" -Value "your-seq-key"
+pwsh -File .\tools\manage-user-secrets.ps1 SetBlock -Section "Authentication:JwtBearer" -JsonBlock '{ "SigningKey": "your-32+-byte-secret", "ValidIssuer": "vapecache-internal", "ValidAudience": "vapecache-admin" }'
+pwsh -File .\tools\manage-user-secrets.ps1 RemoveSection -Section "Authentication:JwtBearer"
+```
+
+Equivalent environment variable names are:
+
+- `VAPECACHE_REDIS_CONNECTIONSTRING` or `ConnectionStrings__redis`
+- `Authentication__JwtBearer__SigningKey`
+- `Serilog__Seq__ApiKey`
+
 The console host, direct UI run, and AppHost/Aspire wiring all honor that same
 `VAPECACHE_REDIS_CONNECTIONSTRING` value. When running under Aspire, `ConnectionStrings:redis`
 is also picked up automatically.

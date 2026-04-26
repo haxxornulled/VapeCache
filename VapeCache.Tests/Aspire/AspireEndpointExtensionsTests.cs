@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Moq;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
@@ -246,7 +247,8 @@ public sealed class AspireEndpointExtensionsTests
             BreakerReason: null,
             Autoscaler: null,
             Lanes: Array.Empty<RedisMuxLaneSnapshot>(),
-            Spill: null);
+            Spill: null,
+            OriginStats: default);
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         var redis = new Mock<IRedisCommandExecutor>();
@@ -268,6 +270,64 @@ public sealed class AspireEndpointExtensionsTests
         Assert.NotNull(envelope.Snapshot);
         Assert.Equal(BackendType.Redis, envelope.Snapshot!.Backend);
         Assert.Equal(140, envelope.Snapshot.Reads);
+        Assert.Equal(0, envelope.Snapshot.OriginStats.InteropReads);
+    }
+
+    [Fact]
+    public async Task MapVapeCacheEndpoints_ExposesSharedSnapshot_WithOriginBreakdown()
+    {
+        var snapshot = new VapeCacheSharedDashboardSnapshot(
+            TimestampUtc: DateTimeOffset.UtcNow,
+            Backend: BackendType.Redis,
+            HitRate: 0.91d,
+            Reads: 220,
+            Writes: 45,
+            Hits: 200,
+            Misses: 20,
+            FallbackToMemory: 3,
+            RedisBreakerOpened: 1,
+            StampedeKeyRejected: 0,
+            StampedeLockWaitTimeout: 0,
+            StampedeFailureBackoffRejected: 0,
+            BreakerEnabled: true,
+            BreakerOpen: false,
+            BreakerConsecutiveFailures: 0,
+            BreakerOpenRemaining: null,
+            BreakerForcedOpen: false,
+            BreakerReason: null,
+            Autoscaler: null,
+            Lanes: Array.Empty<RedisMuxLaneSnapshot>(),
+            Spill: null,
+            OriginStats: new CacheOriginStatsSnapshot(
+                NativeReads: 120,
+                NativeWrites: 30,
+                NativeHits: 110,
+                NativeMisses: 10,
+                InteropReads: 100,
+                InteropWrites: 15,
+                InteropHits: 90,
+                InteropMisses: 10));
+
+        var payload = JsonSerializer.SerializeToUtf8Bytes(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var redis = new Mock<IRedisCommandExecutor>();
+        redis.Setup(x => x.GetAsync(VapeCacheSharedDashboardSnapshotStore.RedisKey, It.IsAny<CancellationToken>()))
+            .Returns((string _, CancellationToken _) => ValueTask.FromResult<byte[]?>(payload));
+
+        await using var app = await CreateAppAsync(
+            includeBreakerControlEndpoints: false,
+            redisCommandExecutor: redis.Object);
+        using var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/vapecache/dashboard/shared-snapshot");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var envelope = await response.Content.ReadFromJsonAsync<VapeCacheSharedDashboardSnapshotEnvelope>();
+        Assert.NotNull(envelope);
+        Assert.NotNull(envelope!.Snapshot);
+        Assert.Equal(120, envelope.Snapshot!.OriginStats.NativeReads);
+        Assert.Equal(30, envelope.Snapshot.OriginStats.NativeWrites);
+        Assert.Equal(100, envelope.Snapshot.OriginStats.InteropReads);
+        Assert.Equal(15, envelope.Snapshot.OriginStats.InteropWrites);
     }
 
     [Fact]
@@ -332,6 +392,43 @@ public sealed class AspireEndpointExtensionsTests
         using var doc = JsonDocument.Parse(dataLine!);
         Assert.True(doc.RootElement.TryGetProperty("Lanes", out var lanesProperty));
         Assert.Equal(JsonValueKind.Array, lanesProperty.ValueKind);
+    }
+
+    [Fact]
+    public async Task WithAutoMappedEndpoints_PublishesSharedSnapshot_WhenEnabled()
+    {
+        var writes = new List<(string Key, byte[] Payload, TimeSpan? Ttl)>();
+        var redis = new Mock<IRedisCommandExecutor>();
+        redis.Setup(x => x.SetAsync(
+                It.IsAny<string>(),
+                It.IsAny<ReadOnlyMemory<byte>>(),
+                It.IsAny<TimeSpan?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string key, ReadOnlyMemory<byte> payload, TimeSpan? ttl, CancellationToken _) =>
+            {
+                writes.Add((key, payload.ToArray(), ttl));
+                return ValueTask.FromResult(true);
+            });
+
+        await using var app = await CreateAutoMappedAppAsync(
+            enabled: false,
+            redisCommandExecutor: redis.Object,
+            publishSharedSnapshot: true);
+
+        await WaitForAsync(
+            () => writes.Count > 0,
+            timeout: TimeSpan.FromSeconds(5));
+
+        Assert.NotEmpty(writes);
+        var write = writes[^1];
+        Assert.Equal(VapeCacheSharedDashboardSnapshotStore.RedisKey, write.Key);
+        Assert.Equal(VapeCacheSharedDashboardSnapshotStore.TimeToLive, write.Ttl);
+
+        var snapshot = JsonSerializer.Deserialize<VapeCacheSharedDashboardSnapshot>(
+            write.Payload,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(snapshot);
+        Assert.Equal(BackendType.Redis, snapshot!.Backend);
     }
 
     [Fact]
@@ -486,7 +583,9 @@ public sealed class AspireEndpointExtensionsTests
         string prefix = "/vapecache",
         string adminPrefix = "/vapecache/admin",
         bool requireAuthorizationOnAdminEndpoints = false,
-        string? adminAuthorizationPolicy = null)
+        string? adminAuthorizationPolicy = null,
+        IRedisCommandExecutor? redisCommandExecutor = null,
+        bool publishSharedSnapshot = false)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -510,13 +609,34 @@ public sealed class AspireEndpointExtensionsTests
                 options.EnableLiveStream = true;
                 options.EnableDashboard = true;
                 options.LiveSampleInterval = TimeSpan.FromMilliseconds(50);
+                options.PublishSharedSnapshot = publishSharedSnapshot;
+                options.SharedSnapshotPublishInterval = TimeSpan.FromMilliseconds(50);
             });
+        if (redisCommandExecutor is not null)
+        {
+            builder.Services.RemoveAll<IRedisCommandExecutor>();
+            builder.Services.AddSingleton(redisCommandExecutor);
+        }
         builder.Services.AddOptions<RedisConnectionOptions>()
             .Bind(builder.Configuration.GetSection("RedisConnection"));
 
         var app = builder.Build();
         await app.StartAsync();
         return app;
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        var started = DateTime.UtcNow;
+        while (DateTime.UtcNow - started < timeout)
+        {
+            if (condition())
+                return;
+
+            await Task.Delay(50);
+        }
+
+        Assert.True(condition(), "Timed out waiting for condition.");
     }
 
     private static async Task<WebApplication> CreateAdminOnlyAppAsync(

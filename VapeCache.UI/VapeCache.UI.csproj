@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>preview</LangVersion>
+    <UserSecretsId>927d4220-ed90-4771-b9d0-e97c7bfa4797</UserSecretsId>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <UiFrontendDir>$(MSBuildProjectDirectory)\ui</UiFrontendDir>
     <UiFrontendStamp>$(MSBuildProjectDirectory)\obj\ui-vite.stamp</UiFrontendStamp>
@@ -34,6 +35,10 @@
     <ProjectReference Include="..\VapeCache.Features.Invalidation\VapeCache.Features.Invalidation.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
     <ProjectReference Include="..\VapeCache.ServiceDefaults\VapeCache.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="VapeCache.Tests" />
   </ItemGroup>
 
   <ItemGroup>

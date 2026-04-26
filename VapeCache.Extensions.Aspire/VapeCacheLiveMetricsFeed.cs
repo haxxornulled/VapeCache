@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Abstractions.Diagnostics;
+using VapeCache.Extensions.Aspire.Hosting;
 
 namespace VapeCache.Extensions.Aspire;
 
@@ -94,7 +95,7 @@ public sealed record VapeCacheLiveSample
     public IReadOnlyList<RedisMuxLaneSnapshot>? Lanes { get; init; }
 }
 
-internal sealed class VapeCacheLiveMetricsFeed : BackgroundService, IVapeCacheLiveMetricsFeed
+internal sealed class VapeCacheLiveMetricsFeed : HostedLifecycleLoopService, IVapeCacheLiveMetricsFeed
 {
     private readonly ICacheStats stats;
     private readonly IRedisCircuitBreakerState? breakerState;

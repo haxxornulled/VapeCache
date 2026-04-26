@@ -32,11 +32,15 @@ public sealed class VapeCacheCachingModule : Module
         builder.RegisterType<CurrentCacheService>()
             .As<ICurrentCacheService>()
             .SingleInstance();
+        builder.RegisterType<CacheOperationOriginAccessor>()
+            .As<ICacheOperationOriginAccessor>()
+            .SingleInstance();
         builder.RegisterType<CacheBackendState>()
             .As<ICacheBackendState>()
             .SingleInstance()
             .OnActivated(e => CacheTelemetry.Initialize(e.Instance));
         builder.RegisterType<CacheStatsRegistry>().AsSelf().SingleInstance();
+        builder.RegisterType<CacheOriginStats>().AsSelf().As<ICacheOriginStats>().SingleInstance();
         builder.RegisterType<CurrentCacheStats>().As<ICacheStats>().SingleInstance();
         builder.RegisterType<CacheIntentRegistry>().As<ICacheIntentRegistry>().SingleInstance();
 
@@ -69,11 +73,13 @@ public sealed class VapeCacheCachingModule : Module
             .OnActivated(e => CacheTelemetry.InitializeSpillDiagnostics(e.Instance))
             .IfNotRegistered(typeof(IInMemorySpillStore));
 
-        builder.Register(ctx => new RedisCacheService(
-                ctx.Resolve<RedisCommandExecutor>(),
-                ctx.Resolve<ICurrentCacheService>(),
-                ctx.Resolve<CacheStatsRegistry>(),
-                ctx.ResolveOptional<ICacheIntentRegistry>()))
+        builder.RegisterType<RedisCacheService>()
+            .UsingConstructor(
+                typeof(RedisCommandExecutor),
+                typeof(ICurrentCacheService),
+                typeof(CacheStatsRegistry),
+                typeof(ICacheIntentRegistry),
+                typeof(CacheOriginStats))
             .AsSelf()
             .SingleInstance();
         builder.RegisterType<InMemoryCacheService>().AsSelf().As<ICacheFallbackService>().SingleInstance();

@@ -117,8 +117,18 @@ internal sealed partial class PollyRedisCircuitBreaker : IRedisCircuitBreakerSta
     public void ForceOpen(string reason)
     {
         if (!_options.Enabled) return;
+        var alreadyForcedOpen = !string.IsNullOrEmpty(_forcedReason);
         _forcedReason = reason;
         _currentState = CircuitState.Open;
+        if (!alreadyForcedOpen)
+        {
+            _stats.IncBreakerOpened();
+            CacheTelemetry.RedisBreakerOpened.Add(1, new System.Diagnostics.TagList
+            {
+                { "backend", "hybrid" },
+                { "reason", "forced_open" }
+            });
+        }
         LogForcedOpen(_logger, reason);
     }
 

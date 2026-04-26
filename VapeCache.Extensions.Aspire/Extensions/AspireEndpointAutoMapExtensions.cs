@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace VapeCache.Extensions.Aspire;
@@ -28,8 +29,13 @@ public static class AspireEndpointAutoMapExtensions
         if (configure is not null)
             builder.Builder.Services.Configure(configure);
 
-        builder.Builder.Services.AddSingleton<IVapeCacheLiveMetricsFeed, VapeCacheLiveMetricsFeed>();
-        builder.Builder.Services.AddHostedService(sp => (VapeCacheLiveMetricsFeed)sp.GetRequiredService<IVapeCacheLiveMetricsFeed>());
+        builder.Builder.Services.TryAddSingleton<VapeCacheLiveMetricsFeed>();
+        builder.Builder.Services.TryAddSingleton<IVapeCacheLiveMetricsFeed>(static sp => sp.GetRequiredService<VapeCacheLiveMetricsFeed>());
+        builder.Builder.Services.AddSingleton<IHostedService>(static sp => sp.GetRequiredService<VapeCacheLiveMetricsFeed>());
+        builder.Builder.Services.AddSingleton<IHostedLifecycleService>(static sp => sp.GetRequiredService<VapeCacheLiveMetricsFeed>());
+        builder.Builder.Services.TryAddSingleton<VapeCacheSharedDashboardSnapshotPublisher>();
+        builder.Builder.Services.AddSingleton<IHostedService>(static sp => sp.GetRequiredService<VapeCacheSharedDashboardSnapshotPublisher>());
+        builder.Builder.Services.AddSingleton<IHostedLifecycleService>(static sp => sp.GetRequiredService<VapeCacheSharedDashboardSnapshotPublisher>());
 
         builder.Builder.Services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IStartupFilter, VapeCacheEndpointStartupFilter>());

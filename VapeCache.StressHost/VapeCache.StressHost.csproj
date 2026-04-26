@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>preview</LangVersion>
+    <UserSecretsId>927d4220-ed90-4771-b9d0-e97c7bfa4797</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.Aspire\VapeCache.Extensions.Aspire.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.DependencyInjection\VapeCache.Extensions.DependencyInjection.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.DistributedCache\VapeCache.Extensions.DistributedCache.csproj" />
+    <ProjectReference Include="..\VapeCache.Extensions.Logging\VapeCache.Extensions.Logging.csproj" />
+    <ProjectReference Include="..\VapeCache.ServiceDefaults\VapeCache.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+</Project>

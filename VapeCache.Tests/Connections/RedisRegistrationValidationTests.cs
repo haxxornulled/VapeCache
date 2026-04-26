@@ -185,6 +185,32 @@ public sealed class RedisRegistrationValidationTests
     }
 
     [Fact]
+    public void AutofacCachingModule_EnterpriseFeatureGate_CanBeOverridden()
+    {
+        var builder = new ContainerBuilder();
+        builder.RegisterInstance(new TestEnterpriseFeatureGate())
+            .As<IEnterpriseFeatureGate>()
+            .SingleInstance();
+        builder.RegisterModule(new VapeCacheCachingModule());
+        builder.RegisterInstance(new Mock<IRedisConnectionFactory>().Object)
+            .As<IRedisConnectionFactory>()
+            .SingleInstance();
+        builder.RegisterInstance(new Mock<IRedisConnectionPool>().Object)
+            .As<IRedisConnectionPool>()
+            .SingleInstance();
+        builder.RegisterInstance(new Mock<IRedisConnectionStringBuilder>().Object)
+            .As<IRedisConnectionStringBuilder>()
+            .SingleInstance();
+
+        using var container = builder.Build();
+        var gate = container.Resolve<IEnterpriseFeatureGate>();
+
+        Assert.True(gate.IsAutoscalerLicensed);
+        Assert.True(gate.IsDurableSpillLicensed);
+        Assert.True(gate.IsReconciliationLicensed);
+    }
+
+    [Fact]
     public void RedisConnectionOptions_DisablePasswordOnlyAuthFallback_ByDefault()
     {
         var options = new RedisConnectionOptions();
@@ -252,4 +278,12 @@ public sealed class RedisRegistrationValidationTests
         public string Build(RedisConnectionOptions options)
             => $"custom://{options.Host}";
     }
+
+    private sealed class TestEnterpriseFeatureGate : IEnterpriseFeatureGate
+    {
+        public bool IsAutoscalerLicensed => true;
+        public bool IsDurableSpillLicensed => true;
+        public bool IsReconciliationLicensed => true;
+    }
 }
+

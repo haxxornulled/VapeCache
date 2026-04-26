@@ -48,4 +48,39 @@ public sealed class CurrentCacheStatsTests
         Assert.Equal(0, redis.Hits);
         Assert.Equal(1, redis.Misses);
     }
+
+    [Fact]
+    public void Snapshot_prefers_hybrid_stats_when_hybrid_runtime_is_present()
+    {
+        var current = new CurrentCacheService();
+        var backendState = new CacheBackendState(current, breaker: null, failover: null);
+        var registry = new CacheStatsRegistry();
+
+        var memoryStats = registry.GetOrCreate("memory");
+        memoryStats.IncGet();
+        memoryStats.IncHit();
+
+        var redisStats = registry.GetOrCreate("redis");
+        redisStats.IncGet();
+        redisStats.IncMiss();
+
+        var hybridStats = registry.GetOrCreate("hybrid");
+        hybridStats.IncGet();
+        hybridStats.IncGet();
+        hybridStats.IncHit();
+        hybridStats.IncMiss();
+        hybridStats.IncSet();
+        hybridStats.IncFallbackToMemory();
+
+        var sut = new CurrentCacheStats(backendState, registry);
+
+        current.SetCurrent("memory");
+        var snapshot = sut.Snapshot;
+
+        Assert.Equal(2, snapshot.GetCalls);
+        Assert.Equal(1, snapshot.Hits);
+        Assert.Equal(1, snapshot.Misses);
+        Assert.Equal(1, snapshot.SetCalls);
+        Assert.Equal(1, snapshot.FallbackToMemory);
+    }
 }

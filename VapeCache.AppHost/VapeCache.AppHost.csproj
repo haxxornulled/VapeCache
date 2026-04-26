@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.UI\VapeCache.UI.csproj" />
+    <ProjectReference Include="..\VapeCache.StressHost\VapeCache.StressHost.csproj" />
   </ItemGroup>
 
   <ItemGroup>

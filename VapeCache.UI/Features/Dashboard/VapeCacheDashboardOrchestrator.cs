@@ -13,6 +13,7 @@ public sealed class VapeCacheDashboardOrchestrator
     private readonly IRedisCircuitBreakerState _breakerState;
     private readonly IRedisFailoverController _failoverController;
     private readonly IRedisCommandExecutor _redis;
+    private readonly ICacheOriginStats? _originStats;
     private readonly IRedisMultiplexerDiagnostics? _diagnostic;
     private readonly ISpillStoreDiagnostics? _spillDiagnostics;
     private readonly object _cacheGate = new();
@@ -40,6 +41,7 @@ public sealed class VapeCacheDashboardOrchestrator
         IRedisCircuitBreakerState breakerState,
         IRedisFailoverController failoverController,
         IRedisCommandExecutor redis,
+        ICacheOriginStats? originStats,
         IEnumerable<IRedisMultiplexerDiagnostics> diagnostics,
         ISpillStoreDiagnostics? spillDiagnostics = null)
     {
@@ -47,6 +49,7 @@ public sealed class VapeCacheDashboardOrchestrator
         _breakerState = breakerState;
         _failoverController = failoverController;
         _redis = redis;
+        _originStats = originStats;
         _diagnostic = GetFirstOrDefault(diagnostics);
         _spillDiagnostics = spillDiagnostics;
     }
@@ -159,7 +162,8 @@ public sealed class VapeCacheDashboardOrchestrator
                 BreakerReason: snapshot.BreakerReason,
                 Autoscaler: snapshot.Autoscaler,
                 Lanes: snapshot.Lanes,
-                Spill: snapshot.Spill);
+                Spill: snapshot.Spill,
+                OriginStats: snapshot.OriginStats);
 
             _sharedCacheTimestampUtc = snapshot.TimestampUtc;
             _sharedCachePayload = snapshot;
@@ -222,7 +226,8 @@ public sealed class VapeCacheDashboardOrchestrator
                 BreakerReason: breakerReason,
                 Autoscaler: autoscaler,
                 Lanes: lanes,
-                Spill: spill);
+                Spill: spill,
+                OriginStats: _originStats?.Snapshot ?? default);
 
             _localCacheStats = stats;
             _localCacheBackend = backend;
@@ -282,6 +287,7 @@ public sealed class VapeCacheDashboardOrchestrator
                string.Equals(current.BreakerReason, previous.BreakerReason, StringComparison.Ordinal) &&
                Equals(current.Autoscaler, previous.Autoscaler) &&
                Equals(current.Spill, previous.Spill) &&
+               current.OriginStats.Equals(previous.OriginStats) &&
                AreEquivalentLanes(current.Lanes, previous.Lanes);
     }
 
@@ -329,7 +335,8 @@ public sealed record VapeCacheDashboardSnapshot
         string? BreakerReason,
         RedisAutoscalerSnapshot? Autoscaler,
         IReadOnlyList<RedisMuxLaneSnapshot> Lanes,
-        SpillStoreDiagnosticsSnapshot? Spill)
+        SpillStoreDiagnosticsSnapshot? Spill,
+        CacheOriginStatsSnapshot OriginStats)
     {
         this.TimestampUtc = TimestampUtc;
         this.Backend = Backend;
@@ -352,6 +359,7 @@ public sealed record VapeCacheDashboardSnapshot
         this.Autoscaler = Autoscaler;
         this.Lanes = Lanes;
         this.Spill = Spill;
+        this.OriginStats = OriginStats;
     }
 
     public DateTimeOffset TimestampUtc { get; init; }
@@ -375,6 +383,7 @@ public sealed record VapeCacheDashboardSnapshot
     public RedisAutoscalerSnapshot? Autoscaler { get; init; }
     public IReadOnlyList<RedisMuxLaneSnapshot> Lanes { get; init; }
     public SpillStoreDiagnosticsSnapshot? Spill { get; init; }
+    public CacheOriginStatsSnapshot OriginStats { get; init; }
 
     /// <summary>
     /// Executes new.
@@ -400,5 +409,6 @@ public sealed record VapeCacheDashboardSnapshot
         BreakerReason: null,
         Autoscaler: null,
         Lanes: Array.Empty<RedisMuxLaneSnapshot>(),
-        Spill: null);
+        Spill: null,
+        OriginStats: default);
 }
