@@ -29,7 +29,7 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Release Validation Gate (No Pack)
+      - name: CI Validation
         shell: pwsh
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/release-check.ps1 -Configuration Release -SkipPack -UsePublicSourcesOnly
+          ./tools/ci-validate.ps1 -Configuration Debug -UsePublicSourcesOnly
