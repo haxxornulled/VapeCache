@@ -14,7 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="11.0.0" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="VapeCache.Persistence" Version="$(VapeCacheEnterprisePackageVersion)" Condition="'$(EnableVapeCacheEnterprisePackages)' == 'true'" />
     <PackageReference Include="VapeCache.Reconciliation" Version="$(VapeCacheEnterprisePackageVersion)" Condition="'$(EnableVapeCacheEnterprisePackages)' == 'true'" />

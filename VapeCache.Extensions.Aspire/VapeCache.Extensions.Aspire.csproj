@@ -43,8 +43,8 @@
   </ItemGroup>
   <ItemGroup>
     <!-- .NET Aspire Service Discovery -->
-    <PackageReference Include="Autofac" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.1.0" />
+    <PackageReference Include="Autofac" Version="9.1.0" />
+    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.5.0" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
   </ItemGroup>
