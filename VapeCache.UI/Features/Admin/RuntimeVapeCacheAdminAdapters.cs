@@ -294,7 +294,7 @@ internal static class RuntimeVapeCacheSharedSnapshotReader
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public static async ValueTask<VapeCacheSharedDashboardSnapshot?> TryReadAsync(
+    public static async Task<VapeCacheSharedDashboardSnapshot?> TryReadAsync(
         IRedisCommandExecutor redis,
         CancellationToken ct = default)
     {

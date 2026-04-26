@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Serilog;
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
@@ -137,9 +138,24 @@ app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-app.Logger.LogInformation(
-    "VapeCache.UI starting in {Environment}. Redis endpoint source resolved to {RedisConnectionString}",
+VapeCacheUiLog.Starting(
+    app.Logger,
     app.Environment.EnvironmentName,
     app.Configuration["RedisConnection:ConnectionString"] ?? "<not-configured>");
 
 app.Run();
+
+internal static class VapeCacheUiLog
+{
+    private static readonly Action<Microsoft.Extensions.Logging.ILogger, string, string, Exception?> StartingMessage =
+        LoggerMessage.Define<string, string>(
+            LogLevel.Information,
+            new EventId(1, nameof(Starting)),
+            "VapeCache.UI starting in {Environment}. Redis endpoint source resolved to {RedisConnectionString}");
+
+    public static void Starting(
+        Microsoft.Extensions.Logging.ILogger logger,
+        string environment,
+        string redisConnectionString)
+        => StartingMessage(logger, environment, redisConnectionString, null);
+}
