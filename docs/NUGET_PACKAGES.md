@@ -191,3 +191,5 @@ See [LICENSE_FAQ.md](LICENSE_FAQ.md), [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md)
 - Packages are built and smoke-tested from this repository.
 - Runtime defaults and option coverage are documented in [SETTINGS_REFERENCE.md](SETTINGS_REFERENCE.md).
 - Integration and migration guidance is tracked in [UPGRADE_NOTES.md](UPGRADE_NOTES.md).
+- Package signing is supported when a proper code-signing certificate is supplied via `NUGET_SIGNING_CERT_PATH` / `NUGET_SIGNING_CERT_KEY_PATH` or a PFX at `NUGET_SIGNING_CERT_PATH`.
+- The Let’s Encrypt files in `C:\Users\James Arceri\Documents\Certs\` are TLS certificates for `www.vapecache.net`; they are not valid NuGet signing certificates.

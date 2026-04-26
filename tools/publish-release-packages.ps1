@@ -21,6 +21,14 @@ $packages = Get-ReleasePackageVersionInfo
 Assert-ReleasePackageBranding
 Assert-ReleasePackageDocumentationMetadata
 
+if (-not [string]::IsNullOrWhiteSpace($env:NUGET_SIGNING_CERT_PATH))
+{
+    Invoke-ReleaseScript -ScriptPath (Join-Path $PSScriptRoot "sign-release-packages.ps1") -ArgumentList @(
+        "-PackageOutput", $PackageOutput,
+        "-PackageVersion", $resolvedPackageVersion
+    )
+}
+
 if ([string]::IsNullOrWhiteSpace($ApiKey))
 {
     throw "NuGet API key required. Pass -ApiKey or set NUGET_API_KEY."

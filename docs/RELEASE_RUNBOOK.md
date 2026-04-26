@@ -16,6 +16,11 @@ This runbook standardizes OSS release execution to reduce single-operator risk.
 - git push access for the public OSS repo
 - NuGet.org publish credentials (`NUGET_API_KEY`) with push access for all `VapeCache.*` package IDs
 - GitHub Packages token (`PACKAGES_PUBLISH_TOKEN`) with `write:packages` and `read:packages` scopes (and repo access for private repos if needed)
+- Optional package-signing certificate if you want signed packages before publish:
+  - `NUGET_SIGNING_CERT_PATH` and `NUGET_SIGNING_CERT_KEY_PATH` for PEM files, or `NUGET_SIGNING_CERT_PATH` for a PFX
+  - `NUGET_SIGNING_CERT_PASSWORD` if the PFX is password protected
+  - `NUGET_TIMESTAMP_SERVER` for the RFC 3161 timestamp server
+  - the certificate must be RSA, 2048-bit or larger, and valid for code signing
 - local environment with PowerShell (`pwsh` preferred, `powershell.exe` supported) and `.NET 10 SDK`
 - one online Enterprise self-hosted runner with labels `self-hosted`, `windows`, and `x64`
 
@@ -98,6 +103,7 @@ This split is intentional:
    - set `NUGET_API_KEY` in the shell or pass `-ApiKey`
    - `./tools/publish-release-packages.ps1 -PackageVersion <package-version>`
    - if you receive HTTP 403, verify the key is valid and has owner/package permissions for every `VapeCache.*` package
+   - if `NUGET_SIGNING_CERT_PATH` is set, `tools/publish-release-packages.ps1` signs the packages before pushing them
 6. Publish to GitHub Packages:
    - set `PACKAGES_PUBLISH_TOKEN` in the shell
    - `./tools/publish-release-packages.ps1 -PackageVersion <package-version> -Source https://nuget.pkg.github.com/haxxornulled/index.json -ApiKey $env:PACKAGES_PUBLISH_TOKEN`
@@ -139,6 +145,7 @@ If release fails before publish:
 - fix on branch
 - rerun `tools/release-check.ps1`
 - repack with the same version after fixing the issue
+- if signing fails, verify the certificate is a code-signing RSA cert and not a TLS server certificate
 
 If release fails during publish:
 
