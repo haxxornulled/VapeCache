@@ -34,12 +34,7 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Emergency Validation Gate (Hosted Runner)
+      - name: Emergency CI Validation (Hosted Runner)
         shell: pwsh
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/release-check.ps1 -Configuration Release -SkipPack -UsePublicSourcesOnly
-
-      - name: Build Solution (Hosted Runner)
-        shell: pwsh
-        run: |
-          dotnet build VapeCache.slnx -c Release --nologo --verbosity minimal
+          ./tools/ci-validate.ps1 -Configuration Debug -UsePublicSourcesOnly
