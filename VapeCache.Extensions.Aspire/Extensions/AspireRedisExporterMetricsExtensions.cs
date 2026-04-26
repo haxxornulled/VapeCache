@@ -51,9 +51,9 @@ public static class AspireRedisExporterMetricsExtensions
             RedisExporterTelemetry.Initialize(state);
             return state;
         });
-
-        builder.Builder.Services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<IHostedService, RedisExporterMetricsHostedService>());
+        builder.Builder.Services.TryAddSingleton<RedisExporterMetricsHostedService>();
+        builder.Builder.Services.AddSingleton<IHostedService>(static sp => sp.GetRequiredService<RedisExporterMetricsHostedService>());
+        builder.Builder.Services.AddSingleton<IHostedLifecycleService>(static sp => sp.GetRequiredService<RedisExporterMetricsHostedService>());
 
         return builder;
     }

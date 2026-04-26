@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using VapeCache.Abstractions.Caching;
@@ -14,20 +15,47 @@ internal sealed class RuntimeVapeCacheAdminStatsSnapshotProvider : IVapeCacheAdm
 {
     private readonly ICacheBackendState _backendState;
     private readonly ICacheStats _stats;
+    private readonly IRedisCommandExecutor _redis;
     private readonly IRedisMultiplexerDiagnostics? _diagnostics;
 
     public RuntimeVapeCacheAdminStatsSnapshotProvider(
         ICacheBackendState backendState,
         ICacheStats stats,
+        IRedisCommandExecutor redis,
         IEnumerable<IRedisMultiplexerDiagnostics> diagnostics)
     {
         _backendState = backendState ?? throw new ArgumentNullException(nameof(backendState));
         _stats = stats ?? throw new ArgumentNullException(nameof(stats));
+        _redis = redis ?? throw new ArgumentNullException(nameof(redis));
         _diagnostics = diagnostics?.FirstOrDefault();
     }
 
     public VapeCacheAdminStatsSnapshot GetSnapshot()
     {
+        var shared = RuntimeVapeCacheSharedSnapshotReader.TryReadAsync(_redis).GetAwaiter().GetResult();
+        if (shared is not null)
+        {
+            return new VapeCacheAdminStatsSnapshot(
+                TimestampUtc: shared.TimestampUtc,
+                Backend: shared.Backend,
+                Stats: new CacheStatsSnapshot(
+                    GetCalls: shared.Reads,
+                    Hits: shared.Hits,
+                    Misses: shared.Misses,
+                    SetCalls: shared.Writes,
+                    RemoveCalls: 0,
+                    FallbackToMemory: shared.FallbackToMemory,
+                    RedisBreakerOpened: shared.RedisBreakerOpened,
+                    StampedeKeyRejected: shared.StampedeKeyRejected,
+                    StampedeLockWaitTimeout: shared.StampedeLockWaitTimeout,
+                    StampedeFailureBackoffRejected: shared.StampedeFailureBackoffRejected),
+                Reads: shared.Reads,
+                Writes: shared.Writes,
+                HitRate: shared.HitRate,
+                Lanes: shared.Lanes,
+                HealthyLaneCount: shared.Lanes.Count(lane => lane.Healthy));
+        }
+
         var stats = _stats.Snapshot;
         var reads = stats.Hits + stats.Misses;
         var writes = stats.SetCalls + stats.RemoveCalls;
@@ -81,14 +109,24 @@ internal sealed class RuntimeVapeCacheAdminInvalidationOperationsFacade : IVapeC
 internal sealed class RuntimeVapeCacheAdminAutoscalerStatusProvider : IVapeCacheAdminAutoscalerStatusProvider
 {
     private readonly IRedisMultiplexerDiagnostics? _diagnostics;
+    private readonly IRedisCommandExecutor _redis;
 
-    public RuntimeVapeCacheAdminAutoscalerStatusProvider(IEnumerable<IRedisMultiplexerDiagnostics> diagnostics)
+    public RuntimeVapeCacheAdminAutoscalerStatusProvider(
+        IRedisCommandExecutor redis,
+        IEnumerable<IRedisMultiplexerDiagnostics> diagnostics)
     {
+        _redis = redis ?? throw new ArgumentNullException(nameof(redis));
         _diagnostics = diagnostics?.FirstOrDefault();
     }
 
     public RedisAutoscalerSnapshot? GetStatus()
-        => _diagnostics?.GetAutoscalerSnapshot();
+    {
+        var shared = RuntimeVapeCacheSharedSnapshotReader.TryReadAsync(_redis).GetAwaiter().GetResult();
+        if (shared?.Autoscaler is not null)
+            return shared.Autoscaler;
+
+        return _diagnostics?.GetAutoscalerSnapshot();
+    }
 }
 
 /// <summary>
@@ -97,14 +135,24 @@ internal sealed class RuntimeVapeCacheAdminAutoscalerStatusProvider : IVapeCache
 internal sealed class RuntimeVapeCacheAdminSpillDiagnosticsProvider : IVapeCacheAdminSpillDiagnosticsProvider
 {
     private readonly ISpillStoreDiagnostics? _spillDiagnostics;
+    private readonly IRedisCommandExecutor _redis;
 
-    public RuntimeVapeCacheAdminSpillDiagnosticsProvider(ISpillStoreDiagnostics? spillDiagnostics = null)
+    public RuntimeVapeCacheAdminSpillDiagnosticsProvider(
+        IRedisCommandExecutor redis,
+        ISpillStoreDiagnostics? spillDiagnostics = null)
     {
+        _redis = redis ?? throw new ArgumentNullException(nameof(redis));
         _spillDiagnostics = spillDiagnostics;
     }
 
     public SpillStoreDiagnosticsSnapshot? GetStatus()
-        => _spillDiagnostics?.GetSnapshot();
+    {
+        var shared = RuntimeVapeCacheSharedSnapshotReader.TryReadAsync(_redis).GetAwaiter().GetResult();
+        if (shared?.Spill is not null)
+            return shared.Spill;
+
+        return _spillDiagnostics?.GetSnapshot();
+    }
 }
 
 /// <summary>
@@ -150,17 +198,34 @@ internal sealed class RuntimeVapeCacheAdminBreakerStatusProvider : IVapeCacheAdm
 {
     private readonly IRedisCircuitBreakerState _breaker;
     private readonly IRedisFailoverController _failover;
+    private readonly IRedisCommandExecutor _redis;
 
     public RuntimeVapeCacheAdminBreakerStatusProvider(
+        IRedisCommandExecutor redis,
         IRedisCircuitBreakerState breaker,
         IRedisFailoverController failover)
     {
+        _redis = redis ?? throw new ArgumentNullException(nameof(redis));
         _breaker = breaker ?? throw new ArgumentNullException(nameof(breaker));
         _failover = failover ?? throw new ArgumentNullException(nameof(failover));
     }
 
     public VapeCacheAdminBreakerStatus GetStatus()
-        => new(
+    {
+        var shared = RuntimeVapeCacheSharedSnapshotReader.TryReadAsync(_redis).GetAwaiter().GetResult();
+        if (shared is not null)
+        {
+            return new VapeCacheAdminBreakerStatus(
+                Enabled: shared.BreakerEnabled,
+                IsOpen: shared.BreakerOpen,
+                ConsecutiveFailures: shared.BreakerConsecutiveFailures,
+                OpenRemaining: shared.BreakerOpenRemaining,
+                HalfOpenProbeInFlight: false,
+                IsForcedOpen: shared.BreakerForcedOpen,
+                Reason: shared.BreakerReason);
+        }
+
+        return new VapeCacheAdminBreakerStatus(
             Enabled: _breaker.Enabled,
             IsOpen: _breaker.IsOpen,
             ConsecutiveFailures: _breaker.ConsecutiveFailures,
@@ -168,6 +233,7 @@ internal sealed class RuntimeVapeCacheAdminBreakerStatusProvider : IVapeCacheAdm
             HalfOpenProbeInFlight: _breaker.HalfOpenProbeInFlight,
             IsForcedOpen: _failover.IsForcedOpen,
             Reason: _failover.Reason);
+    }
 }
 
 /// <summary>
@@ -224,3 +290,36 @@ internal sealed class RuntimeVapeCacheAdminEventStreamFeedProvider : IVapeCacheA
     }
 }
 
+internal static class RuntimeVapeCacheSharedSnapshotReader
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public static async ValueTask<VapeCacheSharedDashboardSnapshot?> TryReadAsync(
+        IRedisCommandExecutor redis,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var payload = await redis.GetAsync(VapeCacheSharedDashboardSnapshotStore.RedisKey, ct).ConfigureAwait(false);
+            if (payload is null || payload.Length == 0)
+                return null;
+
+            var snapshot = JsonSerializer.Deserialize<VapeCacheSharedDashboardSnapshot>(payload, JsonOptions);
+            if (snapshot is null)
+                return null;
+
+            if (DateTimeOffset.UtcNow - snapshot.TimestampUtc > VapeCacheSharedDashboardSnapshotStore.MaxSnapshotAge)
+                return null;
+
+            return snapshot;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}

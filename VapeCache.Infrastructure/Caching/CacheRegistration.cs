@@ -52,6 +52,7 @@ public static class CacheRegistration
             ServiceDescriptor.Singleton<IHostedService, RedisMultiplexerOptionsStartupHostedService>());
 
         services.AddSingleton<ICurrentCacheService, CurrentCacheService>();
+        services.AddSingleton<ICacheOperationOriginAccessor, CacheOperationOriginAccessor>();
         services.AddSingleton<ICacheBackendState>(sp =>
         {
             var backendState = new CacheBackendState(
@@ -62,6 +63,8 @@ public static class CacheRegistration
             return backendState;
         });
         services.AddSingleton<CacheStatsRegistry>();
+        services.AddSingleton<CacheOriginStats>();
+        services.AddSingleton<ICacheOriginStats>(sp => sp.GetRequiredService<CacheOriginStats>());
         services.AddSingleton<ICacheStats, CurrentCacheStats>();
         services.AddSingleton<ICacheIntentRegistry, CacheIntentRegistry>();
         services.AddSingleton<TimeProvider>(_ => TimeProvider.System);
@@ -86,11 +89,13 @@ public static class CacheRegistration
         // Cache services
         // IMPORTANT: RedisCacheService gets the RAW RedisCommandExecutor (no hybrid wrapper)
         // to avoid circular dependency with HybridCacheService
-        services.AddSingleton(sp => new RedisCacheService(
-            sp.GetRequiredService<RedisCommandExecutor>(),
-            sp.GetRequiredService<ICurrentCacheService>(),
-            sp.GetRequiredService<CacheStatsRegistry>(),
-            sp.GetRequiredService<ICacheIntentRegistry>()));
+        services.AddSingleton<RedisCacheService>(sp =>
+            new RedisCacheService(
+                sp.GetRequiredService<RedisCommandExecutor>(),
+                sp.GetRequiredService<ICurrentCacheService>(),
+                sp.GetRequiredService<CacheStatsRegistry>(),
+                sp.GetRequiredService<ICacheIntentRegistry>(),
+                sp.GetRequiredService<CacheOriginStats>()));
         services.AddSingleton<InMemoryCacheService>();
         services.TryAddSingleton<ICacheFallbackService, InMemoryCacheService>();
         services.AddSingleton<HybridCacheService>();
@@ -179,6 +184,7 @@ public static class CacheRegistration
             current.SetCurrent("memory");
             return current;
         });
+        services.AddSingleton<ICacheOperationOriginAccessor, CacheOperationOriginAccessor>();
         services.AddSingleton<ICacheBackendState>(sp =>
         {
             var backendState = new CacheBackendState(
@@ -189,6 +195,8 @@ public static class CacheRegistration
             return backendState;
         });
         services.AddSingleton<CacheStatsRegistry>();
+        services.AddSingleton<CacheOriginStats>();
+        services.AddSingleton<ICacheOriginStats>(sp => sp.GetRequiredService<CacheOriginStats>());
         services.AddSingleton<ICacheStats, CurrentCacheStats>();
         services.AddSingleton<ICacheIntentRegistry, CacheIntentRegistry>();
         services.AddSingleton(TimeProvider.System);

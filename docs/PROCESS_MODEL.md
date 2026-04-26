@@ -8,7 +8,7 @@ This document defines the engineering process model used to move runtime changes
 flowchart TD
     A["Design / requirements"] --> B["Implementation in bounded layer"]
     B --> C["Unit + integration tests"]
-    C --> D["Perf/behavior validation (HeadToHead + GroceryStore)"]
+    C --> D["Perf/behavior validation (Benchmarks + RuntimeStress)"]
     D --> E{"Passes build/test/perf gates?"}
     E -- No --> F["Fix + re-run validations"]
     F --> C
@@ -24,15 +24,15 @@ sequenceDiagram
     autonumber
     participant Dev as Engineer
     participant CI as Local/CI gates
-    participant GS as GroceryStore stress
-    participant H2H as HeadToHead benchmark
+    participant RS as RuntimeStress suite
+    participant BENCH as Benchmarks
 
     Dev->>CI: dotnet build/test (Release)
     CI-->>Dev: pass/fail
-    Dev->>GS: run high-concurrency scenario
-    GS-->>Dev: throughput, hits/misses, breaker/fallback stats, memory trend
-    Dev->>H2H: run apples + optimized tracks
-    H2H-->>Dev: latency/throughput/allocation diffs
+    Dev->>RS: run high-concurrency runtime stress
+    RS-->>Dev: throughput, hits/misses, breaker/fallback stats, origin telemetry
+    Dev->>BENCH: run focused micro/live benchmarks
+    BENCH-->>Dev: latency/throughput/allocation diffs
     Dev->>CI: finalize with docs + release metadata
 ```
 
@@ -57,7 +57,7 @@ stateDiagram-v2
 
 - Release build succeeds with zero errors.
 - Core test suites pass.
-- GroceryStore run shows stable breaker/fallback behavior and sane hit/miss accounting.
-- HeadToHead run completes both tracks and reports workload integrity metrics.
+- Runtime stress run shows stable breaker/fallback behavior and sane hit/miss accounting.
+- Benchmark run completes the relevant focused track and reports integrity metrics.
 - Memory trend sampling does not show unbounded process growth during stress.
 - Docs and package matrices match current published package set.

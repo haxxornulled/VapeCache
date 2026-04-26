@@ -60,4 +60,15 @@ public sealed class VapeCacheEndpointOptions
     /// Gets or sets the bounded channel capacity for live metrics samples.
     /// </summary>
     public int LiveChannelCapacity { get; set; } = 256;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this host publishes shared dashboard snapshots to Redis.
+    /// Enable this on the process producing the workload you want the dashboard to reflect.
+    /// </summary>
+    public bool PublishSharedSnapshot { get; set; }
+
+    /// <summary>
+    /// Gets or sets the publishing interval used for shared dashboard snapshots.
+    /// </summary>
+    public TimeSpan SharedSnapshotPublishInterval { get; set; } = TimeSpan.FromSeconds(1);
 }

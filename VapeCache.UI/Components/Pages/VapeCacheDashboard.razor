@@ -11,7 +11,10 @@
             <h1>VapeCache Dashboard</h1>
             <div class="dashboard-kickers">
                 <span class="dashboard-kicker">Backend: @_snapshot.Backend</span>
+                <span class="dashboard-kicker @CurrentServingPathKickerClass">Current Serving Path: @CurrentServingPathLabel</span>
                 <span class="dashboard-kicker dashboard-kicker-muted">Live sample: 500ms</span>
+                <span class="dashboard-kicker dashboard-kicker-muted">Native R/W: @_snapshot.OriginStats.NativeReads / @_snapshot.OriginStats.NativeWrites</span>
+                <span class="dashboard-kicker dashboard-kicker-muted">Interop R/W: @_snapshot.OriginStats.InteropReads / @_snapshot.OriginStats.InteropWrites</span>
             </div>
             <p>Last sample: @_snapshot.TimestampUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss.fff")</p>
         </div>
@@ -19,17 +22,20 @@
     </header>
 
     <section class="gauge-grid">
-        <MetricGauge Label="Hit Rate" Value="@(_snapshot.HitRate * 100d)" Unit="%" Min="0" Max="100" Decimals="2" Caption="cache accuracy" />
-        <MetricGauge Label="Reads" Value="_snapshot.Reads" Min="0" Max="@Math.Max(1d, _snapshot.Reads)" Decimals="0" Caption="total read calls" />
-        <MetricGauge Label="Writes" Value="_snapshot.Writes" Min="0" Max="@Math.Max(1d, _snapshot.Writes)" Decimals="0" Caption="set + remove calls" />
-        <MetricGauge Label="Fallback Events" Value="_snapshot.FallbackToMemory" Min="0" Max="@Math.Max(1d, _snapshot.FallbackToMemory)" Decimals="0" Caption="redis to memory" />
-        <MetricGauge Label="Breaker Opens" Value="_snapshot.RedisBreakerOpened" Min="0" Max="@Math.Max(1d, _snapshot.RedisBreakerOpened)" Decimals="0" Caption="circuit trips" />
-        <MetricGauge Label="Stampede Rejects" Value="_snapshot.StampedeKeyRejected" Min="0" Max="@Math.Max(1d, _snapshot.StampedeKeyRejected)" Decimals="0" Caption="lock protection" />
+        <MetricGauge Label="Current Hit Rate" Value="@(_snapshot.HitRate * 100d)" Unit="%" Min="0" Max="100" Decimals="2" Caption="current cache accuracy" />
+        <MetricGauge Label="Cumulative Reads" Value="_snapshot.Reads" Min="0" Max="@Math.Max(1d, _snapshot.Reads)" Decimals="0" Caption="total read calls" />
+        <MetricGauge Label="Cumulative Writes" Value="_snapshot.Writes" Min="0" Max="@Math.Max(1d, _snapshot.Writes)" Decimals="0" Caption="total set + remove calls" />
+        <MetricGauge Label="Cumulative Fallbacks" Value="_snapshot.FallbackToMemory" Min="0" Max="@Math.Max(1d, _snapshot.FallbackToMemory)" Decimals="0" Caption="redis to memory transitions" />
+        <MetricGauge Label="Cumulative Breaker Opens" Value="_snapshot.RedisBreakerOpened" Min="0" Max="@Math.Max(1d, _snapshot.RedisBreakerOpened)" Decimals="0" Caption="circuit trips" />
+        <MetricGauge Label="Stampede Protection" Value="@(_snapshot.StampedeKeyRejected + _snapshot.StampedeLockWaitTimeout + _snapshot.StampedeFailureBackoffRejected)" Min="0" Max="@Math.Max(1d, _snapshot.StampedeKeyRejected + _snapshot.StampedeLockWaitTimeout + _snapshot.StampedeFailureBackoffRejected)" Decimals="0" Caption="key rejects + lock waits + backoff" />
     </section>
 
     <section class="summary-grid">
         <article>
-            <h2>Breaker</h2>
+            <div class="panel-header">
+                <h2>Current Breaker State</h2>
+                <span class="panel-badge @CurrentServingPathBadgeClass">@CurrentServingPathLabel</span>
+            </div>
             <dl>
                 <dt>Enabled</dt><dd>@_snapshot.BreakerEnabled</dd>
                 <dt>Open</dt><dd>@_snapshot.BreakerOpen</dd>
@@ -41,7 +47,10 @@
         </article>
 
         <article>
-            <h2>Autoscaler</h2>
+            <div class="panel-header">
+                <h2>Current MUX Capacity</h2>
+                <span class="panel-badge panel-badge-muted">Current state</span>
+            </div>
             @if (_snapshot.Autoscaler is { } autoscaler)
             {
                 <dl>
@@ -60,7 +69,10 @@
         </article>
 
         <article>
-            <h2>Spill</h2>
+            <div class="panel-header">
+                <h2>Current Spill State</h2>
+                <span class="panel-badge panel-badge-muted">Current state</span>
+            </div>
             @if (_snapshot.Spill is { } spill)
             {
                 <dl>
@@ -77,16 +89,43 @@
                 <p>No spill diagnostics available.</p>
             }
         </article>
+
+        <article>
+            <div class="panel-header">
+                <h2>Cumulative Traffic Mix</h2>
+                <span class="panel-badge panel-badge-muted">Cumulative totals</span>
+            </div>
+            <dl>
+                <dt>Native Reads / Writes</dt><dd>@_snapshot.OriginStats.NativeReads / @_snapshot.OriginStats.NativeWrites</dd>
+                <dt>Native Hits / Misses</dt><dd>@_snapshot.OriginStats.NativeHits / @_snapshot.OriginStats.NativeMisses</dd>
+                <dt>Interop Reads / Writes</dt><dd>@_snapshot.OriginStats.InteropReads / @_snapshot.OriginStats.InteropWrites</dd>
+                <dt>Interop Hits / Misses</dt><dd>@_snapshot.OriginStats.InteropHits / @_snapshot.OriginStats.InteropMisses</dd>
+            </dl>
+        </article>
     </section>
 
     <section class="lanes-section">
-        <h2>MUX Lanes</h2>
+        <div class="panel-header">
+            <h2>Current MUX Lanes</h2>
+            <span class="panel-badge panel-badge-muted">Current live lane snapshot</span>
+        </div>
         @if (_snapshot.Lanes.Count == 0)
         {
             <p>No lane snapshots available.</p>
         }
         else
         {
+            <div class="lane-summary-grid">
+                @foreach (var summary in _laneSummaries)
+                {
+                    <article class="lane-summary-card">
+                        <h3>@summary.Label</h3>
+                        <p>@summary.Count lane(s) <span>@summary.LaneShareText</span></p>
+                        <p>@summary.HealthyCount healthy <span>@summary.HealthyShareText</span></p>
+                        <p>@summary.TotalOperations ops <span>@summary.OperationsShareText</span></p>
+                    </article>
+                }
+            </div>
             <div class="table-wrap">
                 <table>
                     <thead>

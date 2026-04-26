@@ -116,12 +116,13 @@ public sealed class StampedeProtectedCacheServiceTests
     [Fact]
     public async Task GetOrSetAsync_rejects_suspicious_key_when_enabled()
     {
+        var stats = new CacheStats();
         var inner = new FakeCache();
         var svc = new StampedeProtectedCacheService(inner, new TestOptionsMonitor<CacheStampedeOptions>(new CacheStampedeOptions
         {
             Enabled = true,
             RejectSuspiciousKeys = true
-        }));
+        }), stats);
 
         static void Serialize(IBufferWriter<byte> w, int v)
         {
@@ -140,18 +141,21 @@ public sealed class StampedeProtectedCacheServiceTests
                 Deserialize,
                 new CacheEntryOptions(TimeSpan.FromMinutes(1)),
                 CancellationToken.None).AsTask());
+
+        Assert.Equal(1, stats.Snapshot.StampedeKeyRejected);
     }
 
     [Fact]
     public async Task GetOrSetAsync_applies_failure_backoff_after_factory_error()
     {
+        var stats = new CacheStats();
         var inner = new FakeCache();
         var svc = new StampedeProtectedCacheService(inner, new TestOptionsMonitor<CacheStampedeOptions>(new CacheStampedeOptions
         {
             Enabled = true,
             EnableFailureBackoff = true,
             FailureBackoff = TimeSpan.FromMilliseconds(200)
-        }));
+        }), stats);
 
         static void Serialize(IBufferWriter<byte> w, int v)
         {
@@ -167,6 +171,8 @@ public sealed class StampedeProtectedCacheServiceTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             svc.GetOrSetAsync("bk", _ => ValueTask.FromResult(2), Serialize, Deserialize, new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None).AsTask());
+
+        Assert.Equal(1, stats.Snapshot.StampedeFailureBackoffRejected);
 
         await Task.Delay(250);
         var ok = await svc.GetOrSetAsync("bk", _ => ValueTask.FromResult(3), Serialize, Deserialize, new CacheEntryOptions(TimeSpan.FromMinutes(1)), CancellationToken.None);

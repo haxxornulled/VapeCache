@@ -14,20 +14,22 @@ internal sealed class RedisCacheService : ICacheService
     private readonly ICurrentCacheService _current;
     private readonly CacheStats _stats;
     private readonly ICacheIntentRegistry _intentRegistry;
+    private readonly CacheOriginStats? _originStats;
     private static readonly ICacheIntentRegistry NoopIntentRegistry = new NoopCacheIntentRegistry();
 
     [ActivatorUtilitiesConstructor]
-    public RedisCacheService(RedisCommandExecutor redis, ICurrentCacheService current, CacheStatsRegistry statsRegistry, ICacheIntentRegistry? intentRegistry = null)
-        : this((IRedisCommandExecutor)redis, current, statsRegistry, intentRegistry)
+    public RedisCacheService(RedisCommandExecutor redis, ICurrentCacheService current, CacheStatsRegistry statsRegistry, ICacheIntentRegistry? intentRegistry = null, CacheOriginStats? originStats = null)
+        : this((IRedisCommandExecutor)redis, current, statsRegistry, intentRegistry, originStats)
     {
     }
 
-    public RedisCacheService(IRedisCommandExecutor redis, ICurrentCacheService current, CacheStatsRegistry statsRegistry, ICacheIntentRegistry? intentRegistry = null)
+    public RedisCacheService(IRedisCommandExecutor redis, ICurrentCacheService current, CacheStatsRegistry statsRegistry, ICacheIntentRegistry? intentRegistry = null, CacheOriginStats? originStats = null)
     {
         _redis = redis;
         _current = current;
         _stats = statsRegistry.GetOrCreate(CacheStatsNames.Redis);
         _intentRegistry = intentRegistry ?? NoopIntentRegistry;
+        _originStats = originStats;
     }
 
     public string Name => "redis";
@@ -40,6 +42,7 @@ internal sealed class RedisCacheService : ICacheService
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         _current.SetCurrent(Name);
         _stats.IncGet();
+        _originStats?.IncGet();
         CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
         try
@@ -49,11 +52,13 @@ internal sealed class RedisCacheService : ICacheService
             {
                 _intentRegistry.RecordRemove(key);
                 _stats.IncMiss();
+                _originStats?.IncMiss();
                 CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
             }
             else
             {
                 _stats.IncHit();
+                _originStats?.IncHit();
                 CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
             }
             return bytes;
@@ -72,6 +77,7 @@ internal sealed class RedisCacheService : ICacheService
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         _current.SetCurrent(Name);
         _stats.IncSet();
+        _originStats?.IncSet();
         CacheTelemetry.SetCalls.Add(1, new TagList { { "backend", Name } });
         CacheTelemetry.SetPayloadBytes.Record(value.Length, new TagList
         {
@@ -95,6 +101,7 @@ internal sealed class RedisCacheService : ICacheService
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         _current.SetCurrent(Name);
         _stats.IncRemove();
+        _originStats?.IncRemove();
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
         try
@@ -115,6 +122,7 @@ internal sealed class RedisCacheService : ICacheService
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         _current.SetCurrent(Name);
         _stats.IncGet();
+        _originStats?.IncGet();
         CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
         try
@@ -124,11 +132,13 @@ internal sealed class RedisCacheService : ICacheService
             {
                 _intentRegistry.RecordRemove(key);
                 _stats.IncMiss();
+                _originStats?.IncMiss();
                 CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
                 return default;
             }
 
             _stats.IncHit();
+            _originStats?.IncHit();
             CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
             return deserialize(lease.Span);
         }

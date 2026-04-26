@@ -122,6 +122,17 @@ Controlled live reconnect/outage drill:
 This drill is opt-in and runs only when:
 - `VAPECACHE_RECONNECT_DRILL_ENABLED=true`
 
+### RuntimeStressIntegrationTests
+Operator-grade runtime stress against the full hybrid cache surface:
+
+- Mixed `IVapeCache` and `IDistributedCache` traffic under concurrency
+- Forced failover while traffic stays hot
+- Verifies fallback accounting and backend truth
+- Verifies native-vs-interop origin telemetry remains honest under load
+
+This suite is opt-in and runs only when:
+- `VAPECACHE_RUNTIME_STRESS_ENABLED=true`
+
 ### RedisPubSubIntegrationTests
 Tests end-to-end pub/sub delivery against live Redis.
 
@@ -212,6 +223,40 @@ Use the helper script to run a controlled client-kill reconnect drill against yo
   -DurationSeconds 20 `
   -KillRounds 8 `
   -KillIntervalMs 750
+```
+
+Run the runtime stress suite:
+
+```powershell
+.\tools\run-runtime-stress.ps1 `
+  -Workers 32 `
+  -Keyspace 256 `
+  -DurationSeconds 12 `
+  -Connections 8 `
+  -ForceOpenAfterMs 1500 `
+  -ForceOpenHoldMs 2500
+```
+
+Run runtime stress plus the reconnect drill in one pass:
+
+```powershell
+.\tools\run-runtime-stress.ps1 `
+  -Workers 32 `
+  -DurationSeconds 12 `
+  -Connections 8 `
+  -IncludeReconnectDrill
+```
+
+Run the longer soak path with repeated failover cycles:
+
+```powershell
+.\tools\run-runtime-stress.ps1 `
+  -Mode soak `
+  -DurationSeconds 20 `
+  -Workers 32 `
+  -Keyspace 256 `
+  -Connections 8 `
+  -ForceOpenCycles 3
 ```
 
 Key safety property:

@@ -72,15 +72,49 @@ public sealed class HybridCacheServiceTests
         Assert.Equal(2, version);
     }
 
+    [Fact]
+    public void ForceOpen_increments_breaker_opened_once_per_manual_open_transition()
+    {
+        var fallback = new RecordingFallbackCacheService();
+        var stats = new CacheStatsRegistry();
+        var service = CreateService(fallback, statsRegistry: stats);
+
+        service.ForceOpen("manual-drill");
+        service.ForceOpen("manual-drill-repeat");
+
+        var snapshot = stats.GetOrCreate(CacheStatsNames.Hybrid).Snapshot;
+        Assert.True(service.IsForcedOpen);
+        Assert.Equal("manual-drill-repeat", service.Reason);
+        Assert.Equal(1, snapshot.RedisBreakerOpened);
+    }
+
+    [Fact]
+    public void ForceOpen_after_clear_records_another_breaker_open()
+    {
+        var fallback = new RecordingFallbackCacheService();
+        var stats = new CacheStatsRegistry();
+        var service = CreateService(fallback, statsRegistry: stats);
+
+        service.ForceOpen("cycle-1");
+        service.ClearForcedOpen();
+        service.ForceOpen("cycle-2");
+
+        var snapshot = stats.GetOrCreate(CacheStatsNames.Hybrid).Snapshot;
+        Assert.True(service.IsForcedOpen);
+        Assert.Equal("cycle-2", service.Reason);
+        Assert.Equal(2, snapshot.RedisBreakerOpened);
+    }
+
     private static HybridCacheService CreateService(
         RecordingFallbackCacheService fallback,
         InMemoryCommandExecutor? executor = null,
         IRedisReconciliationService? reconciliation = null,
-        IEnterpriseFeatureGate? enterpriseFeatureGate = null)
+        IEnterpriseFeatureGate? enterpriseFeatureGate = null,
+        CacheStatsRegistry? statsRegistry = null)
     {
         executor ??= new InMemoryCommandExecutor();
         var current = new CurrentCacheService();
-        var stats = new CacheStatsRegistry();
+        var stats = statsRegistry ?? new CacheStatsRegistry();
         var redis = new RedisCacheService(executor, current, stats);
         return new HybridCacheService(
             redis,

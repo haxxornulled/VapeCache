@@ -70,7 +70,8 @@ public sealed record VapeCacheSharedDashboardSnapshot
         string? BreakerReason,
         RedisAutoscalerSnapshot? Autoscaler,
         IReadOnlyList<RedisMuxLaneSnapshot> Lanes,
-        SpillStoreDiagnosticsSnapshot? Spill)
+        SpillStoreDiagnosticsSnapshot? Spill,
+        CacheOriginStatsSnapshot OriginStats)
     {
         this.TimestampUtc = TimestampUtc;
         this.Backend = Backend;
@@ -93,6 +94,7 @@ public sealed record VapeCacheSharedDashboardSnapshot
         this.Autoscaler = Autoscaler;
         this.Lanes = Lanes;
         this.Spill = Spill;
+        this.OriginStats = OriginStats;
     }
 
     public DateTimeOffset TimestampUtc { get; init; }
@@ -117,4 +119,5 @@ public sealed record VapeCacheSharedDashboardSnapshot
     public RedisAutoscalerSnapshot? Autoscaler { get; init; }
     public IReadOnlyList<RedisMuxLaneSnapshot> Lanes { get; init; }
     public SpillStoreDiagnosticsSnapshot? Spill { get; init; }
+    public CacheOriginStatsSnapshot OriginStats { get; init; }
 }

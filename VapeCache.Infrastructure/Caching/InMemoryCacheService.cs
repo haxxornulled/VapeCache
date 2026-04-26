@@ -22,6 +22,7 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
     private readonly bool _spillLicensed;
     private readonly ICacheIntentRegistry _intentRegistry;
     private readonly ILogger<InMemoryCacheService> _logger;
+    private readonly CacheOriginStats? _originStats;
     private int _spillStoreWarningIssued;
     private int _spillLicenseWarningIssued;
     private static readonly ICacheIntentRegistry NoopIntentRegistry = new NoopCacheIntentRegistry();
@@ -34,7 +35,8 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
         IInMemorySpillStore spillStore,
         ICacheIntentRegistry? intentRegistry = null,
         ILogger<InMemoryCacheService>? logger = null,
-        IEnterpriseFeatureGate? enterpriseFeatureGate = null)
+        IEnterpriseFeatureGate? enterpriseFeatureGate = null,
+        CacheOriginStats? originStats = null)
     {
         _cache = cache;
         _current = current;
@@ -44,6 +46,7 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
         _spillLicensed = enterpriseFeatureGate?.IsDurableSpillLicensed ?? false;
         _intentRegistry = intentRegistry ?? NoopIntentRegistry;
         _logger = logger ?? NullLogger<InMemoryCacheService>.Instance;
+        _originStats = originStats;
         // Avoid writing spill references when the no-op store is active.
         // This prevents large entries from becoming unreadable in free-tier/default wiring.
         _spillStoreSupportsWrites = spillStore is not NoopSpillStore && _spillLicensed;
@@ -63,6 +66,7 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
         _current.SetCurrent(Name);
 
         _stats.IncGet();
+        _originStats?.IncGet();
         var start = Stopwatch.GetTimestamp();
         try
         {
@@ -71,6 +75,7 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
                 if (cached is byte[] value)
                 {
                     _stats.IncHit();
+                    _originStats?.IncHit();
                     CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
                     CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
                     return CopyBuffer(value);
@@ -82,6 +87,7 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
                     if (bytes is not null)
                     {
                         _stats.IncHit();
+                        _originStats?.IncHit();
                         CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
                         CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
                         return bytes;
@@ -90,6 +96,7 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
             }
 
             _stats.IncMiss();
+            _originStats?.IncMiss();
             _intentRegistry.RecordRemove(key);
             CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
             CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
@@ -110,6 +117,7 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
         ct.ThrowIfCancellationRequested();
         _current.SetCurrent(Name);
         _stats.IncSet();
+        _originStats?.IncSet();
         CacheTelemetry.SetCalls.Add(1, new TagList { { "backend", Name } });
         CacheTelemetry.SetPayloadBytes.Record(value.Length, new TagList
         {
@@ -165,6 +173,7 @@ internal sealed partial class InMemoryCacheService : ICacheFallbackService
         ct.ThrowIfCancellationRequested();
         _current.SetCurrent(Name);
         _stats.IncRemove();
+        _originStats?.IncRemove();
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
         var existed = false;

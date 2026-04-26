@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Serilog;
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using VapeCache.UI.Components;
@@ -7,8 +8,11 @@ using VapeCache.UI.Features.CacheWorkbench;
 using VapeCache.UI.Features.Dashboard;
 using VapeCache.Extensions.AdminAuth;
 using VapeCache.Extensions.Aspire;
+using VapeCache.Extensions.Aspire.Hosting;
+using VapeCache.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
+VapeCacheRuntimeHostDefaults.ApplyRedisMultiplexerDefaults(builder.Configuration);
 
 // Prefer a real connection string from env/Aspire when present so direct UI runs
 // and AppHost runs resolve Redis the same way.
@@ -27,6 +31,14 @@ if (!string.IsNullOrWhiteSpace(redisConnectionString))
 {
     builder.Configuration["RedisConnection:ConnectionString"] = redisConnectionString;
 }
+
+builder.Host.UseSerilog((context, services, loggerConfig) =>
+{
+    loggerConfig.ConfigureVapeCacheLogging(
+        context.Configuration,
+        services,
+        context.HostingEnvironment.EnvironmentName);
+});
 
 builder.Host.UseServiceProviderFactory(new AutofacServiceProviderFactory());
 builder.Host.ConfigureContainer<ContainerBuilder>(static _ => { });
@@ -77,6 +89,7 @@ builder.AddVapeCacheClientBuilder(registerCoreServices: false)
         options.Enabled = false;
         options.LiveSampleInterval = TimeSpan.FromMilliseconds(500);
         options.LiveChannelCapacity = 512;
+        options.PublishSharedSnapshot = false;
     });
 
 // Add services to the container.
@@ -88,6 +101,8 @@ builder.Services.AddScoped<CacheWorkbenchOrchestrator>();
 builder.Services.AddScoped<VapeCacheDashboardOrchestrator>();
 
 var app = builder.Build();
+
+app.UseSerilogRequestLogging();
 
 app.MapDefaultEndpoints();
 app.MapVapeCacheEndpoints(
@@ -121,5 +136,10 @@ app.UseAuthorization();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+app.Logger.LogInformation(
+    "VapeCache.UI starting in {Environment}. Redis endpoint source resolved to {RedisConnectionString}",
+    app.Environment.EnvironmentName,
+    app.Configuration["RedisConnection:ConnectionString"] ?? "<not-configured>");
 
 app.Run();

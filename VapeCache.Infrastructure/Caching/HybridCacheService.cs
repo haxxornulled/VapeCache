@@ -27,6 +27,7 @@ internal sealed partial class HybridCacheService : ICacheService
     private readonly ICurrentCacheService current;
     private readonly TimeProvider timeProvider;
     private readonly ILogger<HybridCacheService> logger;
+    private readonly CacheOriginStats? _originStats;
 
     public HybridCacheService(
         RedisCacheService redis,
@@ -38,13 +39,15 @@ internal sealed partial class HybridCacheService : ICacheService
         ILogger<HybridCacheService> logger,
         IOptionsMonitor<HybridFailoverOptions>? failoverOptions = null,
         IRedisReconciliationService? reconciliation = null,
-        IEnterpriseFeatureGate? enterpriseFeatureGate = null)
+        IEnterpriseFeatureGate? enterpriseFeatureGate = null,
+        CacheOriginStats? originStats = null)
     {
         this.redis = redis;
         this.fallback = fallback;
         this.current = current;
         this.timeProvider = timeProvider;
         this.logger = logger;
+        _originStats = originStats;
         _stats = statsRegistry.GetOrCreate(CacheStatsNames.Hybrid);
         _breakerOptions = breakerOptions;
         _failoverOptions = failoverOptions ?? DefaultHybridFailoverOptionsMonitor.Instance;
@@ -242,6 +245,7 @@ internal sealed partial class HybridCacheService : ICacheService
     {
         var breaker = _breaker;
         _stats.IncGet();
+        _originStats?.IncGet();
         CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
 
@@ -256,8 +260,8 @@ internal sealed partial class HybridCacheService : ICacheService
 
                 var bytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
                 bytes = await ResolveTaggedPayloadAsync(key, bytes, ct).ConfigureAwait(false);
-                if (bytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
-                else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
+                if (bytes is null) { _stats.IncMiss(); _originStats?.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
+                else { _stats.IncHit(); _originStats?.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
                 return bytes;
             }
 
@@ -283,6 +287,7 @@ internal sealed partial class HybridCacheService : ICacheService
                 {
                     await TryWarmFallbackFromReadAsync(key, resolvedRedisPayload.Payload, ct).ConfigureAwait(false);
                     _stats.IncHit();
+                    _originStats?.IncHit();
                     CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
                     return resolvedRedisPayload.ToArray();
                 }
@@ -304,8 +309,8 @@ internal sealed partial class HybridCacheService : ICacheService
 
             var fallbackBytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
             fallbackBytes = await ResolveTaggedPayloadAsync(key, fallbackBytes, ct).ConfigureAwait(false);
-            if (fallbackBytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
-            else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
+            if (fallbackBytes is null) { _stats.IncMiss(); _originStats?.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
+            else { _stats.IncHit(); _originStats?.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
             return fallbackBytes;
         }
         finally
@@ -323,6 +328,7 @@ internal sealed partial class HybridCacheService : ICacheService
     {
         var breaker = _breaker;
         _stats.IncSet();
+        _originStats?.IncSet();
         CacheTelemetry.SetCalls.Add(1, new TagList { { "backend", Name } });
         CacheTelemetry.SetPayloadBytes.Record(value.Length, new TagList
         {
@@ -399,6 +405,7 @@ internal sealed partial class HybridCacheService : ICacheService
     {
         var breaker = _breaker;
         _stats.IncRemove();
+        _originStats?.IncRemove();
         CacheTelemetry.RemoveCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
         var ok = await fallback.RemoveAsync(key, ct).ConfigureAwait(false);
@@ -460,6 +467,7 @@ internal sealed partial class HybridCacheService : ICacheService
     {
         var breaker = _breaker;
         _stats.IncGet();
+        _originStats?.IncGet();
         CacheTelemetry.GetCalls.Add(1, new TagList { { "backend", Name } });
         var start = Stopwatch.GetTimestamp();
 
@@ -474,8 +482,8 @@ internal sealed partial class HybridCacheService : ICacheService
 
                 var fallbackBytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
                 fallbackBytes = await ResolveTaggedPayloadAsync(key, fallbackBytes, ct).ConfigureAwait(false);
-                if (fallbackBytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
-                else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
+                if (fallbackBytes is null) { _stats.IncMiss(); _originStats?.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
+                else { _stats.IncHit(); _originStats?.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
                 return fallbackBytes is null ? default : deserialize(fallbackBytes);
             }
 
@@ -488,8 +496,8 @@ internal sealed partial class HybridCacheService : ICacheService
                     CacheTelemetry.FallbackToMemory.Add(1, new TagList { { "backend", Name }, { "reason", "half_open_busy" } });
                     var fallbackBytes = await fallback.GetAsync(key, ct).ConfigureAwait(false);
                     fallbackBytes = await ResolveTaggedPayloadAsync(key, fallbackBytes, ct).ConfigureAwait(false);
-                    if (fallbackBytes is null) { _stats.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
-                    else { _stats.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
+                    if (fallbackBytes is null) { _stats.IncMiss(); _originStats?.IncMiss(); CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } }); }
+                    else { _stats.IncHit(); _originStats?.IncHit(); CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } }); }
                     return fallbackBytes is null ? default : deserialize(fallbackBytes);
                 }
 
@@ -506,6 +514,7 @@ internal sealed partial class HybridCacheService : ICacheService
                         var value = deserialize(resolvedRedisPayload.Payload.Span);
                         await TryWarmFallbackFromReadAsync(key, resolvedRedisPayload.Payload, ct).ConfigureAwait(false);
                         _stats.IncHit();
+                        _originStats?.IncHit();
                         CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
                         return value;
                     }
@@ -536,6 +545,7 @@ internal sealed partial class HybridCacheService : ICacheService
             if (bytes is null)
             {
                 _stats.IncMiss();
+                _originStats?.IncMiss();
                 CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
                 return default;
             }
@@ -544,6 +554,7 @@ internal sealed partial class HybridCacheService : ICacheService
             {
                 var value = deserialize(bytes);
                 _stats.IncHit();
+                _originStats?.IncHit();
                 CacheTelemetry.Hits.Add(1, new TagList { { "backend", Name } });
                 return value;
             }
@@ -552,6 +563,7 @@ internal sealed partial class HybridCacheService : ICacheService
                 LogCorruptedPayloadDetected(logger, ex, key);
                 await TryRemoveCorruptedEntryAsync(key, ct).ConfigureAwait(false);
                 _stats.IncMiss();
+                _originStats?.IncMiss();
                 CacheTelemetry.Misses.Add(1, new TagList { { "backend", Name } });
                 return default;
             }
@@ -1142,10 +1154,19 @@ internal sealed partial class HybridCacheService : ICacheService
     public void ForceOpen(string reason)
     {
         if (!_breaker.Enabled) return;
+        var alreadyForcedOpen = Interlocked.Exchange(ref _forcedOpen, 1) != 0;
         Volatile.Write(ref _forcedReason, reason);
-        Volatile.Write(ref _forcedOpen, 1);
         // Ensure state looks "open" even if it was closed previously.
         Volatile.Write(ref _openUntilTicks, 1);
+        if (!alreadyForcedOpen)
+        {
+            _stats.IncBreakerOpened();
+            CacheTelemetry.RedisBreakerOpened.Add(1, new TagList
+            {
+                { "backend", Name },
+                { "reason", "forced_open" }
+            });
+        }
     }
 
     /// <summary>

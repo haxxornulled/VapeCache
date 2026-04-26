@@ -247,6 +247,51 @@ public sealed class VapeCacheDistributedCacheTests
         Assert.Null(backend.TryGetStored("app:cart:1"));
     }
 
+    [Fact]
+    public async Task Bridge_flows_distributed_cache_origin_across_async_calls()
+    {
+        var timeProvider = new ManualTimeProvider(new DateTimeOffset(2026, 4, 1, 12, 0, 0, TimeSpan.Zero));
+        var backend = new RecordingCacheService(timeProvider);
+        var originAccessor = new TestOriginAccessor();
+        var observedOrigins = new List<string>();
+        var instrumented = new OriginTrackingCacheService(backend, originAccessor, observedOrigins);
+        var sut = new VapeCacheDistributedCache(
+            instrumented,
+            timeProvider,
+            Options.Create(new VapeCacheDistributedCacheOptions()),
+            originAccessor);
+
+        await sut.SetAsync("bridge:1", "hello"u8.ToArray(), new DistributedCacheEntryOptions());
+        _ = await sut.GetAsync("bridge:1");
+        await sut.RemoveAsync("bridge:1");
+
+        Assert.NotEmpty(observedOrigins);
+        Assert.All(observedOrigins, origin => Assert.Equal(CacheOperationOrigin.DistributedCacheBridge, origin));
+    }
+
+    [Fact]
+    public void Bridge_flows_distributed_cache_origin_across_sync_calls()
+    {
+        var timeProvider = new ManualTimeProvider(new DateTimeOffset(2026, 4, 1, 12, 0, 0, TimeSpan.Zero));
+        var backend = new RecordingCacheService(timeProvider);
+        var originAccessor = new TestOriginAccessor();
+        var observedOrigins = new List<string>();
+        var instrumented = new OriginTrackingCacheService(backend, originAccessor, observedOrigins);
+        var sut = new VapeCacheDistributedCache(
+            instrumented,
+            timeProvider,
+            Options.Create(new VapeCacheDistributedCacheOptions()),
+            originAccessor);
+
+        sut.Set("bridge:sync", "hello"u8.ToArray(), new DistributedCacheEntryOptions());
+        _ = sut.Get("bridge:sync");
+        sut.Refresh("bridge:sync");
+        sut.Remove("bridge:sync");
+
+        Assert.NotEmpty(observedOrigins);
+        Assert.All(observedOrigins, origin => Assert.Equal(CacheOperationOrigin.DistributedCacheBridge, origin));
+    }
+
     private static VapeCacheDistributedCache CreateSut(
         RecordingCacheService backend,
         TimeProvider timeProvider,
@@ -417,5 +462,90 @@ public sealed class VapeCacheDistributedCacheTests
             Next = segment;
             return segment;
         }
+    }
+
+    private sealed class TestOriginAccessor : ICacheOperationOriginAccessor
+    {
+        private readonly AsyncLocal<string?> _current = new();
+
+        public string CurrentOrigin => string.IsNullOrWhiteSpace(_current.Value)
+            ? CacheOperationOrigin.Native
+            : _current.Value!;
+
+        public IDisposable BeginScope(string origin)
+        {
+            var previous = _current.Value;
+            _current.Value = origin;
+            return new Scope(_current, previous);
+        }
+
+        private sealed class Scope : IDisposable
+        {
+            private readonly AsyncLocal<string?> _current;
+            private readonly string? _previous;
+
+            public Scope(AsyncLocal<string?> current, string? previous)
+            {
+                _current = current;
+                _previous = previous;
+            }
+
+            public void Dispose()
+            {
+                _current.Value = _previous;
+            }
+        }
+    }
+
+    private sealed class OriginTrackingCacheService : ICacheService
+    {
+        private readonly RecordingCacheService _inner;
+        private readonly ICacheOperationOriginAccessor _originAccessor;
+        private readonly List<string> _observedOrigins;
+
+        public OriginTrackingCacheService(
+            RecordingCacheService inner,
+            ICacheOperationOriginAccessor originAccessor,
+            List<string> observedOrigins)
+        {
+            _inner = inner;
+            _originAccessor = originAccessor;
+            _observedOrigins = observedOrigins;
+        }
+
+        public string Name => _inner.Name;
+
+        public async ValueTask<byte[]?> GetAsync(string key, CancellationToken ct)
+        {
+            _observedOrigins.Add(_originAccessor.CurrentOrigin);
+            return await _inner.GetAsync(key, ct).ConfigureAwait(false);
+        }
+
+        public async ValueTask SetAsync(string key, ReadOnlyMemory<byte> value, CacheEntryOptions options, CancellationToken ct)
+        {
+            _observedOrigins.Add(_originAccessor.CurrentOrigin);
+            await _inner.SetAsync(key, value, options, ct).ConfigureAwait(false);
+        }
+
+        public async ValueTask<bool> RemoveAsync(string key, CancellationToken ct)
+        {
+            _observedOrigins.Add(_originAccessor.CurrentOrigin);
+            return await _inner.RemoveAsync(key, ct).ConfigureAwait(false);
+        }
+
+        public ValueTask<T?> GetAsync<T>(string key, SpanDeserializer<T> deserialize, CancellationToken ct)
+            => _inner.GetAsync(key, deserialize, ct);
+
+        public ValueTask SetAsync<T>(string key, T value, Action<IBufferWriter<byte>, T> serialize, CacheEntryOptions options, CancellationToken ct)
+            => _inner.SetAsync(key, value, serialize, options, ct);
+
+        public ValueTask<T> GetOrSetAsync<T>(
+            string key,
+            Func<CancellationToken, ValueTask<T>> factory,
+            Action<IBufferWriter<byte>, T> serialize,
+            SpanDeserializer<T> deserialize,
+            CacheEntryOptions options,
+            CancellationToken ct)
+            => _inner.GetOrSetAsync(key, factory, serialize, deserialize, options, ct);
     }
 }

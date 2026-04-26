@@ -8,6 +8,16 @@
     <VapeCacheAspireVersion>13.2.1</VapeCacheAspireVersion>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!--
+      NuGet audit suppressions for current OpenTelemetry stable OTLP packages.
+      Verified on 2026-04-24: the latest stable line available to this repo still trips these advisories.
+    -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-g94r-2vxg-569j" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-mr8r-92fq-pj8p" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-q834-8qmm-v933" />
+  </ItemGroup>
+
   <PropertyGroup Condition="
     '$(MSBuildProjectName)' == 'VapeCache.Tests' or
     '$(MSBuildProjectName)' == 'VapeCache.PerfGates.Tests' or

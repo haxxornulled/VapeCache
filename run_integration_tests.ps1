@@ -49,7 +49,7 @@ param(
     [switch]$UseTls,
     [string]$TestFilter = "FullyQualifiedName~VapeCache.Tests.Integration",
     [ValidateSet("Debug", "Release")]
-    [string]$Configuration = "Release",
+    [string]$Configuration = "Debug",
     [string]$Project = "VapeCache.Tests/VapeCache.Tests.csproj"
 )
 

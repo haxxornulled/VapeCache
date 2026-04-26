@@ -8,6 +8,7 @@ using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Extensions.AspNetCore;
 using VapeCache.Extensions.Aspire;
+using VapeCache.Extensions.Aspire.Hosting;
 
 namespace VapeCache.Tests.Aspire;
 
@@ -106,9 +107,11 @@ public sealed class AspireExtensionsTests
         Assert.False(options.EnableLiveStream);
         Assert.False(options.EnableDashboard);
         Assert.False(options.IncludeBreakerControlEndpoints);
+        Assert.False(options.PublishSharedSnapshot);
         Assert.Equal("/vapecache/admin", options.AdminPrefix);
         Assert.False(options.RequireAuthorizationOnAdminEndpoints);
         Assert.Null(options.AdminAuthorizationPolicy);
+        Assert.Equal(TimeSpan.FromSeconds(1), options.SharedSnapshotPublishInterval);
     }
 
     [Fact]
@@ -240,12 +243,8 @@ public sealed class AspireExtensionsTests
         Assert.Equal("http://localhost:9121/metrics", options.Endpoint);
         Assert.Equal(TimeSpan.FromSeconds(3), options.PollInterval);
         Assert.Equal(TimeSpan.FromSeconds(1), options.RequestTimeout);
-
-        Assert.Contains(
-            hostBuilder.Services,
-            static descriptor =>
-                descriptor.ServiceType == typeof(IHostedService) &&
-                descriptor.ImplementationType?.Name == "RedisExporterMetricsHostedService");
+        Assert.True(ContainsServiceRegistration<RedisExporterMetricsHostedService>(hostBuilder.Services, typeof(IHostedService)));
+        Assert.True(ContainsServiceRegistration<RedisExporterMetricsHostedService>(hostBuilder.Services, typeof(IHostedLifecycleService)));
     }
 
     [Fact]
@@ -360,11 +359,8 @@ public sealed class AspireExtensionsTests
             static descriptor =>
                 descriptor.ServiceType == typeof(IHostedService) &&
                 descriptor.ImplementationType?.Name == "VapeCacheStartupWarmupHostedService");
-        Assert.DoesNotContain(
-            hostBuilder.Services,
-            static descriptor =>
-                descriptor.ServiceType == typeof(IHostedService) &&
-                descriptor.ImplementationType?.Name == "RedisExporterMetricsHostedService");
+        Assert.False(ContainsServiceRegistration<RedisExporterMetricsHostedService>(hostBuilder.Services, typeof(IHostedService)));
+        Assert.False(ContainsServiceRegistration<RedisExporterMetricsHostedService>(hostBuilder.Services, typeof(IHostedLifecycleService)));
     }
 
     [Fact]
@@ -384,10 +380,31 @@ public sealed class AspireExtensionsTests
             static descriptor =>
                 descriptor.ServiceType == typeof(IHostedService) &&
                 descriptor.ImplementationType?.Name == "VapeCacheStartupWarmupHostedService");
-        Assert.Contains(
-            hostBuilder.Services,
-            static descriptor =>
-                descriptor.ServiceType == typeof(IHostedService) &&
-                descriptor.ImplementationType?.Name == "RedisExporterMetricsHostedService");
+        Assert.Contains(hostBuilder.Services, static descriptor => descriptor.ServiceType == typeof(IHostedService));
+        Assert.Contains(hostBuilder.Services, static descriptor => descriptor.ServiceType == typeof(IHostedLifecycleService));
+    }
+
+    private static bool ContainsServiceRegistration<TImplementation>(
+        IServiceCollection services,
+        Type serviceType)
+    {
+        var provider = services.BuildServiceProvider();
+        try
+        {
+            return serviceType == typeof(IHostedService)
+                ? provider.GetServices<IHostedService>().OfType<TImplementation>().Any()
+                : provider.GetServices<IHostedLifecycleService>().OfType<TImplementation>().Any();
+        }
+        finally
+        {
+            if (provider is IAsyncDisposable asyncDisposable)
+            {
+                asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            else
+            {
+                provider.Dispose();
+            }
+        }
     }
 }

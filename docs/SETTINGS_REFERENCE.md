@@ -95,6 +95,8 @@ Options for automatic mapping of VapeCache operational endpoints.
 | EnableDashboard | bool | false | Whether the built-in dashboard endpoint is mapped. |
 | LiveSampleInterval | TimeSpan | TimeSpan.FromSeconds(1) | Sampling interval for live metrics feed. |
 | LiveChannelCapacity | int | 256 | Bounded channel capacity for live metrics samples. |
+| PublishSharedSnapshot | bool | false | Whether this host publishes shared dashboard snapshots to Redis. |
+| SharedSnapshotPublishInterval | TimeSpan | TimeSpan.FromSeconds(1) | Publishing interval for shared dashboard snapshots. |
 
 ## PosSearchDemoOptions
 

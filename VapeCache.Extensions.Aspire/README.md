@@ -473,8 +473,12 @@ builder.AddVapeCache()
         options.EnableDashboard = true;
         options.LiveSampleInterval = TimeSpan.FromMilliseconds(500);
         options.LiveChannelCapacity = 512;
+        options.PublishSharedSnapshot = true;
+        options.SharedSnapshotPublishInterval = TimeSpan.FromMilliseconds(500);
     });
 ```
+
+`PublishSharedSnapshot` should be enabled only on the workload-producing host you want the dashboard to represent. Keep it off on the dashboard/UI host itself so an idle UI process does not overwrite the shared Redis snapshot from your active load run.
 
 When `IncludeBreakerControlEndpoints` is enabled, auto-mapping keeps `Prefix` read-only and maps control routes under `AdminPrefix`.
 
