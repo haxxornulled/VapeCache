@@ -11,6 +11,10 @@ param(
     [string]$NuGetApiKey = $env:NUGET_API_KEY,
     [string]$GitHubPackagesSource = "https://nuget.pkg.github.com/haxxornulled/index.json",
     [string]$GitHubPackagesApiKey = "",
+    [string]$NuGetSigningCertPath = $env:NUGET_SIGNING_CERT_PATH,
+    [string]$NuGetSigningCertKeyPath = $env:NUGET_SIGNING_CERT_KEY_PATH,
+    [string]$NuGetSigningCertPassword = $env:NUGET_SIGNING_CERT_PASSWORD,
+    [string]$NuGetTimestampServer = $env:NUGET_TIMESTAMP_SERVER,
     [string[]]$PushRemotes = @("origin", "oss"),
     [string[]]$ReleaseRepos = @("haxxornulled/VapeCache", "haxxornulled/VapeCache-Enterprise"),
     [string]$TagPrefix = "v",
@@ -152,6 +156,34 @@ if (-not $SkipSmoke)
                 "-PackageId", $packageId
             )
         }
+    }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($NuGetSigningCertPath))
+{
+    Invoke-ReleaseStep -Name "Sign release packages" -Action {
+        $signArgs = @(
+            "-PackageOutput", $PackageOutput,
+            "-PackageVersion", $resolvedPackageVersion,
+            "-CertificatePath", $NuGetSigningCertPath
+        )
+
+        if (-not [string]::IsNullOrWhiteSpace($NuGetSigningCertKeyPath))
+        {
+            $signArgs += @("-CertificateKeyPath", $NuGetSigningCertKeyPath)
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($NuGetSigningCertPassword))
+        {
+            $signArgs += @("-CertificatePassword", $NuGetSigningCertPassword)
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($NuGetTimestampServer))
+        {
+            $signArgs += @("-TimestampServer", $NuGetTimestampServer)
+        }
+
+        Invoke-ReleaseScript -ScriptPath (Join-Path $PSScriptRoot "sign-release-packages.ps1") -ArgumentList $signArgs
     }
 }
 
