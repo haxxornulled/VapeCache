@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Moq;
 using VapeCache.Abstractions.Caching;
 using VapeCache.Abstractions.Connections;
 using VapeCache.Infrastructure.Caching;

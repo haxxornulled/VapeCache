@@ -4,7 +4,9 @@ using Microsoft.Extensions.Options;
 using Autofac;
 using Moq;
 using VapeCache.Abstractions.Caching;
+using VapeCache.Abstractions.Collections;
 using VapeCache.Abstractions.Connections;
+using VapeCache.Abstractions.Diagnostics;
 using VapeCache.Extensions.DependencyInjection;
 using VapeCache.Infrastructure.Caching;
 using VapeCache.Infrastructure.DependencyInjection;
@@ -103,11 +105,11 @@ public sealed class VapeCacheDependencyInjectionExtensionsTests
     }
 
     [Fact]
-    public async Task UseEnterpriseFeatureGate_ReplacesDefaultGate()
+    public async Task AddVapeCacheEnterpriseFeatureGate_ReplacesDefaultGate()
     {
         var services = new ServiceCollection();
-        services.AddVapeCache()
-            .UseEnterpriseFeatureGate<TestEnterpriseFeatureGate>();
+        services.AddVapeCache();
+        services.AddVapeCacheEnterpriseFeatureGate<TestEnterpriseFeatureGate>();
 
         await using var provider = services.BuildServiceProvider();
         var gate = provider.GetRequiredService<IEnterpriseFeatureGate>();
