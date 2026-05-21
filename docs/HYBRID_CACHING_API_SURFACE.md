@@ -19,11 +19,11 @@ using VapeCache.Abstractions.Connections;
 builder.Services.AddOptions<RedisConnectionOptions>()
     .Bind(builder.Configuration.GetSection("RedisConnection"));
 
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 ```
 
-`AddVapecacheCaching()` registers:
+`AddVapeCacheCaching()` registers:
 
 - `ICacheService` -> stampede-protected hybrid cache service.
 - `ICacheTagService` -> same stampede-protected hybrid instance.
@@ -213,5 +213,5 @@ await cache.InvalidateZoneAsync(zone, ct);
 ## Production Notes
 
 - Fallback memory is node-local; use session affinity during failover in multi-node clusters.
-- Tag/zone APIs require the hybrid runtime (`AddVapecacheCaching`).
+- Tag/zone APIs require the hybrid runtime (`AddVapeCacheCaching`).
 - Reconciliation durability is provided by `VapeCache.Reconciliation`; configure it for no-drop outage replay guarantees.

@@ -7,7 +7,7 @@ The ergonomic API provides a high-level, type-safe interface over VapeCache's lo
 ### 1. DI Registration
 
 ```csharp
-services.AddVapecacheCaching();
+services.AddVapeCacheCaching();
 // That's it! IVapeCache is now registered with System.Text.Json codec by default
 ```
 
@@ -100,7 +100,7 @@ public class UserDtoCodec : ICacheCodec<UserDto>
 }
 
 // Register at startup
-services.AddVapecacheCaching();
+services.AddVapeCacheCaching();
 services.AddSingleton<ICacheCodecProvider>(sp =>
 {
     var provider = new SystemTextJsonCodecProvider();

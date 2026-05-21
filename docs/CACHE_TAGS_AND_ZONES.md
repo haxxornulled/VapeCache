@@ -55,4 +55,4 @@ await cache.InvalidateZoneAsync(productsZone, ct);
 
 - Zone names are normalized (`Trim`) and stored as `zone:{name}` tags.
 - Existing tags are preserved when `WithTags/WithZones` are chained.
-- Tag/zone operations require `AddVapecacheCaching()` (Hybrid cache runtime).
+- Tag/zone operations require `AddVapeCacheCaching()` (Hybrid cache runtime).

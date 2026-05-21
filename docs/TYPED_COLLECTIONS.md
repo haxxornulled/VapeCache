@@ -14,7 +14,7 @@ public interface ICacheCollectionFactory
 }
 ```
 
-Register via `AddVapecacheCaching()` (or the Autofac module).
+Register via `AddVapeCacheCaching()` (or the Autofac module).
 
 ## Lists
 

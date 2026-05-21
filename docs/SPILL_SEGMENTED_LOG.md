@@ -40,7 +40,7 @@ Each record uses a fixed-size header plus payload:
 Default OSS wiring remains `NoopSpillStore`. To enable file-backed segmented spill:
 
 ```csharp
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheCaching();
 builder.Services.AddVapeCachePersistence();
 ```
 

@@ -151,8 +151,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOptions<RedisConnectionOptions>()
     .Bind(builder.Configuration.GetSection("RedisConnection"));
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 builder.Services.AddVapeCachePubSub(); // optional: only when pub/sub is required
 builder.Services.AddVapeCacheDistributedCache(); // optional: IDistributedCache / migration bridge
 
@@ -340,7 +340,7 @@ With hybrid cache enabled, this stream path automatically reads from in-memory f
 ## Common Mistakes
 
 - Redis is not running, or wrong host/port in config.
-- Registered `AddVapecacheCaching()` but forgot `AddVapecacheRedisConnections()`.
+- Registered `AddVapeCacheCaching()` but forgot `AddVapeCacheRedisConnections()`.
 - Forgot to bind `RedisConnection` from configuration (or set `VAPECACHE_REDIS_CONNECTIONSTRING`).
 - Used the Redis/hybrid path when you actually wanted `AddVapeCacheInMemory(...)`.
 - Invalid `CacheStampede` values (out of allowed ranges).

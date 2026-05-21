@@ -105,7 +105,7 @@ public sealed class VapeCacheClient : IVapeCache
 
     private ICacheTagService RequireTagService()
         => _tags ?? throw new NotSupportedException(
-            "Tag and zone invalidation requires an ICacheTagService backend (HybridCacheService via AddVapecacheCaching).");
+            "Tag and zone invalidation requires an ICacheTagService backend (HybridCacheService via AddVapeCacheCaching).");
 
     /// <summary>
     /// Internal cache region implementation that automatically prefixes keys.

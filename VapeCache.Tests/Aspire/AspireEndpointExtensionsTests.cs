@@ -548,8 +548,8 @@ public sealed class AspireEndpointExtensionsTests
         {
             ["RedisConnection:Host"] = "redis.internal"
         });
-        builder.Services.AddVapecacheRedisConnections();
-        builder.Services.AddVapecacheCaching();
+        builder.Services.AddVapeCacheRedisConnections();
+        builder.Services.AddVapeCacheCaching();
         builder.Services.AddOptions<RedisConnectionOptions>()
             .Bind(builder.Configuration.GetSection("RedisConnection"));
         if (redisCommandExecutor is not null)
@@ -653,8 +653,8 @@ public sealed class AspireEndpointExtensionsTests
         {
             ["RedisConnection:Host"] = "redis.internal"
         });
-        builder.Services.AddVapecacheRedisConnections();
-        builder.Services.AddVapecacheCaching();
+        builder.Services.AddVapeCacheRedisConnections();
+        builder.Services.AddVapeCacheCaching();
         builder.Services.AddOptions<RedisConnectionOptions>()
             .Bind(builder.Configuration.GetSection("RedisConnection"));
 
@@ -678,8 +678,8 @@ public sealed class AspireEndpointExtensionsTests
         {
             ["RedisConnection:Host"] = "redis.internal"
         });
-        builder.Services.AddVapecacheRedisConnections();
-        builder.Services.AddVapecacheCaching();
+        builder.Services.AddVapeCacheRedisConnections();
+        builder.Services.AddVapeCacheCaching();
         builder.Services.AddOptions<RedisConnectionOptions>()
             .Bind(builder.Configuration.GetSection("RedisConnection"));
 

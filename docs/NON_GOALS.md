@@ -193,8 +193,8 @@ Use **VapeCache + StackExchange.Redis** together:
 
 ```csharp
 // VapeCache for caching (fast, observable, reliable)
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 
 // StackExchange.Redis for Pub/Sub (when needed)
 builder.Services.AddSingleton<IConnectionMultiplexer>(ConnectionMultiplexer.Connect("localhost:6379"));

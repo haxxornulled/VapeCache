@@ -97,8 +97,8 @@ using VapeCache.Abstractions.Connections;
 builder.Services.AddOptions<RedisConnectionOptions>()
     .Bind(builder.Configuration.GetSection("RedisConnection"));
 
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 ```
 
 That approach gives you exact control, but the DI facade is the recommended entrypoint for most apps.

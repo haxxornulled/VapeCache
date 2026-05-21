@@ -29,8 +29,8 @@ public static class AspireVapeCacheExtensions
 
         if (registerCoreServices)
         {
-            builder.Services.AddVapecacheRedisConnections();
-            builder.Services.AddVapecacheCaching();
+            builder.Services.AddVapeCacheRedisConnections();
+            builder.Services.AddVapeCacheCaching();
         }
 
         builder.Services.TryAddSingleton<IVapeCacheStartupReadiness, VapeCacheStartupReadinessState>();

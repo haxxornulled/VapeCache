@@ -24,7 +24,7 @@ public static class CacheRegistration
     /// <summary>
     /// Adds value.
     /// </summary>
-    public static IServiceCollection AddVapecacheCaching(this IServiceCollection services)
+    public static IServiceCollection AddVapeCacheCaching(this IServiceCollection services)
     {
         CacheTelemetry.EnsureInitialized();
 
@@ -165,7 +165,7 @@ public static class CacheRegistration
     /// Adds an in-memory-only VapeCache runtime that does not require Redis.
     /// This is intended for local development, tests, and lightweight single-node hosts.
     /// </summary>
-    public static IServiceCollection AddVapecacheInMemoryCaching(this IServiceCollection services)
+    public static IServiceCollection AddVapeCacheInMemoryCaching(this IServiceCollection services)
     {
         CacheTelemetry.EnsureInitialized();
 

@@ -1,4 +1,4 @@
-﻿// ========================= File: Vapecache.Infrastructure/Connections/RedisConnectionRegistration.cs =========================
+// ========================= File: VapeCache.Infrastructure/Connections/RedisConnectionRegistration.cs =========================
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -15,7 +15,7 @@ public static class RedisConnectionRegistration
     /// <summary>
     /// Adds value.
     /// </summary>
-    public static IServiceCollection AddVapecacheRedisConnections(this IServiceCollection services)
+    public static IServiceCollection AddVapeCacheRedisConnections(this IServiceCollection services)
     {
         RedisTelemetry.EnsureInitialized();
 

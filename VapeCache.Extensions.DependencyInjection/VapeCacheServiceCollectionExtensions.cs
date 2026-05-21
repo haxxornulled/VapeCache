@@ -18,8 +18,8 @@ public static class VapeCacheServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddLogging();
-        services.AddVapecacheRedisConnections();
-        services.AddVapecacheCaching();
+        services.AddVapeCacheRedisConnections();
+        services.AddVapeCacheCaching();
 
         return new VapeCacheDependencyInjectionBuilder(services);
     }
@@ -49,7 +49,7 @@ public static class VapeCacheServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddLogging();
-        services.AddVapecacheInMemoryCaching();
+        services.AddVapeCacheInMemoryCaching();
 
         return new VapeCacheDependencyInjectionBuilder(services);
     }

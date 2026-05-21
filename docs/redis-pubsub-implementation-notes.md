@@ -12,7 +12,7 @@ Current state:
   - `SubscribeAsync(channel, handler)` returning `IRedisPubSubSubscription`
   - dedicated subscriber loop with reconnect + resubscribe
   - bounded per-subscription queue with backpressure drop handling
-- DI registration now exposes `IRedisPubSubService` from `AddVapecacheCaching()`.
+- DI registration now exposes `IRedisPubSubService` from `AddVapeCacheCaching()`.
 
 Why:
 - Pub/sub connections in Redis are push-oriented and should not share request/response traffic.

@@ -23,8 +23,8 @@ using VapeCache.Extensions.AspNetCore;
 
 builder.Services.AddOptions<RedisConnectionOptions>()
     .Bind(builder.Configuration.GetSection("RedisConnection"));
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 
 builder.Services.AddVapeCacheOutputCaching(options =>
 {

@@ -15,7 +15,7 @@ public static class PubSubRegistration
     /// <summary>
     /// Adds Redis pub/sub services and options validation.
     /// </summary>
-    public static IServiceCollection AddVapecachePubSubServices(this IServiceCollection services)
+    public static IServiceCollection AddVapeCachePubSubServices(this IServiceCollection services)
     {
         ParanoiaThrowGuard.Against.NotNull(services);
 
