@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.Streams</PackageId>
     <Title>VapeCache Extensions for Redis Streams</Title>
-    <Version>1.2.22</Version>
+    <Version>1.2.23</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.Streams</Product>
@@ -41,6 +41,7 @@
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
   </ItemGroup>
 </Project>
+
 
 
 

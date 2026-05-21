@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.KeyDB</PackageId>
     <Title>VapeCache Extensions for KeyDB</Title>
-    <Version>1.2.22</Version>
+    <Version>1.2.23</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.KeyDB</Product>
@@ -36,6 +36,7 @@
     <ProjectReference Include="..\VapeCache.Extensions.DependencyInjection\VapeCache.Extensions.DependencyInjection.csproj" />
   </ItemGroup>
 </Project>
+
 
 
 
