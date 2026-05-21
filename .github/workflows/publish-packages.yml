@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       packageVersion:
-        description: "Optional package version override (for example 1.2.15 or 1.2.15-rc1)"
+        description: "Optional package version override (for example 1.2.23 or 1.2.23-rc1)"
         required: false
         type: string
   push:
@@ -20,7 +20,96 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  publish-oss:
+    if: github.repository == 'haxxornulled/VapeCache'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    env:
+      DOTNET_INSTALL_DIR: ${{ github.workspace }}/.dotnet
+      PACKAGE_VERSION: ${{ github.event.inputs.packageVersion || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Release Validation Gate
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/release-check.ps1 -Configuration Release -SkipPack -UsePublicSourcesOnly
+
+      - name: Pack Release Packages
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PACKAGE_VERSION)) {
+            pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/pack-release-packages.ps1 -Configuration Release -OutputDir artifacts/packages
+          }
+          else {
+            pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/pack-release-packages.ps1 -Configuration Release -OutputDir artifacts/packages -PackageVersion $env:PACKAGE_VERSION
+          }
+
+      - name: NuGet login (Trusted Publishing)
+        id: nuget_login
+        uses: NuGet/login@v1
+        with:
+          user: VapeCache
+
+      - name: Publish NuGet.org
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PACKAGE_VERSION)) {
+            pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -Source https://api.nuget.org/v3/index.json -ApiKey $env:NUGET_API_KEY
+          }
+          else {
+            pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -PackageVersion $env:PACKAGE_VERSION -Source https://api.nuget.org/v3/index.json -ApiKey $env:NUGET_API_KEY
+          }
+
+      - name: Publish GitHub Packages
+        shell: pwsh
+        env:
+          PACKAGES_PUBLISH_TOKEN: ${{ github.token }}
+        run: |
+          $packagesSource = "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+
+          if ([string]::IsNullOrWhiteSpace($env:PACKAGE_VERSION)) {
+            pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -Source $packagesSource -ApiKey $env:PACKAGES_PUBLISH_TOKEN
+          }
+          else {
+            pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/publish-release-packages.ps1 -PackageOutput artifacts/packages -PackageVersion $env:PACKAGE_VERSION -Source $packagesSource -ApiKey $env:PACKAGES_PUBLISH_TOKEN
+          }
+
+      - name: Build Release Notes
+        if: startsWith(github.ref, 'refs/tags/')
+        id: release_notes
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $notesPath = Join-Path $env:GITHUB_WORKSPACE "artifacts/release-notes-$tag.md"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./tools/build-release-notes.ps1 -Tag $tag -OutputPath $notesPath -AssumePublished
+
+          "path=$notesPath" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: ${{ steps.release_notes.outputs.path }}
+          make_latest: true
+
+  publish-enterprise:
     if: github.repository == 'haxxornulled/VapeCache-Enterprise'
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 120

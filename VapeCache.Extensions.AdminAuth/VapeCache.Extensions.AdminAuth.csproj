@@ -6,7 +6,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.AdminAuth</PackageId>
     <Title>VapeCache Extensions for Admin Authentication</Title>
-    <Version>1.2.22</Version>
+    <Version>1.2.23</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.AdminAuth</Product>
@@ -39,6 +39,7 @@
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.7" />
   </ItemGroup>
 </Project>
+
 
 
 
