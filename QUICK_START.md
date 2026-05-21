@@ -105,8 +105,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOptions<RedisConnectionOptions>()
     .Bind(builder.Configuration.GetSection("RedisConnection"));
 
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 builder.Services.AddVapeCachePubSub(); // optional: only when pub/sub support is needed
 
 var app = builder.Build();

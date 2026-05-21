@@ -13,10 +13,10 @@ namespace VapeCache.Tests.Caching;
 public sealed class RedisModuleDetectorRegistrationTests
 {
     [Fact]
-    public void AddVapecacheCaching_UsesRawRedisExecutor_ForModuleDetection()
+    public void AddVapeCacheCaching_UsesRawRedisExecutor_ForModuleDetection()
     {
         var services = new ServiceCollection();
-        services.AddVapecacheCaching();
+        services.AddVapeCacheCaching();
 
         var descriptor = services.Single(d => d.ServiceType == typeof(IRedisModuleDetector));
         Assert.NotNull(descriptor.ImplementationFactory);

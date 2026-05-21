@@ -77,7 +77,7 @@ public sealed class SegmentedLogSpillStoreTests : IAsyncDisposable
     public async Task AddVapeCachePersistence_ReplacesNoopSpillStoreRegistration()
     {
         var services = new ServiceCollection();
-        services.AddVapecacheCaching();
+        services.AddVapeCacheCaching();
         services.AddOptions<InMemorySpillOptions>().Configure(o => o.SpillDirectory = _spillDir);
         services.AddVapeCachePersistence();
 

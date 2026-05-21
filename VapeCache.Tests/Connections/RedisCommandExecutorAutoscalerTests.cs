@@ -173,6 +173,7 @@ public sealed class RedisCommandExecutorAutoscalerTests
             EmergencyScaleUpTimeoutRatePerSecThreshold = 0.5
         });
 
+        MarkAllLanesHealthy(harness.Executor);
         ForceTimeoutSpike(harness.Executor, 10);
         InvokeEvaluateAutoscale(harness.Executor);
 

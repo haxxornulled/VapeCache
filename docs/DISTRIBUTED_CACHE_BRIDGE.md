@@ -112,8 +112,8 @@ builder.Services.AddVapeCache(builder.Configuration)
 You can also register the adapter directly after the core runtime:
 
 ```csharp
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 builder.Services.AddVapeCacheDistributedCache(options =>
 {
     options.KeyPrefix = "interop:";

@@ -68,8 +68,8 @@ Primary entrypoint:
 
 This composes:
 
-- `AddVapecacheRedisConnections()` (transport, connection factory, pool)
-- `AddVapecacheCaching()` (hybrid cache runtime, stampede protection, codecs, typed client)
+- `AddVapeCacheRedisConnections()` (transport, connection factory, pool)
+- `AddVapeCacheCaching()` (hybrid cache runtime, stampede protection, codecs, typed client)
 
 Optional capability packages compose on top:
 

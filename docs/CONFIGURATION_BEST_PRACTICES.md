@@ -11,7 +11,7 @@
 ### VapeCache.Infrastructure (Library)
 ```csharp
 // ✅ CORRECT: Library uses IServiceCollection extension methods
-public static IServiceCollection AddVapecacheRedisConnections(
+public static IServiceCollection AddVapeCacheRedisConnections(
     this IServiceCollection services)
 {
     // Register services - does NOT touch IConfiguration
@@ -39,8 +39,8 @@ builder.Services
     .Bind(builder.Configuration.GetSection("RedisConnection"))
     .ValidateOnStart();
 
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 ```
 
 ## Why This Matters
@@ -70,7 +70,7 @@ public static IServiceCollection AddVapeCache(
 ### ✅ Good: Host Binds Configuration
 ```csharp
 // CORRECT: Library exposes IServiceCollection extension
-public static IServiceCollection AddVapecacheRedisConnections(
+public static IServiceCollection AddVapeCacheRedisConnections(
     this IServiceCollection services)
 {
     // Just register services - host provides configuration
@@ -85,7 +85,7 @@ services
     .Validate(o => !string.IsNullOrWhiteSpace(o.Host), "Host is required")
     .ValidateOnStart();
 
-services.AddVapecacheRedisConnections();  // ← No configuration passed!
+services.AddVapeCacheRedisConnections();  // ← No configuration passed!
 ```
 
 **Benefits:**
@@ -165,8 +165,8 @@ public static class AspireVapeCacheExtensions
         this IHostApplicationBuilder builder)
     {
         // ✅ Just register services - don't read configuration
-        builder.Services.AddVapecacheRedisConnections();
-        builder.Services.AddVapecacheCaching();
+        builder.Services.AddVapeCacheRedisConnections();
+        builder.Services.AddVapeCacheCaching();
 
         return new AspireVapeCacheBuilder(builder);
     }
@@ -214,7 +214,7 @@ public async Task RedisConnectionFactory_UsesConfiguredHost()
         options.Port = 6380;
     });
 
-    services.AddVapecacheRedisConnections();
+    services.AddVapeCacheRedisConnections();
 
     var provider = services.BuildServiceProvider();
     var factory = provider.GetRequiredService<IRedisConnectionFactory>();
@@ -246,7 +246,7 @@ public async Task VapeCache_WorksWithTestRedis()
         .AddOptions<RedisConnectionOptions>()
         .Bind(config.GetSection("RedisConnection"));
 
-    services.AddVapecacheRedisConnections();
+    services.AddVapeCacheRedisConnections();
 
     var provider = services.BuildServiceProvider();
     var factory = provider.GetRequiredService<IRedisConnectionFactory>();
@@ -341,7 +341,7 @@ config.AddAzureKeyVault(new Uri("https://myvault.vault.azure.net/"), new Default
 | Responsibility | Owner | Mechanism |
 |----------------|-------|-----------|
 | **Define configuration schema** | Library (VapeCache.Infrastructure) | `RedisConnectionOptions` POCO |
-| **Register services** | Library | `AddVapecacheRedisConnections()` extension |
+| **Register services** | Library | `AddVapeCacheRedisConnections()` extension |
 | **Provide configuration** | Host (Program.cs) | `IConfiguration` → `IOptions<T>` binding |
 | **Choose config sources** | Host | `ConfigureAppConfiguration()` |
 | **Validate configuration** | Host | `.Validate()` in options builder |

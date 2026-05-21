@@ -43,7 +43,7 @@ public interface IRedisModuleDetector
 }
 ```
 
-**Registration:** Automatically available via DI when using `AddVapecacheCaching()`
+**Registration:** Automatically available via DI when using `AddVapeCacheCaching()`
 
 ## Usage Examples
 
@@ -282,7 +282,7 @@ public async Task DetectsRedisJson()
 public async Task DetectRealRedisModules()
 {
     var services = new ServiceCollection();
-    services.AddVapecacheCaching();
+    services.AddVapeCacheCaching();
     services.Configure<RedisConnectionOptions>(o =>
     {
         o.Host = "localhost";

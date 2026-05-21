@@ -69,7 +69,7 @@ public sealed class VapeCachePubSubExtensionsTests
     public void PubSubRegistration_ThrowsWhenServicesIsNull()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            PubSubRegistration.AddVapecachePubSubServices(
+            PubSubRegistration.AddVapeCachePubSubServices(
                 services: null!));
     }
 

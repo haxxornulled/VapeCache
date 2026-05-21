@@ -26,8 +26,8 @@ using VapeCache.Infrastructure.Connections;
 builder.Services.AddOptions<RedisConnectionOptions>()
     .Bind(builder.Configuration.GetSection("RedisConnection"));
 
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 ```
 
 If you want one-call registration with configuration binding, use `VapeCache.Extensions.DependencyInjection` instead.

@@ -18,7 +18,7 @@ It is designed for predictable behavior under load, Redis trouble, and high-thro
 
 ## What The Hybrid Runtime Actually Does
 
-When you register the native runtime with `AddVapecacheCaching()`, VapeCache is not just acting like a thin Redis wrapper.
+When you register the native runtime with `AddVapeCacheCaching()`, VapeCache is not just acting like a thin Redis wrapper.
 The hybrid runtime is a production cache execution model with Redis as the primary backend and node-local memory as the failover path.
 
 Native hybrid behavior includes:
@@ -202,8 +202,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOptions<RedisConnectionOptions>()
     .Bind(builder.Configuration.GetSection("RedisConnection"));
 
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 builder.Services.AddVapeCachePubSub(); // optional: only when pub/sub is needed
 builder.Services.AddVapeCacheStreams(); // optional: only when stream idempotent producer support is needed
 

@@ -48,8 +48,8 @@ If you register the core services directly:
 builder.Services.AddOptions<RedisConnectionOptions>()
     .Bind(builder.Configuration.GetSection("RedisConnection"));
 
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 ```
 
 VapeCache now validates `RedisConnectionOptions` and `RedisMultiplexerOptions` at startup. A host with no Redis endpoint configured fails fast instead of waiting for first traffic.

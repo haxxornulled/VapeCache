@@ -199,8 +199,8 @@ builder.Host.ConfigureLogging(logging =>
     logging.AddNLog();
 });
 
-builder.Services.AddVapecacheRedisConnections();
-builder.Services.AddVapecacheCaching();
+builder.Services.AddVapeCacheRedisConnections();
+builder.Services.AddVapeCacheCaching();
 ```
 
 **What You Get:**

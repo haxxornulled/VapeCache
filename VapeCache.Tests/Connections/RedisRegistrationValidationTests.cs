@@ -257,8 +257,8 @@ public sealed class RedisRegistrationValidationTests
 
         var root = configuration.Build();
         var services = new ServiceCollection();
-        services.AddVapecacheRedisConnections();
-        services.AddVapecacheCaching();
+        services.AddVapeCacheRedisConnections();
+        services.AddVapeCacheCaching();
         services.AddOptions<RedisConnectionOptions>()
             .Bind(root.GetSection("RedisConnection"));
         services.AddOptions<RedisMultiplexerOptions>()

@@ -15,7 +15,7 @@ public static class VapeCachePubSubServiceCollectionExtensions
     /// Registers Redis pub/sub services.
     /// </summary>
     public static IServiceCollection AddVapeCachePubSub(this IServiceCollection services)
-        => PubSubRegistration.AddVapecachePubSubServices(services);
+        => PubSubRegistration.AddVapeCachePubSubServices(services);
 
     /// <summary>
     /// Registers Redis pub/sub services and binds options from configuration.
@@ -32,6 +32,6 @@ public static class VapeCachePubSubServiceCollectionExtensions
         services.AddOptions<RedisPubSubOptions>()
             .Bind(configuration.GetSection(sectionName));
 
-        return PubSubRegistration.AddVapecachePubSubServices(services);
+        return PubSubRegistration.AddVapeCachePubSubServices(services);
     }
 }
