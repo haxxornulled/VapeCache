@@ -2,14 +2,17 @@
 
 Optional policy-driven invalidation package for VapeCache.
 
-## What it adds
+## Install
 
-- `CacheInvalidationPlan` and `CacheInvalidationPlanBuilder`
-- `ICacheInvalidationPolicy<TEvent>` with built-in policy implementations
-- `ICacheInvalidationExecutor` to apply plans to `IVapeCache`
-- `ICacheInvalidationDispatcher` to run all registered policies for an event
-- Runtime configuration via `IOptionsMonitor<CacheInvalidationOptions>`
-- Strategic runtime profiles for common deployment shapes
+```bash
+dotnet add package VapeCache.Features.Invalidation
+```
+
+## Use This Package When
+
+- you want policy-driven invalidation plans instead of ad-hoc cache clearing
+- you want key, tag, and zone invalidation abstractions in one package
+- you want runtime profiles for common deployment shapes
 
 ## Runtime Profiles
 
@@ -25,12 +28,6 @@ You can override profile defaults with:
 - `ExecuteTargetsInParallel`
 - `EvaluatePoliciesInParallel`
 - `MaxConcurrency`
-
-## Install
-
-```dotnetcli
-dotnet add package VapeCache.Features.Invalidation
-```
 
 ## Example
 
@@ -59,7 +56,7 @@ public sealed class OrderInvalidationPolicy : ICacheInvalidationPolicy<OrderPlac
 await dispatcher.DispatchAsync(new OrderPlacedEvent(orderId, customerId), ct);
 ```
 
-## Out-of-box policies
+## Built-In Policies
 
 - `TagInvalidationPolicy<TEvent>`
 - `ZoneInvalidationPolicy<TEvent>`
@@ -69,7 +66,7 @@ await dispatcher.DispatchAsync(new OrderPlacedEvent(orderId, customerId), ct);
 - `StaticInvalidationPolicy<TEvent>`
 - `CompositeInvalidationPolicy<TEvent>`
 
-## One-line policy registration helpers
+## Registration Helpers
 
 ```csharp
 services.AddTagInvalidationPolicy<OrderUpdated>(e => [$"order:{e.OrderId}"]);
@@ -82,7 +79,7 @@ services.AddEntityInvalidationPolicy<OrderUpdated>(
     keyPrefixes: ["order", "order:summary"]);
 ```
 
-## Profile-oriented policy shortcuts
+## Profile-Oriented Shortcuts
 
 ```csharp
 // Small website: tag + zone invalidation (lower write amplification)

@@ -2,7 +2,13 @@
 
 Bridge package for using VapeCache through `IDistributedCache` and `IBufferDistributedCache`.
 
-## Positioning
+## Install
+
+```bash
+dotnet add package VapeCache.Extensions.DistributedCache
+```
+
+## Use This Package When
 
 This package is the migration and interoperability path, not the recommended primary experience.
 
@@ -13,13 +19,7 @@ This package is the migration and interoperability path, not the recommended pri
 
 For the fuller rationale and positioning, see https://github.com/haxxornulled/VapeCache/blob/main/docs/DISTRIBUTED_CACHE_BRIDGE.md.
 
-## Install
-
-```bash
-dotnet add package VapeCache.Extensions.DistributedCache
-```
-
-## Setup
+## Usage
 
 ```csharp
 using Microsoft.Extensions.Caching.Distributed;

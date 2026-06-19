@@ -2,13 +2,18 @@
 
 `VapeCache.ServiceDefaults` contains shared Aspire and OpenTelemetry service defaults used by VapeCache hosts.
 
-## What It Configures
+## Use This Package When
 
-- OpenTelemetry tracing, metrics, and log export defaults
-- Health checks and resilience defaults for hosted services
-- Common service-discovery and HTTP resilience wiring
+- you want OpenTelemetry tracing, metrics, and log export defaults
+- you want health checks and resilience defaults for hosted services
+- you want common service-discovery and HTTP resilience wiring
 
-## Intended Usage
+## Example
 
-Reference this package from app-host projects to keep distributed-service defaults consistent across environments.
+```csharp
+var builder = DistributedApplication.CreateBuilder(args);
+builder.AddServiceDefaults();
+```
+
+This shared project is referenced from app-host and API projects to keep distributed-service defaults consistent across environments.
 

@@ -2,7 +2,7 @@
 
 OpenTelemetry package for VapeCache EF Core interceptor events.
 
-## What this package provides
+## Use This Package When
 
 - Meter: `VapeCache.EFCore.Cache`
 - ActivitySource: `VapeCache.EFCore.Cache`
@@ -16,7 +16,7 @@ dotnet add package VapeCache.Extensions.EntityFrameworkCore
 dotnet add package VapeCache.Extensions.EntityFrameworkCore.OpenTelemetry
 ```
 
-## Register
+## Usage
 
 ```csharp
 builder.Services.AddVapeCacheEntityFrameworkCore();

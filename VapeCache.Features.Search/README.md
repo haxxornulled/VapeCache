@@ -8,7 +8,7 @@ Typed RediSearch helpers for HASH-backed VapeCache search projections.
 dotnet add package VapeCache.Features.Search
 ```
 
-## What This Package Is For
+## Use This Package When
 
 - denormalized HASH documents that RediSearch can index efficiently
 - typed `TEXT`, `TAG`, and `NUMERIC` schemas

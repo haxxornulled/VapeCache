@@ -8,7 +8,13 @@ ASP.NET Core pipeline hooks for MVC, Minimal APIs, and Blazor output caching bac
 dotnet add package VapeCache.Extensions.AspNetCore
 ```
 
-## Setup
+## Use This Package When
+
+- you want output caching and policy ergonomics for minimal APIs, MVC, or Blazor
+- you want a shared cache policy registry for named responses
+- you want sticky failover hints for cluster and web-garden deployments
+
+## Usage
 
 ```csharp
 using Microsoft.AspNetCore.OutputCaching;

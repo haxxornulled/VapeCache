@@ -8,14 +8,14 @@ Reusable admin authentication wiring for VapeCache hosts.
 dotnet add package VapeCache.Extensions.AdminAuth
 ```
 
-## What it provides
+## Use This Package When
 
 - `AddVapeCacheAdminAuthentication(...)` service registration helper
 - Optional JWT bearer bootstrap from `Authentication:JwtBearer`
 - Admin policy registration (`RequireAuthenticatedUser` or dev override assertion)
 - Startup validation that fails fast when admin authorization is required but no auth schemes exist
 
-## Register
+## Example
 
 ```csharp
 using VapeCache.Extensions.AdminAuth;

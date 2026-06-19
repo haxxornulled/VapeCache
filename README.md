@@ -4,11 +4,19 @@
 
 # VapeCache
 
-VapeCache is a Redis-protocol-first caching runtime for ASP.NET Core and .NET services.
+VapeCache is a Redis-first caching runtime and product monorepo for ASP.NET Core and .NET services.
 It is designed for predictable behavior under load, Redis trouble, and high-throughput API traffic.
+The repo contains the runtime package, integration packages, and the local application shell we use to build and validate the platform.
 
 - Website: `https://vapecache.net`
 - Source: `https://github.com/haxxornulled/VapeCache`
+
+## Repository Map
+
+- `VapeCache.Infrastructure` builds `VapeCache.Runtime`, the core runtime package.
+- `VapeCache.Core`, `VapeCache.Abstractions`, `VapeCache.Features.*`, and `VapeCache.Extensions.*` are the published package surface.
+- `VapeCache.Application`, `VapeCache.ServiceDefaults`, `VapeCache.AppHost`, and `VapeCache.UI` are the local product shell and hosting infrastructure.
+- `VapeCache.Tests`, `VapeCache.PerfGates.Tests`, `VapeCache.Benchmarks`, and `VapeCache.StressHost` cover validation and performance work.
 
 > VapeCache is source-available under BUSL-1.1. Internal production use is allowed under the Additional Use Grant. Managed caching/database services and commercial caching/database infrastructure products require a commercial license. The code converts to Apache-2.0 on 2029-03-11.
 
@@ -355,6 +363,7 @@ That lets the front-door receipt check invalidate instantly without flattening t
 See [docs/REDIS_SEARCH.md](docs/REDIS_SEARCH.md).
 
 ## Production Packages (Source-Available)
+`VapeCache.Runtime` is produced by `VapeCache.Infrastructure`; the rest of the package graph lives in the `VapeCache.*` integration projects.
 
 | Package | NuGet | GitHub Packages | Purpose | Docs |
 |---|---|---|---|---|
@@ -392,16 +401,12 @@ Multiplexing itself is OSS; adaptive autoscaling is Enterprise.
 ## Documentation
 
 - Start here: [docs/INDEX.md](docs/INDEX.md)
-- Getting started: [docs/QUICKSTART.md](docs/QUICKSTART.md), [docs/CONFIGURATION.md](docs/CONFIGURATION.md), [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md), [docs/NUGET_PACKAGES.md](docs/NUGET_PACKAGES.md), [docs/DISTRIBUTED_CACHE_BRIDGE.md](docs/DISTRIBUTED_CACHE_BRIDGE.md), [docs/FUSIONCACHE_POSITIONING.md](docs/FUSIONCACHE_POSITIONING.md), [docs/GITHUB_BRANDING.md](docs/GITHUB_BRANDING.md)
-- FusionCache comparison: [docs/FUSIONCACHE_GAP_ANALYSIS.md](docs/FUSIONCACHE_GAP_ANALYSIS.md)
-- Microsoft HybridCache: [docs/MICROSOFT_HYBRIDCACHE.md](docs/MICROSOFT_HYBRIDCACHE.md)
-- Core runtime: [docs/API_REFERENCE.md](docs/API_REFERENCE.md), [docs/CACHE_INVALIDATION.md](docs/CACHE_INVALIDATION.md), [docs/CACHE_TAGS_AND_ZONES.md](docs/CACHE_TAGS_AND_ZONES.md)
-- ASP.NET Core: [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md), [docs/ASPNETCORE_POLICY_EXTENSION.md](docs/ASPNETCORE_POLICY_EXTENSION.md)
-- Integrations: [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md), [docs/LOGGING_TELEMETRY_CONFIGURATION.md](docs/LOGGING_TELEMETRY_CONFIGURATION.md)
-- Demo strategy: [docs/DEMO_HOST_BLUEPRINT.md](docs/DEMO_HOST_BLUEPRINT.md), [docs/TRANSPORT_MUX_AUTOSCALER_DEEP_DIVE.md](docs/TRANSPORT_MUX_AUTOSCALER_DEEP_DIVE.md)
-- Ops and releases: [docs/PRODUCTION_GUARDRAILS.md](docs/PRODUCTION_GUARDRAILS.md), [docs/STABILITY_POLICY.md](docs/STABILITY_POLICY.md), [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md), [docs/RELEASE_RUNBOOK.md](docs/RELEASE_RUNBOOK.md)
-- Process model: [docs/PROCESS_MODEL.md](docs/PROCESS_MODEL.md)
-- OSS and licensing: [docs/OSS_VS_ENTERPRISE.md](docs/OSS_VS_ENTERPRISE.md), [docs/LICENSE_FAQ.md](docs/LICENSE_FAQ.md)
+- Quick start: [docs/QUICKSTART.md](docs/QUICKSTART.md), [docs/CONFIGURATION.md](docs/CONFIGURATION.md), [docs/SETTINGS_REFERENCE.md](docs/SETTINGS_REFERENCE.md)
+- Core runtime: [docs/HYBRID_CACHING_API_SURFACE.md](docs/HYBRID_CACHING_API_SURFACE.md), [docs/CACHE_INVALIDATION.md](docs/CACHE_INVALIDATION.md), [docs/CACHE_TAGS_AND_ZONES.md](docs/CACHE_TAGS_AND_ZONES.md), [docs/DISTRIBUTED_CACHE_BRIDGE.md](docs/DISTRIBUTED_CACHE_BRIDGE.md), [docs/MICROSOFT_HYBRIDCACHE.md](docs/MICROSOFT_HYBRIDCACHE.md)
+- Integrations: [docs/ASPNETCORE_PIPELINE_CACHING.md](docs/ASPNETCORE_PIPELINE_CACHING.md), [docs/ASPNETCORE_POLICY_EXTENSION.md](docs/ASPNETCORE_POLICY_EXTENSION.md), [docs/ASPIRE_INTEGRATION.md](docs/ASPIRE_INTEGRATION.md), [docs/LOGGING_TELEMETRY_CONFIGURATION.md](docs/LOGGING_TELEMETRY_CONFIGURATION.md)
+- Deep dives: [docs/FUSIONCACHE_POSITIONING.md](docs/FUSIONCACHE_POSITIONING.md), [docs/FUSIONCACHE_GAP_ANALYSIS.md](docs/FUSIONCACHE_GAP_ANALYSIS.md), [docs/DEMO_HOST_BLUEPRINT.md](docs/DEMO_HOST_BLUEPRINT.md), [docs/TRANSPORT_MUX_AUTOSCALER_DEEP_DIVE.md](docs/TRANSPORT_MUX_AUTOSCALER_DEEP_DIVE.md)
+- Operations: [docs/PRODUCTION_GUARDRAILS.md](docs/PRODUCTION_GUARDRAILS.md), [docs/STABILITY_POLICY.md](docs/STABILITY_POLICY.md), [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md), [docs/RELEASE_RUNBOOK.md](docs/RELEASE_RUNBOOK.md), [docs/PROCESS_MODEL.md](docs/PROCESS_MODEL.md)
+- Licensing and governance: [docs/OSS_VS_ENTERPRISE.md](docs/OSS_VS_ENTERPRISE.md), [docs/LICENSE_FAQ.md](docs/LICENSE_FAQ.md), [docs/GITHUB_BRANDING.md](docs/GITHUB_BRANDING.md), [docs/TRADEMARK_POLICY.md](docs/TRADEMARK_POLICY.md), [LICENSE.md](LICENSE.md), [COMMERCIAL.md](COMMERCIAL.md)
 
 ## Build And Test
 

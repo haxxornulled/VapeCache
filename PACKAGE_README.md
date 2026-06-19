@@ -7,6 +7,12 @@ VapeCache is a Redis-first caching runtime for ASP.NET Core and .NET services.
 
 VapeCache is source-available under BUSL-1.1. Internal production use is allowed under the Additional Use Grant. Managed caching/database services and commercial caching/database infrastructure products require a commercial license. The code converts to Apache-2.0 on 2029-03-11.
 
+## Repo Structure
+
+- `VapeCache.Infrastructure` produces the `VapeCache.Runtime` package, which is the core runtime implementation.
+- `VapeCache.Core`, `VapeCache.Abstractions`, `VapeCache.Features.*`, and `VapeCache.Extensions.*` are the published NuGet packages.
+- `VapeCache.Application`, `VapeCache.ServiceDefaults`, `VapeCache.AppHost`, and `VapeCache.UI` are product infrastructure projects and are not published packages.
+
 The native runtime provides:
 
 - Redis-primary plus in-memory-fallback hybrid caching
@@ -64,7 +70,7 @@ dotnet add package VapeCache.Features.Invalidation
 
 ## OSS Packages
 
-- `VapeCache.Runtime`: Redis transport, caching runtime, fallback behavior, telemetry
+- `VapeCache.Runtime`: Redis transport, caching runtime, fallback behavior, telemetry, produced by `VapeCache.Infrastructure`
 - `VapeCache.Core`: shared primitives used by other VapeCache packages
 - `VapeCache.Abstractions`: public contracts, options, and shared value types
 - `VapeCache.Extensions.DependencyInjection`: one-call DI facade for runtime registration

@@ -8,7 +8,13 @@ Redis Streams extension for VapeCache with Redis 8.6 idempotent producer support
 dotnet add package VapeCache.Extensions.Streams
 ```
 
-## Configure
+## Use This Package When
+
+- you need Redis Streams support as a separate integration package
+- you want Redis 8.6 idempotent producer support
+- you want the idempotence retention model to stay explicit
+
+## Usage
 
 ```csharp
 builder.Services.AddVapeCacheStreams(options =>
@@ -18,7 +24,7 @@ builder.Services.AddVapeCacheStreams(options =>
 });
 ```
 
-## Publish idempotent stream entries
+## Example
 
 ```csharp
 var streamProducer = app.Services.GetRequiredService<IRedisStreamIdempotentProducer>();
@@ -35,7 +41,7 @@ var entryId = await streamProducer.PublishAsync(
     ct: cancellationToken);
 ```
 
-## Optional per-stream idempotence retention
+## Retention
 
 ```csharp
 await streamProducer.ConfigureIdempotenceAsync(

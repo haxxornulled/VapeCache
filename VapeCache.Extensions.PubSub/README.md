@@ -10,7 +10,13 @@ This package adds explicit registration for `IRedisPubSubService` with bounded d
 dotnet add package VapeCache.Extensions.PubSub
 ```
 
-## Setup
+## Use This Package When
+
+- you want Redis pub/sub registration as an explicit package boundary
+- you want bounded delivery queues with reconnect and resubscribe behavior
+- you want to keep pub/sub wiring separate from the core runtime package
+
+## Usage
 
 ```csharp
 using VapeCache.Extensions.DependencyInjection;
