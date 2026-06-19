@@ -1,6 +1,7 @@
 # VapeCache.Runtime
 
 Core Redis-first runtime package for VapeCache.
+This project produces the `VapeCache.Runtime` NuGet package.
 
 This package ships the transport, cache runtime, fallback behavior, circuit breaker, and telemetry hooks.
 

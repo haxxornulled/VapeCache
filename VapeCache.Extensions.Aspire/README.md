@@ -568,7 +568,7 @@ readinessProbe:
 
 ## License
 
-MIT for the OSS repository code.
+VapeCache is source-available under BUSL-1.1.
 
 Branding, names, and logos remain subject to the repository trademark policy.
 

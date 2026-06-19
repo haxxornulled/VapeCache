@@ -4,11 +4,19 @@
 
 # VapeCache
 
-VapeCache is a Redis-protocol-first caching runtime for ASP.NET Core and .NET services.
+VapeCache is a Redis-first caching runtime and product monorepo for ASP.NET Core and .NET services.
 It is designed for predictable behavior under load, Redis trouble, and high-throughput API traffic.
+The repo contains the runtime package, integration packages, and the local application shell we use to build and validate the platform.
 
 - Website: `https://vapecache.net`
 - Source: `https://github.com/haxxornulled/VapeCache`
+
+## Repository Map
+
+- `VapeCache.Infrastructure` builds `VapeCache.Runtime`, the core runtime package.
+- `VapeCache.Core`, `VapeCache.Abstractions`, `VapeCache.Features.*`, and `VapeCache.Extensions.*` are the published package surface.
+- `VapeCache.Application`, `VapeCache.ServiceDefaults`, `VapeCache.AppHost`, and `VapeCache.UI` are the local product shell and hosting infrastructure.
+- `VapeCache.Tests`, `VapeCache.PerfGates.Tests`, `VapeCache.Benchmarks`, and `VapeCache.StressHost` cover validation and performance work.
 
 > VapeCache is source-available under BUSL-1.1. Internal production use is allowed under the Additional Use Grant. Managed caching/database services and commercial caching/database infrastructure products require a commercial license. The code converts to Apache-2.0 on 2029-03-11.
 
@@ -355,6 +363,8 @@ That lets the front-door receipt check invalidate instantly without flattening t
 See [docs/REDIS_SEARCH.md](docs/REDIS_SEARCH.md).
 
 ## Production Packages (Source-Available)
+
+`VapeCache.Runtime` is produced by `VapeCache.Infrastructure`; the rest of the package graph lives in the `VapeCache.*` integration projects.
 
 | Package | NuGet | GitHub Packages | Purpose | Docs |
 |---|---|---|---|---|
