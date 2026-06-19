@@ -7,7 +7,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>VapeCache.Extensions.PubSub</PackageId>
     <Title>VapeCache Extensions for Redis Pub/Sub</Title>
-    <Version>1.2.23</Version>
+    <Version>1.2.20</Version>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
     <Product>VapeCache.Extensions.PubSub</Product>
@@ -34,8 +34,8 @@
     <Compile Include="..\shared\Guards\ParanoiaThrowGuard.cs" Link="Internal\ParanoiaThrowGuard.cs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Autofac" Version="9.1.0" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.7" />
+    <PackageReference Include="Autofac" Version="9.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.9" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\VapeCache.Abstractions\VapeCache.Abstractions.csproj" />
@@ -43,9 +43,6 @@
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
   </ItemGroup>
 </Project>
-
-
-
 
 
 

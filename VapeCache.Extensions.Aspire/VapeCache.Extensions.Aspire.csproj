@@ -10,7 +10,7 @@
     <!-- NuGet Package Metadata -->
     <PackageId>VapeCache.Extensions.Aspire</PackageId>
     <Title>VapeCache Extensions for Aspire</Title>
-    <Version>1.2.23</Version>
+    <Version>1.2.20</Version>
     <Description>.NET Aspire integration for VapeCache. Adds service discovery, health checks, and OpenTelemetry wiring for Aspire-hosted applications.</Description>
     <Authors>DFWFORSALE INC</Authors>
     <Company>DFWFORSALE INC</Company>
@@ -43,10 +43,10 @@
   </ItemGroup>
   <ItemGroup>
     <!-- .NET Aspire Service Discovery -->
-    <PackageReference Include="Autofac" Version="9.1.0" />
-    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.5.0" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
+    <PackageReference Include="Autofac" Version="9.2.0" />
+    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.7.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.16.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.16.0" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="DashboardAssets\*.*" />
@@ -57,9 +57,6 @@
     <None Include="..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
-
-
-
 
 
 

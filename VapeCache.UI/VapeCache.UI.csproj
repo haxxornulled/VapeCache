@@ -5,7 +5,6 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>preview</LangVersion>
-    <UserSecretsId>927d4220-ed90-4771-b9d0-e97c7bfa4797</UserSecretsId>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <UiFrontendDir>$(MSBuildProjectDirectory)\ui</UiFrontendDir>
     <UiFrontendStamp>$(MSBuildProjectDirectory)\obj\ui-vite.stamp</UiFrontendStamp>
@@ -14,7 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="11.0.0" />
+    <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="11.0.1" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="VapeCache.Persistence" Version="$(VapeCacheEnterprisePackageVersion)" Condition="'$(EnableVapeCacheEnterprisePackages)' == 'true'" />
     <PackageReference Include="VapeCache.Reconciliation" Version="$(VapeCacheEnterprisePackageVersion)" Condition="'$(EnableVapeCacheEnterprisePackages)' == 'true'" />
@@ -35,10 +34,6 @@
     <ProjectReference Include="..\VapeCache.Features.Invalidation\VapeCache.Features.Invalidation.csproj" />
     <ProjectReference Include="..\VapeCache.Infrastructure\VapeCache.Infrastructure.csproj" />
     <ProjectReference Include="..\VapeCache.ServiceDefaults\VapeCache.ServiceDefaults.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <InternalsVisibleTo Include="VapeCache.Tests" />
   </ItemGroup>
 
   <ItemGroup>
