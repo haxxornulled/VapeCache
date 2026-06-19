@@ -4,16 +4,15 @@ This policy applies to the `VapeCache` name, logos, icons, social preview assets
 
 ## Short Version
 
-Code is MIT. Brand is not.
+Code is source-available under BUSL-1.1. Brand is not.
 
-The MIT license grants rights to the code in this repository.
-It does not grant any right to use the `VapeCache` name, logos, or other branding except as described below.
+The code license grants the rights described in [LICENSE](../LICENSE) and does not grant any right to use the `VapeCache` name, logos, or other branding except as described below.
 
 ## What You May Do
 
 - Use the `VapeCache` name in truthful, descriptive statements such as compatibility notes, comparisons, links, and references to this repository.
 - Say that your project "uses VapeCache", "is compatible with VapeCache", or "is derived from VapeCache" when that is accurate.
-- Redistribute the code with the required MIT copyright and license notice preserved.
+- Redistribute the code with the required license notice preserved.
 
 ## What You May Not Do
 

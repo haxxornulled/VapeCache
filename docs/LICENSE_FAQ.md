@@ -1,44 +1,48 @@
 # License FAQ
 
+## What license does VapeCache use?
+VapeCache is source-available under BUSL-1.1.
+
 ## Can I use VapeCache in production?
-Yes. The OSS repository is licensed under MIT.
+Yes, for your own internal business operations under the Additional Use Grant.
 
 ## Can I use VapeCache in a commercial application?
-Yes. Commercial application use is allowed.
+Yes, if the application is for your own internal use and stays within the Additional Use Grant.
 
 ## Can I use VapeCache in SaaS?
-Yes. SaaS use is allowed.
+Only if the use stays within the Additional Use Grant.
 
 ## Can I use VapeCache for internal business systems?
-Yes. Internal business use is allowed.
+Yes. Internal production use is allowed.
 
-## Can I offer VapeCache itself as a managed/hosted caching service?
-The MIT license does not prohibit that use.
+## Can I offer VapeCache as a managed or hosted caching service?
+Not under the standard repository grant.
 
-However, MIT does not grant trademark rights to the `VapeCache` name, logos, or branding.
-See [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md).
+Managed caching/database services require a commercial license because the Additional Use Grant only covers internal production use.
 
 ## Can I embed VapeCache as the core of a commercial caching/database infrastructure product?
-Yes, under MIT.
+Not under the standard repository grant.
+
+Commercial caching/database infrastructure products require a commercial license unless your use fits the Additional Use Grant.
 
 ## Do I have to open-source my changes?
-No. MIT is a permissive license.
+No. BUSL-1.1 is source-available, not copyleft.
 
-You can keep modifications private or distribute them under different terms, subject to preserving the original copyright and license notice for the MIT-licensed portions.
+You may keep modifications private, but redistribution and production use must still follow the license terms and the commercial-use boundary.
 
 ## Is there any warranty or support commitment?
 No.
 
 The software is provided `AS IS`, without warranty of any kind, and without any obligation to provide support, maintenance, updates, or security fixes.
 
-## Does MIT give me trademark rights to the VapeCache name or logos?
+## Does the code license give me trademark rights to the VapeCache name or logos?
 No.
 
 The code license and the brand/trademark policy are separate.
 See [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md).
 
-## Does this repository provide an express patent license beyond MIT?
-No additional patent grant is added in this repository beyond the MIT license text.
+## When does the code convert to Apache-2.0?
+On `2029-03-11`.
 
 ## Where are the full legal terms?
-See the repository [LICENSE](../LICENSE) file and [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md).
+See the repository [LICENSE](../LICENSE) file and [COMMERCIAL.md](../COMMERCIAL.md) for the commercial boundary.

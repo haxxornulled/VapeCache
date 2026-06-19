@@ -4,7 +4,7 @@ This document is the source of truth for VapeCache GitHub profile branding.
 
 ## Repository About
 
-- **Description**: `Redis-first caching runtime for .NET 10 with hybrid failover, stampede protection, output caching, and deep OpenTelemetry observability.`
+- **Description**: `Source-available Redis-first caching runtime for .NET 10 with hybrid failover, stampede protection, output caching, and deep OpenTelemetry observability. BUSL-1.1 with internal production use grant; converts to Apache-2.0 on 2029-03-11.`
 - **Website**: `https://vapecache.net`
 
 ## Topics

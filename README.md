@@ -10,6 +10,8 @@ It is designed for predictable behavior under load, Redis trouble, and high-thro
 - Website: `https://vapecache.net`
 - Source: `https://github.com/haxxornulled/VapeCache`
 
+> VapeCache is source-available under BUSL-1.1. Internal production use is allowed under the Additional Use Grant. Managed caching/database services and commercial caching/database infrastructure products require a commercial license. The code converts to Apache-2.0 on 2029-03-11.
+
 - Redis/KeyDB-compatible transport tuned for cache workloads
 - Circuit-breaker and in-memory fallback for outage tolerance
 - Stampede controls for hot keys
@@ -64,7 +66,7 @@ Performance data and methodology are tracked in-repo with reproducible benchmark
 - Claims policy: [docs/BENCHMARK_CLAIMS_POLICY.md](docs/BENCHMARK_CLAIMS_POLICY.md)
 - Latest benchmark reports: [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md)
 
-OSS scope in this repository: production-ready runtime packages for core caching, invalidation, ASP.NET Core integration, and Aspire integration.
+Source-available scope in this repository: production-ready runtime packages for core caching, invalidation, ASP.NET Core integration, and Aspire integration.
 For OSS/Enterprise boundaries, see [docs/OSS_VS_ENTERPRISE.md](docs/OSS_VS_ENTERPRISE.md).
 
 ## Dependency Ownership
@@ -352,7 +354,7 @@ For workloads like grocery receipt verification, the recommended plan is to sear
 That lets the front-door receipt check invalidate instantly without flattening the rest of the runtime behind a generic search abstraction.
 See [docs/REDIS_SEARCH.md](docs/REDIS_SEARCH.md).
 
-## Production Packages (OSS)
+## Production Packages (Source-Available)
 
 | Package | NuGet | GitHub Packages | Purpose | Docs |
 |---|---|---|---|---|
@@ -376,7 +378,7 @@ Full package install matrix: [docs/NUGET_PACKAGES.md](docs/NUGET_PACKAGES.md)
 GitHub profile/About/topic/social branding: [docs/GITHUB_BRANDING.md](docs/GITHUB_BRANDING.md)
 Public website and doc home: `https://vapecache.net`
 
-## Out Of OSS Scope
+## Out Of Source-Available Scope
 
 The following are not shipped from this OSS repository:
 
@@ -410,14 +412,14 @@ dotnet test VapeCache.Tests/VapeCache.Tests.csproj -c Release
 
 ## License
 
-VapeCache OSS is licensed under the MIT License.
+VapeCache is source-available under BUSL-1.1.
 
-That means you can use, modify, redistribute, and commercialize the code with very few conditions.
-The main obligations are to keep the copyright notice and license text with substantial portions of the software.
+The Additional Use Grant allows internal production use for your own business operations. Managed caching/database services and commercial caching/database infrastructure products require a commercial license.
 
 Important boundary:
 
-- the code is MIT-licensed
-- the `VapeCache` name, logos, package identity, and brand assets are not granted to you under MIT
+- the code is source-available under BUSL-1.1
+- the code converts to Apache-2.0 on 2029-03-11
+- the `VapeCache` name, logos, package identity, and brand assets are not granted by the code license
 
-See [LICENSE](LICENSE) for the license text, [docs/LICENSE_FAQ.md](docs/LICENSE_FAQ.md) for quick answers, and [docs/TRADEMARK_POLICY.md](docs/TRADEMARK_POLICY.md) for brand and naming rules.
+See [LICENSE.md](LICENSE.md), [LICENSE](LICENSE), [COMMERCIAL.md](COMMERCIAL.md), [docs/LICENSE_FAQ.md](docs/LICENSE_FAQ.md), and [docs/TRADEMARK_POLICY.md](docs/TRADEMARK_POLICY.md).

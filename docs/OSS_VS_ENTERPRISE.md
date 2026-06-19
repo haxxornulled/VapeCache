@@ -11,6 +11,16 @@ The goal is simple:
 - OSS must remain production-usable for normal application workloads.
 - Enterprise adds operational leverage for higher-load and multi-environment fleet operation.
 
+## Licensing
+
+VapeCache is source-available under BUSL-1.1.
+
+- Internal production use is allowed under the Additional Use Grant.
+- Managed caching/database services and commercial caching/database infrastructure products require a commercial license.
+- The code converts to Apache-2.0 on `2029-03-11`.
+
+This document still uses "OSS" as a product-boundary shorthand for the public runtime surface, not as a claim that the code is open source.
+
 ## OSS Includes
 
 This repository ships the OSS runtime and integrations, including:
