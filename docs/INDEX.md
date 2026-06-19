@@ -1,6 +1,6 @@
 # VapeCache Documentation Index
 
-This index reflects the OSS runtime surface in this repository.
+This index reflects the public source-available runtime surface in this repository.
 
 ## 1. Getting Started
 
@@ -14,6 +14,8 @@ This index reflects the OSS runtime surface in this repository.
 - [GITHUB_BRANDING.md](GITHUB_BRANDING.md)
 - [LICENSE_FAQ.md](LICENSE_FAQ.md)
 - [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md)
+- [LICENSE.md](../LICENSE.md)
+- [COMMERCIAL.md](../COMMERCIAL.md)
 - [OSS_VS_ENTERPRISE.md](OSS_VS_ENTERPRISE.md)
 
 ## 2. Core Concepts

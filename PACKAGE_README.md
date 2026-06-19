@@ -5,6 +5,8 @@ VapeCache is a Redis-first caching runtime for ASP.NET Core and .NET services.
 - Website: `https://vapecache.net`
 - Source repository: `https://github.com/haxxornulled/VapeCache`
 
+VapeCache is source-available under BUSL-1.1. Internal production use is allowed under the Additional Use Grant. Managed caching/database services and commercial caching/database infrastructure products require a commercial license. The code converts to Apache-2.0 on 2029-03-11.
+
 The native runtime provides:
 
 - Redis-primary plus in-memory-fallback hybrid caching
@@ -104,11 +106,11 @@ See: https://github.com/haxxornulled/VapeCache/blob/main/docs/OSS_VS_ENTERPRISE.
 
 ## License
 
-VapeCache OSS uses the MIT License.
+VapeCache is source-available under BUSL-1.1.
 
-- Allowed: production use, commercial use, SaaS use, modification, redistribution
-- Conditions: preserve the copyright notice and MIT license text
+- Allowed: non-production use and limited internal production use under the Additional Use Grant
+- Conditions: follow the LICENSE terms and respect the commercial-use boundary
 - Limitations: provided `AS IS`, without warranty or liability
-- Brand note: the MIT license does not grant rights to the `VapeCache` name, logos, or branding
+- Brand note: the code license does not grant rights to the `VapeCache` name, logos, or branding
 
-See LICENSE in the package for full legal terms and the docs FAQ/trademark policy for quick guidance.
+See [LICENSE](LICENSE), [LICENSE.md](LICENSE.md), [COMMERCIAL.md](COMMERCIAL.md), and the docs FAQ/trademark policy for quick guidance.

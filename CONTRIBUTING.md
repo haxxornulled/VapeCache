@@ -35,7 +35,7 @@ $env:VAPECACHE_REDIS_CONNECTIONSTRING = "redis://localhost:6379/0"
 - Keep changes scoped and explain rationale.
 - Add/adjust tests for behavior changes.
 - Avoid large formatting-only diffs unless required.
-- By submitting a contribution, you represent that you have the right to contribute it and agree that it is provided under the repository's MIT license and any applicable repository policies.
+- By submitting a contribution, you represent that you have the right to contribute it and agree that it is provided under the repository's BUSL-1.1 license and any applicable repository policies.
 
 ## Commit Notifications
 - Pushes to `main`, `master`, and release tags matching `v*` trigger `.github/workflows/commit-notify.yml`.

@@ -1,6 +1,6 @@
 # NuGet Packages
 
-This OSS repository ships production-ready runtime packages for Redis-first caching on .NET.
+This source-available repository ships production-ready runtime packages for Redis-first caching on .NET.
 
 Home on the web:
 
@@ -169,22 +169,21 @@ See [OSS_VS_ENTERPRISE.md](OSS_VS_ENTERPRISE.md) for the canonical boundary.
 
 ## License Summary
 
-VapeCache OSS is licensed under MIT.
+VapeCache is source-available under BUSL-1.1.
 
 Allowed:
-- production use
-- commercial application use
-- SaaS use
-- internal business use
+- non-production use
+- internal production use under the Additional Use Grant
 - modification
-- redistribution
+- redistribution within the license terms
 
 Important:
-- MIT does not grant trademark rights to the `VapeCache` name, logos, or branding
+- managed caching/database services and commercial caching/database infrastructure products require a commercial license
+- the code converts to Apache-2.0 on `2029-03-11`
+- the code license does not grant trademark rights to the `VapeCache` name, logos, or branding
 - the software is provided `AS IS`, without warranty or liability
-- no support, maintenance, or service commitment is created by the license
 
-See [LICENSE_FAQ.md](LICENSE_FAQ.md), [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md), and [../LICENSE](../LICENSE).
+See [LICENSE.md](../LICENSE.md), [LICENSE_FAQ.md](LICENSE_FAQ.md), [COMMERCIAL.md](../COMMERCIAL.md), [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md), and [../LICENSE](../LICENSE).
 
 ## Release Notes
 
