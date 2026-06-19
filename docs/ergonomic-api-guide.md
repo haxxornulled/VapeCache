@@ -286,4 +286,4 @@ var result = await _cache.GetAsync(key, ct);
 
 - [Architecture Documentation](architecture.md)
 - [Performance Gates](perf-gates.md)
-- [Beating StackExchange.Redis Roadmap](../BEAT_STACKEXCHANGE_ROADMAP.md)
+- [FusionCache gap analysis](FUSIONCACHE_GAP_ANALYSIS.md)
