@@ -3,7 +3,7 @@
 Wire VapeCache into .NET Aspire without Program.cs boilerplate.
 You get service discovery, health checks, telemetry, and wrapper endpoints in one fluent chain.
 
-## Features
+## Use This Package When
 
 ✅ **Service Discovery** - Auto-configure Redis connection from Aspire resources
 ✅ **Health Checks** - Redis connectivity and circuit breaker monitoring
@@ -19,7 +19,7 @@ You get service discovery, health checks, telemetry, and wrapper endpoints in on
 ✅ **Production Observability Profile** - `.WithProductionObservability(...)` or `AddVapeCacheWithProductionObservability(...)`
 ✅ **Low Ceremony** - Single fluent chain to enable all major features
 
-## Installation
+## Install
 
 ```bash
 dotnet add package VapeCache.Extensions.Aspire

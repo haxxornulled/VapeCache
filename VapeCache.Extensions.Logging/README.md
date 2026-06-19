@@ -8,7 +8,13 @@ Centralized Serilog and OpenTelemetry logging wiring for VapeCache hosts.
 dotnet add package VapeCache.Extensions.Logging
 ```
 
-## Setup
+## Use This Package When
+
+- you want one central logging setup for VapeCache hosts
+- you want Serilog and OpenTelemetry wiring kept in one place
+- you want optional file, Seq, console, OTLP, and JSON formatting support
+
+## Usage
 
 ```csharp
 using Serilog;

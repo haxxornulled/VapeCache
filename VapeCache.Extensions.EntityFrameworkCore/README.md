@@ -2,7 +2,7 @@
 
 EF Core adapter package for VapeCache second-level cache interception contracts.
 
-## What this package provides
+## Use This Package When
 
 - deterministic EF query cache-key builder contract (`IEfCoreQueryCacheKeyBuilder`)
 - default SHA-256 query key builder (`Sha256EfCoreQueryCacheKeyBuilder`)
@@ -16,7 +16,7 @@ EF Core adapter package for VapeCache second-level cache interception contracts.
 dotnet add package VapeCache.Extensions.EntityFrameworkCore
 ```
 
-## Register
+## Usage
 
 ```csharp
 builder.Services.AddVapeCacheEntityFrameworkCore(options =>

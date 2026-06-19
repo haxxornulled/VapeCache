@@ -8,7 +8,15 @@ One-call `IServiceCollection` facade for wiring VapeCache into a .NET applicatio
 dotnet add package VapeCache.Extensions.DependencyInjection
 ```
 
-## Hybrid Redis Runtime
+## Use This Package When
+
+- you want one-call service registration around the native runtime
+- you want configuration binding and sensible defaults in one place
+- you want either Redis-backed or in-memory runtime wiring
+
+## Usage
+
+### Hybrid Redis Runtime
 
 ```csharp
 using VapeCache.Extensions.DependencyInjection;
@@ -17,7 +25,7 @@ builder.Services.AddVapeCache(builder.Configuration)
     .WithCacheStampedeProfile(CacheStampedeProfile.Balanced);
 ```
 
-## In-Memory-Only Runtime
+### In-Memory-Only Runtime
 
 ```csharp
 using VapeCache.Extensions.DependencyInjection;
